@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../types';
+import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem, GameState } from '../../types';
 import { shortId, fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
+import { canEmbarkTroops, canDisembarkTroops } from './contextMenus/fleetContextMenuRules';
 
 interface FleetPanelProps {
   fleet: Fleet;
@@ -15,7 +16,9 @@ interface FleetPanelProps {
   onMerge: (targetFleetId: string) => void;
   onDeploy: (shipId: string) => void;
   onEmbark: (shipId: string, armyId: string) => void;
+  onOpenTroopTransfer: (fleetId: string, mode: 'embark' | 'disembark') => void;
   playerFactionId: string;
+  gameState: any; // GameState - need to import properly
 }
 
 // Minimalist Ship Icons
@@ -72,7 +75,7 @@ const ShipIcon: React.FC<{ type: string; className?: string }> = ({ type, classN
 
 const FleetPanel: React.FC<FleetPanelProps> = ({ 
     fleet, otherFleetsInSystem, currentSystem, availableArmies,
-    onSplit, onMerge, onDeploy, onEmbark, playerFactionId 
+    onSplit, onMerge, onDeploy, onEmbark, onOpenTroopTransfer, playerFactionId, gameState
 }) => {
   const { t } = useI18n();
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
@@ -167,6 +170,36 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
              </div>
         )}
       </div>
+
+      {/* TROOP TRANSFER OPTIONS */}
+      {isPlayer && currentSystem && gameState && (
+          <div className="mb-2 p-2 bg-green-900/10 border border-green-500/20 rounded">
+              <div className="text-[10px] text-green-300 uppercase font-bold mb-1 flex items-center gap-1">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+                   <path fillRule="evenodd" d="M8.25 6.75a3.75 3.75 0 117.5 0 3.75 3.75 0 01-7.5 0zM15.75 9.75a3 3 0 116 0 3 3 0 01-6 0zM2.25 9.75a3 3 0 116 0 3 3 0 01-6 0zM6.31 15.117A6.745 6.745 0 0112 12a6.745 6.745 0 016.709 7.498.75.75 0 01-.372.568A12.696 12.696 0 0112 21.75c-2.305 0-4.47-.612-6.337-1.684a.75.75 0 01-.372-.568 6.787 6.787 0 011.019-4.38z" clipRule="evenodd" />
+                 </svg>
+                 Troop Operations
+              </div>
+              <div className="flex flex-wrap gap-2">
+                  {canEmbarkTroops(fleet, gameState) && (
+                      <button
+                          onClick={() => onOpenTroopTransfer(fleet.id, 'embark')}
+                          className="px-2 py-1 bg-green-800/60 hover:bg-green-600 text-white text-[10px] rounded border border-green-500/40 flex items-center gap-1 transition-colors"
+                      >
+                          <span>Embark Troops</span>
+                      </button>
+                  )}
+                  {canDisembarkTroops(fleet, gameState) && (
+                      <button
+                          onClick={() => onOpenTroopTransfer(fleet.id, 'disembark')}
+                          className="px-2 py-1 bg-green-800/60 hover:bg-green-600 text-white text-[10px] rounded border border-green-500/40 flex items-center gap-1 transition-colors"
+                      >
+                          <span>Disembark Troops</span>
+                      </button>
+                  )}
+              </div>
+          </div>
+      )}
 
       {/* MERGE OPTIONS */}
       {isPlayer && otherFleetsInSystem.length > 0 && (

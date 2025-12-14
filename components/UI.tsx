@@ -9,6 +9,7 @@ import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
+import { TroopTransferModal } from './ui/modals/TroopTransferModal';
 import { hasInvadingForce } from '../engine/army';
 import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
@@ -19,7 +20,7 @@ interface UIProps {
   selectedFleet: Fleet | null;
   logs: LogEntry[];
   
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'TROOP_TRANSFER_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -43,6 +44,11 @@ interface UIProps {
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
   onCommitInvasion: (fleetId: string) => void;
+  onOpenTroopTransfer: (fleetId: string, mode: 'embark' | 'disembark') => void;
+  onTroopTransferConfirm: (updatedWorld: GameState) => void;
+
+  troopTransferMode: 'embark' | 'disembark' | null;
+  troopTransferFleetId: string | null;
 
   onSave: () => void;
 
@@ -58,6 +64,8 @@ const UI: React.FC<UIProps> = ({
     selectedBattleId, gameState,
     onMoveCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
     onOpenBattle, onInvade, onCommitInvasion,
+    onOpenTroopTransfer, onTroopTransferConfirm,
+    troopTransferMode, troopTransferFleetId,
     onSave,
     devMode, godEyes, onSetUiSettings
 }) => {
@@ -209,6 +217,16 @@ const UI: React.FC<UIProps> = ({
         />
       )}
 
+      {uiMode === 'TROOP_TRANSFER_MODAL' && troopTransferMode && troopTransferFleetId && (
+        <TroopTransferModal
+            mode={troopTransferMode}
+            fleetId={troopTransferFleetId}
+            world={gameState}
+            onConfirm={onTroopTransferConfirm}
+            onClose={onCloseMenu}
+        />
+      )}
+
       {selectedFleet && uiMode === 'NONE' && (
         <FleetPanel 
             fleet={selectedFleet}
@@ -219,7 +237,9 @@ const UI: React.FC<UIProps> = ({
             availableArmies={availableArmies}
             onDeploy={onDeploy}
             onEmbark={onEmbark}
+            onOpenTroopTransfer={onOpenTroopTransfer}
             playerFactionId={playerFactionId}
+            gameState={gameState}
         />
       )}
 
