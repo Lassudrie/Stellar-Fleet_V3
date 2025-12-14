@@ -21,7 +21,7 @@ import { clone, equals, distSq } from './engine/math/vec3';
 import { CAPTURE_RANGE } from './data/static';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'TROOP_TRANSFER_MODAL';
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -35,6 +35,8 @@ const App: React.FC = () => {
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
+  const [troopTransferMode, setTroopTransferMode] = useState<'embark' | 'disembark' | null>(null);
+  const [troopTransferFleetId, setTroopTransferFleetId] = useState<string | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -228,6 +230,24 @@ const App: React.FC = () => {
       setUiMode('INVASION_MODAL');
   };
 
+  const handleOpenTroopTransfer = (fleetId: string, mode: 'embark' | 'disembark') => {
+      setTroopTransferFleetId(fleetId);
+      setTroopTransferMode(mode);
+      setUiMode('TROOP_TRANSFER_MODAL');
+  };
+
+  const handleTroopTransferConfirm = (updatedWorld: GameState) => {
+      if (engine) {
+          // Update the engine state with the modified state
+          engine.state = updatedWorld;
+          engine.notify(); // Notify listeners of state change
+          updateViewState(engine.getState());
+      }
+      setUiMode('NONE');
+      setTroopTransferFleetId(null);
+      setTroopTransferMode(null);
+  };
+
   const handleCommitInvasion = (fleetId: string) => { 
       if (!targetSystem || !engine) return;
 
@@ -410,6 +430,8 @@ const App: React.FC = () => {
                 battles={viewGameState.battles}
                 selectedBattleId={selectedBattleId}
                 gameState={viewGameState}
+                troopTransferMode={troopTransferMode}
+                troopTransferFleetId={troopTransferFleetId}
                 
                 onSplit={handleSplitFleet}
                 onMerge={handleMergeFleet}
@@ -429,6 +451,8 @@ const App: React.FC = () => {
                 }}
                 onInvade={handleInvade}
                 onCommitInvasion={handleCommitInvasion}
+                onOpenTroopTransfer={handleOpenTroopTransfer}
+                onTroopTransferConfirm={handleTroopTransferConfirm}
 
                 onSave={handleSave}
                 

@@ -65,6 +65,7 @@ export interface Army {
   strength: number;
   state: ArmyState;
   containerId: string;
+  embarkedFleetId?: string; // Fleet ID if army is embarked on a fleet
 }
 
 export interface StarSystem {
@@ -89,6 +90,8 @@ export interface Fleet {
   stateStartTurn: number; // Turn when the current state began (Used for VFX)
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
+  currentSystemId?: string | null; // System ID where the fleet is currently located (if in orbit)
+  embarkedArmyIds?: string[]; // Array of army IDs embarked on this fleet
 }
 
 export interface LaserShot {
