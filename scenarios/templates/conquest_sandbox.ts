@@ -73,12 +73,8 @@ const conquestSandbox: ScenarioDefinitionV1 = {
     aiEnabled: true,
     totalWar: true,
 
-    // Deterministic ground combat (attrition guaranteed).
-    groundCombat: {
-      enabled: true,
-      model: 'deterministic_attrition_v1',
-      configId: 'default'
-    }
+    // Feature Flag: Army Experience (veterancy)
+    useArmyExperience: true
   }
 };
 

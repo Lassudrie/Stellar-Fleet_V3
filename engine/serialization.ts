@@ -1,281 +1,276 @@
+import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
 import { Vec3, vec3 } from './math/vec3';
-import { AIState, Army, Battle, Fleet, FleetState, GameObjectives, GameState, LaserShot, LogEntry, StarSystem } from '../types';
-import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO, EnemySightingDTO, SAVE_VERSION } from './saveFormat';
-import { toEnemySightings, fromEnemySightings } from './saveEnemies';
-import { deepFreezeDev } from './state/immutability';
+import { 
+  SAVE_VERSION, 
+  SaveFileV2, 
+  GameStateDTO, 
+  Vector3DTO, 
+  StarSystemDTO, 
+  FleetDTO, 
+  LaserShotDTO,
+  BattleDTO,
+  AIStateDTO,
+  EnemySightingDTO,
+  ArmyDTO
+} from './saveFormat';
+
+// --- HELPERS ---
 
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
 const deserializeVector3 = (v: Vector3DTO): Vec3 => vec3(v.x, v.y, v.z);
 
-const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
+// --- VALIDATORS & MIGRATION ---
 
-const finiteOr = (value: any, fallback: number): number => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-};
+// Helper to provide default factions if missing (Backward Compat)
+const DEFAULT_FACTIONS: FactionState[] = [
+    { id: 'blue', name: 'United Earth Fleet', color: '#3b82f6', isPlayable: true },
+    { id: 'red', name: 'Martian Syndicate', color: '#ef4444', isPlayable: false, aiProfile: 'aggressive' }
+];
 
-const finiteOrUndefined = (value: any): number | undefined => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-};
+export const serializeGameState = (state: GameState): string => {
+  // Serialize AI State
+  let aiStateDto: AIStateDTO | undefined;
+  if (state.aiState) {
+    const sightings: Record<string, EnemySightingDTO> = {};
+    Object.entries(state.aiState.sightings).forEach(([key, s]) => {
+      sightings[key] = {
+        ...s,
+        position: serializeVector3(s.position)
+      };
+    });
+    aiStateDto = {
+      sightings,
+      targetPriorities: state.aiState.targetPriorities,
+      systemLastSeen: state.aiState.systemLastSeen,
+      lastOwnerBySystemId: state.aiState.lastOwnerBySystemId,
+      holdUntilTurnBySystemId: state.aiState.holdUntilTurnBySystemId
+    };
+  }
 
-export const serializeGameState = (state: GameState): SaveFileV2 => {
-  const dto: GameStateDTO = {
+  const stateDto: GameStateDTO = {
     scenarioId: state.scenarioId,
     scenarioTitle: state.scenarioTitle,
     playerFactionId: state.playerFactionId,
+    factions: state.factions,
     seed: state.seed,
     rngState: state.rngState,
     startYear: state.startYear,
+    day: state.day,
     systems: state.systems.map(s => ({
-      id: s.id,
-      name: s.name,
-      position: serializeVector3(s.position),
+      ...s,
       ownerFactionId: s.ownerFactionId,
-      population: s.population,
-      maxPopulation: s.maxPopulation,
-      economy: s.economy,
-      defenseLevel: s.defenseLevel,
-      resources: s.resources,
-      color: s.color,
+      position: serializeVector3(s.position)
     })),
     fleets: state.fleets.map(f => ({
-      id: f.id,
-      name: f.name,
+      ...f,
       factionId: f.factionId,
       position: serializeVector3(f.position),
-      ships: f.ships.map(s => ({
-        id: s.id,
-        type: s.type,
-        hp: s.hp,
-        maxHp: s.maxHp,
-        missileCooldown: s.missileCooldown,
-        carriedArmyId: s.carriedArmyId,
-        veteranLevel: s.veteranLevel,
-        kills: s.kills,
-      })),
-      fuel: f.fuel,
-      maxFuel: f.maxFuel,
-      destination: f.destination ? serializeVector3(f.destination) : undefined,
-      arrivedAt: f.arrivedAt,
-      state: f.state,
-      targetSystemId: f.targetSystemId,
       targetPosition: f.targetPosition ? serializeVector3(f.targetPosition) : null,
-      radius: f.radius,
-      stateStartTurn: f.stateStartTurn,
-      retreating: f.retreating,
-      invasionTargetSystemId: f.invasionTargetSystemId,
-      currentSystemId: f.currentSystemId,
-      embarkedArmyIds: f.embarkedArmyIds,
+      ships: f.ships.map(s => ({
+          id: s.id,
+          type: s.type,
+          hp: s.hp,
+          maxHp: s.maxHp,
+          carriedArmyId: s.carriedArmyId || null
+      }))
     })),
     armies: state.armies.map(a => ({
       id: a.id,
       factionId: a.factionId,
       strength: a.strength,
-      state: a.state,
-      containerId: a.containerId,
-
-      // Optional ground combat fields
-      groundAttack: a.groundAttack,
-      groundDefense: a.groundDefense,
       maxStrength: a.maxStrength,
-      experience: a.experience,
-      level: a.level,
-      morale: a.morale,
-      fatigue: a.fatigue,
+      xp: a.xp,
+      state: a.state,
+      containerId: a.containerId
     })),
-    factions: state.factions.map(f => ({
-      id: f.id,
-      name: f.name,
-      color: f.color,
-      resources: (f as any).resources || { metal: 0, crystal: 0, fuel: 0 },
-      aiControlled: (f as any).aiControlled !== undefined ? (f as any).aiControlled : !f.isPlayable,
-      eliminated: (f as any).eliminated,
+    lasers: state.lasers.map(l => ({
+      ...l,
+      start: serializeVector3(l.start),
+      end: serializeVector3(l.end)
     })),
-    battles: state.battles,
+    battles: state.battles.map(b => ({
+      ...b,
+      winnerFactionId: b.winnerFactionId,
+      initialShips: b.initialShips?.map(s => ({...s, factionId: s.factionId})),
+      shipsLost: b.shipsLost 
+    })),
     logs: state.logs,
-    lasers: state.lasers.map(ls => ({
-      id: ls.id,
-      start: serializeVector3(ls.start),
-      end: serializeVector3(ls.end),
-      color: ls.color,
-      life: (ls as any).life || 0,
-    })),
-    laserShots: state.laserShots.map(ls => ({
-      id: ls.id,
-      start: serializeVector3(ls.start),
-      end: serializeVector3(ls.end),
-      color: ls.color,
-      createdAt: ls.createdAt,
-      duration: ls.duration,
-    })),
-    day: state.day,
-    currentPlayer: state.currentPlayer,
     selectedFleetId: state.selectedFleetId,
-    selectedSystemId: state.selectedSystemId,
     winnerFactionId: state.winnerFactionId,
-    cameraPosition: serializeVector3(state.cameraPosition),
-    cameraTarget: serializeVector3(state.cameraTarget),
-    rules: state.rules,
-    aiState: state.aiState,
-    gameStarted: state.gameStarted,
-    gameOver: state.gameOver,
-    winner: state.winner,
+    aiState: aiStateDto,
     objectives: state.objectives,
-    enemySightings: toEnemySightings(state.aiState),
+    rules: state.rules
   };
 
-  return {
+  const saveFile: SaveFileV2 = {
     version: SAVE_VERSION,
-    timestamp: Date.now(),
-    gameState: dto,
+    createdAt: new Date().toISOString(),
+    state: stateDto
   };
+
+  return JSON.stringify(saveFile, null, 2);
 };
 
-export const deserializeGameState = (saveFile: SaveFileV2): GameState => {
+export const deserializeGameState = (json: string): GameState => {
+  let raw: any;
   try {
-    const dto = saveFile.gameState;
+    raw = JSON.parse(json);
+  } catch (e) {
+    throw new Error("File is not valid JSON.");
+  }
 
-    const systems: StarSystem[] = dto.systems.map((s: StarSystemDTO) => ({
+  let dto: any = raw.state || raw; // Handle wrapped or raw DTO
+
+  // MIGRATION V1 -> V2 logic
+  // If factions or playerFactionId are missing, inject defaults
+  const isLegacy = !dto.playerFactionId || !dto.factions;
+  
+  const factions: FactionState[] = dto.factions || DEFAULT_FACTIONS;
+  const playerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+
+  try {
+    // Systems
+    const systems: StarSystem[] = dto.systems.map((s: any) => ({
       id: s.id,
       name: s.name,
       position: deserializeVector3(s.position),
-      ownerFactionId: s.ownerFactionId,
-      population: s.population,
-      maxPopulation: s.maxPopulation,
-      economy: s.economy,
-      defenseLevel: s.defenseLevel,
-      resources: s.resources,
       color: s.color,
+      size: s.size,
+      resourceType: s.resourceType,
+      // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
+      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null) 
     }));
 
-    const fleets: Fleet[] = dto.fleets.map((f: FleetDTO) => ({
+    // Fleets
+    const fleets: Fleet[] = dto.fleets.map((f: any) => ({
       id: f.id,
-      name: f.name,
-      factionId: f.factionId || (f as any).faction, // Migration
+      // Map Legacy 'faction' to 'factionId'
+      factionId: f.factionId || f.faction, 
       position: deserializeVector3(f.position),
-      ships: f.ships.map((s: ShipDTO) => ({
-        id: s.id,
-        type: s.type,
-        hp: s.hp,
-        maxHp: s.maxHp,
-        missileCooldown: s.missileCooldown,
-        carriedArmyId: s.carriedArmyId,
-        veteranLevel: s.veteranLevel,
-        kills: s.kills,
-      })),
-      fuel: f.fuel,
-      maxFuel: f.maxFuel,
-      destination: f.destination ? deserializeVector3(f.destination) : undefined,
-      arrivedAt: f.arrivedAt,
-      state: ((f as any).state as FleetState) || FleetState.ORBIT, // Migration: default to ORBIT if missing
-      targetSystemId: (f as any).targetSystemId || null,
-      targetPosition: (f as any).targetPosition ? deserializeVector3((f as any).targetPosition) : null,
-      radius: (f as any).radius || 0,
-      stateStartTurn: (f as any).stateStartTurn || 0,
-      retreating: (f as any).retreating,
-      invasionTargetSystemId: (f as any).invasionTargetSystemId,
-      currentSystemId: (f as any).currentSystemId,
-      embarkedArmyIds: (f as any).embarkedArmyIds,
+      state: f.state,
+      targetSystemId: f.targetSystemId,
+      targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
+      radius: f.radius,
+      stateStartTurn: f.stateStartTurn ?? 0,
+      retreating: f.retreating,
+      invasionTargetSystemId: f.invasionTargetSystemId,
+      ships: f.ships.map((s: any) => ({
+          id: s.id,
+          type: s.type,
+          hp: s.hp,
+          maxHp: s.maxHp,
+          carriedArmyId: s.carriedArmyId ?? null
+      }))
     }));
 
+    // Armies
     const armies: Army[] = (dto.armies || []).map((a: any) => {
-      const strength = Math.max(0, finiteOr(a.strength, 0));
-      const maxStrength = Math.max(strength, finiteOr(a.maxStrength, strength));
-      const experience = Math.max(0, finiteOr(a.experience, 0));
-      const levelFromSave = finiteOrUndefined(a.level);
-      const level = levelFromSave !== undefined ? Math.max(1, Math.floor(levelFromSave)) : Math.max(1, Math.floor(experience / 100) + 1);
-      const morale = clamp(finiteOr(a.morale, 100), 0, 100);
+      const strengthRaw = typeof a?.strength === 'number' && Number.isFinite(a.strength)
+        ? a.strength
+        : 0;
+      const strength = Math.floor(strengthRaw);
+
+      const maxStrengthRaw = typeof a?.maxStrength === 'number' && Number.isFinite(a.maxStrength)
+        ? a.maxStrength
+        : strength;
+      const maxStrength = Math.max(Math.floor(maxStrengthRaw), strength);
+
+      const xpRaw = typeof a?.xp === 'number' && Number.isFinite(a.xp)
+        ? a.xp
+        : 0;
+      const xp = Math.max(0, Math.floor(xpRaw));
 
       return {
         id: a.id,
         factionId: a.factionId || a.faction, // Migration
-        strength: Math.min(strength, maxStrength),
-        state: a.state,
-        containerId: a.containerId,
-
-        // Ground combat fields (optional)
-        groundAttack: finiteOrUndefined(a.groundAttack),
-        groundDefense: finiteOrUndefined(a.groundDefense),
+        strength,
         maxStrength,
-        experience,
-        level,
-        morale,
-        fatigue: finiteOrUndefined(a.fatigue),
+        xp,
+        state: a.state,
+        containerId: a.containerId
       };
     });
 
-    const battles: Battle[] = dto.battles || [];
-
-    const laserShots: LaserShot[] = (dto.laserShots || []).map((ls: LaserShotDTO) => ({
-      id: ls.id,
-      start: deserializeVector3(ls.start),
-      end: deserializeVector3(ls.end),
-      color: ls.color,
-      createdAt: ls.createdAt,
-      duration: ls.duration,
-    }));
-
-    const logs: LogEntry[] = dto.logs || [];
-
-    const aiState: AIState = dto.aiState || { enemySightings: {} };
-
     const lasers: LaserShot[] = (dto.lasers || []).map((l: any) => ({
       id: l.id,
-      start: deserializeVector3(l.start),
-      end: deserializeVector3(l.end),
       color: l.color,
-      createdAt: (l as any).createdAt || Date.now(),
-      duration: (l as any).duration || 1000,
+      life: l.life,
+      start: deserializeVector3(l.start),
+      end: deserializeVector3(l.end)
     }));
+
+    // Battles
+    const battles: Battle[] = (dto.battles || []).map((b: any) => {
+        // Handle migration of shipsLost keys if strictly typed previously, but JSON keys are always strings so it's fine.
+        // Rename winner -> winnerFactionId
+        const winnerFactionId = b.winnerFactionId !== undefined ? b.winnerFactionId : b.winner;
+        
+        // Migrate Snapshot factions
+        const initialShips = b.initialShips?.map((s: any) => ({
+            ...s,
+            factionId: s.factionId || s.faction
+        }));
+
+        return {
+            ...b,
+            winnerFactionId,
+            initialShips,
+            survivorShipIds: b.survivorShipIds,
+            roundsPlayed: b.roundsPlayed,
+            shipsLost: b.shipsLost,
+            missilesIntercepted: b.missilesIntercepted,
+            projectilesDestroyedByPd: b.projectilesDestroyedByPd
+        };
+    });
+
+    let aiState: AIState | undefined;
+    if (dto.aiState) {
+      const sightings: Record<string, EnemySighting> = {};
+      Object.entries(dto.aiState.sightings || {}).forEach(([key, s]: [string, any]) => {
+        sightings[key] = {
+          ...s,
+          position: deserializeVector3(s.position)
+        };
+      });
+      aiState = {
+        sightings,
+        targetPriorities: dto.aiState.targetPriorities,
+        systemLastSeen: dto.aiState.systemLastSeen || {},
+        lastOwnerBySystemId: dto.aiState.lastOwnerBySystemId || {},
+        holdUntilTurnBySystemId: dto.aiState.holdUntilTurnBySystemId || {}
+      };
+    }
 
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
-      playerFactionId: dto.playerFactionId || dto.currentPlayer,
-      factions: dto.factions.map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        color: f.color,
-        isPlayable: !f.aiControlled,
-        aiProfile: f.aiControlled ? 'aggressive' : undefined,
-      })),
-      seed: dto.seed || Date.now(),
-      rngState: dto.rngState || dto.seed || Date.now(),
-      startYear: dto.startYear || 2200,
+      playerFactionId,
+      factions,
+      seed: dto.seed,
+      rngState: dto.rngState ?? dto.seed,
+      startYear: dto.startYear,
+      day: dto.day,
       systems,
       fleets,
       armies,
       lasers,
       battles,
-      logs,
-      laserShots,
-      day: dto.day || 0,
-      currentPlayer: dto.currentPlayer,
-      selectedFleetId: dto.selectedFleetId,
-      selectedSystemId: dto.selectedSystemId,
-      winnerFactionId: dto.winnerFactionId || dto.winner,
-      cameraPosition: deserializeVector3(dto.cameraPosition),
-      cameraTarget: deserializeVector3(dto.cameraTarget),
-      rules: dto.rules || {
-        fogOfWar: true,
-        aiEnabled: true,
-        useAdvancedCombat: true,
-        totalWar: true,
-      },
-      aiState: fromEnemySightings(aiState, dto.enemySightings as EnemySightingDTO[]),
-      gameStarted: dto.gameStarted,
-      gameOver: dto.gameOver,
-      winner: dto.winner || dto.winnerFactionId,
-      objectives: dto.objectives || {
-        conditions: [],
-        maxTurns: undefined,
-      },
+      logs: dto.logs || [],
+      selectedFleetId: dto.selectedFleetId ?? null,
+      winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
+      aiState,
+      objectives: dto.objectives || { conditions: [], maxTurns: undefined },
+      rules: {
+        fogOfWar: dto.rules?.fogOfWar ?? true,
+        aiEnabled: dto.rules?.aiEnabled ?? true,
+        useAdvancedCombat: dto.rules?.useAdvancedCombat ?? true,
+        totalWar: dto.rules?.totalWar ?? true,
+        useArmyExperience: dto.rules?.useArmyExperience ?? false
+      }
     };
 
-    // Freeze for dev safety (optional)
-    deepFreezeDev(state);
     return state;
-  } catch (error) {
-    console.error('Error deserializing game state:', error);
-    throw error;
+  } catch (e) {
+    throw new Error(`Error reconstructing game state: ${(e as Error).message}`);
   }
 };

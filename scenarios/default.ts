@@ -1,4 +1,3 @@
-
 import { GameScenario } from './types';
 import { SYSTEM_COUNT, GALAXY_RADIUS } from '../data/static';
 
@@ -49,7 +48,10 @@ export const createDefaultScenario = (seed: number = Date.now()): GameScenario =
       fogOfWar: true,
       aiEnabled: true,
       useAdvancedCombat: true,
-      totalWar: true
+      totalWar: true,
+
+      // Feature Flag: Army Experience (veterancy)
+      useArmyExperience: true
     }
   };
 };
