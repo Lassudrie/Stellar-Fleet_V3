@@ -10,6 +10,8 @@ import {
   INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP 
 } from './constants';
 import { withUpdatedFleetDerived } from '../../fleetDerived';
+import { findNearestAlliedSystemExcluding } from '../world/findNearestAlliedSystem';
+import { clone } from '../../math/vec3';
 
 // --- HELPERS ---
 
@@ -316,6 +318,7 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
 
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
+  const battleSystemId = battle.systemId;
 
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];
@@ -333,12 +336,37 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
 
     if (newShips.length > 0) {
         // Update fleet with new ships AND new derived stats (radius)
-        const updatedFleet = withUpdatedFleetDerived({
+        let updatedFleet = withUpdatedFleetDerived({
             ...oldFleet,
             ships: newShips,
             state: FleetState.ORBIT,
             stateStartTurn: state.day // Correctly update state timestamp to current turn
         });
+
+        // --- Retreat logic ---
+        // If this fleet's faction lost the battle, it must retreat
+        if (winnerFactionId !== 'draw' && oldFleet.factionId !== winnerFactionId) {
+            const retreatSystem = findNearestAlliedSystemExcluding(
+                oldFleet.factionId,
+                battleSystemId,
+                state.systems
+            );
+
+            if (retreatSystem) {
+                updatedFleet = {
+                    ...updatedFleet,
+                    retreating: true,
+                    targetSystemId: retreatSystem.id,
+                    targetPosition: clone(retreatSystem.position),
+                    state: FleetState.MOVING
+                };
+            } else {
+                // No valid allied system to retreat to → fleet destroyed
+                // Don't add to survivingFleets
+                return;
+            }
+        }
+
         survivingFleets.push(updatedFleet);
     }
   });
