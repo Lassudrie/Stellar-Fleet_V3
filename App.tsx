@@ -274,7 +274,7 @@ const App: React.FC = () => {
           // Update the engine state with the modified state
           engine.state = updatedWorld;
           engine.notify(); // Notify listeners of state change
-          updateViewState(engine.getState());
+          updateViewState(getViewSnapshot(updatedWorld));
       }
       setUiMode('NONE');
       setTroopTransferFleetId(null);
