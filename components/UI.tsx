@@ -9,6 +9,7 @@ import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
+import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import { hasInvadingForce } from '../engine/army';
 import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
@@ -19,7 +20,7 @@ interface UIProps {
   selectedFleet: Fleet | null;
   logs: LogEntry[];
   
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -40,6 +41,7 @@ interface UIProps {
   onLoadCommand: (fleetId: string) => void;
   onUnloadCommand: (fleetId: string) => void;
   onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK') => void;
+  onOpenOrbitingFleetPicker: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
@@ -60,7 +62,7 @@ const UI: React.FC<UIProps> = ({
     onRestart, onNextTurn, 
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
-    onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
+    onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave,
@@ -145,6 +147,23 @@ const UI: React.FC<UIProps> = ({
       );
   }, [targetSystem, blueFleets, gameState.armies, playerFactionId]);
 
+  const orbitingPlayerFleets = useMemo(() => {
+      if (!targetSystem) return [];
+
+      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
+
+      return blueFleets
+          .filter(fleet => (
+              fleet.state === FleetState.ORBIT &&
+              distSq(fleet.position, targetSystem.position) <= orbitThresholdSq
+          ))
+          .sort((a, b) => {
+              const sizeDiff = b.ships.length - a.ships.length;
+              if (sizeDiff !== 0) return sizeDiff;
+              return a.id.localeCompare(b.id);
+          });
+  }, [blueFleets, targetSystem]);
+
   // Compute Ground Forces Summary for Context Menu
   const groundForcesSummary = useMemo(() => {
       if (!targetSystem || !gameState.armies) return null;
@@ -170,6 +189,18 @@ const UI: React.FC<UIProps> = ({
 
       return { blueCount: playerForces, bluePower: playerPower, redCount: enemyForces, redPower: enemyPower };
   }, [targetSystem, gameState.armies, playerFactionId]);
+
+  const handleSelectFleetAtSystem = () => {
+      if (orbitingPlayerFleets.length === 0) return;
+
+      if (orbitingPlayerFleets.length === 1) {
+          onSelectFleet(orbitingPlayerFleets[0].id);
+          onCloseMenu();
+          return;
+      }
+
+      onOpenOrbitingFleetPicker();
+  };
 
   return (
     <div className="absolute inset-0 pointer-events-none safe-area">
@@ -214,6 +245,8 @@ const UI: React.FC<UIProps> = ({
             showAttackOption={showAttackOption}
             showLoadOption={showLoadOption}
             showUnloadOption={showUnloadOption}
+            canSelectFleet={orbitingPlayerFleets.length > 0}
+            onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
             onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
             onOpenUnloadPicker={() => onOpenFleetPicker('UNLOAD')}
@@ -237,11 +270,20 @@ const UI: React.FC<UIProps> = ({
             onClose={onCloseMenu}
         />
       )}
-      
+
+      {uiMode === 'ORBIT_FLEET_PICKER' && targetSystem && (
+        <OrbitingFleetPicker
+            system={targetSystem}
+            fleets={orbitingPlayerFleets}
+            onSelect={(fleetId) => { onSelectFleet(fleetId); onCloseMenu(); }}
+            onClose={onCloseMenu}
+        />
+      )}
+
       {uiMode === 'INVASION_MODAL' && targetSystem && (
-        <InvasionModal 
+        <InvasionModal
             targetSystem={targetSystem}
-            fleets={blueFleets} 
+            fleets={blueFleets}
             onConfirm={onCommitInvasion}
             onClose={onCloseMenu}
             playerFactionId={playerFactionId}

@@ -71,6 +71,7 @@ export const fr = {
   // Context Menu
   'ctx.groundForces': 'Forces au Sol',
   'ctx.moveTo': 'Aller vers...',
+  'ctx.selectFleet': 'Sélectionner flotte',
   'ctx.invade': 'Envahir',
   'ctx.attack': 'Attaquer',
   'ctx.load': 'Charger les armées',
@@ -91,6 +92,13 @@ export const fr = {
   'picker.eta_one': 'ETA 1 TOUR',
   'picker.eta_other': 'ETA {{count}} TOURS',
   'picker.ly': 'AL',
+
+  // Orbiting Fleet Picker
+  'orbitPicker.title': 'Flottes en orbite',
+  'orbitPicker.subtitle': 'Choisissez une flotte à {{system}}',
+  'orbitPicker.noFleets': 'Aucune flotte jouable n\'est en orbite de ce système.',
+  'orbitPicker.shipCount': '{{count}} vaisseaux',
+  'orbitPicker.power': 'Puissance : {{power}}',
 
   // Fleet Panel
   'fleet.orbiting': 'En orbite de {{system}}',

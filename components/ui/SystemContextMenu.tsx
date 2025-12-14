@@ -11,6 +11,8 @@ interface SystemContextMenuProps {
   showAttackOption: boolean;
   showLoadOption: boolean;
   showUnloadOption: boolean;
+  canSelectFleet: boolean;
+  onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
   onOpenLoadPicker: () => void;
   onOpenUnloadPicker: () => void;
@@ -21,18 +23,32 @@ interface SystemContextMenuProps {
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption,
+    canSelectFleet, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
 
   return (
-    <div 
+    <div
       className="absolute z-40 bg-slate-900/95 border border-blue-500/30 text-white p-2 rounded shadow-2xl backdrop-blur min-w-[200px] animate-in fade-in zoom-in-95 duration-100 pointer-events-auto flex flex-col gap-1"
       style={{ left: position.x, top: position.y }}
     >
       <div className="px-3 py-2 text-xs font-bold text-blue-200 border-b border-slate-700 mb-1 uppercase tracking-wider">
           {system.name}
       </div>
+
+      {canSelectFleet && (
+          <button
+              onClick={onSelectFleetAtSystem}
+              className="text-left px-3 py-2 hover:bg-indigo-600/20 text-indigo-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path fillRule="evenodd" d="M11.47 3.72a.75.75 0 011.06 0l8.25 8.25a.75.75 0 01-1.06 1.06L12 5.56 4.28 13.03a.75.75 0 11-1.06-1.06l8.25-8.25z" clipRule="evenodd" />
+                  <path fillRule="evenodd" d="M4.22 12.22a.75.75 0 011.06 0L12 18.94l6.72-6.72a.75.75 0 111.06 1.06l-7.25 7.25a.75.75 0 01-1.06 0l-7.25-7.25a.75.75 0 010-1.06z" clipRule="evenodd" />
+              </svg>
+              {t('ctx.selectFleet')}
+          </button>
+      )}
 
       {/* GROUND INTEL SECTION */}
       {groundForces && (

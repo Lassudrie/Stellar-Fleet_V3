@@ -18,7 +18,7 @@ import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -261,6 +261,10 @@ const App: React.FC = () => {
       setUiMode('FLEET_PICKER');
   };
 
+  const handleOpenOrbitingFleetPicker = () => {
+      setUiMode('ORBIT_FLEET_PICKER');
+  };
+
   const handleCloseMenu = () => {
       setFleetPickerMode(null);
       setUiMode('NONE');
@@ -371,6 +375,7 @@ const App: React.FC = () => {
                 onLoadCommand={handleLoadCommand}
                 onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
+                onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
                 onSelectFleet={setSelectedFleetId}
