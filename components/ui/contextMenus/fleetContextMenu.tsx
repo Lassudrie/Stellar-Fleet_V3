@@ -22,8 +22,8 @@ export function FleetContextMenu({
 }: FleetContextMenuProps) {
   const { t } = useI18n();
 
-  const canEmbark = canEmbarkTroops(fleet, world);
-  const canDisembark = canDisembarkTroops(fleet, world);
+  const canEmbark = canEmbarkTroops(world, fleet);
+  const canDisembark = canDisembarkTroops(world, fleet);
 
   return (
     <div

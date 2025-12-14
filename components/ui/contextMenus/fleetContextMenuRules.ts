@@ -1,58 +1,53 @@
-import { Fleet, GameState } from '../../../types';
+import { GameState, Fleet, ArmyState, ShipType } from '../../../types';
 import { findNearestSystem } from '../../../engine/world';
-import { ORBIT_RADIUS } from '../../../data/static';
 import { distSq } from '../../../engine/math/vec3';
-import { ArmyState } from '../../../types';
+import { ORBIT_RADIUS } from '../../../data/static';
 
-export function canEmbarkTroops(fleet: Fleet, world: GameState): boolean {
-  if (!fleet.currentSystemId) {
-    // Try to determine current system
-    const currentSystem = findNearestSystem(world.systems, fleet.position);
-    if (!currentSystem) return false;
-    
-    const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-    if (distSq(fleet.position, currentSystem.position) > orbitThresholdSq) return false;
-  } else {
-    const system = world.systems.find(s => s.id === fleet.currentSystemId);
-    if (!system) return false;
+const ORBIT_THRESHOLD_SQ = (ORBIT_RADIUS * 3) * (ORBIT_RADIUS * 3);
+
+const getCurrentSystem = (world: GameState, fleet: Fleet) => {
+  if (fleet.currentSystemId) {
+    const explicit = world.systems.find(s => s.id === fleet.currentSystemId);
+    if (explicit) return explicit;
   }
+  return findNearestSystem(world.systems, fleet.position);
+};
 
-  // Check if there are any deployable armies in the system
-  const systemId = fleet.currentSystemId || findNearestSystem(world.systems, fleet.position)?.id;
-  if (!systemId) return false;
+export const canEmbarkTroops = (world: GameState, fleet: Fleet): boolean => {
+  const currentSystem = getCurrentSystem(world, fleet);
+  if (!currentSystem) return false;
 
-  const systemArmies = world.armies.filter(
-    a => a.containerId === systemId && 
-         a.state === ArmyState.DEPLOYED &&
-         a.factionId === fleet.factionId &&
-         !a.embarkedFleetId
+  const inOrbit = distSq(fleet.position, currentSystem.position) <= ORBIT_THRESHOLD_SQ;
+  if (!inOrbit) return false;
+
+  const hasEmptyTransport = fleet.ships.some(
+    s => s.type === ShipType.TROOP_TRANSPORT && !s.carriedArmyId
+  );
+  if (!hasEmptyTransport) return false;
+
+  const hasEligibleArmy = world.armies.some(
+    a =>
+      a.state === ArmyState.DEPLOYED &&
+      a.containerId === currentSystem.id &&
+      a.factionId === fleet.factionId
   );
 
-  return systemArmies.length > 0;
-}
+  return hasEligibleArmy;
+};
 
-export function canDisembarkTroops(fleet: Fleet, world: GameState): boolean {
-  if (!fleet.currentSystemId) {
-    // Try to determine current system
-    const currentSystem = findNearestSystem(world.systems, fleet.position);
-    if (!currentSystem) return false;
-    
-    const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-    if (distSq(fleet.position, currentSystem.position) > orbitThresholdSq) return false;
-  } else {
-    const system = world.systems.find(s => s.id === fleet.currentSystemId);
-    if (!system) return false;
-  }
+export const canDisembarkTroops = (world: GameState, fleet: Fleet): boolean => {
+  const currentSystem = getCurrentSystem(world, fleet);
+  if (!currentSystem) return false;
 
-  // Check if fleet has embarked armies
-  if (!fleet.embarkedArmyIds || fleet.embarkedArmyIds.length === 0) return false;
+  const inOrbit = distSq(fleet.position, currentSystem.position) <= ORBIT_THRESHOLD_SQ;
+  if (!inOrbit) return false;
 
-  // Check if current system is allied
-  const systemId = fleet.currentSystemId || findNearestSystem(world.systems, fleet.position)?.id;
-  if (!systemId) return false;
+  // Disembark is only permitted in allied systems.
+  if (currentSystem.ownerFactionId !== fleet.factionId) return false;
 
-  const system = world.systems.find(s => s.id === systemId);
-  if (!system) return false;
+  const hasLoadedTransport = fleet.ships.some(
+    s => s.type === ShipType.TROOP_TRANSPORT && !!s.carriedArmyId
+  );
 
-  return system.ownerFactionId === fleet.factionId;
-}
+  return hasLoadedTransport;
+};

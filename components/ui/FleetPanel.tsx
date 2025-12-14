@@ -181,7 +181,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                  Troop Operations
               </div>
               <div className="flex flex-wrap gap-2">
-                  {canEmbarkTroops(fleet, gameState) && (
+                  {canEmbarkTroops(gameState, fleet) && (
                       <button
                           onClick={() => onOpenTroopTransfer(fleet.id, 'embark')}
                           className="px-2 py-1 bg-green-800/60 hover:bg-green-600 text-white text-[10px] rounded border border-green-500/40 flex items-center gap-1 transition-colors"
@@ -189,7 +189,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                           <span>Embark Troops</span>
                       </button>
                   )}
-                  {canDisembarkTroops(fleet, gameState) && (
+                  {canDisembarkTroops(gameState, fleet) && (
                       <button
                           onClick={() => onOpenTroopTransfer(fleet.id, 'disembark')}
                           className="px-2 py-1 bg-green-800/60 hover:bg-green-600 text-white text-[10px] rounded border border-green-500/40 flex items-center gap-1 transition-colors"
