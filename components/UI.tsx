@@ -134,8 +134,16 @@ const UI: React.FC<UIProps> = ({
 
   const showUnloadOption = useMemo(() => {
       if (!targetSystem) return false;
-      return targetSystem.ownerFactionId === playerFactionId;
-  }, [targetSystem, playerFactionId]);
+      if (targetSystem.ownerFactionId !== playerFactionId) return false;
+
+      const playerFleetIds = new Set(blueFleets.map(fleet => fleet.id));
+
+      return gameState.armies.some(army =>
+          army.factionId === playerFactionId &&
+          army.state === ArmyState.EMBARKED &&
+          playerFleetIds.has(army.containerId)
+      );
+  }, [targetSystem, blueFleets, gameState.armies, playerFactionId]);
 
   // Compute Ground Forces Summary for Context Menu
   const groundForcesSummary = useMemo(() => {
