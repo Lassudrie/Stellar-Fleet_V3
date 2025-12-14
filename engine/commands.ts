@@ -35,6 +35,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     
                     // Locked fleets cannot move
                     if (fleet.retreating) return fleet;
+                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
+                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -61,6 +63,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
+                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
+                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -87,6 +91,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
+                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
+                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -113,6 +119,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
+                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
+                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
