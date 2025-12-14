@@ -8,18 +8,20 @@ interface SystemContextMenuProps {
   system: StarSystem;
   groundForces: { blueCount: number, bluePower: number, redCount: number, redPower: number } | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
+  showAttackOption: boolean;
   showLoadOption: boolean;
   showUnloadOption: boolean;
   onOpenFleetPicker: () => void;
   onOpenLoadPicker: () => void;
   onOpenUnloadPicker: () => void;
   onInvade: () => void;
+  onAttack: () => void;
   onClose: () => void;
 }
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
-    position, system, groundForces, showInvadeOption, showLoadOption, showUnloadOption,
-    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onClose
+    position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption,
+    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
 
@@ -58,16 +60,16 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
           </div>
       )}
 
-      {/* MOVE ACTION */}
+      {/* MOVE OR ATTACK ACTION */}
       <button
-          onClick={onOpenFleetPicker}
+          onClick={showAttackOption ? onAttack : onOpenFleetPicker}
           className="text-left px-3 py-2 hover:bg-blue-600/20 text-blue-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
       >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
             <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
             <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
           </svg>
-          {t('ctx.moveTo')}
+          {showAttackOption ? t('ctx.attack') : t('ctx.moveTo')}
       </button>
 
       {/* LOAD ARMIES */}
