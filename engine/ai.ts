@@ -5,6 +5,8 @@ import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
 import { aiDebugger } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
+import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
+import { CAPTURE_RANGE } from '../data/static';
 
 // Configuration
 const cfg = {
@@ -41,9 +43,9 @@ export const planAiTurn = (
   // 1. MEMORY & PERCEPTION UPDATE
   const myFleets = state.fleets.filter(f => f.factionId === factionId);
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
-  
+
   // Initialize or clone memory
-  // Note: For now we share one AIState object in GameState, 
+  // Note: For now we share one AIState object in GameState,
   // but strictly speaking each AI faction should have its own.
   // Assuming single AI ('red') for now in V1 compatibility, or shared memory if multi-AI.
   const memory: AIState = existingState ? JSON.parse(JSON.stringify(existingState)) : {
@@ -54,27 +56,51 @@ export const planAiTurn = (
     holdUntilTurnBySystemId: {}
   };
 
+  const observedSystemIds = state.rules.fogOfWar
+    ? getObservedSystemIds(state, factionId, myFleets)
+    : new Set(state.systems.map(s => s.id));
+
+  // Update memory with real observations through fog-of-war helpers
+  const visibleState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
+  const visibleEnemyFleets = visibleState.fleets.filter(f => f.factionId !== factionId);
+
+  visibleEnemyFleets.forEach(fleet => {
+    const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+    memory.sightings[fleet.id] = {
+      fleetId: fleet.id,
+      systemId: systemInRange ? systemInRange.id : null,
+      position: { ...fleet.position },
+      daySeen: state.day,
+      estimatedPower: calculateFleetPower(fleet),
+      confidence: 1.0
+    };
+  });
+
+  observedSystemIds.forEach(id => {
+    memory.systemLastSeen[id] = state.day;
+  });
+
   // 2. STRATEGIC ANALYSIS (System Valuation)
-  const analysisArray: { id: string, value: number, threat: number, isOwner: boolean }[] = [];
+  const analysisArray: { id: string, value: number, threat: number, isOwner: boolean, fogAge: number }[] = [];
   const totalMyPower = myFleets.reduce((sum, f) => sum + calculateFleetPower(f), 0);
   
   state.systems.forEach(sys => {
-      let value = 10; 
+      let value = 10;
       if (sys.resourceType !== 'none') value += 50;
       if (sys.ownerFactionId === factionId) value += 20;
 
-      // Estimate threat at system (Known enemies from memory)
-      const enemiesHere = state.fleets.filter(f => 
-          f.factionId !== factionId && 
-          distSq(f.position, sys.position) < 100 // nearby
-      );
-      const threat = enemiesHere.reduce((sum, f) => sum + calculateFleetPower(f), 0);
+      const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
+
+      // Estimate threat at system using current sightings only
+      const sightingsHere = Object.values(memory.sightings).filter(s => s.systemId === sys.id);
+      const threat = sightingsHere.reduce((sum, sighting) => sum + (sighting.estimatedPower * sighting.confidence), 0);
 
       const data = {
           id: sys.id,
           value,
           threat,
-          isOwner: sys.ownerFactionId === factionId
+          isOwner: sys.ownerFactionId === factionId,
+          fogAge
       };
       analysisArray.push(data);
   });
@@ -84,13 +110,16 @@ export const planAiTurn = (
 
   analysisArray.forEach(sysData => {
     const inertia = memory.targetPriorities[sysData.id] || 0;
+    const fogFactor = 1 / (1 + sysData.fogAge * 0.1);
+
+    const applyFog = (base: number) => base * fogFactor;
 
     // Priority 1: DEFEND (Owned + Threat)
     if (sysData.isOwner && sysData.threat > 0) {
       tasks.push({
         type: 'DEFEND',
         systemId: sysData.id,
-        priority: ((1000 + sysData.value) * cfg.defendBias) + inertia, 
+        priority: applyFog((1000 + sysData.value) * cfg.defendBias) + inertia,
         requiredPower: sysData.threat * 1.1,
         reason: 'Hostiles in sector'
       });
@@ -107,7 +136,7 @@ export const planAiTurn = (
           const hasTransports = myFleets.some(f => f.ships.some(s => s.carriedArmyId));
           
           let type: TaskType = 'ATTACK';
-          let priority = (500 + sysData.value) + inertia;
+          let priority = applyFog(500 + sysData.value) + inertia;
           
           if (hasTransports) {
                type = 'INVADE';
