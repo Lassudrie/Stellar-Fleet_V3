@@ -5,7 +5,7 @@ export class RNG {
   private state: number;
 
   constructor(seed: number) {
-    this.state = seed;
+    this.state = this.normalizeState(seed);
   }
 
   // --- STATE MANAGEMENT ---
@@ -16,8 +16,21 @@ export class RNG {
   }
 
   // Restore internal state from serialization
+  // Normalizes the value to ensure valid 32-bit unsigned integer range
   public setState(state: number): void {
-    this.state = state;
+    this.state = this.normalizeState(state);
+  }
+
+  // Normalize state to valid 32-bit unsigned integer
+  // Handles NaN, Infinity, negatives, and non-integers
+  private normalizeState(value: number): number {
+    // Handle invalid values
+    if (!Number.isFinite(value)) {
+      console.warn('[RNG] Invalid state value, defaulting to 1');
+      return 1;
+    }
+    // Convert to 32-bit unsigned integer (handles negatives and non-integers)
+    return (Math.floor(Math.abs(value)) >>> 0) || 1; // Ensure non-zero
   }
 
   // --- GENERATION ---
@@ -47,7 +60,12 @@ export class RNG {
   }
 
   // Helper for picking array element
-  public pick<T>(array: T[]): T {
+  // Returns undefined if array is empty (safe guard against crash)
+  public pick<T>(array: T[]): T | undefined {
+    if (array.length === 0) {
+      console.warn('[RNG] pick() called on empty array, returning undefined');
+      return undefined;
+    }
     return array[Math.floor(this.next() * array.length)];
   }
 

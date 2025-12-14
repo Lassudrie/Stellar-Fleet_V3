@@ -2,6 +2,7 @@
 import { GameState } from '../types';
 import { RNG } from './rng';
 import { deepFreezeDev } from './state/immutability';
+import { canonicalizeState } from './state/canonicalize';
 import { TurnContext } from './turn/types';
 
 // Phases
@@ -19,10 +20,12 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
 
   const ctx: TurnContext = { rng };
 
+  // --- CANONICALIZE INPUT STATE ---
+  // Ensures consistent iteration order for deterministic RNG consumption
+  let nextState = canonicalizeState(state);
+
   // --- PIPELINE EXECUTION ---
   // Each phase takes (state, ctx) and returns nextState.
-  
-  let nextState = state;
 
   // 1. Resolve battles from previous turn (Scheduled -> Resolved)
   nextState = phaseBattleResolution(nextState, ctx);
@@ -45,7 +48,9 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 7. Cleanup & Maintenance
   nextState = phaseCleanup(nextState, ctx);
 
-  // 8. Time Advance
+  // 8. Canonicalize output & Time Advance
+  nextState = canonicalizeState(nextState);
+  
   return {
       ...nextState,
       day: nextState.day + 1
