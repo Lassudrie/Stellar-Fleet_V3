@@ -42,7 +42,7 @@ interface UIProps {
   
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
-  onCommitInvasion: (shipIds: string[]) => void;
+  onCommitInvasion: (fleetId: string) => void;
 
   onSave: () => void;
 
