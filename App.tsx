@@ -32,6 +32,7 @@ const App: React.FC = () => {
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
+  const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -87,22 +88,25 @@ const App: React.FC = () => {
           if (!fleetExists) {
               setSelectedFleetId(null);
               if (uiMode !== 'SYSTEM_MENU') {
+                  setFleetPickerMode(null);
                   setUiMode('NONE');
               }
           }
       }
   };
 
-  useEffect(() => {
-    if (engine) {
-      updateViewState(engine.state);
-      
-      const unsub = engine.subscribe(() => {
+    useEffect(() => {
+      if (engine) {
         updateViewState(engine.state);
-      });
-      return unsub;
-    }
-  }, [engine, godEyes]); 
+
+        const unsub = engine.subscribe(() => {
+          updateViewState(engine.state);
+        });
+        return () => {
+            unsub();
+        };
+      }
+    }, [engine, godEyes]);
 
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
@@ -158,9 +162,10 @@ const App: React.FC = () => {
           
           const newEngine = new GameEngine(state);
           setEngine(newEngine);
-          
-          setEnemySightings({}); 
+
+          setEnemySightings({});
           setSelectedFleetId(null);
+          setFleetPickerMode(null);
           setUiMode('NONE');
           
           updateViewState(newEngine.state);
@@ -179,6 +184,7 @@ const App: React.FC = () => {
   const handleSystemClick = (sys: StarSystem, event: any) => {
       setTargetSystem(sys);
       setMenuPosition({ x: event.clientX, y: event.clientY });
+      setFleetPickerMode(null);
       setUiMode('SYSTEM_MENU');
   };
 
@@ -199,23 +205,63 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
+          setFleetPickerMode(null);
           setUiMode('NONE');
       }
   };
 
-  const handleOpenFleetPicker = () => {
+  const handleLoadCommand = (fleetId: string) => {
+      if (engine && targetSystem) {
+          const result = engine.dispatchPlayerCommand({
+              type: 'ORDER_LOAD',
+              fleetId,
+              targetSystemId: targetSystem.id
+          });
+          if (!result.ok) {
+              alert(t('msg.commandFailed', { error: result.error }));
+              return;
+          }
+          setFleetPickerMode(null);
+          setUiMode('NONE');
+      }
+  };
+
+  const handleUnloadCommand = (fleetId: string) => {
+      if (engine && targetSystem) {
+          const result = engine.dispatchPlayerCommand({
+              type: 'ORDER_UNLOAD',
+              fleetId,
+              targetSystemId: targetSystem.id
+          });
+          if (!result.ok) {
+              alert(t('msg.commandFailed', { error: result.error }));
+              return;
+          }
+          setFleetPickerMode(null);
+          setUiMode('NONE');
+      }
+  };
+
+  const handleOpenFleetPicker = (mode: 'MOVE' | 'LOAD' | 'UNLOAD') => {
+      setFleetPickerMode(mode);
       setUiMode('FLEET_PICKER');
+  };
+
+  const handleCloseMenu = () => {
+      setFleetPickerMode(null);
+      setUiMode('NONE');
   };
 
   const handleInvade = (systemId: string) => {
       const system = viewGameState?.systems.find(s => s.id === systemId);
       if (!system) return;
       setTargetSystem(system);
+      setFleetPickerMode(null);
       setUiMode('INVASION_MODAL');
   };
 
-  const handleCommitInvasion = (fleetId: any) => { 
-      const fId = fleetId as string;
+  const handleCommitInvasion = (fleetId: string) => {
+      const fId = fleetId;
       if (!targetSystem || !engine) return;
 
       const result = engine.dispatchPlayerCommand({
@@ -234,7 +280,7 @@ const App: React.FC = () => {
           alert(t('msg.commandFailed', { error: result.error }));
       }
 
-      setUiMode('NONE');
+      handleCloseMenu();
   };
 
   const handleSplitFleet = (shipIds: string[]) => {
@@ -280,7 +326,7 @@ const App: React.FC = () => {
                 onFleetSelect={handleFleetSelect}
                 onSystemClick={handleSystemClick}
                 onBackgroundClick={() => {
-                    setUiMode('NONE');
+                    handleCloseMenu();
                     setSelectedFleetId(null);
                 }}
             />
@@ -307,12 +353,16 @@ const App: React.FC = () => {
                 onRestart={() => setScreen('MENU')}
                 onNextTurn={handleNextTurn}
                 onMoveCommand={handleMoveCommand}
+                onLoadCommand={handleLoadCommand}
+                onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
-                onCloseMenu={() => setUiMode('NONE')}
+                onCloseMenu={handleCloseMenu}
+                fleetPickerMode={fleetPickerMode}
                 onSelectFleet={setSelectedFleetId}
-                
+
                 onOpenBattle={(id) => {
                     setSelectedBattleId(id);
+                    setFleetPickerMode(null);
                     setUiMode('BATTLE_SCREEN');
                 }}
                 onInvade={handleInvade}

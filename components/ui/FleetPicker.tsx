@@ -1,32 +1,35 @@
 
 import React, { useMemo } from 'react';
-import { Fleet, StarSystem, FleetState } from '../../types';
+import { Fleet, StarSystem, FleetState, ShipType } from '../../types';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { dist } from '../../engine/math/vec3';
 
 interface FleetPickerProps {
+  mode: 'MOVE' | 'LOAD' | 'UNLOAD';
   targetSystem: StarSystem;
   blueFleets: Fleet[];
-  onMoveCommand: (fleetId: string) => void;
+  onSelectFleet: (fleetId: string) => void;
   onClose: () => void;
 }
 
-const FleetPicker: React.FC<FleetPickerProps> = ({ targetSystem, blueFleets, onMoveCommand, onClose }) => {
+const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleets, onSelectFleet, onClose }) => {
   const { t } = useI18n();
-  
-  // Sort fleets by distance to target system
+
+  // Sort fleets by distance to target system and filter based on mode
   const sortedFleets = useMemo(() => {
-      // Robustly handle positions even if they lost their prototype (POJO)
       const targetPos = targetSystem.position;
 
-      // Filter out fleets that are already at the target system
       const availableFleets = blueFleets.filter(fleet => {
-        const fleetPos = fleet.position;
-        const d = dist(fleetPos, targetPos);
-        // Exclude if distance is very small (already at system, approx 0)
-        return d > 1.0; 
+          const distance = dist(fleet.position, targetPos);
+
+          if (mode === 'MOVE') {
+              return distance > 1.0;
+          }
+
+          const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
+          return hasTransport;
       });
 
       return availableFleets.sort((a, b) => {
@@ -34,35 +37,51 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ targetSystem, blueFleets, onM
           const distB = dist(b.position, targetPos);
           return distA - distB;
       });
-  }, [blueFleets, targetSystem]);
+  }, [blueFleets, mode, targetSystem]);
+
+  const titleKey = mode === 'LOAD'
+      ? 'picker.titleLoad'
+      : mode === 'UNLOAD'
+          ? 'picker.titleUnload'
+          : 'picker.title';
+
+  const destinationKey = mode === 'LOAD'
+      ? 'picker.destinationLoad'
+      : mode === 'UNLOAD'
+          ? 'picker.destinationUnload'
+          : 'picker.destination';
+
+  const emptyKey = mode === 'MOVE'
+      ? 'picker.noFleets'
+      : 'picker.noTransportFleets';
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px] pointer-events-auto z-50">
         <div className="bg-slate-900 border border-blue-500/50 w-11/12 max-w-md max-h-[80vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
             <div className="bg-slate-950 p-4 border-b border-slate-800 flex justify-between items-center">
                 <div>
-                  <h3 className="text-blue-400 font-bold text-lg tracking-wider uppercase">{t('picker.title')}</h3>
-                  <p className="text-xs text-slate-500">{t('picker.destination', { system: targetSystem.name })}</p>
+                  <h3 className="text-blue-400 font-bold text-lg tracking-wider uppercase">{t(titleKey)}</h3>
+                  <p className="text-xs text-slate-500">{t(destinationKey, { system: targetSystem.name })}</p>
                 </div>
                 <button onClick={onClose} className="text-slate-500 hover:text-white">✕</button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                 {sortedFleets.length === 0 ? (
                     <div className="text-center p-8 text-slate-500">
-                      {t('picker.noFleets')}
+                      {t(emptyKey)}
                     </div>
                 ) : (
                     sortedFleets.map(fleet => {
                         const fleetPos = fleet.position;
                         const targetPos = targetSystem.position;
                         const rawDist = dist(fleetPos, targetPos);
-                        
+
                         const d = Math.round(rawDist);
-                        
+
                         // Calculate dynamic speed based on composition
                         const speed = getFleetSpeed(fleet);
-                        const eta = Math.ceil(rawDist / speed);
+                        const eta = Math.max(1, Math.ceil(rawDist / speed));
                         
                         // Localization for ETA
                         const etaText = eta === 1 
@@ -72,7 +91,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ targetSystem, blueFleets, onM
                         return (
                             <button
                               key={fleet.id}
-                              onClick={() => onMoveCommand(fleet.id)}
+                              onClick={() => onSelectFleet(fleet.id)}
                               className="w-full bg-slate-800/50 hover:bg-blue-900/30 border border-slate-700 hover:border-blue-500/50 p-3 rounded-lg flex items-center justify-between group transition-all"
                             >
                                 <div className="text-left">

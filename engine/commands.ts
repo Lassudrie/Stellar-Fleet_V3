@@ -5,12 +5,14 @@ import { getSystemById } from './world';
 import { clone } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 
-export type GameCommand = 
+export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
   | { type: 'AI_UPDATE_STATE'; newState: AIState }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string };
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string };
 
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): GameState => {
     // Enforce Immutability in Dev
@@ -39,7 +41,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        invasionTargetSystemId: null // Clear previous orders
+                        invasionTargetSystemId: null, // Clear previous orders
+                        loadTargetSystemId: null,
+                        unloadTargetSystemId: null
                     };
                 })
             };
@@ -63,7 +67,61 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        invasionTargetSystemId: system.id // Set invasion order
+                        invasionTargetSystemId: system.id, // Set invasion order
+                        loadTargetSystemId: null,
+                        unloadTargetSystemId: null
+                    };
+                })
+            };
+        }
+
+        case 'ORDER_LOAD_MOVE': {
+            const system = getSystemById(state.systems, command.targetSystemId);
+
+            if (!system) return state;
+            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
+            if (!fleetExists) return state;
+
+            return {
+                ...state,
+                fleets: state.fleets.map(fleet => {
+                    if (fleet.id !== command.fleetId) return fleet;
+                    if (fleet.retreating) return fleet;
+
+                    return {
+                        ...fleet,
+                        state: FleetState.MOVING,
+                        targetSystemId: system.id,
+                        targetPosition: clone(system.position),
+                        invasionTargetSystemId: null,
+                        loadTargetSystemId: system.id,
+                        unloadTargetSystemId: null
+                    };
+                })
+            };
+        }
+
+        case 'ORDER_UNLOAD_MOVE': {
+            const system = getSystemById(state.systems, command.targetSystemId);
+
+            if (!system) return state;
+            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
+            if (!fleetExists) return state;
+
+            return {
+                ...state,
+                fleets: state.fleets.map(fleet => {
+                    if (fleet.id !== command.fleetId) return fleet;
+                    if (fleet.retreating) return fleet;
+
+                    return {
+                        ...fleet,
+                        state: FleetState.MOVING,
+                        targetSystemId: system.id,
+                        targetPosition: clone(system.position),
+                        invasionTargetSystemId: null,
+                        loadTargetSystemId: null,
+                        unloadTargetSystemId: system.id
                     };
                 })
             };
