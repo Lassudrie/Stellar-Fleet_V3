@@ -1,7 +1,7 @@
 
 import { GameState } from '../../../types';
 import { TurnContext } from '../types';
-import { pruneBattles } from '../../../services/battle/detection';
+import { pruneBattles } from '../../systems/battle/detection';
 import { sanitizeArmies } from '../../army';
 
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {

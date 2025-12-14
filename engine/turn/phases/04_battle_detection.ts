@@ -1,7 +1,7 @@
 
 import { GameState, FleetState } from '../../../types';
 import { TurnContext } from '../types';
-import { detectNewBattles } from '../../../services/battle/detection';
+import { detectNewBattles } from '../../systems/battle/detection';
 
 export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameState => {
     // Only detect if advanced combat is enabled

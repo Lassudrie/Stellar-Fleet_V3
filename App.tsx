@@ -9,7 +9,7 @@ import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import { buildScenario } from './scenarios';
-import { generateWorld } from './services/world/worldGenerator';
+import { generateWorld } from './engine/systems/world/worldGenerator';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from './engine/fogOfWar';
