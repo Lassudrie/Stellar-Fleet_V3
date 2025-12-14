@@ -121,6 +121,7 @@ const UI: React.FC<UIProps> = ({
 
   const showAttackOption = useMemo(() => {
       if (!targetSystem) return false;
+      if (!targetSystem.ownerFactionId) return false;
       return targetSystem.ownerFactionId !== playerFactionId;
   }, [targetSystem, playerFactionId]);
 
