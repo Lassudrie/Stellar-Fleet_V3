@@ -51,6 +51,8 @@ interface UIProps {
   onCommitInvasion: (fleetId: string) => void;
 
   onSave: () => void;
+  onExportAiLogs?: () => void;
+  onClearAiLogs?: () => void;
 
   devMode: boolean;
   godEyes: boolean;
@@ -65,7 +67,7 @@ const UI: React.FC<UIProps> = ({
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
-    onSave,
+    onSave, onExportAiLogs, onClearAiLogs,
     devMode, godEyes, onSetUiSettings
 }) => {
   
@@ -229,9 +231,8 @@ const UI: React.FC<UIProps> = ({
         devMode={devMode}
         godEyes={godEyes}
         onSetUiSettings={onSetUiSettings}
-        
-        onExportAiLogs={(window as any)._exportAiLogs}
-        onClearAiLogs={(window as any)._clearAiLogs}
+        onExportAiLogs={onExportAiLogs}
+        onClearAiLogs={onClearAiLogs}
         
         // Pass PlayerID for ownership checks
         playerFactionId={playerFactionId}
