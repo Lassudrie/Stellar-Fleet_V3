@@ -36,13 +36,16 @@ interface UIProps {
   onRestart: () => void;
   onNextTurn: () => void;
   onMoveCommand: (fleetId: string) => void;
-  onOpenFleetPicker: () => void;
+  onLoadCommand: (fleetId: string) => void;
+  onUnloadCommand: (fleetId: string) => void;
+  onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD') => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
-  
+  fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | null;
+
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
-  onCommitInvasion: (shipIds: string[]) => void;
+  onCommitInvasion: (fleetId: string) => void;
 
   onSave: () => void;
 
@@ -56,7 +59,8 @@ const UI: React.FC<UIProps> = ({
     onRestart, onNextTurn, 
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
-    onMoveCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
+    onMoveCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
+    fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave,
     devMode, godEyes, onSetUiSettings
@@ -106,7 +110,7 @@ const UI: React.FC<UIProps> = ({
   // Rules: Not owned by player + Player Fleet in Orbit + Contains Loaded Troop Transport
   const showInvadeOption = useMemo(() => {
       if (!targetSystem) return false;
-      
+
       if (targetSystem.ownerFactionId === playerFactionId) return false;
 
       const detectionDistSq = (ORBIT_RADIUS * 2.5) ** 2; 
@@ -117,6 +121,21 @@ const UI: React.FC<UIProps> = ({
           hasInvadingForce(f)
       );
   }, [targetSystem, blueFleets, playerFactionId]);
+
+  const showLoadOption = useMemo(() => {
+      if (!targetSystem) return false;
+
+      return gameState.armies.some(army =>
+          army.containerId === targetSystem.id &&
+          army.factionId === playerFactionId &&
+          army.state === ArmyState.DEPLOYED
+      );
+  }, [targetSystem, gameState.armies, playerFactionId]);
+
+  const showUnloadOption = useMemo(() => {
+      if (!targetSystem) return false;
+      return targetSystem.ownerFactionId === playerFactionId;
+  }, [targetSystem, playerFactionId]);
 
   // Compute Ground Forces Summary for Context Menu
   const groundForcesSummary = useMemo(() => {
@@ -179,22 +198,31 @@ const UI: React.FC<UIProps> = ({
       />
 
       {uiMode === 'SYSTEM_MENU' && menuPosition && targetSystem && (
-        <SystemContextMenu 
+        <SystemContextMenu
             position={menuPosition}
             system={targetSystem}
             groundForces={groundForcesSummary}
             showInvadeOption={showInvadeOption}
-            onOpenFleetPicker={onOpenFleetPicker}
+            showLoadOption={showLoadOption}
+            showUnloadOption={showUnloadOption}
+            onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
+            onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
+            onOpenUnloadPicker={() => onOpenFleetPicker('UNLOAD')}
             onInvade={() => onInvade(targetSystem.id)}
             onClose={onCloseMenu}
         />
       )}
 
       {uiMode === 'FLEET_PICKER' && targetSystem && (
-        <FleetPicker 
+        <FleetPicker
+            mode={fleetPickerMode || 'MOVE'}
             targetSystem={targetSystem}
             blueFleets={blueFleets}
-            onMoveCommand={onMoveCommand}
+            onSelectFleet={(fleetId) => {
+                if (fleetPickerMode === 'LOAD') return onLoadCommand(fleetId);
+                if (fleetPickerMode === 'UNLOAD') return onUnloadCommand(fleetId);
+                return onMoveCommand(fleetId);
+            }}
             onClose={onCloseMenu}
         />
       )}

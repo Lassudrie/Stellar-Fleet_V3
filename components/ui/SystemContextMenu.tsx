@@ -8,14 +8,18 @@ interface SystemContextMenuProps {
   system: StarSystem;
   groundForces: { blueCount: number, bluePower: number, redCount: number, redPower: number } | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
+  showLoadOption: boolean;
+  showUnloadOption: boolean;
   onOpenFleetPicker: () => void;
+  onOpenLoadPicker: () => void;
+  onOpenUnloadPicker: () => void;
   onInvade: () => void;
   onClose: () => void;
 }
 
-const SystemContextMenu: React.FC<SystemContextMenuProps> = ({ 
-    position, system, groundForces, showInvadeOption,
-    onOpenFleetPicker, onInvade, onClose 
+const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
+    position, system, groundForces, showInvadeOption, showLoadOption, showUnloadOption,
+    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onClose
 }) => {
   const { t } = useI18n();
 
@@ -55,7 +59,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
       )}
 
       {/* MOVE ACTION */}
-      <button 
+      <button
           onClick={onOpenFleetPicker}
           className="text-left px-3 py-2 hover:bg-blue-600/20 text-blue-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
       >
@@ -65,6 +69,34 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
           </svg>
           {t('ctx.moveTo')}
       </button>
+
+      {/* LOAD ARMIES */}
+      {showLoadOption && (
+          <button
+              onClick={onOpenLoadPicker}
+              className="text-left px-3 py-2 hover:bg-emerald-600/20 text-emerald-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path d="M11.47 3.72a.75.75 0 011.06 0l4.5 4.5a.75.75 0 11-1.06 1.06L12.75 6.56V16a.75.75 0 01-1.5 0V6.56L8.09 9.28a.75.75 0 01-1.06-1.06l4.44-4.5z" />
+                  <path d="M5.75 18.5a.75.75 0 00-.75.75v.5c0 .966.784 1.75 1.75 1.75h10.5A1.75 1.75 0 0019 19.75v-.5a.75.75 0 00-.75-.75H5.75z" />
+              </svg>
+              {t('ctx.load')}
+          </button>
+      )}
+
+      {/* UNLOAD ARMIES */}
+      {showUnloadOption && (
+          <button
+              onClick={onOpenUnloadPicker}
+              className="text-left px-3 py-2 hover:bg-amber-600/20 text-amber-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path d="M12.53 20.28a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.16 3.16V8a.75.75 0 111.5 0v9.88l3.16-3.16a.75.75 0 111.06 1.06l-4.38 4.5z" />
+                  <path d="M5.75 3.5A1.75 1.75 0 004 5.25v.5c0 .414.336.75.75.75h14.5a.75.75 0 00.75-.75v-.5A1.75 1.75 0 0018.25 3.5H5.75z" />
+              </svg>
+              {t('ctx.unload')}
+          </button>
+      )}
 
       {/* INVADE ACTION (Conditional) */}
       {showInvadeOption && (
