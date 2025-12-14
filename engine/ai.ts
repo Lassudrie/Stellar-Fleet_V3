@@ -105,6 +105,12 @@ export const planAiTurn = (
       analysisArray.push(data);
   });
 
+  const embarkedFriendlyArmies = new Set(
+    state.armies
+      .filter(a => a.factionId === factionId && a.state === ArmyState.EMBARKED)
+      .map(a => a.id)
+  );
+
   // 3. TASK GENERATION
   const tasks: Task[] = [];
 
@@ -127,18 +133,20 @@ export const planAiTurn = (
     // Priority 2: ATTACK or INVADE (Expansion)
     else if (!sysData.isOwner && sysData.value > 20) {
       if (sysData.threat < totalMyPower * 0.8) {
-          const defenders = state.armies.filter(a => 
-              a.containerId === sysData.id && 
-              a.state === ArmyState.DEPLOYED && 
+          const defenders = state.armies.filter(a =>
+              a.containerId === sysData.id &&
+              a.state === ArmyState.DEPLOYED &&
               a.factionId !== factionId
           ).length;
-          
-          const hasTransports = myFleets.some(f => f.ships.some(s => s.carriedArmyId));
+
+          const hasEmbarkedArmies = myFleets.some(f =>
+              f.ships.some(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
+          );
           
           let type: TaskType = 'ATTACK';
           let priority = applyFog(500 + sysData.value) + inertia;
-          
-          if (hasTransports) {
+
+          if (hasEmbarkedArmies) {
                type = 'INVADE';
                priority += 200;
           }
@@ -196,7 +204,7 @@ export const planAiTurn = (
         let suitability = 10000 - d + fObj.power; 
 
         if (task.type === 'INVADE') {
-            const embarkedCount = f.ships.filter(s => s.carriedArmyId).length;
+            const embarkedCount = f.ships.filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId)).length;
             if (embarkedCount > 0) {
                 suitability += 5000 + (embarkedCount * 1000);
             }
@@ -274,13 +282,16 @@ export const planAiTurn = (
 
       // Issue movement command
       // Use ORDER_INVASION_MOVE for INVADE tasks to auto-deploy armies on arrival
-      if (task.type === 'INVADE') {
+      const embarkedCount = fleet.ships.filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId)).length;
+
+      if (task.type === 'INVADE' && embarkedCount > 0) {
           commands.push({
               type: 'ORDER_INVASION_MOVE',
               fleetId: fleet.id,
               targetSystemId: task.systemId
           });
       } else {
+          // Future improvement: introduce a LOAD phase to embark armies before invading.
           commands.push({
               type: 'MOVE_FLEET',
               fleetId: fleet.id,
