@@ -126,7 +126,15 @@ export const planAiTurn = (
   });
 
   // Sort Tasks
-  tasks.sort((a, b) => b.priority - a.priority);
+  tasks.sort((a, b) => {
+    const priorityDiff = b.priority - a.priority;
+    if (priorityDiff !== 0) return priorityDiff;
+
+    const typeDiff = a.type.localeCompare(b.type);
+    if (typeDiff !== 0) return typeDiff;
+
+    return a.systemId.localeCompare(b.systemId);
+  });
 
   // 4. FLEET ASSIGNMENT
   const availableFleetObjs = myFleets.map(f => ({
@@ -177,7 +185,12 @@ export const planAiTurn = (
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
 
-    candidates.sort((a, b) => b.suitability - a.suitability);
+    candidates.sort((a, b) => {
+      const suitabilityDiff = b.suitability - a.suitability;
+      if (suitabilityDiff !== 0) return suitabilityDiff;
+
+      return a.fObj.fleet.id.localeCompare(b.fObj.fleet.id);
+    });
 
     let assignedPower = 0;
     const assigned: typeof candidates = [];
