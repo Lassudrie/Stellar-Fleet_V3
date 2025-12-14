@@ -12,7 +12,8 @@ export const checkVictoryConditions = (state: GameState): FactionId | null => {
   // If maxTurns is reached, the game ends.
   // In a typical scenario, if you haven't won by X turns, you might lose, or it might be a score check.
   // For now, if 'survival' is a condition and turns are reached, Blue wins. Otherwise null/draw.
-  if (state.objectives.maxTurns && state.day > state.objectives.maxTurns) {
+  // Turn limit is inclusive: reaching the specified day should immediately trigger end-of-game logic.
+  if (state.objectives.maxTurns && state.day >= state.objectives.maxTurns) {
     const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
     if (survivalCondition) {
       const survivingFactionId = state.playerFactionId;
