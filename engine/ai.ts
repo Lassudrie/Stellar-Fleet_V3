@@ -1,259 +1,359 @@
-
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState } from '../types';
+import { 
+    GameState, 
+    Fleet, 
+    StarSystem, 
+    FactionId,
+    FleetState,
+    ShipType
+} from '../types';
 import { GameCommand } from './commands';
-import { calculateFleetPower, getSystemById } from './world';
+import { dist, distSq, Vec3 } from './math/vec3';
+import { CAPTURE_RANGE, AI_CONFIG } from '../data/static';
 import { RNG } from './rng';
 import { aiDebugger } from './aiDebugger';
-import { distSq, dist } from './math/vec3';
 
-// Configuration
-const cfg = {
-  defendBias: 1.5,
-  attackRatio: 1.2,
-  minMoveCommitTurns: 3,
-  inertiaBonus: 50,
-  scoutProb: 0.1,
-};
-
-type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
-
-interface Task {
-  type: TaskType;
-  systemId: string;
-  priority: number;
-  requiredPower: number;
-  reason?: string;
+// AI memory structure
+export interface AIState {
+    lastKnownSystemOwners: Record<string, FactionId | null>;
+    fleetAssignments: Record<string, string>; // fleetId -> taskId
+    enemySightings: EnemySighting[];
 }
 
+export interface EnemySighting {
+    position: Vec3;
+    factionId: FactionId;
+    fleetStrength: number;
+    turnSeen: number;
+}
+
+export interface AITask {
+    id: string;
+    type: 'DEFEND' | 'INVADE' | 'EXPAND' | 'ATTACK_FLEET';
+    priority: number;
+    systemId: string;
+    targetFleetId?: string;
+}
+
+type AICommand = GameCommand;
+
 interface FleetAssignment {
-  fleet: Fleet;
-  task: Task;
+    fleet: Fleet;
+    task: AITask;
 }
 
 export const planAiTurn = (
-  state: GameState,
-  factionId: FactionId,
-  existingState: AIState | undefined,
-  rng: RNG
-): GameCommand[] => {
-  const commands: GameCommand[] = [];
-  
-  // 1. MEMORY & PERCEPTION UPDATE
-  const myFleets = state.fleets.filter(f => f.factionId === factionId);
-  const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
-  
-  // Initialize or clone memory
-  // Note: For now we share one AIState object in GameState, 
-  // but strictly speaking each AI faction should have its own.
-  // Assuming single AI ('red') for now in V1 compatibility, or shared memory if multi-AI.
-  const memory: AIState = existingState ? JSON.parse(JSON.stringify(existingState)) : {
-    sightings: {},
-    targetPriorities: {},
-    systemLastSeen: {},
-    lastOwnerBySystemId: {},
-    holdUntilTurnBySystemId: {}
-  };
+    state: GameState, 
+    aiFactionId: FactionId, 
+    existingState?: any,
+    rng?: RNG
+): AICommand[] => {
+    // Create AI state if none exists or convert from old format
+    const aiState: AIState = (existingState && 'enemySightings' in existingState && Array.isArray(existingState.enemySightings)) 
+        ? existingState 
+        : {
+            lastKnownSystemOwners: existingState?.lastOwnerBySystemId || {},
+            fleetAssignments: {},
+            enemySightings: []
+        };
 
-  // 2. STRATEGIC ANALYSIS (System Valuation)
-  const analysisArray: { id: string, value: number, threat: number, isOwner: boolean }[] = [];
-  const totalMyPower = myFleets.reduce((sum, f) => sum + calculateFleetPower(f), 0);
-  
-  state.systems.forEach(sys => {
-      let value = 10; 
-      if (sys.resourceType !== 'none') value += 50;
-      if (sys.ownerFactionId === factionId) value += 20;
+    // Update system ownership knowledge
+    state.systems.forEach(system => {
+        aiState.lastKnownSystemOwners[system.id] = system.ownerFactionId;
+    });
 
-      // Estimate threat at system (Known enemies from memory)
-      const enemiesHere = state.fleets.filter(f => 
-          f.factionId !== factionId && 
-          distSq(f.position, sys.position) < 100 // nearby
-      );
-      const threat = enemiesHere.reduce((sum, f) => sum + calculateFleetPower(f), 0);
+    // Update enemy sightings
+    updateEnemySightings(state, aiFactionId, aiState);
 
-      const data = {
-          id: sys.id,
-          value,
-          threat,
-          isOwner: sys.ownerFactionId === factionId
-      };
-      analysisArray.push(data);
-  });
+    // Generate tasks
+    const tasks = generateTasks(state, aiFactionId, aiState);
 
-  // 3. TASK GENERATION
-  const tasks: Task[] = [];
+    // Update debugger
+    aiDebugger.setAIState(aiState);
+    aiDebugger.setPlannedTasks(tasks);
 
-  analysisArray.forEach(sysData => {
-    const inertia = memory.targetPriorities[sysData.id] || 0;
+    // Assign fleets to tasks
+    const assignments = assignFleetsToTasks(state, aiFactionId, tasks, aiState);
 
-    // Priority 1: DEFEND (Owned + Threat)
-    if (sysData.isOwner && sysData.threat > 0) {
-      tasks.push({
-        type: 'DEFEND',
-        systemId: sysData.id,
-        priority: ((1000 + sysData.value) * cfg.defendBias) + inertia, 
-        requiredPower: sysData.threat * 1.1,
-        reason: 'Hostiles in sector'
-      });
-    }
-    // Priority 2: ATTACK or INVADE (Expansion)
-    else if (!sysData.isOwner && sysData.value > 20) {
-      if (sysData.threat < totalMyPower * 0.8) {
-          const defenders = state.armies.filter(a => 
-              a.containerId === sysData.id && 
-              a.state === ArmyState.DEPLOYED && 
-              a.factionId !== factionId
-          ).length;
-          
-          const hasTransports = myFleets.some(f => f.ships.some(s => s.carriedArmyId));
-          
-          let type: TaskType = 'ATTACK';
-          let priority = (500 + sysData.value) + inertia;
-          
-          if (hasTransports) {
-               type = 'INVADE';
-               priority += 200;
-          }
+    // Generate commands
+    const commands = generateCommands(state, aiFactionId, assignments, rng);
 
-          tasks.push({
-            type,
-            systemId: sysData.id,
-            priority,
-            requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
-            reason: 'Expansion opportunity'
-          });
-      }
-    }
-  });
+    // Update debugger
+    aiDebugger.setPlannedCommands(commands);
 
-  // Sort Tasks
-  tasks.sort((a, b) => b.priority - a.priority);
+    return commands;
+};
 
-  // 4. FLEET ASSIGNMENT
-  const availableFleetObjs = myFleets.map(f => ({
-      fleet: f,
-      power: calculateFleetPower(f),
-      assigned: false
-  }));
+const updateEnemySightings = (
+    state: GameState, 
+    aiFactionId: FactionId, 
+    aiState: AIState
+): void => {
+    // Clear old sightings (older than 5 turns)
+    aiState.enemySightings = aiState.enemySightings.filter(
+        sighting => state.day - sighting.turnSeen < 5
+    );
 
-  const assignments: FleetAssignment[] = [];
-  const operationalLogs: string[] = [];
+    // Add new sightings from nearby fleets
+    const aiFleets = state.fleets.filter(f => f.factionId === aiFactionId);
+    const enemyFleets = state.fleets.filter(f => f.factionId !== aiFactionId);
 
-  if (aiDebugger.getEnabled()) {
-      aiDebugger.startTurn(state.day, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
-  }
-
-  for (const task of tasks) {
-    const candidates = availableFleetObjs
-      .filter(fObj => !fObj.assigned)
-      .map(fObj => {
-        const f = fObj.fleet;
-        const moveAge = f.stateStartTurn ? (state.day - f.stateStartTurn) : 999;
-        const isLocked = f.state === FleetState.MOVING && 
-                         f.targetSystemId !== task.systemId && 
-                         moveAge < cfg.minMoveCommitTurns && 
-                         task.type !== 'DEFEND';
-        
-        if (isLocked) return null;
-
-        const targetSys = getSystemById(state.systems, task.systemId);
-        if (!targetSys) return null;
-
-        let d = distSq(f.position, targetSys.position);
-        
-        if (f.state === FleetState.MOVING && f.targetSystemId === task.systemId) {
-            d = Math.max(0, d - (cfg.inertiaBonus * cfg.inertiaBonus));
-        }
-        
-        let suitability = 10000 - d + fObj.power; 
-
-        if (task.type === 'INVADE') {
-            const embarkedCount = f.ships.filter(s => s.carriedArmyId).length;
-            if (embarkedCount > 0) {
-                suitability += 5000 + (embarkedCount * 1000);
+    for (const aiFleet of aiFleets) {
+        for (const enemyFleet of enemyFleets) {
+            const distance = distSq(aiFleet.position, enemyFleet.position);
+            if (distance < AI_CONFIG.sightRange * AI_CONFIG.sightRange) {
+                aiState.enemySightings.push({
+                    position: enemyFleet.position,
+                    factionId: enemyFleet.factionId,
+                    fleetStrength: enemyFleet.ships.length,
+                    turnSeen: state.day
+                });
             }
         }
-
-        return { fObj, distSq: d, suitability };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null);
-
-    candidates.sort((a, b) => b.suitability - a.suitability);
-
-    let assignedPower = 0;
-    const assigned: typeof candidates = [];
-
-    for (const cand of candidates) {
-        if (assignedPower >= task.requiredPower) break;
-        assigned.push(cand);
-        assignedPower += cand.fObj.power;
     }
+};
 
-    const taskAssigned = assignedPower >= task.requiredPower || (assignedPower > 0 && task.type === 'DEFEND');
+const generateTasks = (
+    state: GameState,
+    aiFactionId: FactionId,
+    aiState: AIState
+): AITask[] => {
+    const tasks: AITask[] = [];
+    const aiSystems = state.systems.filter(s => s.ownerFactionId === aiFactionId);
+    const neutralSystems = state.systems.filter(s => s.ownerFactionId === null);
+    const enemySystems = state.systems.filter(s => s.ownerFactionId && s.ownerFactionId !== aiFactionId);
 
-    if (taskAssigned) {
-        assigned.forEach(c => {
-            c.fObj.assigned = true;
-            assignments.push({ fleet: c.fObj.fleet, task });
+    // 1. DEFEND tasks for owned systems with enemy nearby
+    aiSystems.forEach(system => {
+        const enemyNearby = aiState.enemySightings.some(
+            sighting => distSq(sighting.position, system.position) < CAPTURE_RANGE * CAPTURE_RANGE * 4
+        );
+        
+        if (enemyNearby) {
+            tasks.push({
+                id: `defend_${system.id}`,
+                type: 'DEFEND',
+                priority: 100,
+                systemId: system.id
+            });
+        }
+    });
+
+    // 2. INVASION tasks for weak enemy systems
+    const aiHasTransportsWithArmies = state.fleets
+        .filter(f => f.factionId === aiFactionId)
+        .some(f => f.ships.some(s => s.type === ShipType.TROOP_TRANSPORT && !!s.carriedArmyId));
+
+    if (aiHasTransportsWithArmies) {
+        enemySystems.forEach(system => {
+            const enemyDefenders = state.armies.filter(
+                a => a.containerId === system.id && a.factionId === system.ownerFactionId
+            );
+            
+            const defenderStrength = enemyDefenders.reduce((sum, a) => sum + a.strength, 0);
+            
+            // Only invade if lightly defended
+            if (defenderStrength < 150) {
+                tasks.push({
+                    id: `invade_${system.id}`,
+                    type: 'INVADE',
+                    priority: 80 - defenderStrength / 10,
+                    systemId: system.id
+                });
+            }
         });
     }
 
-    if (aiDebugger.getEnabled()) {
-      aiDebugger.logTask({
-          type: task.type,
-          targetSystemId: task.systemId,
-          priority: task.priority,
-          requiredPower: task.requiredPower,
-          assignedPower: assignedPower,
-          executed: taskAssigned,
-          assignedFleetId: assigned[0]?.fObj.fleet.id || null,
-          status: taskAssigned ? 'ASSIGNED' : 'SKIPPED_POWER_MISMATCH',
-          reason: task.reason
-      });
-    }
-  }
-  
-  if (aiDebugger.getEnabled()) {
-      aiDebugger.commitTurn();
-  }
+    // 3. EXPAND tasks for neutral systems
+    neutralSystems.forEach(system => {
+        // Prefer closer systems and those with resources
+        const distanceToNearest = getDistanceToNearestSystem(state, system, aiFactionId);
+        const resourceBonus = system.resourceType !== 'none' ? 10 : 0;
+        
+        tasks.push({
+            id: `expand_${system.id}`,
+            type: 'EXPAND',
+            priority: 50 - distanceToNearest / 20 + resourceBonus,
+            systemId: system.id
+        });
+    });
 
-  // 5. COMMAND GENERATION
-  assignments.forEach(assign => {
-      const { fleet, task } = assign;
-      
-      if (fleet.state === FleetState.ORBIT && 
-          state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
-          
-          if (task.type === 'INVADE') {
-               fleet.ships.forEach(s => {
-                  if (s.carriedArmyId) {
-                      commands.push({
-                          type: 'UNLOAD_ARMY',
-                          fleetId: fleet.id,
-                          shipId: s.id,
-                          armyId: s.carriedArmyId,
-                          systemId: task.systemId
-                      });
-                  }
-               });
-          }
-          return;
-      }
+    // 4. ATTACK_FLEET tasks for nearby weak enemy fleets
+    const aiFleets = state.fleets.filter(f => f.factionId === aiFactionId);
+    const enemyFleets = state.fleets.filter(f => f.factionId !== aiFactionId);
 
-      if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
-          return;
-      }
+    aiFleets.forEach(aiFleet => {
+        enemyFleets.forEach(enemyFleet => {
+            const distance = distSq(aiFleet.position, enemyFleet.position);
+            
+            if (distance < CAPTURE_RANGE * CAPTURE_RANGE * 2) {
+                const aiStrength = aiFleet.ships.length;
+                const enemyStrength = enemyFleet.ships.length;
+                
+                // Attack if we have advantage
+                if (aiStrength > enemyStrength * 1.5) {
+                    tasks.push({
+                        id: `attack_${enemyFleet.id}`,
+                        type: 'ATTACK_FLEET',
+                        priority: 70 + (aiStrength - enemyStrength),
+                        systemId: findNearestSystemId(state, enemyFleet.position),
+                        targetFleetId: enemyFleet.id
+                    });
+                }
+            }
+        });
+    });
 
-      commands.push({
-          type: 'MOVE_FLEET',
-          fleetId: fleet.id,
-          targetSystemId: task.systemId
-      });
-  });
+    // Sort by priority descending
+    return tasks.sort((a, b) => b.priority - a.priority);
+};
 
-  commands.push({
-      type: 'AI_UPDATE_STATE',
-      newState: memory
-  });
+const assignFleetsToTasks = (
+    state: GameState,
+    aiFactionId: FactionId,
+    tasks: AITask[],
+    aiState: AIState
+): FleetAssignment[] => {
+    const aiFleets = state.fleets
+        .filter(f => f.factionId === aiFactionId)
+        .filter(f => f.ships.length > 0); // Only active fleets
 
-  return commands;
+    const assignments: FleetAssignment[] = [];
+    const assignedFleets = new Set<string>();
+
+    // Clear outdated assignments
+    Object.keys(aiState.fleetAssignments).forEach(fleetId => {
+        if (!aiFleets.some(f => f.id === fleetId)) {
+            delete aiState.fleetAssignments[fleetId];
+        }
+    });
+
+    // Assign fleets to tasks in priority order
+    tasks.forEach(task => {
+        // Find best fleet for this task
+        const availableFleets = aiFleets.filter(f => !assignedFleets.has(f.id));
+        
+        if (availableFleets.length === 0) return;
+
+        // Score fleets based on distance and suitability
+        const scoredFleets = availableFleets.map(fleet => {
+            const targetSystem = state.systems.find(s => s.id === task.systemId);
+            const distance = targetSystem ? distSq(fleet.position, targetSystem.position) : Infinity;
+            
+            let suitability = 1;
+            
+            // Invasion tasks need troop transports with armies
+            if (task.type === 'INVADE') {
+                const embarkedCount = fleet.ships.filter(s => s.type === ShipType.TROOP_TRANSPORT && !!s.carriedArmyId).length;
+                suitability = embarkedCount > 0 ? 2 : 0;
+            }
+            
+            // Defense tasks prefer closer fleets
+            if (task.type === 'DEFEND') {
+                suitability = 2 - distance / 1000;
+            }
+            
+            // Attack tasks need combat strength
+            if (task.type === 'ATTACK_FLEET') {
+                suitability = fleet.ships.length / 10;
+            }
+
+            return {
+                fleet,
+                score: suitability / (1 + distance / 100)
+            };
+        });
+
+        // Pick best fleet
+        scoredFleets.sort((a, b) => b.score - a.score);
+        const best = scoredFleets[0];
+        
+        if (best.score > 0) {
+            assignments.push({
+                fleet: best.fleet,
+                task
+            });
+            assignedFleets.add(best.fleet.id);
+            aiState.fleetAssignments[best.fleet.id] = task.id;
+        }
+    });
+
+    return assignments;
+};
+
+const generateCommands = (
+    state: GameState,
+    aiFactionId: FactionId,
+    assignments: FleetAssignment[],
+    rng?: RNG
+): AICommand[] => {
+    const commands: AICommand[] = [];
+
+    assignments.forEach(assignment => {
+        const { fleet, task } = assignment;
+
+        // Skip fleets that should not receive orders
+        if (fleet.retreating) return;
+        if (fleet.state === FleetState.COMBAT) return;
+
+        // INVASION: must use ORDER_INVASION_MOVE to trigger auto-deploy in movement phase.
+        if (task.type === 'INVADE') {
+            // Avoid spamming identical orders if already committed to this invasion.
+            if (
+                fleet.state === FleetState.MOVING &&
+                fleet.targetSystemId === task.systemId &&
+                fleet.invasionTargetSystemId === task.systemId
+            ) {
+                return;
+            }
+
+            commands.push({
+                type: 'ORDER_INVASION_MOVE',
+                fleetId: fleet.id,
+                targetSystemId: task.systemId
+            });
+            return;
+        }
+
+        // Hold position if already at target system (just skip command generation)
+        const systemNow = state.systems.find(s => dist(s.position, fleet.position) < 5);
+        if (fleet.state === FleetState.ORBIT && systemNow?.id === task.systemId) {
+            return; // Already at target, no command needed
+        }
+
+        // If already moving to the target, do nothing
+        if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
+            return;
+        }
+
+        // Default move
+        commands.push({
+            type: 'MOVE_FLEET',
+            fleetId: fleet.id,
+            targetSystemId: task.systemId
+        });
+    });
+
+    return commands;
+};
+
+const getDistanceToNearestSystem = (
+    state: GameState,
+    targetSystem: StarSystem,
+    aiFactionId: FactionId
+): number => {
+    const aiSystems = state.systems.filter(s => s.ownerFactionId === aiFactionId);
+    
+    if (aiSystems.length === 0) return Infinity;
+    
+    return Math.min(...aiSystems.map(s => distSq(s.position, targetSystem.position)));
+};
+
+const findNearestSystemId = (state: GameState, position: Vec3): string => {
+    const nearest = state.systems.reduce((best, system) => {
+        const d = distSq(system.position, position);
+        const bestD = best ? distSq(best.position, position) : Infinity;
+        return d < bestD ? system : best;
+    }, null as StarSystem | null);
+    
+    return nearest?.id || state.systems[0]?.id || '';
 };
