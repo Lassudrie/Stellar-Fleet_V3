@@ -6,6 +6,8 @@ import { GameState, FactionId, VictoryCondition, Fleet } from '../types';
  * Returns the winning Faction, or null if the game continues.
  */
 export const checkVictoryConditions = (state: GameState): FactionId | null => {
+  const factionIds = state.factions.map(f => f.id);
+
   // 1. Check Max Turns (Draw/Timeout)
   // If maxTurns is reached, the game ends.
   // In a typical scenario, if you haven't won by X turns, you might lose, or it might be a score check.
@@ -13,19 +15,17 @@ export const checkVictoryConditions = (state: GameState): FactionId | null => {
   if (state.objectives.maxTurns && state.day > state.objectives.maxTurns) {
     const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
     if (survivalCondition) {
-      // Assuming 'survival' implies the Player (BLUE) just needs to exist
-      const blueAlive = hasActivePresence(state, 'blue');
-      if (blueAlive) return 'blue';
+      const survivingFactionId = state.playerFactionId;
+      const playerAlive = hasActivePresence(state, survivingFactionId);
+      if (playerAlive) return survivingFactionId;
     }
     // Simple timeout without explicit survival objective -> Draw or just end
-    return null; 
+    return null;
   }
 
   // 2. Check each Faction against Global Conditions
   // Note: Most scenarios are symmetrical for "Elimination" and "Domination".
-  const factions: FactionId[] = ['blue', 'red'];
-
-  for (const factionId of factions) {
+  for (const factionId of factionIds) {
     if (checkFactionVictory(factionId, state)) {
       return factionId;
     }
@@ -68,7 +68,7 @@ const checkFactionVictory = (factionId: FactionId, state: GameState): boolean =>
  * Elimination: A faction wins if ALL opposing factions have 0 active fleets and 0 systems.
  */
 const checkElimination = (factionId: FactionId, state: GameState): boolean => {
-  const enemies = ['blue', 'red'].filter(f => f !== factionId);
+  const enemies = state.factions.map(f => f.id).filter(f => f !== factionId);
   
   // Are all enemies wiped out?
   const allEnemiesDestroyed = enemies.every(enemyFactionId => {
