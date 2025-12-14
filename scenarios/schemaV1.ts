@@ -162,15 +162,12 @@ export interface GameplayRules {
   totalWar: boolean;
 
   /**
-   * Combat terrestre (optionnel).
-   * - enabled=false ou absent -> modèle legacy.
-   * - model permet de sélectionner un solveur déterministe extensible.
+   * Active le système d'expérience des armées (vétéran/élite, bonus combat & moral).
+   *
+   * - Optionnel pour rétrocompatibilité des scénarios.
+   * - Si absent/undefined, le moteur considère la feature désactivée.
    */
-  groundCombat?: {
-    enabled: boolean;
-    model: 'legacy' | 'deterministic_attrition_v1';
-    configId?: string;
-  };
+  useArmyExperience?: boolean;
 }
 
 // --- ROOT INTERFACE ---
@@ -187,3 +184,43 @@ export interface ScenarioDefinitionV1 {
   objectives: VictoryConditions;
   rules: GameplayRules;
 }
+
+/**
+ * EXEMPLE MINIMAL DE SCENARIO (Pour référence)
+ * --------------------------------------------
+ * 
+ * const duelScenario: ScenarioDefinitionV1 = {
+ *   schemaVersion: 1,
+ *   id: "skirmish_duel_small",
+ *   meta: {
+ *     title: "Duel Rapide",
+ *     description: "Une petite carte pour un affrontement direct.",
+ *     difficulty: 2
+ *   },
+ *   generation: {
+ *     systemCount: 40,
+ *     radius: 60,
+ *     topology: "cluster"
+ *   },
+ *   setup: {
+ *     factions: [
+ *       { id: "blue", name: "UEF", colorHex: "#0000FF", isPlayable: true },
+ *       { id: "red", name: "Martians", colorHex: "#FF0000", isPlayable: false, aiProfile: "aggressive" }
+ *     ],
+ *     startingDistribution: "cluster",
+ *     initialFleets: [
+ *       { ownerFactionId: "blue", spawnLocation: "home_system", ships: ["carrier", "frigate", "frigate"] },
+ *       { ownerFactionId: "red", spawnLocation: "home_system", ships: ["cruiser", "destroyer", "destroyer"] }
+ *     ]
+ *   },
+ *   objectives: {
+ *     win: [{ type: "elimination" }]
+ *   },
+ *   rules: {
+ *     fogOfWar: true,
+ *     useAdvancedCombat: true,
+ *     aiEnabled: true,
+ *     totalWar: true
+ *   }
+ * };
+ */
