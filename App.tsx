@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { ThreeEvent } from '@react-three/fiber';
 import { GameEngine } from './engine/GameEngine';
 import { GameState, StarSystem, Fleet, EnemySighting } from './types';
 import GameScene from './components/GameScene';
@@ -10,6 +11,7 @@ import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import OptionsScreen from './components/screens/OptionsScreen';
 import { buildScenario } from './scenarios';
+import { GameScenario } from './scenarios/types';
 import { generateWorld } from './engine/systems/world/worldGenerator';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -116,12 +118,12 @@ const App: React.FC = () => {
     }
   }, [engine, godEyes]); 
 
-  const handleLaunchGame = (scenarioArg: any) => {
+  const handleLaunchGame = (scenarioArg: number | GameScenario) => {
     setLoading(true);
     setEnemySightings({}); 
     setTimeout(() => {
         // Handle both simple seed (number) and full Scenario object
-        let scenario;
+        let scenario: GameScenario;
         if (typeof scenarioArg === 'number') {
              scenario = buildScenario('conquest_sandbox', scenarioArg);
         } else {
@@ -188,7 +190,7 @@ const App: React.FC = () => {
 
   // --- INTERACTION HANDLERS ---
 
-  const handleSystemClick = (sys: StarSystem, event: any) => {
+  const handleSystemClick = (sys: StarSystem, event: ThreeEvent<MouseEvent>) => {
       setTargetSystem(sys);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setUiMode('SYSTEM_MENU');
@@ -226,13 +228,12 @@ const App: React.FC = () => {
       setUiMode('INVASION_MODAL');
   };
 
-  const handleCommitInvasion = (fleetId: any) => { 
-      const fId = fleetId as string;
+  const handleCommitInvasion = (fleetId: string) => { 
       if (!targetSystem || !engine) return;
 
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
-          fleetId: fId,
+          fleetId: fleetId,
           targetSystemId: targetSystem.id
       });
 
