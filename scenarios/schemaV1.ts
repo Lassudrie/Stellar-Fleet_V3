@@ -1,4 +1,3 @@
-
 /**
  * SCENARIO DEFINITION SCHEMA V1
  * -----------------------------
@@ -41,6 +40,16 @@ export interface WorldGenerationConfig {
   
   /** Forme de la galaxie */
   topology: GalaxyTopology;
+
+  /**
+   * Espacement minimal entre deux systèmes stellaires (en années-lumière / unités logiques).
+   *
+   * Objectif : éviter les chevauchements visuels (systèmes trop proches) pour tous les scénarios.
+   *
+   * - Par défaut (si undefined) : 5
+   * - Pour désactiver : 0
+   */
+  minimumSystemSpacingLy?: number;
   
   /** 
    * Overrides spécifiques (optionnel).
