@@ -20,7 +20,7 @@ graph TD
         GameEngine class
         runTurn.ts
         RNG System
-        Services (Movement, Battle, World)
+        Systems (Movement, Battle, World)
     end
 
     subgraph "Presentation Layer (components/)"
