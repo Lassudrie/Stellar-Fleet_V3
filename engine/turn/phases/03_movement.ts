@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, Army } from '../../../types';
+import { GameState, Fleet, Army, LogEntry } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveFleetMovement } from '../../systems/movement/movementPhase';
 
@@ -7,7 +7,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
     const nextDay = state.day + 1; // Movement projects to next day positions
     
     const nextFleets: Fleet[] = [];
-    const newLogs = [];
+    const newLogs: LogEntry[] = [];
     const armyUpdates = new Map<string, Partial<Army>>();
 
     // 1. Process each fleet

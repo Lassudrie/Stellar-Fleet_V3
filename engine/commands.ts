@@ -25,7 +25,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const fleetExists = state.fleets.some(f => f.id === command.fleetId);
             if (!fleetExists) return state;
 
-            // Structural Sharing Update
+            // Structural Sharing Update (Copy-on-write)
+            // We strictly return a new State and new Fleets array to ensure UI updates.
             return {
                 ...state,
                 fleets: state.fleets.map(fleet => {
