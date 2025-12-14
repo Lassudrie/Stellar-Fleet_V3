@@ -32,7 +32,6 @@ const App: React.FC = () => {
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
-  const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
@@ -86,10 +85,10 @@ const App: React.FC = () => {
       }
 
       // Edge Case: If the currently selected fleet was hidden by Fog of War, deselect it
-      if (selectedFleetId) {
-          const fleetExists = nextView.fleets.find(f => f.id === selectedFleetId);
+      if (nextView.selectedFleetId) {
+          const fleetExists = nextView.fleets.find(f => f.id === nextView.selectedFleetId);
           if (!fleetExists) {
-              setSelectedFleetId(null);
+              if (engine) engine.setSelectedFleetId(null);
               if (uiMode !== 'SYSTEM_MENU') {
                   setUiMode('NONE');
               }
@@ -97,12 +96,23 @@ const App: React.FC = () => {
       }
   };
 
+  // Helper to force reference changes for React.memo until engine is fully immutable
+  const getViewSnapshot = (state: GameState): GameState => ({
+      ...state,
+      fleets: [...state.fleets],
+      systems: [...state.systems],
+      armies: [...state.armies],
+      lasers: [...state.lasers],
+      battles: [...state.battles],
+      logs: [...state.logs],
+  });
+
   useEffect(() => {
     if (engine) {
-      updateViewState(engine.state);
+      updateViewState(getViewSnapshot(engine.state));
       
       const unsub = engine.subscribe(() => {
-        updateViewState(engine.state);
+        updateViewState(getViewSnapshot(engine.state));
       });
       return () => { unsub(); };
     }
@@ -161,10 +171,10 @@ const App: React.FC = () => {
           const state = deserializeGameState(text);
           
           const newEngine = new GameEngine(state);
+          newEngine.setSelectedFleetId(null);
           setEngine(newEngine);
           
           setEnemySightings({}); 
-          setSelectedFleetId(null);
           setUiMode('NONE');
           
           updateViewState(newEngine.state);
@@ -187,7 +197,7 @@ const App: React.FC = () => {
   };
 
   const handleFleetSelect = (id: string | null) => {
-      setSelectedFleetId(id);
+      if (engine) engine.setSelectedFleetId(id);
   };
 
   const handleNextTurn = () => {
@@ -241,20 +251,20 @@ const App: React.FC = () => {
   };
 
   const handleSplitFleet = (shipIds: string[]) => {
-      if (engine && selectedFleetId) {
+      if (engine && engine.state.selectedFleetId) {
           engine.dispatchPlayerCommand({
               type: 'SPLIT_FLEET',
-              originalFleetId: selectedFleetId,
+              originalFleetId: engine.state.selectedFleetId,
               shipIds
           });
       }
   };
 
   const handleMergeFleet = (targetFleetId: string) => {
-      if (engine && selectedFleetId) {
+      if (engine && engine.state.selectedFleetId) {
           engine.dispatchPlayerCommand({
               type: 'MERGE_FLEETS',
-              sourceFleetId: selectedFleetId,
+              sourceFleetId: engine.state.selectedFleetId,
               targetFleetId
           });
       }
@@ -372,7 +382,7 @@ const App: React.FC = () => {
   if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
-      const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
+      const selectedFleet = viewGameState.fleets.find(f => f.id === viewGameState.selectedFleetId) || null;
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
@@ -383,7 +393,7 @@ const App: React.FC = () => {
                 onSystemClick={handleSystemClick}
                 onBackgroundClick={() => {
                     setUiMode('NONE');
-                    setSelectedFleetId(null);
+                    if (engine) engine.setSelectedFleetId(null);
                 }}
             />
             <UI 
@@ -411,7 +421,7 @@ const App: React.FC = () => {
                 onMoveCommand={handleMoveCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
                 onCloseMenu={() => setUiMode('NONE')}
-                onSelectFleet={setSelectedFleetId}
+                onSelectFleet={handleFleetSelect}
                 
                 onOpenBattle={(id) => {
                     setSelectedBattleId(id);

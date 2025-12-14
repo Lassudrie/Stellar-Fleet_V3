@@ -69,6 +69,16 @@ export class GameEngine {
         this.notify();
     }
 
+    setSelectedFleetId(id: string | null) {
+        if (this.state.selectedFleetId !== id) {
+            this.state = {
+                ...this.state,
+                selectedFleetId: id
+            };
+            this.notify();
+        }
+    }
+
     dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
         if (command.type === 'MOVE_FLEET') {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
