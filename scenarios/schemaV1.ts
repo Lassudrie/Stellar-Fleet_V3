@@ -96,6 +96,26 @@ export interface ScenarioSetup {
    * 'none': Aucun système possédé au départ (Battle Royale).
    */
   startingDistribution: 'scattered' | 'cluster' | 'none';
+
+  /**
+   * Allocation cible des systèmes au démarrage (optionnel).
+   * Si défini, le world generator tentera d'assigner un nombre de systèmes conforme
+   * aux pourcentages, en gardant une territorialité contiguë (croissance depuis le home).
+   *
+   * Exemple :
+   * {
+   *   type: 'percentages',
+   *   byFactionId: { red: 0.3, blue: 0.3 },
+   *   neutralShare: 0.4,
+   *   contiguity: 'clustered'
+   * }
+   */
+  territoryAllocation?: {
+    type: 'percentages';
+    byFactionId: Record<string, number>; // parts (0..1)
+    neutralShare?: number; // defaults to remaining share
+    contiguity?: 'clustered'; // defaults to 'clustered'
+  };
   
   /** Flottes présentes au début du tour 1 */
   initialFleets: FleetDefinition[];

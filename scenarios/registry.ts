@@ -48,6 +48,32 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
         factionIds.add(f.id);
     }
 
+    // 6b. Optional Territory Allocation Validation
+    if (s.setup.territoryAllocation !== undefined && s.setup.territoryAllocation !== null) {
+        const ta = s.setup.territoryAllocation as any;
+        if (ta.type !== 'percentages') throw new Error("Unsupported setup.territoryAllocation.type");
+        if (!ta.byFactionId || typeof ta.byFactionId !== 'object') throw new Error("Missing setup.territoryAllocation.byFactionId");
+
+        let sum = 0;
+        for (const [fid, share] of Object.entries(ta.byFactionId)) {
+            if (!factionIds.has(fid)) throw new Error(`territoryAllocation references unknown factionId: '${fid}'`);
+            if (typeof share !== 'number' || !isFinite(share) || share < 0 || share > 1) {
+                throw new Error(`Invalid territoryAllocation share for '${fid}'`);
+            }
+            sum += share;
+        }
+
+        if (ta.neutralShare !== undefined && ta.neutralShare !== null) {
+            if (typeof ta.neutralShare !== 'number' || !isFinite(ta.neutralShare) || ta.neutralShare < 0 || ta.neutralShare > 1) {
+                throw new Error("Invalid territoryAllocation.neutralShare");
+            }
+            sum += ta.neutralShare;
+        }
+
+        // Allow small floating errors
+        if (sum > 1.00001) throw new Error(`territoryAllocation shares sum to > 1.0 (${sum})`);
+    }
+
     for (const fleet of s.setup.initialFleets) {
         if (!factionIds.has(fleet.ownerFactionId)) {
             throw new Error(`Fleet definition references unknown faction ID: '${fleet.ownerFactionId}'`);
