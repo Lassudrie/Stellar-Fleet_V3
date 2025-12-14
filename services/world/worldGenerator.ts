@@ -1,4 +1,3 @@
-
 import { GameState, StarSystem, Fleet, FactionId, ShipType, Army, ArmyState, FleetState, FactionState } from '../../types';
 import { RNG } from '../../engine/rng';
 import { GameScenario } from '../../scenarios/types';
@@ -8,6 +7,16 @@ import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
+
+// --- World Gen Constraints ---
+// Default requirement: ensure systems are not closer than 5 ly to avoid visual overlaps.
+// Can be overridden / disabled per scenario via generation.minimumSystemSpacingLy (0 = disabled).
+const DEFAULT_MINIMUM_SYSTEM_SPACING_LY = 5;
+
+// Attempt budgets (defensive: avoid infinite loops on extreme/invalid configs).
+const PRIMARY_POSITION_ATTEMPTS = 200;
+const FALLBACK_POSITION_ATTEMPTS = 2000;
+const BEST_EFFORT_FALLBACK_SAMPLES = 250;
 
 export const generateWorld = (scenario: GameScenario): { state: GameState; rng: RNG } => {
   const rng = new RNG(scenario.seed);
@@ -28,6 +37,17 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   // --- 1. GENERATE SYSTEMS ---
   const systems: StarSystem[] = [];
   const radius = scenario.generation.radius;
+
+  // --- 1.0 MINIMUM SYSTEM SPACING (Optional, Data-Driven) ---
+  // Default: 5 (enabled). To disable for a specific scenario: set generation.minimumSystemSpacingLy = 0
+  const minimumSystemSpacingLyRaw = scenario.generation.minimumSystemSpacingLy;
+  const minimumSystemSpacingLy =
+      (typeof minimumSystemSpacingLyRaw === 'number' && Number.isFinite(minimumSystemSpacingLyRaw))
+          ? Math.max(0, minimumSystemSpacingLyRaw)
+          : DEFAULT_MINIMUM_SYSTEM_SPACING_LY;
+
+  const enforceMinimumSystemSpacing = minimumSystemSpacingLy > 0;
+  const minimumSystemSpacingSq = minimumSystemSpacingLy * minimumSystemSpacingLy;
   
   // 1a. Static Systems (Overrides)
   const staticDefs = scenario.generation.staticSystems || [];
@@ -45,6 +65,22 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
     });
     staticNames.add(def.name);
   });
+
+  // Validate static systems spacing (static positions are not auto-adjusted).
+  if (enforceMinimumSystemSpacing && systems.length > 1) {
+      for (let a = 0; a < systems.length; a++) {
+          for (let b = a + 1; b < systems.length; b++) {
+              const d2 = distSq(systems[a].position, systems[b].position);
+              if (d2 < minimumSystemSpacingSq) {
+                  const d = Math.sqrt(d2);
+                  console.warn(
+                      `[WorldGen] Static systems '${systems[a].name}' and '${systems[b].name}' are only ${d.toFixed(2)} ly apart (< ${minimumSystemSpacingLy}). ` +
+                      `Static positions are not auto-adjusted; consider updating scenario.generation.staticSystems.`
+                  );
+              }
+          }
+      }
+  }
 
   // 1b. Procedural Systems
   const systemsToGenerate = Math.max(0, scenario.generation.systemCount - systems.length);
@@ -122,6 +158,82 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       );
   };
 
+  // --- Minimum System Spacing Helpers ---
+  const getFallbackScatteredPosition = (): Vec3 => {
+      // Uniform distribution in a circle requires sqrt of random for radius
+      const r = Math.sqrt(rng.next()) * radius;
+      const theta = rng.next() * Math.PI * 2;
+      return vec3(
+          Math.cos(theta) * r,
+          rng.range(-5, 5),
+          Math.sin(theta) * r
+      );
+  };
+
+  const getMinDistSqToExistingSystems = (pos: Vec3): number => {
+      if (systems.length === 0) return Infinity;
+
+      let min = Infinity;
+      for (const sys of systems) {
+          const d2 = distSq(pos, sys.position);
+          if (d2 < min) min = d2;
+
+          // Early exit: already invalid
+          if (min < minimumSystemSpacingSq) return min;
+      }
+      return min;
+  };
+
+  const isPositionValidWithSpacing = (pos: Vec3): boolean => {
+      if (!enforceMinimumSystemSpacing) return true;
+      return getMinDistSqToExistingSystems(pos) >= minimumSystemSpacingSq;
+  };
+
+  const getProceduralPositionWithMinSpacing = (index: number): Vec3 => {
+      if (!enforceMinimumSystemSpacing) return getProceduralPosition(index);
+
+      // 1) Primary attempts: keep the requested topology
+      for (let attempt = 0; attempt < PRIMARY_POSITION_ATTEMPTS; attempt++) {
+          const p = getProceduralPosition(index);
+          if (isPositionValidWithSpacing(p)) return p;
+      }
+
+      // 2) Fallback attempts: escape local density by sampling the full disk
+      for (let attempt = 0; attempt < FALLBACK_POSITION_ATTEMPTS; attempt++) {
+          const p = getFallbackScatteredPosition();
+          if (isPositionValidWithSpacing(p)) {
+              console.warn(
+                  `[WorldGen] Minimum spacing fallback used for system #${index} ` +
+                  `after ${PRIMARY_POSITION_ATTEMPTS} failed primary attempts (minSpacing=${minimumSystemSpacingLy}).`
+              );
+              return p;
+          }
+      }
+
+      // 3) Best-effort: pick the candidate that maximizes distance to the nearest neighbor
+      let bestPos: Vec3 = getFallbackScatteredPosition();
+      let bestMinDistSq = getMinDistSqToExistingSystems(bestPos);
+
+      for (let sample = 0; sample < BEST_EFFORT_FALLBACK_SAMPLES; sample++) {
+          const p = getFallbackScatteredPosition();
+          const d2 = getMinDistSqToExistingSystems(p);
+          if (d2 > bestMinDistSq) {
+              bestMinDistSq = d2;
+              bestPos = p;
+              if (bestMinDistSq >= minimumSystemSpacingSq) break;
+          }
+      }
+
+      const bestDist = Math.sqrt(Math.max(0, bestMinDistSq));
+      console.warn(
+          `[WorldGen] Failed to place a system with minimum spacing of ${minimumSystemSpacingLy} ly. ` +
+          `Placing best-effort candidate with nearest distance=${bestDist.toFixed(2)} ly. ` +
+          `If overlaps are unacceptable, increase radius, reduce systemCount, or set minimumSystemSpacingLy=0 to disable.`
+      );
+
+      return bestPos;
+  };
+
   // Name Generator
   const generateName = (): string => {
       const prefixes = ['Al', 'Bet', 'Gam', 'Del', 'Eps', 'Zet', 'Eta', 'The', 'Iot', 'Kap', 'Lam', 'Mu', 'Nu', 'Xi', 'Omi', 'Pi', 'Rho', 'Sig', 'Tau', 'Ups', 'Phi', 'Chi', 'Psi', 'Ome', 'Cor', 'Vak', 'Ril'];
@@ -145,7 +257,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
     systems.push({
       id: rng.id('sys'),
       name: name,
-      position: getProceduralPosition(i),
+      position: getProceduralPositionWithMinSpacing(i),
       color: '#ffffff',
       size: rng.range(0.8, 1.2),
       ownerFactionId: null,
@@ -156,6 +268,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   // --- 2. FACTIONS & TERRITORIES ---
   const homeSystems = new Map<string, StarSystem>(); // FactionID -> System
   const distMode = scenario.setup.startingDistribution;
+  const staticSystemIds = new Set<string>((scenario.generation.staticSystems || []).map(s => s.id));
 
   if (distMode !== 'none') {
       const usedIndices = new Set<number>();
@@ -221,6 +334,105 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
                   n.sys.color = faction.color; // IMMEDIATE COLOR UPDATE
               });
           });
+      }
+
+      // C. Optional Target Allocation (Percentages)
+      // If the scenario declares a territoryAllocation, we grow contiguous territory from each home
+      // until the target system counts are reached. Remaining systems stay neutral.
+      const ta = (scenario.setup as any).territoryAllocation as
+        | { type: 'percentages'; byFactionId: Record<string, number>; neutralShare?: number; contiguity?: 'clustered' }
+        | undefined;
+
+      if (ta && ta.type === 'percentages') {
+          // Compute targets based on TOTAL systemCount (including static). We generally keep static systems neutral.
+          const total = systems.length;
+          const targets = new Map<string, number>();
+
+          // Determine target counts per faction with controlled rounding.
+          // We floor each target then distribute the remainder by largest fractional parts.
+          const raw: Array<{ id: string; raw: number; base: number; frac: number }> = [];
+          for (const [fid, share] of Object.entries(ta.byFactionId || {})) {
+              const r = total * share;
+              const b = Math.floor(r);
+              raw.push({ id: fid, raw: r, base: b, frac: r - b });
+          }
+          raw.sort((a, b) => b.frac - a.frac);
+
+          let allocated = raw.reduce((acc, x) => acc + x.base, 0);
+          // Neutral share defaults to remaining systems
+          const neutralTarget = ta.neutralShare !== undefined
+              ? Math.max(0, Math.round(total * ta.neutralShare))
+              : Math.max(0, total - allocated);
+
+          // Ensure we don't over-allocate (can happen with neutralShare rounding)
+          const maxFactionTotal = Math.max(0, total - neutralTarget);
+
+          // Start with floored targets
+          raw.forEach(x => targets.set(x.id, x.base));
+
+          // Distribute remainder up to maxFactionTotal
+          let remainder = maxFactionTotal - allocated;
+          let idx = 0;
+          while (remainder > 0 && raw.length > 0) {
+              const pick = raw[idx % raw.length];
+              targets.set(pick.id, (targets.get(pick.id) || 0) + 1);
+              remainder--;
+              idx++;
+          }
+
+          // Helper: count currently owned systems for a faction
+          const ownedCount = (fid: string) => systems.filter(s => s.ownerFactionId === fid).length;
+
+          // Helper: get nearest unowned system to a given set of owned systems (contiguous growth)
+          const getNextGrowCandidate = (owned: StarSystem[]): StarSystem | null => {
+              let best: { sys: StarSystem; dist: number } | null = null;
+              for (const sys of systems) {
+                  if (sys.ownerFactionId) continue;
+                  if (staticSystemIds.has(sys.id)) continue; // Keep static systems neutral
+
+                  let min = Infinity;
+                  for (const o of owned) {
+                      const d = distSq(sys.position, o.position);
+                      if (d < min) min = d;
+                  }
+                  if (best === null || min < best.dist) {
+                      best = { sys, dist: min };
+                  }
+              }
+              return best ? best.sys : null;
+          };
+
+          // Grow each faction territory independently, alternating growth to reduce collision.
+          const growOrder = factions.map(f => f.id).filter(fid => targets.has(fid));
+          let safety = 0;
+          while (safety < 5000) {
+              safety++;
+              let progressed = false;
+
+              for (const fid of growOrder) {
+                  const target = targets.get(fid) || 0;
+                  const current = ownedCount(fid);
+                  if (current >= target) continue;
+
+                  const owned = systems.filter(s => s.ownerFactionId === fid);
+                  if (owned.length === 0) continue;
+
+                  const candidate = getNextGrowCandidate(owned);
+                  if (!candidate) continue;
+
+                  const factionDef = factions.find(f => f.id === fid);
+                  if (!factionDef) continue;
+                  candidate.ownerFactionId = fid;
+                  candidate.color = factionDef.color; // IMMEDIATE COLOR UPDATE
+                  progressed = true;
+              }
+
+              if (!progressed) break; // No more unowned candidates
+
+              // Stop if all faction targets are satisfied
+              const allDone = growOrder.every(fid => ownedCount(fid) >= (targets.get(fid) || 0));
+              if (allDone) break;
+          }
       }
   }
 
@@ -327,7 +539,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       }
   });
 
-  console.log(`[WorldGen] Generated ${systems.length} systems (Topology: ${topology}), ${fleets.length} fleets, ${armies.length} armies. Player: ${playerFactionId}`);
+  const spacingLabel = enforceMinimumSystemSpacing ? `${minimumSystemSpacingLy}ly` : 'disabled';
+  console.log(`[WorldGen] Generated ${systems.length} systems (Topology: ${topology}, MinSpacing: ${spacingLabel}), ${fleets.length} fleets, ${armies.length} armies. Player: ${playerFactionId}`);
 
   // --- 5. ASSEMBLE STATE ---
   const state: GameState = {
@@ -362,3 +575,4 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
 
   return { state, rng };
 };
+
