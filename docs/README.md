@@ -19,6 +19,10 @@ Conception technique et contraintes critiques.
 Structure des données.
 - **[Modèles de Données](data/data-models.md)** : Définition des entités (GameState, Fleet, System) et des DTOs de sauvegarde.
 
+## Scénario actif
+
+Le simulateur charge uniquement le scénario **Conquest Sandbox** situé dans `scenarios/templates/conquest_sandbox.ts`, référencé manuellement par le registre `scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
+
 ## Installation & Démarrage
 
 Le projet utilise **Vite** et **React**.
