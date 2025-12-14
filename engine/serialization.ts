@@ -2,17 +2,18 @@ import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting
 import { Vec3, vec3 } from './math/vec3';
 import { 
   SAVE_VERSION, 
-  SaveFileV2, 
-  GameStateDTO, 
-  Vector3DTO, 
-  StarSystemDTO, 
-  FleetDTO, 
+  SaveFileV2,
+  GameStateDTO,
+  Vector3DTO,
+  StarSystemDTO,
+  FleetDTO,
   LaserShotDTO,
   BattleDTO,
   AIStateDTO,
   EnemySightingDTO,
   ArmyDTO
 } from './saveFormat';
+import { sanitizeEngagementState } from './features/engagementRewards/state';
 
 // --- HELPERS ---
 
@@ -92,14 +93,15 @@ export const serializeGameState = (state: GameState): string => {
       ...b,
       winnerFactionId: b.winnerFactionId,
       initialShips: b.initialShips?.map(s => ({...s, factionId: s.factionId})),
-      shipsLost: b.shipsLost 
+      shipsLost: b.shipsLost
     })),
     logs: state.logs,
     selectedFleetId: state.selectedFleetId,
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
     objectives: state.objectives,
-    rules: state.rules
+    rules: state.rules,
+    engagement: state.engagement
   };
 
   const saveFile: SaveFileV2 = {
@@ -266,7 +268,8 @@ export const deserializeGameState = (json: string): GameState => {
         useAdvancedCombat: dto.rules?.useAdvancedCombat ?? true,
         totalWar: dto.rules?.totalWar ?? true,
         useArmyExperience: dto.rules?.useArmyExperience ?? false
-      }
+      },
+      engagement: sanitizeEngagementState(dto.engagement)
     };
 
     return state;

@@ -159,6 +159,7 @@ const UI: React.FC<UIProps> = ({
         startYear={startYear}
         day={day}
         battles={battles}
+        engagement={gameState.engagement}
         onToggleMenu={() => setIsSideMenuOpen(true)}
         onNextTurn={onNextTurn}
         onOpenBattle={onOpenBattle}
