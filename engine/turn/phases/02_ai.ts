@@ -1,22 +1,26 @@
-
 import { GameState } from '../../../types';
 import { TurnContext } from '../types';
 import { planAiTurn } from '../../ai';
 import { applyCommand } from '../../commands';
 
 export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
-    if (!state.rules.aiEnabled) return state;
+  if (!state.rules.aiEnabled) return state;
 
-    // 1. Generate Commands for Red Faction
-    // Uses current state (after battle resolution)
-    // Assuming 'red' is the AI faction for now, based on legacy logic
-    const commands = planAiTurn(state, 'red', state.aiState, ctx.rng);
-    
-    // 2. Apply Commands Sequentially
-    let nextState = state;
-    for (const cmd of commands) {
-        nextState = applyCommand(nextState, cmd, ctx.rng);
-    }
-    
-    return nextState;
+  // Pick the first non-playable faction (deterministic) as the AI controller.
+  const aiFactionId = state.factions
+    .filter(f => !f.isPlayable)
+    .map(f => f.id)
+    .filter(id => id !== state.playerFactionId)
+    .sort((a, b) => a.localeCompare(b))[0];
+
+  if (!aiFactionId) return state;
+
+  const commands = planAiTurn(state, aiFactionId, state.aiState, ctx.rng);
+
+  let nextState = state;
+  for (const cmd of commands) {
+    nextState = applyCommand(nextState, cmd, ctx.rng);
+  }
+
+  return nextState;
 };
