@@ -1,75 +1,157 @@
-import { ShipType } from '../types';
-
 /**
- * Ce fichier représente un "contrat" de données minimal pour les scénarios.
- * Les templates de scénarios doivent respecter ces types.
+ * SCENARIO DEFINITION SCHEMA V1
+ * -----------------------------
+ * Ce fichier définit le contrat de données strict pour les scénarios de Stellar Fleet.
+ * Il est purement "Data-Driven" : aucune logique, aucune dépendance au moteur de rendu (Three.js)
+ * ou au moteur de jeu (classes, méthodes).
+ *
+ * Ce format est conçu pour être sérialisable en JSON.
  */
 
-export interface ScenarioDefinitionV1 {
-  id: string;
-  name: string;
+// --- 1. META-DATA ---
+export interface ScenarioMeta {
+  /** Nom affiché dans le menu */
+  title: string;
+  /** Description courte ou lore */
   description: string;
-  version: 1;
-  initialDay: number;
-  rules: GameplayRules;
-  factions: ScenarioFaction[];
-  systems: ScenarioSystem[];
-  fleets: ScenarioFleet[];
-  armies?: ScenarioArmy[];
+  /** Auteur du scénario (pour les mods) */
+  author?: string;
+  /** Difficulté estimée (1-5) */
+  difficulty: number;
+  /** Tags pour le filtrage (ex: "Duel", "Huge", "Tutorial") */
+  tags?: string[];
 }
 
-export interface ScenarioFaction {
-  id: string;
+// --- 2. GENERATION (World Gen) ---
+export type GalaxyTopology = 'spiral' | 'cluster' | 'ring' | 'scattered';
+
+export interface WorldGenerationConfig {
+  /** 
+   * Si défini, la génération est déterministe. 
+   * Si null/undefined, le moteur en générera une aléatoire à chaque lancement (mode Sandbox).
+   */
+  fixedSeed?: number;
+  
+  /** Nombre cible de systèmes stellaires */
+  systemCount: number;
+  
+  /** Rayon de la galaxie (unités logiques) */
+  radius: number;
+  
+  /** Forme de la galaxie */
+  topology: GalaxyTopology;
+
+  /**
+   * Espacement minimal entre deux systèmes stellaires (en années-lumière / unités logiques).
+   *
+   * Objectif : éviter les chevauchements visuels (systèmes trop proches) pour tous les scénarios.
+   *
+   * - Par défaut (si undefined) : 5
+   * - Pour désactiver : 0
+   */
+  minimumSystemSpacingLy?: number;
+  
+  /** 
+   * Overrides spécifiques (optionnel).
+   * Permet de forcer la présence de systèmes à des coordonnées précises (ex: Système Sol à 0,0,0).
+   */
+  staticSystems?: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number; z: number }; // DTO simple, pas de Vector3
+    resourceType: 'gas' | 'none';
+  }>;
+}
+
+// --- 3. SETUP (Initial State) ---
+
+/** Définition d'une faction jouable ou IA */
+export interface FactionDefinition {
+  id: string; // ex: "blue", "red", "pirates"
   name: string;
-  color: string;
-  resources: {
-    metal: number;
-    crystal: number;
-    fuel: number;
+  colorHex: string; // ex: "#3b82f6"
+  isPlayable: boolean; // Si true, le joueur peut la sélectionner
+  aiProfile?: 'aggressive' | 'defensive' | 'expander'; // Indice pour l'IA
+}
+
+/** Composition d'une flotte initiale */
+export interface FleetDefinition {
+  /** Référence à l'ID de la faction propriétaire */
+  ownerFactionId: string;
+  
+  /** 
+   * Où faire apparaitre cette flotte ?
+   * - 'home_system': Au système de départ assigné à la faction.
+   * - 'random': Un système aléatoire (neutre).
+   * - { x, y, z }: Coordonnées précises (Deep Space).
+   */
+  spawnLocation: 'home_system' | 'random' | { x: number; y: number; z: number };
+  
+  /** Composition (Liste d'IDs de types de vaisseaux, ex: ['carrier', 'fighter', 'fighter']) */
+  ships: string[]; 
+  
+  /** Si vrai, cette flotte contient une armée embarquée par défaut sur les transports */
+  withArmies?: boolean;
+}
+
+export interface ScenarioSetup {
+  /** Liste des factions présentes dans ce scénario */
+  factions: FactionDefinition[];
+  
+  /** 
+   * Configuration du territoire initial.
+   * 'scattered': Chaque faction commence avec 1 système au hasard, loin des autres.
+   * 'cluster': Chaque faction commence avec un groupe de systèmes.
+   * 'none': Aucun système possédé au départ (Battle Royale).
+   */
+  startingDistribution: 'scattered' | 'cluster' | 'none';
+
+  /**
+   * Allocation cible des systèmes au démarrage (optionnel).
+   * Si défini, le world generator tentera d'assigner un nombre de systèmes conforme
+   * aux pourcentages, en gardant une territorialité contiguë (croissance depuis le home).
+   *
+   * Exemple :
+   * {
+   *   type: 'percentages',
+   *   byFactionId: { red: 0.3, blue: 0.3 },
+   *   neutralShare: 0.4,
+   *   contiguity: 'clustered'
+   * }
+   */
+  territoryAllocation?: {
+    type: 'percentages';
+    byFactionId: Record<string, number>; // parts (0..1)
+    neutralShare?: number; // defaults to remaining share
+    contiguity?: 'clustered'; // defaults to 'clustered'
   };
-  aiControlled: boolean;
+  
+  /** Flottes présentes au début du tour 1 */
+  initialFleets: FleetDefinition[];
 }
 
-export interface ScenarioSystem {
-  id: string;
-  name: string;
-  position: { x: number; y: number; z: number };
-  ownerFactionId: string | null;
-  population: number;
-  maxPopulation: number;
-  economy: number;
-  defenseLevel: number;
-  resources: {
-    metal: number;
-    crystal: number;
-    fuel: number;
-  };
+// --- 4. OBJECTIVES (Win/Loss Conditions) ---
+
+export type WinConditionType = 
+  | 'elimination'       // Détruire tous les ennemis
+  | 'domination'        // Contrôler X% des systèmes
+  | 'survival'          // Survivre X tours
+  | 'king_of_the_hill'; // Contrôler un système spécifique pendant X tours
+
+export interface WinCondition {
+  type: WinConditionType;
+  /** Paramètre contextuel (ex: pourcentage pour domination, tours pour survival, ID système pour King) */
+  value?: number | string;
 }
 
-export interface ScenarioFleet {
-  id: string;
-  name: string;
-  factionId: string;
-  position: { x: number; y: number; z: number };
-  fuel: number;
-  ships: ScenarioShip[];
+export interface VictoryConditions {
+  /** Liste des conditions pour gagner (OR logique : une seule suffit) */
+  win: WinCondition[];
+  /** Limite de tours (optionnel, 0 = infini) */
+  maxTurns?: number;
 }
 
-export interface ScenarioShip {
-  id: string;
-  type: ShipType;
-  hp: number;
-  carriedArmyId?: string | null;
-}
-
-export interface ScenarioArmy {
-  id: string;
-  factionId: string;
-  strength: number;
-  state: 'deployed' | 'embarked' | 'in_transit';
-  containerId: string;
-}
-
+// --- 5. RULES (Gameplay Mutators) ---
 export interface GameplayRules {
   fogOfWar: boolean;
   /** Combat V1 (complexe) ou V0 (instantané) */
@@ -89,4 +171,19 @@ export interface GameplayRules {
     model: 'legacy' | 'deterministic_attrition_v1';
     configId?: string;
   };
+}
+
+// --- ROOT INTERFACE ---
+export interface ScenarioDefinitionV1 {
+  /** Version du schéma pour future rétrocompatibilité */
+  schemaVersion: 1;
+  
+  /** Identifiant unique du scénario (ex: "tutorial_01") */
+  id: string;
+  
+  meta: ScenarioMeta;
+  generation: WorldGenerationConfig;
+  setup: ScenarioSetup;
+  objectives: VictoryConditions;
+  rules: GameplayRules;
 }
