@@ -1,0 +1,89 @@
+
+import { ScenarioTemplate } from './types';
+import conquestSandbox from './templates/conquest_sandbox';
+
+// Manually register templates. 
+// Note: We use TS files now instead of JSON to avoid module resolution issues in some environments.
+const templatesToLoad = [
+    { data: conquestSandbox, name: 'conquest_sandbox.ts' }
+];
+
+/**
+ * Validates a raw JSON object against the ScenarioTemplate V1 schema.
+ * Performs structural checks and basic referential integrity checks.
+ */
+function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate | null {
+  try {
+    if (typeof data !== 'object' || data === null) throw new Error("Not a JSON object");
+    const s = data as any;
+
+    // 1. Root fields
+    if (s.schemaVersion !== 1) throw new Error(`Unsupported schemaVersion: ${s.schemaVersion}`);
+    if (typeof s.id !== 'string' || !s.id) throw new Error("Missing or invalid 'id'");
+    
+    // 2. Meta
+    if (!s.meta || typeof s.meta !== 'object') throw new Error("Missing 'meta'");
+    if (typeof s.meta.title !== 'string') throw new Error("Missing 'meta.title'");
+    if (typeof s.meta.description !== 'string') throw new Error("Missing 'meta.description'");
+    
+    // 3. Generation
+    if (!s.generation || typeof s.generation !== 'object') throw new Error("Missing 'generation'");
+    if (typeof s.generation.systemCount !== 'number') throw new Error("Missing 'generation.systemCount'");
+    if (typeof s.generation.radius !== 'number') throw new Error("Missing 'generation.radius'");
+    if (typeof s.generation.topology !== 'string') throw new Error("Missing 'generation.topology'");
+
+    // 4. Setup
+    if (!s.setup || typeof s.setup !== 'object') throw new Error("Missing 'setup'");
+    if (!Array.isArray(s.setup.factions) || s.setup.factions.length === 0) throw new Error("Missing or empty 'setup.factions'");
+    if (!Array.isArray(s.setup.initialFleets)) throw new Error("Missing 'setup.initialFleets'");
+
+    // 5. Rules & Objectives
+    if (!s.rules || typeof s.rules !== 'object') throw new Error("Missing 'rules'");
+    if (!s.objectives || !Array.isArray(s.objectives.win)) throw new Error("Missing 'objectives.win'");
+
+    // 6. Referential Integrity (Faction IDs)
+    const factionIds = new Set<string>();
+    for (const f of s.setup.factions) {
+        if (typeof f.id !== 'string') throw new Error("Invalid faction ID");
+        factionIds.add(f.id);
+    }
+
+    for (const fleet of s.setup.initialFleets) {
+        if (!factionIds.has(fleet.ownerFactionId)) {
+            throw new Error(`Fleet definition references unknown faction ID: '${fleet.ownerFactionId}'`);
+        }
+        if (!Array.isArray(fleet.ships) || fleet.ships.length === 0) {
+            throw new Error(`Fleet definition for '${fleet.ownerFactionId}' has no ships`);
+        }
+        // Validate ship types are strings (we don't validate against engine ship types here to keep registry decoupled)
+        if (fleet.ships.some((t: any) => typeof t !== 'string' || t.trim() === '')) {
+            throw new Error(`Fleet definition contains invalid ship type strings`);
+        }
+    }
+
+    return s as ScenarioTemplate;
+
+  } catch (e) {
+    console.warn(`[ScenarioRegistry] Failed to load scenario '${fileName}': ${(e as Error).message}`);
+    return null;
+  }
+}
+
+// Parse and Load
+const loadedScenarios: ScenarioTemplate[] = [];
+
+for (const { data, name } of templatesToLoad) {
+    const validated = validateScenarioV1(data, name);
+    if (validated) {
+        loadedScenarios.push(validated);
+    }
+}
+
+// Sort by difficulty then title
+loadedScenarios.sort((a, b) => {
+    const diff = (a.meta.difficulty || 0) - (b.meta.difficulty || 0);
+    if (diff !== 0) return diff;
+    return a.meta.title.localeCompare(b.meta.title);
+});
+
+export const SCENARIO_REGISTRY = loadedScenarios;

@@ -1,11 +1,15 @@
-<div align="center">
+# Stellar Fleet
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A minimalist 3D space battle simulator for mobile.
 
-  <h1>Built with AI Studio</h2>
+## Architecture
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- **Engine**: Pure TypeScript, separated from UI.
+- **State**: Immutable updates.
+- **Determinism**: The simulation (world generation, combat, movement logs) is strictly deterministic based on the `seed` in `GameState`. `Math.random` and `Date.now` are prohibited in state-modifying logic. Visual animations (FleetRenderer) may use system time for smooth interpolation but do not affect logic.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Tech Stack
 
-</div>
+- React 19 / Vite
+- React Three Fiber / Three.js
+- TailwindCSS

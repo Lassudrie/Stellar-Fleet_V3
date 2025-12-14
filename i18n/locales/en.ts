@@ -1,0 +1,153 @@
+
+export const en = {
+  // Main Menu
+  'menu.title': 'Stellar',
+  'menu.subtitle': 'Fleet',
+  'menu.newGame': 'New Game',
+  'menu.loadGame': 'Load Game',
+  'menu.options': 'Options',
+  'menu.systemReady': 'System Ready',
+
+  // Scenario Select
+  'scenario.title': 'Scenario',
+  'scenario.select': 'Select Simulation',
+  'scenario.fog': 'Fog of War',
+  'scenario.ai': 'AI Opponent',
+  'scenario.size': 'Galaxy Size',
+  'scenario.stars': 'Stars',
+  'scenario.radius': 'Map Radius',
+  'scenario.seed': 'Generation Seed (Optional)',
+  'scenario.random': 'Random',
+  'scenario.launch': 'Launch Simulation',
+  'scenario.launch_short': 'Launch',
+  'scenario.back': 'Back to Menu',
+  'scenario.conquest_sandbox.title': 'Conquest Sandbox',
+  'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
+
+  // New Game Screen
+  'newgame.title': 'New Simulation',
+  'newgame.subtitle': 'Configure initialization parameters.',
+  'newgame.faction': 'Faction',
+  'newgame.cancel': 'Cancel',
+  'newgame.launch': 'Launch',
+
+  // Load/Options Placeholders
+  'screen.underConstruction': '[ MODULE UNDER CONSTRUCTION ]',
+  'screen.return': 'Return',
+  'options.title': 'System Options',
+  'load.title': 'Load Game',
+
+  // UI TopBar
+  'ui.year': 'Year',
+  'ui.turn': 'Turn',
+  'ui.alerts': 'Alerts',
+  'ui.report': 'Report',
+  'ui.combat': 'Combat',
+  'ui.comlink': 'Com-Link',
+
+  // UI SideMenu
+  'sidemenu.command': 'Command',
+  'sidemenu.com_logs': 'Com Logs',
+  'sidemenu.registry': 'Fleet Registry',
+  'sidemenu.territory': 'Territory',
+  'sidemenu.settings': 'Settings',
+  'sidemenu.recentEvents': 'Recent Events: {{count}}',
+  'sidemenu.activeUnits': 'Active Units: {{count}}',
+  'sidemenu.controlledSectors': 'Controlled Sectors: {{count}}',
+  'sidemenu.systemPreferences': 'System Preferences',
+  'sidemenu.export': 'Export Save',
+  'sidemenu.import': 'Import Save',
+  'sidemenu.restart': 'Restart Simulation',
+  'sidemenu.warning': 'WARNING',
+  'sidemenu.warningText': 'These settings are local to your browser session and will reset on reload. They do not affect game logic or determinism.',
+  'sidemenu.noEvents': 'No events recorded.',
+  'sidemenu.noSystems': 'No systems controlled.',
+  'sidemenu.debugTools': 'Debug Tools',
+  'sidemenu.devMode': 'Developer Mode',
+  'sidemenu.godEyes': 'God Eyes',
+  'sidemenu.aiDebugger': 'AI Debugger',
+  'sidemenu.language': 'Language',
+
+  // Context Menu
+  'ctx.groundForces': 'Ground Forces',
+  'ctx.moveTo': 'Move To...',
+  'ctx.invade': 'Invade',
+  'ctx.cancel': 'Cancel',
+
+  // Fleet Picker
+  'picker.title': 'Select Fleet',
+  'picker.destination': 'Destination: {{system}}',
+  'picker.noFleets': 'No available fleets (fleets already in this system cannot move to it).',
+  'picker.eta_one': 'ETA 1 TURN',
+  'picker.eta_other': 'ETA {{count}} TURNS',
+  'picker.ly': 'LY',
+
+  // Fleet Panel
+  'fleet.orbiting': 'Orbiting {{system}}',
+  'fleet.split': 'Split Fleet ({{count}})',
+  'fleet.mergeOp': 'Merge Operations',
+  'fleet.mergeWith': 'Merge with {{fleet}}',
+  'fleet.hostile': 'HOSTILE SIGNAL',
+  'fleet.deploy': 'Deploy {{army}}',
+  'fleet.load': 'Load Army...',
+  'fleet.status.orbit': 'ORBIT',
+  'fleet.status.moving': 'MOVING',
+  'fleet.status.combat': 'COMBAT',
+
+  // Invasion
+  'invasion.title': 'Invasion Planner',
+  'invasion.target': 'Target: {{system}}',
+  'invasion.noFleets': 'No fleets with loaded transports in orbit.',
+  'invasion.ready': '{{count}} Ready',
+  'invasion.transport': 'Transport {{id}}',
+  'invasion.army': 'Army {{id}} ({{strength}})',
+  'invasion.selected': 'Selected:',
+  'invasion.deploy': 'Deploy Forces',
+  'invasion.cancel': 'Cancel',
+
+  // Battle Screen
+  'battle.reportTitle': 'Battle Report',
+  'battle.rounds_one': '1 ROUND',
+  'battle.rounds_other': '{{count}} ROUNDS',
+  'battle.finished': 'FINISHED',
+  'battle.victory': '{{winner}} VICTORY',
+  'battle.draw': 'DRAW',
+  'battle.unknown': 'RESULT UNKNOWN',
+  'battle.close': 'Close Report',
+  'battle.blueForces': 'Blue Forces',
+  'battle.redForces': 'Red Forces',
+  'battle.survivors': 'Survivors',
+  'battle.lost': 'Lost',
+  'battle.fleets': 'Fleets:',
+  'battle.none': 'None',
+  'battle.interceptions': 'Interceptions',
+  'battle.pdKills': 'PD Kills',
+  'battle.tacticalData': 'Tactical Data Stream',
+  'battle.noData': 'No tactical data recorded.',
+  'battle.error': 'COM-LINK ERROR',
+  'battle.errorMsg': 'Unable to retrieve combat telemetry for ID: {{id}}',
+  'battle.closeConn': 'CLOSE CONNECTION',
+
+  // Victory
+  'victory.victory': 'VICTORY',
+  'victory.defeat': 'DEFEAT',
+  'victory.totalTurns': 'Total Turns: {{day}}',
+  'victory.replay': 'REPLAY',
+
+  // Loading
+  'loading.init': 'Initializing Simulation',
+  'loading.version': 'V1.1 • DETERMINISTIC ENGINE',
+
+  // App / Engine Messages
+  'msg.commandFailed': 'Command Failed: {{error}}',
+  'msg.splitFailed': 'Split Failed: {{error}}',
+  'msg.mergeFailed': 'Merge Failed: {{error}}',
+  'msg.notOrbiting': 'Fleet is not in stable orbit of a system.',
+  'msg.deployLog': 'Deployed army from ship {{ship}} to {{system}}.',
+  'msg.invasionLog': 'Invasion Initiated on {{system}}. {{count}} armies deployed.',
+  'msg.invasionFail': 'Deployed: {{success}}. Failed: {{fail}}.\nReason: {{error}}',
+  'msg.saveFail': 'Failed to save game',
+  'msg.invalidSave': 'Invalid save file.',
+  'msg.logsCleared': 'AI Logs Cleared',
+  'msg.exportFail': 'Failed to export logs',
+};

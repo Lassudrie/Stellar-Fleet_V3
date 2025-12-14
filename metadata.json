@@ -1,0 +1,5 @@
+{
+  "name": "Stellar Fleet",
+  "description": "A minimalist 3D space battle simulator for mobile. Command fleets in a generated galaxy.",
+  "requestFramePermissions": []
+}

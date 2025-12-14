@@ -1,0 +1,249 @@
+
+import React, { useMemo, useRef } from 'react';
+import { Instance, Instances, Text } from '@react-three/drei';
+import { BufferGeometry, Float32BufferAttribute, Euler, DoubleSide, Vector3 } from 'three';
+import { ThreeEvent, useThree, useFrame } from '@react-three/fiber';
+import { StarSystem, Army, ArmyState } from '../types';
+import { CAPTURE_RANGE, COLORS } from '../data/static';
+
+interface GalaxyProps {
+  systems: StarSystem[];
+  armies?: Army[];
+  battlingSystemIds?: Set<string>;
+  onSystemClick: (system: StarSystem, event: ThreeEvent<MouseEvent>) => void;
+  playerFactionId: string;
+}
+
+interface ArmyInfo {
+    playerCount: number;
+    enemyCount: number;
+    hasConflict: boolean;
+}
+
+const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: ArmyInfo }> = ({ system, rotation, armyInfo }) => {
+    const textRef = useRef<any>(null);
+    const iconRef = useRef<any>(null);
+    const armyIconRef = useRef<any>(null);
+    const isOwned = system.ownerFactionId !== null;
+    
+    const resourceIcon = useMemo(() => {
+        if (system.resourceType === 'gas') return '🪐';
+        return null;
+    }, [system.resourceType]);
+
+    const armyVisual = useMemo(() => {
+        if (!armyInfo || (armyInfo.playerCount === 0 && armyInfo.enemyCount === 0)) return null;
+        
+        if (armyInfo.hasConflict) {
+            return { text: '⚔', color: '#fbbf24' }; // Amber Swords
+        }
+        if (armyInfo.playerCount > 0) {
+            return { text: `⚑ ${armyInfo.playerCount}`, color: COLORS.blueHighlight };
+        }
+        if (armyInfo.enemyCount > 0) {
+            return { text: `⚑ ${armyInfo.enemyCount}`, color: COLORS.redHighlight };
+        }
+        return null;
+    }, [armyInfo]);
+
+    useFrame(({ camera }) => {
+        const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
+        const maxDist = isOwned ? 90 : 60;
+        const fadeStart = maxDist - 20;
+
+        let opacity = 1;
+        if (dist > maxDist) {
+            opacity = 0;
+        } else if (dist > fadeStart) {
+            opacity = 1 - (dist - fadeStart) / 20;
+        }
+
+        const isVisible = opacity > 0.05;
+        
+        if (textRef.current) {
+            textRef.current.visible = isVisible;
+            if (isVisible) {
+                textRef.current.fillOpacity = isOwned ? opacity : opacity * 0.7;
+                textRef.current.outlineOpacity = opacity;
+            }
+        }
+
+        if (iconRef.current) {
+             iconRef.current.visible = isVisible;
+             if (isVisible) {
+                 iconRef.current.fillOpacity = opacity;
+                 iconRef.current.outlineOpacity = opacity;
+             }
+        }
+
+        if (armyIconRef.current) {
+            armyIconRef.current.visible = isVisible;
+            if (isVisible) {
+                armyIconRef.current.fillOpacity = opacity;
+                armyIconRef.current.outlineOpacity = opacity;
+            }
+        }
+    });
+
+    return (
+        <group>
+             {resourceIcon && (
+                 <Text
+                    ref={iconRef}
+                    position={[0, 1.3, 0]} 
+                    rotation={rotation}
+                    fontSize={1.2}
+                    anchorX="center"
+                    anchorY="bottom"
+                    outlineWidth={0.02}
+                    outlineColor="#000000"
+                 >
+                    {resourceIcon}
+                 </Text>
+             )}
+
+             {armyVisual && (
+                 <Text
+                    ref={armyIconRef}
+                    position={[0, resourceIcon ? 2.8 : 1.5, 0]} 
+                    rotation={rotation}
+                    fontSize={1.0}
+                    color={armyVisual.color}
+                    anchorX="center"
+                    anchorY="bottom"
+                    outlineWidth={0.05}
+                    outlineColor="#000000"
+                    fontWeight="bold"
+                 >
+                    {armyVisual.text}
+                 </Text>
+             )}
+             
+            <Text
+                ref={textRef}
+                position={[0, -1.5, 0]} 
+                rotation={rotation}
+                fontSize={0.9} 
+                color={system.color} // Use system color (which defaults to white or owner color)
+                anchorX="center"
+                anchorY="top"
+                outlineWidth={0.05}
+                outlineColor="#000000"
+                fontWeight={isOwned ? 'bold' : 'normal'}
+            >
+                {system.name}
+            </Text>
+        </group>
+    );
+};
+
+const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSystemIds, onSystemClick, playerFactionId }) => {
+  const { camera } = useThree();
+
+  const textRotation = useMemo(() => {
+    return camera.rotation;
+  }, [camera]);
+
+  const armyMap = useMemo(() => {
+      const map = new Map<string, ArmyInfo>();
+      if (!armies) return map;
+
+      armies.forEach(army => {
+          if (army.state !== ArmyState.DEPLOYED) return;
+          
+          if (!map.has(army.containerId)) {
+              map.set(army.containerId, { playerCount: 0, enemyCount: 0, hasConflict: false });
+          }
+          const info = map.get(army.containerId)!;
+          
+          if (army.factionId === playerFactionId) info.playerCount++;
+          else info.enemyCount++;
+          
+          info.hasConflict = info.playerCount > 0 && info.enemyCount > 0;
+      });
+      return map;
+  }, [armies, playerFactionId]);
+
+  const lineGeometry = useMemo(() => {
+    if (!systems || systems.length === 0) return new BufferGeometry();
+    const positions: number[] = [];
+    systems.forEach(sys => {
+        positions.push(sys.position.x, 0, sys.position.z);
+        positions.push(sys.position.x, sys.position.y, sys.position.z);
+    });
+    
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new Float32BufferAttribute(positions, 3));
+    return geo;
+  }, [systems]);
+
+  const battleSystems = useMemo(() => {
+    if (!battlingSystemIds) return [];
+    return systems.filter(s => battlingSystemIds.has(s.id));
+  }, [systems, battlingSystemIds]);
+
+  if (!systems || systems.length === 0) return null;
+
+  return (
+    <group>
+        <lineSegments geometry={lineGeometry}>
+            <lineBasicMaterial color="#ffffff" transparent opacity={0.1} linewidth={1} />
+        </lineSegments>
+
+        <Instances range={systems.length}>
+            <sphereGeometry args={[0.25, 16, 16]} />
+            <meshBasicMaterial />
+            
+            {systems.map((sys) => (
+                <Instance 
+                    key={`vis-${sys.id}`}
+                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    scale={[1.5, 1.5, 1.5]}
+                    color={sys.color} 
+                />
+            ))}
+        </Instances>
+
+        {battleSystems.length > 0 && (
+          <Instances range={battleSystems.length}>
+            <torusGeometry args={[CAPTURE_RANGE * 0.8, 0.1, 8, 32]} />
+            <meshBasicMaterial color="#ef4444" transparent opacity={0.6} side={DoubleSide} />
+            {battleSystems.map((sys) => (
+               <Instance
+                  key={`battle-${sys.id}`}
+                  position={[sys.position.x, sys.position.y, sys.position.z]}
+                  rotation={[Math.PI / 2, 0, 0]} 
+               />
+            ))}
+          </Instances>
+        )}
+
+        <Instances range={systems.length}>
+            <sphereGeometry args={[3.5, 8, 8]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            
+            {systems.map((sys) => (
+                <Instance 
+                    key={`hit-${sys.id}`}
+                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    scale={[1, 1, 1]} 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onSystemClick(sys, e);
+                    }}
+                    onPointerOver={() => document.body.style.cursor = 'pointer'}
+                    onPointerOut={() => document.body.style.cursor = 'auto'}
+                />
+            ))}
+        </Instances>
+
+        {systems.map((sys) => (
+            <group key={`label-${sys.id}`} position={[sys.position.x, sys.position.y, sys.position.z]}>
+                <SystemLabel system={sys} rotation={textRotation} armyInfo={armyMap.get(sys.id)} />
+            </group>
+        ))}
+    </group>
+  );
+});
+
+export default Galaxy;

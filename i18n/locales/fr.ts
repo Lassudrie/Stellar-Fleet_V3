@@ -1,0 +1,153 @@
+
+export const fr = {
+  // Main Menu
+  'menu.title': 'Stellar',
+  'menu.subtitle': 'Fleet',
+  'menu.newGame': 'Nouvelle Partie',
+  'menu.loadGame': 'Charger',
+  'menu.options': 'Options',
+  'menu.systemReady': 'Système Prêt',
+
+  // Scenario Select
+  'scenario.title': 'Scénario',
+  'scenario.select': 'Sélection Simulation',
+  'scenario.fog': 'Brouillard de Guerre',
+  'scenario.ai': 'IA Activée',
+  'scenario.size': 'Taille Galaxie',
+  'scenario.stars': 'Étoiles',
+  'scenario.radius': 'Rayon Carte',
+  'scenario.seed': 'Graine (Optionnel)',
+  'scenario.random': 'Aléatoire',
+  'scenario.launch': 'Lancer Simulation',
+  'scenario.launch_short': 'Lancer',
+  'scenario.back': 'Retour Menu',
+  'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
+  'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
+
+  // New Game Screen
+  'newgame.title': 'Nouvelle Simulation',
+  'newgame.subtitle': 'Configuration des paramètres d\'initialisation.',
+  'newgame.faction': 'Faction',
+  'newgame.cancel': 'Annuler',
+  'newgame.launch': 'Lancer',
+
+  // Load/Options Placeholders
+  'screen.underConstruction': '[ MODULE EN CONSTRUCTION ]',
+  'screen.return': 'Retour',
+  'options.title': 'Options Système',
+  'load.title': 'Charger Partie',
+
+  // UI TopBar
+  'ui.year': 'Année',
+  'ui.turn': 'Tour',
+  'ui.alerts': 'Alertes',
+  'ui.report': 'Rapport',
+  'ui.combat': 'Combat',
+  'ui.comlink': 'Com-Link',
+
+  // UI SideMenu
+  'sidemenu.command': 'Commandement',
+  'sidemenu.com_logs': 'Journaux Com',
+  'sidemenu.registry': 'Registre Flotte',
+  'sidemenu.territory': 'Territoire',
+  'sidemenu.settings': 'Paramètres',
+  'sidemenu.recentEvents': 'Événements Récents : {{count}}',
+  'sidemenu.activeUnits': 'Unités Actives : {{count}}',
+  'sidemenu.controlledSectors': 'Secteurs Contrôlés : {{count}}',
+  'sidemenu.systemPreferences': 'Préférences Système',
+  'sidemenu.export': 'Exporter Save',
+  'sidemenu.import': 'Importer Save',
+  'sidemenu.restart': 'Redémarrer Simulation',
+  'sidemenu.warning': 'ATTENTION',
+  'sidemenu.warningText': 'Ces paramètres sont locaux à votre session navigateur. Ils n\'affectent pas la logique de jeu ou le déterminisme.',
+  'sidemenu.noEvents': 'Aucun événement.',
+  'sidemenu.noSystems': 'Aucun système contrôlé.',
+  'sidemenu.debugTools': 'Outils Debug',
+  'sidemenu.devMode': 'Mode Développeur',
+  'sidemenu.godEyes': 'Vue Divine',
+  'sidemenu.aiDebugger': 'Debug IA',
+  'sidemenu.language': 'Langue',
+
+  // Context Menu
+  'ctx.groundForces': 'Forces au Sol',
+  'ctx.moveTo': 'Aller vers...',
+  'ctx.invade': 'Envahir',
+  'ctx.cancel': 'Annuler',
+
+  // Fleet Picker
+  'picker.title': 'Choisir Flotte',
+  'picker.destination': 'Destination : {{system}}',
+  'picker.noFleets': 'Aucune flotte disponible (déjà sur place).',
+  'picker.eta_one': 'ETA 1 TOUR',
+  'picker.eta_other': 'ETA {{count}} TOURS',
+  'picker.ly': 'AL',
+
+  // Fleet Panel
+  'fleet.orbiting': 'En orbite de {{system}}',
+  'fleet.split': 'Diviser Flotte ({{count}})',
+  'fleet.mergeOp': 'Opérations de Fusion',
+  'fleet.mergeWith': 'Fusionner avec {{fleet}}',
+  'fleet.hostile': 'SIGNAL HOSTILE',
+  'fleet.deploy': 'Déployer {{army}}',
+  'fleet.load': 'Embarquer Armée...',
+  'fleet.status.orbit': 'ORBITE',
+  'fleet.status.moving': 'TRANSIT',
+  'fleet.status.combat': 'COMBAT',
+
+  // Invasion
+  'invasion.title': 'Planification Invasion',
+  'invasion.target': 'Cible : {{system}}',
+  'invasion.noFleets': 'Aucune flotte avec transport chargé en orbite.',
+  'invasion.ready': '{{count}} Prêts',
+  'invasion.transport': 'Transport {{id}}',
+  'invasion.army': 'Armée {{id}} ({{strength}})',
+  'invasion.selected': 'Sélection :',
+  'invasion.deploy': 'Lancer Déploiement',
+  'invasion.cancel': 'Annuler',
+
+  // Battle Screen
+  'battle.reportTitle': 'Rapport de Bataille',
+  'battle.rounds_one': '1 ROUND',
+  'battle.rounds_other': '{{count}} ROUNDS',
+  'battle.finished': 'TERMINE',
+  'battle.victory': 'VICTOIRE {{winner}}',
+  'battle.draw': 'EGALITE',
+  'battle.unknown': 'RESULTAT INCONNU',
+  'battle.close': 'Fermer Rapport',
+  'battle.blueForces': 'Forces Bleues',
+  'battle.redForces': 'Forces Rouges',
+  'battle.survivors': 'Survivants',
+  'battle.lost': 'Pertes',
+  'battle.fleets': 'Flottes :',
+  'battle.none': 'Aucune',
+  'battle.interceptions': 'Interceptions',
+  'battle.pdKills': 'Tirs PD',
+  'battle.tacticalData': 'Flux Tactique',
+  'battle.noData': 'Aucune donnée tactique.',
+  'battle.error': 'ERREUR COM-LINK',
+  'battle.errorMsg': 'Impossible de récupérer la télémétrie pour l\'ID : {{id}}',
+  'battle.closeConn': 'COUPER CONNEXION',
+
+  // Victory
+  'victory.victory': 'VICTOIRE',
+  'victory.defeat': 'DEFAITE',
+  'victory.totalTurns': 'Tours Totaux : {{day}}',
+  'victory.replay': 'REJOUER',
+
+  // Loading
+  'loading.init': 'Initialisation Simulation',
+  'loading.version': 'V1.1 • MOTEUR DETERMINISTE',
+
+  // App / Engine Messages
+  'msg.commandFailed': 'Commande échouée : {{error}}',
+  'msg.splitFailed': 'Division échouée : {{error}}',
+  'msg.mergeFailed': 'Fusion échouée : {{error}}',
+  'msg.notOrbiting': 'La flotte n\'est pas en orbite stable.',
+  'msg.deployLog': 'Armée déployée du vaisseau {{ship}} vers {{system}}.',
+  'msg.invasionLog': 'Invasion initiée sur {{system}}. {{count}} armées déployées.',
+  'msg.invasionFail': 'Déployé : {{success}}. Échec : {{fail}}.\nRaison : {{error}}',
+  'msg.saveFail': 'Échec de la sauvegarde',
+  'msg.invalidSave': 'Fichier de sauvegarde invalide.',
+  'msg.logsCleared': 'Logs IA effacés',
+  'msg.exportFail': 'Échec export logs',
+};
