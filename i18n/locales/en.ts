@@ -72,6 +72,8 @@ export const en = {
   'ctx.groundForces': 'Ground Forces',
   'ctx.moveTo': 'Move To...',
   'ctx.invade': 'Invade',
+  'ctx.load': 'Load Army',
+  'ctx.unload': 'Unload Army',
   'ctx.cancel': 'Cancel',
 
   // Fleet Picker

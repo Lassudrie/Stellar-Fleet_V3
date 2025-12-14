@@ -4,6 +4,7 @@ import { RNG } from '../../engine/rng';
 import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../../engine/idUtils';
 import { sub, len, normalize, scale, add, clone } from '../../engine/math/vec3';
+import { canLoadArmy } from '../../engine/army';
 
 export interface ArmyUpdate {
     id: string;
@@ -52,7 +53,8 @@ export const resolveFleetMovement = (
           targetPosition: null,
           targetSystemId: null,
           retreating: false, // Clear retreat flag on arrival
-          invasionTargetSystemId: null // Clear order once executed/arrived
+          invasionTargetSystemId: null, // Clear order once executed/arrived
+          loadingTargetSystemId: null
       };
 
       const arrivedSystemId = fleet.targetSystemId;
@@ -67,7 +69,7 @@ export const resolveFleetMovement = (
             type: 'move'
           });
 
-          // --- AUTO INVASION LOGIC ---
+          // --- AUTO INVASION / UNLOAD LOGIC ---
           if (fleet.invasionTargetSystemId === arrivedSystemId) {
               let deployedCount = 0;
               
@@ -112,12 +114,81 @@ export const resolveFleetMovement = (
               }
 
               if (deployedCount > 0) {
+                  // Differentiate message based on hostility
+                  const isHostile = sys.ownerFactionId && sys.ownerFactionId !== fleet.factionId;
+                  const logText = isHostile
+                      ? `INVASION STARTED: Fleet ${shortId(fleet.id)} deployed ${deployedCount} armies onto ${sys.name}.`
+                      : `Fleet ${shortId(fleet.id)} unloaded ${deployedCount} armies onto ${sys.name}.`;
+
                   generatedLogs.push({
                       id: rng.id('log'),
                       day,
-                      text: `INVASION STARTED: Fleet ${shortId(fleet.id)} deployed ${deployedCount} armies onto ${sys.name}.`,
-                      type: 'combat'
+                      text: logText,
+                      type: isHostile ? 'combat' : 'move'
                   });
+              }
+          }
+
+          // --- AUTO LOAD LOGIC ---
+          if (fleet.loadingTargetSystemId === arrivedSystemId) {
+              let loadedCount = 0;
+
+              // Find deployed armies on this system belonging to the fleet's faction
+              // Must be DEPLOYED and owned by same faction
+              const availableArmies = allArmies.filter(a =>
+                a.containerId === sys.id &&
+                a.state === ArmyState.DEPLOYED &&
+                a.factionId === fleet.factionId
+              );
+
+              if (availableArmies.length > 0) {
+                  let nextShips = [...nextFleet.ships];
+                  let shipsChanged = false;
+
+                  // Iterate ships to find empty transports
+                  for (let i = 0; i < nextShips.length; i++) {
+                      // Stop if no more armies to load
+                      if (loadedCount >= availableArmies.length) break;
+
+                      const ship = nextShips[i];
+
+                      // Check if valid transport and empty using engine helper or direct check
+                      // Direct check is faster here since we are inside the loop
+                      if (canLoadArmy(ship)) {
+                          const armyToLoad = availableArmies[loadedCount];
+
+                          // 1. Update Army
+                          armyUpdates.push({
+                              id: armyToLoad.id,
+                              changes: {
+                                  state: ArmyState.EMBARKED,
+                                  containerId: fleet.id
+                              }
+                          });
+
+                          // 2. Update Ship
+                          nextShips[i] = {
+                              ...ship,
+                              carriedArmyId: armyToLoad.id
+                          };
+
+                          shipsChanged = true;
+                          loadedCount++;
+                      }
+                  }
+
+                  if (shipsChanged) {
+                      nextFleet = { ...nextFleet, ships: nextShips };
+                  }
+
+                  if (loadedCount > 0) {
+                      generatedLogs.push({
+                          id: rng.id('log'),
+                          day,
+                          text: `Fleet ${shortId(fleet.id)} loaded ${loadedCount} armies from ${sys.name}.`,
+                          type: 'move'
+                      });
+                  }
               }
           }
         }

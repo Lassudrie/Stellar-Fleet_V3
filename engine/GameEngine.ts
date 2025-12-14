@@ -8,7 +8,9 @@ type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
     | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
     | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string };
+    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string }
+    | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string }
+    | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string };
 
 export class GameEngine {
     state: GameState;
@@ -85,6 +87,40 @@ export class GameEngine {
                 targetSystemId: command.targetSystemId
             }, this.rng);
             
+            this.syncRngState();
+            this.notify();
+            return { ok: true };
+        }
+
+        if (command.type === 'ORDER_LOAD_MOVE') {
+            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return { ok: false, error: 'Fleet not found' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+
+            this.state = applyCommand(this.state, {
+                type: 'ORDER_LOAD_MOVE',
+                fleetId: command.fleetId,
+                targetSystemId: command.targetSystemId
+            }, this.rng);
+
+            this.syncRngState();
+            this.notify();
+            return { ok: true };
+        }
+
+        if (command.type === 'ORDER_UNLOAD_MOVE') {
+            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return { ok: false, error: 'Fleet not found' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+
+            this.state = applyCommand(this.state, {
+                type: 'ORDER_UNLOAD_MOVE',
+                fleetId: command.fleetId,
+                targetSystemId: command.targetSystemId
+            }, this.rng);
+
             this.syncRngState();
             this.notify();
             return { ok: true };
