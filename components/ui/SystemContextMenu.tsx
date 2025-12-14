@@ -1,12 +1,18 @@
 
 import React from 'react';
-import { StarSystem } from '../../types';
+import { StarSystem, FactionId } from '../../types';
 import { useI18n } from '../../i18n';
+
+interface GroundForceIntel {
+    factionId: FactionId;
+    count: number;
+    power: number;
+}
 
 interface SystemContextMenuProps {
   position: { x: number, y: number };
   system: StarSystem;
-  groundForces: { blueCount: number, bluePower: number, redCount: number, redPower: number } | null;
+  groundForces: GroundForceIntel[] | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
   onOpenFleetPicker: () => void;
   onInvade: () => void;
@@ -29,7 +35,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
       </div>
 
       {/* GROUND INTEL SECTION */}
-      {groundForces && (
+      {groundForces && groundForces.length > 0 && (
           <div className="px-3 py-2 mb-1 bg-slate-800/50 rounded border border-slate-700/50 text-[10px]">
               <div className="uppercase font-bold text-slate-400 mb-1 flex items-center gap-1">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
@@ -38,18 +44,12 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   {t('ctx.groundForces')}
               </div>
               <div className="flex flex-col gap-0.5">
-                  {groundForces.blueCount > 0 && (
-                      <div className="flex justify-between text-blue-300">
-                          <span>BLUE x{groundForces.blueCount}</span>
-                          <span className="font-mono">{groundForces.bluePower.toLocaleString()}</span>
+                  {groundForces.map(gf => (
+                      <div key={gf.factionId} className="flex justify-between" style={{ color: gf.factionId === 'blue' ? '#93c5fd' : (gf.factionId === 'red' ? '#f87171' : '#cbd5e1') }}>
+                          <span>{gf.factionId.toUpperCase()} x{gf.count}</span>
+                          <span className="font-mono">{gf.power.toLocaleString()}</span>
                       </div>
-                  )}
-                  {groundForces.redCount > 0 && (
-                      <div className="flex justify-between text-red-400">
-                          <span>RED x{groundForces.redCount}</span>
-                          <span className="font-mono">{groundForces.redPower.toLocaleString()}</span>
-                      </div>
-                  )}
+                  ))}
               </div>
           </div>
       )}
