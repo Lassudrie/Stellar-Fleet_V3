@@ -1,4 +1,3 @@
-
 import { ScenarioDefinitionV1 } from '../schemaV1';
 
 const conquestSandbox: ScenarioDefinitionV1 = {
@@ -72,7 +71,14 @@ const conquestSandbox: ScenarioDefinitionV1 = {
     fogOfWar: true,
     useAdvancedCombat: true,
     aiEnabled: true,
-    totalWar: true
+    totalWar: true,
+
+    // Deterministic ground combat (attrition guaranteed).
+    groundCombat: {
+      enabled: true,
+      model: 'deterministic_attrition_v1',
+      configId: 'default'
+    }
   }
 };
 
