@@ -68,10 +68,12 @@ export class GameEngine {
     }
 
     dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
+        const playerFactionId = this.state.playerFactionId;
+
         if (command.type === 'MOVE_FLEET') {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== 'blue') return { ok: false, error: 'Not your fleet' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
             if (fleet.retreating) return { ok: false, error: 'Fleet is retreating and cannot receive commands.' };
 
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
@@ -91,7 +93,7 @@ export class GameEngine {
         if (command.type === 'ORDER_INVASION') {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== 'blue') return { ok: false, error: 'Not your fleet' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
             if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
 
             this.state = applyCommand(this.state, {
