@@ -220,34 +220,44 @@ export const planAiTurn = (
   assignments.forEach(assign => {
       const { fleet, task } = assign;
       
+      // Check if fleet is already at destination
       if (fleet.state === FleetState.ORBIT && 
           state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
-          
-          if (task.type === 'INVADE') {
-               fleet.ships.forEach(s => {
-                  if (s.carriedArmyId) {
-                      commands.push({
-                          type: 'UNLOAD_ARMY',
-                          fleetId: fleet.id,
-                          shipId: s.id,
-                          armyId: s.carriedArmyId,
-                          systemId: task.systemId
-                      });
-                  }
-               });
+          // Already at target, no movement needed
+          // Note: Invasion auto-deployment is handled by movementPhase when fleet arrives
+          // with invasionTargetSystemId set. If already in orbit, armies should already be deployed.
+          return;
+      }
+
+      // Check if already moving to target
+      if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
+          // Already heading there - check if invasion order needs to be set
+          if (task.type === 'INVADE' && fleet.invasionTargetSystemId !== task.systemId) {
+              // Re-issue as invasion move to set the flag
+              commands.push({
+                  type: 'ORDER_INVASION_MOVE',
+                  fleetId: fleet.id,
+                  targetSystemId: task.systemId
+              });
           }
           return;
       }
 
-      if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
-          return;
+      // Issue movement command
+      // Use ORDER_INVASION_MOVE for INVADE tasks to auto-deploy armies on arrival
+      if (task.type === 'INVADE') {
+          commands.push({
+              type: 'ORDER_INVASION_MOVE',
+              fleetId: fleet.id,
+              targetSystemId: task.systemId
+          });
+      } else {
+          commands.push({
+              type: 'MOVE_FLEET',
+              fleetId: fleet.id,
+              targetSystemId: task.systemId
+          });
       }
-
-      commands.push({
-          type: 'MOVE_FLEET',
-          fleetId: fleet.id,
-          targetSystemId: task.systemId
-      });
   });
 
   commands.push({

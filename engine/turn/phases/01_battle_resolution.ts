@@ -9,6 +9,16 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
     
     if (scheduledBattles.length === 0) return state;
 
+    // DETERMINISM FIX: Sort battles canonically before processing
+    // This ensures RNG consumption order is consistent regardless of array insertion order
+    scheduledBattles.sort((a, b) => {
+        // Primary: by systemId (alphabetical)
+        const sysCompare = a.systemId.localeCompare(b.systemId);
+        if (sysCompare !== 0) return sysCompare;
+        // Secondary: by battle id (ensures uniqueness)
+        return a.id.localeCompare(b.id);
+    });
+
     let nextBattles = [...state.battles];
     let nextFleets = [...state.fleets];
     let nextLogs = [...state.logs];
