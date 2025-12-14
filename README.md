@@ -7,6 +7,7 @@ A minimalist 3D space battle simulator for mobile.
 - **Engine**: Pure TypeScript, separated from UI.
 - **State**: Immutable updates.
 - **Determinism**: The simulation (world generation, combat, movement logs) is strictly deterministic based on the `seed` in `GameState`. `Math.random` and `Date.now` are prohibited in state-modifying logic. Visual animations (FleetRenderer) may use system time for smooth interpolation but do not affect logic.
+- **Audio assets (UI only)**: stored under `components/audio/` with dedicated `sounds/` (effects) and `musics/` (background) folders. The engine layer never depends on these files.
 
 ## Tech Stack
 
