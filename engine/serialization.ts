@@ -1,5 +1,5 @@
 import { Vec3, vec3 } from './math/vec3';
-import { AIState, Army, Battle, Fleet, GameObjectives, GameState, LaserShot, LogEntry, StarSystem } from '../types';
+import { AIState, Army, Battle, Fleet, FleetState, GameObjectives, GameState, LaserShot, LogEntry, StarSystem } from '../types';
 import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO, EnemySightingDTO } from './saveFormat';
 import { toEnemySightings, fromEnemySightings } from './saveEnemies';
 import { deepFreezeDev } from './state/immutability';
@@ -19,6 +19,12 @@ const finiteOrUndefined = (value: any): number | undefined => {
 
 export const serializeGameState = (state: GameState): SaveFileV2 => {
   const dto: GameStateDTO = {
+    scenarioId: state.scenarioId,
+    scenarioTitle: state.scenarioTitle,
+    playerFactionId: state.playerFactionId,
+    seed: state.seed,
+    rngState: state.rngState,
+    startYear: state.startYear,
     systems: state.systems.map(s => ({
       id: s.id,
       name: s.name,
@@ -50,6 +56,15 @@ export const serializeGameState = (state: GameState): SaveFileV2 => {
       maxFuel: f.maxFuel,
       destination: f.destination ? serializeVector3(f.destination) : undefined,
       arrivedAt: f.arrivedAt,
+      state: f.state,
+      targetSystemId: f.targetSystemId,
+      targetPosition: f.targetPosition ? serializeVector3(f.targetPosition) : null,
+      radius: f.radius,
+      stateStartTurn: f.stateStartTurn,
+      retreating: f.retreating,
+      invasionTargetSystemId: f.invasionTargetSystemId,
+      currentSystemId: f.currentSystemId,
+      embarkedArmyIds: f.embarkedArmyIds,
     })),
     armies: state.armies.map(a => ({
       id: a.id,
@@ -71,12 +86,19 @@ export const serializeGameState = (state: GameState): SaveFileV2 => {
       id: f.id,
       name: f.name,
       color: f.color,
-      resources: f.resources,
-      aiControlled: f.aiControlled,
-      eliminated: f.eliminated,
+      resources: (f as any).resources || { metal: 0, crystal: 0, fuel: 0 },
+      aiControlled: (f as any).aiControlled !== undefined ? (f as any).aiControlled : !f.isPlayable,
+      eliminated: (f as any).eliminated,
     })),
     battles: state.battles,
     logs: state.logs,
+    lasers: state.lasers.map(ls => ({
+      id: ls.id,
+      start: serializeVector3(ls.start),
+      end: serializeVector3(ls.end),
+      color: ls.color,
+      life: (ls as any).life || 0,
+    })),
     laserShots: state.laserShots.map(ls => ({
       id: ls.id,
       start: serializeVector3(ls.start),
@@ -89,6 +111,7 @@ export const serializeGameState = (state: GameState): SaveFileV2 => {
     currentPlayer: state.currentPlayer,
     selectedFleetId: state.selectedFleetId,
     selectedSystemId: state.selectedSystemId,
+    winnerFactionId: state.winnerFactionId,
     cameraPosition: serializeVector3(state.cameraPosition),
     cameraTarget: serializeVector3(state.cameraTarget),
     rules: state.rules,
@@ -143,6 +166,15 @@ export const deserializeGameState = (saveFile: SaveFileV2): GameState => {
       maxFuel: f.maxFuel,
       destination: f.destination ? deserializeVector3(f.destination) : undefined,
       arrivedAt: f.arrivedAt,
+      state: ((f as any).state as FleetState) || FleetState.ORBIT, // Migration: default to ORBIT if missing
+      targetSystemId: (f as any).targetSystemId || null,
+      targetPosition: (f as any).targetPosition ? deserializeVector3((f as any).targetPosition) : null,
+      radius: (f as any).radius || 0,
+      stateStartTurn: (f as any).stateStartTurn || 0,
+      retreating: (f as any).retreating,
+      invasionTargetSystemId: (f as any).invasionTargetSystemId,
+      currentSystemId: (f as any).currentSystemId,
+      embarkedArmyIds: (f as any).embarkedArmyIds,
     }));
 
     const armies: Army[] = (dto.armies || []).map((a: any) => {
@@ -186,18 +218,33 @@ export const deserializeGameState = (saveFile: SaveFileV2): GameState => {
 
     const aiState: AIState = dto.aiState || { enemySightings: {} };
 
+    const lasers: LaserShot[] = (dto.lasers || []).map((l: any) => ({
+      id: l.id,
+      start: deserializeVector3(l.start),
+      end: deserializeVector3(l.end),
+      color: l.color,
+      createdAt: (l as any).createdAt || Date.now(),
+      duration: (l as any).duration || 1000,
+    }));
+
     const state: GameState = {
-      systems,
-      fleets,
-      armies,
+      scenarioId: dto.scenarioId || 'unknown',
+      scenarioTitle: dto.scenarioTitle,
+      playerFactionId: dto.playerFactionId || dto.currentPlayer,
       factions: dto.factions.map((f: any) => ({
         id: f.id,
         name: f.name,
         color: f.color,
-        resources: f.resources,
-        aiControlled: f.aiControlled,
-        eliminated: f.eliminated,
+        isPlayable: !f.aiControlled,
+        aiProfile: f.aiControlled ? 'aggressive' : undefined,
       })),
+      seed: dto.seed || Date.now(),
+      rngState: dto.rngState || dto.seed || Date.now(),
+      startYear: dto.startYear || 2200,
+      systems,
+      fleets,
+      armies,
+      lasers,
       battles,
       logs,
       laserShots,
@@ -205,6 +252,7 @@ export const deserializeGameState = (saveFile: SaveFileV2): GameState => {
       currentPlayer: dto.currentPlayer,
       selectedFleetId: dto.selectedFleetId,
       selectedSystemId: dto.selectedSystemId,
+      winnerFactionId: dto.winnerFactionId || dto.winner,
       cameraPosition: deserializeVector3(dto.cameraPosition),
       cameraTarget: deserializeVector3(dto.cameraTarget),
       rules: dto.rules || {
@@ -216,10 +264,10 @@ export const deserializeGameState = (saveFile: SaveFileV2): GameState => {
       aiState: fromEnemySightings(aiState, dto.enemySightings as EnemySightingDTO[]),
       gameStarted: dto.gameStarted,
       gameOver: dto.gameOver,
-      winner: dto.winner,
+      winner: dto.winner || dto.winnerFactionId,
       objectives: dto.objectives || {
-        targetSystems: 3,
-        eliminateAllEnemies: true,
+        conditions: [],
+        maxTurns: undefined,
       },
     };
 

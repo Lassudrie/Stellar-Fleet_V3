@@ -8,17 +8,25 @@ export interface SaveFileV2 {
 }
 
 export interface GameStateDTO {
+  scenarioId?: string;
+  scenarioTitle?: string;
+  playerFactionId?: string;
+  seed?: number;
+  rngState?: number;
+  startYear?: number;
   systems: StarSystemDTO[];
   fleets: FleetDTO[];
   armies: ArmyDTO[];
   factions: FactionDTO[];
   battles: BattleDTO[];
   logs: LogEntry[];
+  lasers?: LaserShotDTO[];
   laserShots: LaserShotDTO[];
   day: number;
   currentPlayer: string;
   selectedFleetId: string | null;
   selectedSystemId: string | null;
+  winnerFactionId?: string | null;
   cameraPosition: Vector3DTO;
   cameraTarget: Vector3DTO;
   rules: GameplayRules;
@@ -74,6 +82,15 @@ export interface FleetDTO {
   maxFuel: number;
   destination?: Vector3DTO;
   arrivedAt?: number;
+  state?: string; // FleetState
+  targetSystemId?: string | null;
+  targetPosition?: Vector3DTO | null;
+  radius?: number;
+  stateStartTurn?: number;
+  retreating?: boolean;
+  invasionTargetSystemId?: string | null;
+  currentSystemId?: string | null;
+  embarkedArmyIds?: string[];
 }
 
 export interface ArmyDTO {

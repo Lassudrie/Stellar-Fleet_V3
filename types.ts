@@ -1,5 +1,13 @@
 export type FactionId = string;
 
+export interface FactionState {
+  id: FactionId;
+  name: string;
+  color: string;
+  isPlayable: boolean;
+  aiProfile?: string; // If present, controlled by AI
+}
+
 export interface Vector3 {
   x: number;
   y: number;
@@ -54,6 +62,21 @@ export interface Fleet {
   maxFuel: number;
   destination?: Vector3;
   arrivedAt?: number;
+  state: FleetState;
+  targetSystemId: string | null;
+  targetPosition: Vector3 | null;
+  radius: number;
+  stateStartTurn: number;
+  retreating?: boolean;
+  invasionTargetSystemId?: string | null;
+  currentSystemId?: string | null;
+  embarkedArmyIds?: string[];
+}
+
+export enum FleetState {
+  ORBIT = 'ORBIT',
+  MOVING = 'MOVING',
+  COMBAT = 'COMBAT',
 }
 
 export enum ArmyState {
@@ -116,9 +139,16 @@ export interface AIState {
   enemySightings: Record<string, EnemySighting[]>; // factionId -> sightings
 }
 
+export type VictoryType = 'elimination' | 'domination' | 'survival' | 'king_of_the_hill';
+
+export interface VictoryCondition {
+  type: VictoryType;
+  value?: number | string;
+}
+
 export interface GameObjectives {
-  targetSystems: number;
-  eliminateAllEnemies: boolean;
+  conditions: VictoryCondition[];
+  maxTurns?: number;
 }
 
 export type GroundCombatModel = 'legacy' | 'deterministic_attrition_v1';
@@ -144,21 +174,17 @@ export interface GameplayRules {
 }
 
 export interface GameState {
+  scenarioId: string;
+  scenarioTitle?: string;
+  playerFactionId: FactionId;
+  factions: FactionState[];
+  seed: number;
+  rngState: number;
+  startYear: number;
   systems: StarSystem[];
   fleets: Fleet[];
   armies: Army[];
-  factions: {
-    id: FactionId;
-    name: string;
-    color: string;
-    resources: {
-      metal: number;
-      crystal: number;
-      fuel: number;
-    };
-    aiControlled: boolean;
-    eliminated?: boolean;
-  }[];
+  lasers: LaserShot[];
   battles: Battle[];
   logs: LogEntry[];
   laserShots: LaserShot[];
@@ -166,6 +192,7 @@ export interface GameState {
   currentPlayer: FactionId;
   selectedFleetId: string | null;
   selectedSystemId: string | null;
+  winnerFactionId: FactionId | null;
   cameraPosition: Vector3;
   cameraTarget: Vector3;
   rules: GameplayRules;
