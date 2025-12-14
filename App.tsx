@@ -96,12 +96,23 @@ const App: React.FC = () => {
       }
   };
 
+  // Helper to force reference changes for React.memo until engine is fully immutable
+  const getViewSnapshot = (state: GameState): GameState => ({
+      ...state,
+      fleets: [...state.fleets],
+      systems: [...state.systems],
+      armies: [...state.armies],
+      lasers: [...state.lasers],
+      battles: [...state.battles],
+      logs: [...state.logs],
+  });
+
   useEffect(() => {
     if (engine) {
-      updateViewState(engine.state);
+      updateViewState(getViewSnapshot(engine.state));
       
       const unsub = engine.subscribe(() => {
-        updateViewState(engine.state);
+        updateViewState(getViewSnapshot(engine.state));
       });
       return unsub;
     }
