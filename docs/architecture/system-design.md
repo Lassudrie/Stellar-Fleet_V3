@@ -50,6 +50,10 @@ Elle orchestre les services séquentiellement :
 *   **GameScene** : Contient le Canvas Three.js. Gère le rendu 3D.
 *   **UI** : Overlay HTML/CSS (Menu, Badges, BattleScreen).
 *   **Synchronisation** : `App.tsx` s'abonne (`subscribe`) aux changements du moteur et force un re-render React à chaque mise à jour de l'état.
+*   **Assets Audio** : Les effets et musiques utilisés par l'UI résident dans `components/audio/` avec deux sous-dossiers dédiés :
+    *   `components/audio/sounds/` pour les effets courts (feedback UI, alertes).
+    *   `components/audio/musics/` pour les ambiances ou musiques de fond.
+    *   Ces ressources sont chargées uniquement par la couche UI ; le moteur n'a aucune dépendance vers des assets audio.
 
 ## 5. Rendu 3D Optimisé
 *   Utilisation de `Instances` (InstancedMesh) pour les systèmes stellaires (Galaxy.tsx) afin de maintenir 60fps.
