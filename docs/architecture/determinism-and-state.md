@@ -47,3 +47,14 @@ Le système de sauvegarde repose sur la sérialisation complète du `GameState`.
 ### Structure DTO (Data Transfer Object)
 Nous distinguons les types Runtime (`Vector3` de Three.js) des types DTO (`{x,y,z}`).
 Le fichier `serialization.ts` contient les mappers `serializeGameState` et `deserializeGameState` qui font la conversion et la validation.
+
+## 4. Stratégie de Migration vers l'Immutabilité (React Rendering)
+
+Pour garantir des performances UI optimales avec `React.memo`, nous adoptons une stratégie hybride :
+
+1.  **Engine (Simulation)** : Migration progressive vers le "Copy-on-Write". Les commandes (`commands.ts`) renvoient déjà de nouveaux objets. La boucle de simulation (`runTurn`) est en cours de migration.
+2.  **App (Vue)** : En attendant l'immutabilité totale du moteur, l'application (`App.tsx`) génère un **View Snapshot** à chaque notification.
+    *   Copie superficielle (shallow copy) des tableaux principaux (`fleets`, `systems`, etc.).
+    *   Cela force le rafraîchissement des composants React purement basés sur les props.
+
+*Note : Une fois `runTurn` entièrement refactorisé pour être immutable (structurellement partagé), le View Snapshot pourra être retiré.*
