@@ -64,9 +64,11 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
-  for (let i = 0; i < seedString.length; i++) seedHash = (seedHash << 5) - seedHash + seedString.charCodeAt(i);
-  
-  const rng = new RNG(state.seed + seedHash); 
+  for (let i = 0; i < seedString.length; i++) {
+    seedHash = ((seedHash << 5) - seedHash + seedString.charCodeAt(i)) | 0;
+  }
+
+  const rng = new RNG((state.seed + seedHash) | 0);
 
   // 2. INITIALIZE BATTLE STATE
   const involvedFleets = state.fleets.filter(f => battle.involvedFleetIds.includes(f.id));

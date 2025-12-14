@@ -1,14 +1,14 @@
-import { 
-    GameState, 
-    Fleet, 
-    StarSystem, 
+import {
+    GameState,
+    Fleet,
+    StarSystem,
     FactionId,
     FleetState,
     ShipType
 } from '../types';
 import { GameCommand } from './commands';
 import { dist, distSq, Vec3 } from './math/vec3';
-import { CAPTURE_RANGE, AI_CONFIG } from '../data/static';
+import { CAPTURE_RANGE, AI_CONFIG, MAX_FLEET_SIZE } from '../data/static';
 import { RNG } from './rng';
 import { aiDebugger } from './aiDebugger';
 
@@ -42,19 +42,17 @@ interface FleetAssignment {
 }
 
 export const planAiTurn = (
-    state: GameState, 
-    aiFactionId: FactionId, 
-    existingState?: any,
+    state: GameState,
+    aiFactionId: FactionId,
+    existingState?: AIState,
     rng?: RNG
 ): AICommand[] => {
-    // Create AI state if none exists or convert from old format
-    const aiState: AIState = (existingState && 'enemySightings' in existingState && Array.isArray(existingState.enemySightings)) 
-        ? existingState 
-        : {
-            lastKnownSystemOwners: existingState?.lastOwnerBySystemId || {},
-            fleetAssignments: {},
-            enemySightings: []
-        };
+    // Create AI state if none exists
+    const aiState: AIState = existingState || {
+        lastKnownSystemOwners: {},
+        fleetAssignments: {},
+        enemySightings: []
+    };
 
     // Update system ownership knowledge
     state.systems.forEach(system => {
@@ -84,8 +82,8 @@ export const planAiTurn = (
 };
 
 const updateEnemySightings = (
-    state: GameState, 
-    aiFactionId: FactionId, 
+    state: GameState,
+    aiFactionId: FactionId,
     aiState: AIState
 ): void => {
     // Clear old sightings (older than 5 turns)
@@ -314,10 +312,14 @@ const generateCommands = (
             return;
         }
 
-        // Hold position if already at target system (just skip command generation)
+        // Hold position if already at target system
         const systemNow = state.systems.find(s => dist(s.position, fleet.position) < 5);
         if (fleet.state === FleetState.ORBIT && systemNow?.id === task.systemId) {
-            return; // Already at target, no command needed
+            commands.push({
+                type: 'HOLD_POSITION',
+                fleetId: fleet.id
+            });
+            return;
         }
 
         // If already moving to the target, do nothing

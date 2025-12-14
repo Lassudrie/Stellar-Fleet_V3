@@ -2,7 +2,7 @@ import { GameState } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 
-export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
+export const phaseGroundResolution = (state: GameState, ctx: TurnContext): GameState => {
   let nextState = state;
   const newLogs = [...state.logs];
 
@@ -64,3 +64,6 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     logs: newLogs
   };
 };
+
+// Backward compatibility export
+export const phaseGround = phaseGroundResolution;
