@@ -8,6 +8,7 @@ import MainMenu from './components/screens/MainMenu';
 import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
+import OptionsScreen from './components/screens/OptionsScreen';
 import { buildScenario } from './scenarios';
 import { generateWorld } from './engine/systems/world/worldGenerator';
 import { useI18n } from './i18n';
@@ -266,6 +267,7 @@ const App: React.FC = () => {
   if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'OPTIONS' ? 'OPTIONS' : s === 'LOAD_GAME' ? 'LOAD_GAME' : s === 'NEW_GAME' ? 'SCENARIO' : 'MENU')} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
+  if (screen === 'OPTIONS') return <OptionsScreen onBack={() => setScreen('MENU')} />;
   
   if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
