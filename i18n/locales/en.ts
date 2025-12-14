@@ -71,6 +71,7 @@ export const en = {
   // Context Menu
   'ctx.groundForces': 'Ground Forces',
   'ctx.moveTo': 'Move To...',
+  'ctx.selectFleet': 'Select fleet',
   'ctx.invade': 'Invade',
   'ctx.attack': 'Attack',
   'ctx.load': 'Load armies',
@@ -91,6 +92,13 @@ export const en = {
   'picker.eta_one': 'ETA 1 TURN',
   'picker.eta_other': 'ETA {{count}} TURNS',
   'picker.ly': 'LY',
+
+  // Orbiting Fleet Picker
+  'orbitPicker.title': 'Fleets in orbit',
+  'orbitPicker.subtitle': 'Choose a fleet at {{system}}',
+  'orbitPicker.noFleets': 'No player fleets are orbiting this system.',
+  'orbitPicker.shipCount': '{{count}} ships',
+  'orbitPicker.power': 'Power: {{power}}',
 
   // Fleet Panel
   'fleet.orbiting': 'Orbiting {{system}}',
