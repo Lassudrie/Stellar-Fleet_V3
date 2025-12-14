@@ -84,6 +84,12 @@ export interface StarSystem {
   size: number;
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
+
+  /**
+   * Turn number when the current owner took control of the system.
+   * Optional for backward compatibility with existing saves.
+   */
+  captureTurn?: number;
 }
 
 export interface Fleet {
