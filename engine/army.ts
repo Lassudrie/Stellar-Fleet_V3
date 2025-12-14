@@ -1,4 +1,4 @@
-import { Army, ArmyState, Fleet, ShipEntity } from '../types';
+import { Army, ArmyState, Fleet, ShipEntity, ShipType } from '../types';
 
 export const MIN_ARMY_STRENGTH = 10000;
 
@@ -120,6 +120,17 @@ export const getFleetArmies = (fleet: Fleet, allArmies: Army[]): Army[] => {
 
 export const getSystemArmies = (systemId: string, allArmies: Army[]): Army[] => {
   return allArmies.filter(army => army.state === ArmyState.DEPLOYED && army.containerId === systemId);
+};
+
+/**
+ * Checks if a fleet contains at least one Troop Transport with an embarked army.
+ * Used for UI logic (Can I invade?).
+ */
+export const hasInvadingForce = (fleet: Fleet): boolean => {
+  return fleet.ships.some(s => 
+    s.type === ShipType.TROOP_TRANSPORT && 
+    !!s.carriedArmyId
+  );
 };
 
 /**
