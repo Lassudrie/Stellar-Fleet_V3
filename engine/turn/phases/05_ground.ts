@@ -1,66 +1,58 @@
-import { GameState } from '../../../types';
+
+import { GameState, FactionId } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
+import { COLORS } from '../../../data/static';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
-  let nextState = state;
-  const newLogs = [...state.logs];
-
-  // Faction color map for visual ownership tinting
-  const factionColorById = new Map<string, string>(
-    (state.factions || []).map(f => [f.id, f.color])
-  );
-
-  // 1) Resolve ground conflicts in deterministic order
-  const sortedSystems = [...state.systems].sort((a, b) => a.id.localeCompare(b.id));
-  const systemUpdates = new Map<string, any>();
-  const armiesToRemove = new Set<string>();
-
-  for (const system of sortedSystems) {
-    const result = resolveGroundConflict(system, nextState);
-    if (!result) continue;
-
-    newLogs.push({
-      id: ctx.rng.id('log'),
-      day: nextState.day,
-      text: result.logEntry,
-      type: 'combat'
+    let nextSystems = [...state.systems];
+    let nextLogs = [...state.logs];
+    
+    // Track armies to remove (destroyed)
+    const armiesToDestroyIds = new Set<string>();
+    
+    // 1. Resolve Conflict per System
+    nextSystems = nextSystems.map(system => {
+        // Pure calculation based on current state
+        const result = resolveGroundConflict(system, state);
+        
+        if (!result) return system;
+        
+        // Queue destroyed armies
+        result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+        
+        // Add Logs
+        result.logs.forEach(txt => {
+            nextLogs.push({
+                id: ctx.rng.id('log'),
+                day: state.day,
+                text: txt,
+                type: 'combat'
+            });
+        });
+        
+        // Update Ownership
+        if (result.conquestOccurred && result.winnerFactionId && result.winnerFactionId !== 'draw') {
+            return {
+                ...system,
+                ownerFactionId: result.winnerFactionId,
+                color: result.winnerFactionId === 'blue' ? COLORS.blue : COLORS.red
+            };
+        }
+        
+        return system;
     });
 
-    if (result.conquestOccurred && result.winnerFactionId && result.winnerFactionId !== 'draw') {
-      const newOwnerId = result.winnerFactionId;
-      const newColor = factionColorById.get(newOwnerId) || system.color;
-
-      systemUpdates.set(system.id, {
-        ...system,
-        ownerFactionId: newOwnerId,
-        color: newColor,
-        captureTurn: nextState.day
-      });
+    // 2. Filter Destroyed Armies
+    let nextArmies = state.armies;
+    if (armiesToDestroyIds.size > 0) {
+        nextArmies = state.armies.filter(a => !armiesToDestroyIds.has(a.id));
     }
 
-    result.armiesDestroyed.forEach(armyId => armiesToRemove.add(armyId));
-  }
-
-  // 2) Apply system updates
-  if (systemUpdates.size > 0) {
-    nextState = {
-      ...nextState,
-      systems: nextState.systems.map(sys => systemUpdates.get(sys.id) || sys)
+    return {
+        ...state,
+        systems: nextSystems,
+        armies: nextArmies,
+        logs: nextLogs
     };
-  }
-
-  // 3) Remove destroyed armies
-  if (armiesToRemove.size > 0) {
-    nextState = {
-      ...nextState,
-      armies: nextState.armies.filter(army => !armiesToRemove.has(army.id))
-    };
-  }
-
-  // 4) Return updated state with logs
-  return {
-    ...nextState,
-    logs: newLogs
-  };
 };

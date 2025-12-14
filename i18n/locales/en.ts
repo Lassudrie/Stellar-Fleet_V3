@@ -24,6 +24,12 @@ export const en = {
   'scenario.conquest_sandbox.title': 'Conquest Sandbox',
   'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
 
+  // New Game Screen
+  'newgame.title': 'New Simulation',
+  'newgame.subtitle': 'Configure initialization parameters.',
+  'newgame.faction': 'Faction',
+  'newgame.cancel': 'Cancel',
+  'newgame.launch': 'Launch',
 
   // Load/Options Placeholders
   'screen.underConstruction': '[ MODULE UNDER CONSTRUCTION ]',
@@ -138,7 +144,6 @@ export const en = {
   'msg.mergeFailed': 'Merge Failed: {{error}}',
   'msg.notOrbiting': 'Fleet is not in stable orbit of a system.',
   'msg.deployLog': 'Deployed army from ship {{ship}} to {{system}}.',
-  'msg.embarkLog': 'Army {{army}} embarked on transport {{ship}}.',
   'msg.invasionLog': 'Invasion Initiated on {{system}}. {{count}} armies deployed.',
   'msg.invasionFail': 'Deployed: {{success}}. Failed: {{fail}}.\nReason: {{error}}',
   'msg.saveFail': 'Failed to save game',

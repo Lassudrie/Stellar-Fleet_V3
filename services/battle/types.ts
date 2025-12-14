@@ -1,5 +1,5 @@
 
-import { FactionId, ShipType } from '../../../types';
+import { FactionId, ShipType } from '../../types';
 
 export type WeaponType = 'kinetic' | 'missile' | 'torpedo';
 

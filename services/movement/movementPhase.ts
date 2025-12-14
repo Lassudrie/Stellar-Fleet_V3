@@ -1,10 +1,9 @@
 
-import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity } from '../../../types';
-import { RNG } from '../../rng';
+import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity } from '../../types';
+import { RNG } from '../../engine/rng';
 import { getFleetSpeed } from './fleetSpeed';
-import { shortId } from '../../idUtils';
-import { sub, len, normalize, scale, add, clone, distSq } from '../../math/vec3';
-import { findNearestSystem } from '../../world';
+import { shortId } from '../../engine/idUtils';
+import { sub, len, normalize, scale, add, clone } from '../../engine/math/vec3';
 
 export interface ArmyUpdate {
     id: string;
@@ -32,25 +31,6 @@ export const resolveFleetMovement = (
   // Default: Next fleet is current fleet (reference)
   // If we modify it, we will clone it.
   let nextFleet: Fleet = fleet;
-
-  // --- Safety check for retreating fleets ---
-  if (fleet.retreating) {
-    if (!fleet.targetSystemId) {
-      // No retreat target → fleet destroyed
-      nextFleet = { ...fleet, ships: [] }; // Empty ships array will effectively destroy the fleet
-      return { nextFleet, logs: generatedLogs, armyUpdates };
-    }
-
-    // Safety: a retreating fleet must never stay in the system where it was defeated
-    const currentSystem = findNearestSystem(systems, fleet.position);
-    if (currentSystem && currentSystem.id === fleet.targetSystemId) {
-      console.error(
-        `[RETREAT ERROR] Fleet ${fleet.id} has invalid retreat target (same system).`
-      );
-      nextFleet = { ...fleet, ships: [] }; // Destroy fleet
-      return { nextFleet, logs: generatedLogs, armyUpdates };
-    }
-  }
 
   // 1. Handle MOVING state
   if (fleet.state === FleetState.MOVING && fleet.targetPosition) {

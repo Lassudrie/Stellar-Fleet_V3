@@ -1,22 +1,32 @@
-import { GameState, FactionId } from '../types';
 
+import { GameState, FactionId, VictoryCondition, Fleet } from '../types';
+
+/**
+ * Checks all active victory conditions to determine if a faction has won.
+ * Returns the winning Faction, or null if the game continues.
+ */
 export const checkVictoryConditions = (state: GameState): FactionId | null => {
-  const factionIds = getFactionIds(state);
-
-  const maxTurns = state.rules.victoryConditions?.maxTurns;
-  const hasSurvivalCondition =
-    state.rules.victoryConditions?.conditions?.some(c => c.type === 'survival') ?? false;
-
-  // Survival is evaluated only when maxTurns is reached.
-  if (maxTurns && state.day > maxTurns) {
-    if (!hasSurvivalCondition) return null;
-
-    const playerId = state.playerFactionId;
-    return hasActivePresence(state, playerId) ? playerId : null;
+  // 1. Check Max Turns (Draw/Timeout)
+  // If maxTurns is reached, the game ends.
+  // In a typical scenario, if you haven't won by X turns, you might lose, or it might be a score check.
+  // For now, if 'survival' is a condition and turns are reached, Blue wins. Otherwise null/draw.
+  if (state.objectives.maxTurns && state.day > state.objectives.maxTurns) {
+    const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
+    if (survivalCondition) {
+      // Assuming 'survival' implies the Player (BLUE) just needs to exist
+      const blueAlive = hasActivePresence(state, 'blue');
+      if (blueAlive) return 'blue';
+    }
+    // Simple timeout without explicit survival objective -> Draw or just end
+    return null; 
   }
 
-  for (const factionId of factionIds) {
-    if (checkFactionVictory(state, factionId, factionIds)) {
+  // 2. Check each Faction against Global Conditions
+  // Note: Most scenarios are symmetrical for "Elimination" and "Domination".
+  const factions: FactionId[] = ['blue', 'red'];
+
+  for (const factionId of factions) {
+    if (checkFactionVictory(factionId, state)) {
       return factionId;
     }
   }
@@ -24,100 +34,83 @@ export const checkVictoryConditions = (state: GameState): FactionId | null => {
   return null;
 };
 
-const getFactionIds = (state: GameState): FactionId[] => {
-  // Primary source: scenario-defined factions
-  const fromState = (state.factions || [])
-    .map(f => f.id)
-    .filter((id): id is FactionId => typeof id === 'string' && id.length > 0);
-
-  if (fromState.length > 0) {
-    return [...fromState].sort((a, b) => a.localeCompare(b));
+/**
+ * Checks if a specific faction fulfills any of the victory conditions.
+ */
+const checkFactionVictory = (factionId: FactionId, state: GameState): boolean => {
+  // If there are no explicit conditions, default to Elimination check (fallback)
+  if (state.objectives.conditions.length === 0) {
+    return checkElimination(factionId, state);
   }
 
-  // Fallback: discover factions from existing entities (legacy saves / partial states)
-  const discovered = new Set<FactionId>();
-  state.fleets.forEach(f => discovered.add(f.factionId));
-  state.armies.forEach(a => discovered.add(a.factionId));
-  state.systems.forEach(s => {
-    if (s.ownerFactionId) discovered.add(s.ownerFactionId);
-  });
-
-  const ids = Array.from(discovered);
-  if (ids.length > 0) return ids.sort((a, b) => a.localeCompare(b));
-
-  // Last resort: keep legacy default
-  return ['blue', 'red'];
-};
-
-const checkFactionVictory = (
-  state: GameState,
-  factionId: FactionId,
-  allFactionIds: FactionId[]
-): boolean => {
-  const conditions = state.rules.victoryConditions?.conditions;
-
-  // Default behavior (if not specified): elimination
-  if (!conditions || conditions.length === 0) {
-    return checkElimination(state, factionId, allFactionIds);
-  }
-
-  return conditions.some(condition => {
+  // A faction wins if it satisfies ANY of the "OR" conditions defined in the scenario.
+  return state.objectives.conditions.some(condition => {
     switch (condition.type) {
       case 'elimination':
-        return checkElimination(state, factionId, allFactionIds);
+        return checkElimination(factionId, state);
       case 'domination':
-        return checkDomination(state, factionId, condition.threshold);
-      case 'king_of_hill':
-        return checkKingOfHill(state, factionId, condition.systemId, condition.turns);
+        return checkDomination(factionId, state, condition.value);
+      case 'king_of_the_hill':
+        return checkKingOfTheHill(factionId, state, condition.value);
       case 'survival':
-        // Evaluated only via maxTurns gate above
-        return false;
+        // Survival is time-based, checked in the main loop above (MaxTurns).
+        // It cannot be triggered "early".
+        return false; 
       default:
         return false;
     }
   });
 };
 
-const hasActivePresence = (state: GameState, factionId: FactionId): boolean => {
-  // Conservative: fleets with ships is the minimum "alive" signal.
-  return state.fleets.some(f => f.factionId === factionId && f.ships.length > 0);
+// --- CONDITION EVALUATORS ---
+
+/**
+ * Elimination: A faction wins if ALL opposing factions have 0 active fleets and 0 systems.
+ */
+const checkElimination = (factionId: FactionId, state: GameState): boolean => {
+  const enemies = ['blue', 'red'].filter(f => f !== factionId);
+  
+  // Are all enemies wiped out?
+  const allEnemiesDestroyed = enemies.every(enemyFactionId => {
+    const hasFleets = state.fleets.some(f => f.factionId === enemyFactionId && f.ships.length > 0);
+    // Note: We currently don't count systems as "being alive" for elimination in standard 4X,
+    // usually destroying all fleets is enough to trigger a "Functional Kill".
+    // But strict elimination might require systems too.
+    // Let's stick to Fleets for V1 as per original hardcoded logic.
+    return !hasFleets;
+  });
+
+  return allEnemiesDestroyed;
 };
 
-const checkElimination = (
-  state: GameState,
-  factionId: FactionId,
-  allFactionIds: FactionId[]
-): boolean => {
-  if (!hasActivePresence(state, factionId)) return false;
-
-  const enemies = allFactionIds.filter(id => id !== factionId);
-  if (enemies.length === 0) return false; // Solo scenario: do not auto-win.
-
-  return enemies.every(enemyId => !hasActivePresence(state, enemyId));
-};
-
-const checkDomination = (state: GameState, factionId: FactionId, threshold: number): boolean => {
+/**
+ * Domination: A faction wins if it owns >= X% of the systems.
+ */
+const checkDomination = (factionId: FactionId, state: GameState, value?: number | string): boolean => {
+  const percentage = typeof value === 'number' ? value : 50; // Default 50%
+  
   const totalSystems = state.systems.length;
   if (totalSystems === 0) return false;
 
-  const owned = state.systems.filter(s => s.ownerFactionId === factionId).length;
-  return owned / totalSystems >= threshold;
+  const ownedCount = state.systems.filter(s => s.ownerFactionId === factionId).length;
+  const ratio = (ownedCount / totalSystems) * 100;
+
+  return ratio >= percentage;
 };
 
-const checkKingOfHill = (
-  state: GameState,
-  factionId: FactionId,
-  systemId: string,
-  requiredTurns: number
-): boolean => {
-  const system = state.systems.find(s => s.id === systemId);
-  if (!system) return false;
-  if (system.ownerFactionId !== factionId) return false;
+/**
+ * King of the Hill: A faction wins if it owns a specific target system.
+ */
+const checkKingOfTheHill = (factionId: FactionId, state: GameState, value?: number | string): boolean => {
+  if (!value || typeof value !== 'string') return false;
+  const targetSystemId = value;
 
-  // Robust fallback: if captureTurn is missing, treat as "just captured now"
-  // to avoid instantaneous wins on legacy states.
-  const captureTurn = system.captureTurn ?? state.day;
-  const heldTurns = state.day - captureTurn;
+  const system = state.systems.find(s => s.id === targetSystemId);
+  return system ? system.ownerFactionId === factionId : false;
+};
 
-  return heldTurns >= requiredTurns;
+// --- UTILS ---
+
+const hasActivePresence = (state: GameState, factionId: FactionId): boolean => {
+  return state.fleets.some(f => f.factionId === factionId && f.ships.length > 0);
 };

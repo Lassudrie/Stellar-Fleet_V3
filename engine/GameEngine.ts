@@ -3,15 +3,12 @@ import { GameState, FactionId } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
-import { applyEngagementRewardsAfterTurn } from './features/engagementRewards/runner';
 
 type PlayerCommand = 
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
     | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
     | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string }
-    | { type: 'LOAD_ARMY'; armyId: string; fleetId: string; shipId: string; systemId: string }
-    | { type: 'DEPLOY_ARMY'; armyId: string; fleetId: string; shipId: string; systemId: string };
+    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string };
 
 export class GameEngine {
     state: GameState;
@@ -59,12 +56,7 @@ export class GameEngine {
     }
 
     advanceTurn() {
-        const prev = this.state;
-        const turned = runTurn(this.state, this.rng);
-
-        // Optional post-turn engagement layer (must NOT consume the simulation RNG)
-        this.state = applyEngagementRewardsAfterTurn(prev, turned);
-
+        this.state = runTurn(this.state, this.rng);
         this.syncRngState();
         this.notify();
     }
@@ -73,16 +65,6 @@ export class GameEngine {
         this.state = applyCommand(this.state, cmd, this.rng);
         this.syncRngState();
         this.notify();
-    }
-
-    setSelectedFleetId(id: string | null) {
-        if (this.state.selectedFleetId !== id) {
-            this.state = {
-                ...this.state,
-                selectedFleetId: id
-            };
-            this.notify();
-        }
     }
 
     dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
@@ -130,65 +112,6 @@ export class GameEngine {
 
         if (command.type === 'MERGE_FLEETS') {
             // Placeholder logic
-            return { ok: true };
-        }
-
-        if (command.type === 'LOAD_ARMY') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your fleet' };
-
-            const ship = fleet.ships.find(s => s.id === command.shipId);
-            if (!ship) return { ok: false, error: 'Ship not found in fleet' };
-
-            const army = this.state.armies.find(a => a.id === command.armyId);
-            if (!army) return { ok: false, error: 'Army not found' };
-            if (army.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your army' };
-
-            const prevState = this.state;
-            this.state = applyCommand(this.state, {
-                type: 'LOAD_ARMY',
-                armyId: command.armyId,
-                fleetId: command.fleetId,
-                shipId: command.shipId,
-                systemId: command.systemId
-            }, this.rng);
-
-            // If state unchanged, validation failed inside applyCommand
-            if (this.state === prevState) {
-                return { ok: false, error: 'Load failed: check fleet orbit, ship capacity, or army state' };
-            }
-
-            this.syncRngState();
-            this.notify();
-            return { ok: true };
-        }
-
-        if (command.type === 'DEPLOY_ARMY') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your fleet' };
-
-            const ship = fleet.ships.find(s => s.id === command.shipId);
-            if (!ship) return { ok: false, error: 'Ship not found in fleet' };
-            if (ship.carriedArmyId !== command.armyId) return { ok: false, error: 'Ship does not carry this army' };
-
-            const prevState = this.state;
-            this.state = applyCommand(this.state, {
-                type: 'DEPLOY_ARMY',
-                armyId: command.armyId,
-                fleetId: command.fleetId,
-                shipId: command.shipId,
-                systemId: command.systemId
-            }, this.rng);
-
-            // If state unchanged, validation failed inside applyCommand
-            if (this.state === prevState) {
-                return { ok: false, error: 'Deploy failed: check fleet orbit or army state' };
-            }
-
-            this.syncRngState();
-            this.notify();
             return { ok: true };
         }
 

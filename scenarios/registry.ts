@@ -1,3 +1,4 @@
+
 import { ScenarioTemplate } from './types';
 import conquestSandbox from './templates/conquest_sandbox';
 
@@ -31,17 +32,6 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
     if (typeof s.generation.radius !== 'number') throw new Error("Missing 'generation.radius'");
     if (typeof s.generation.topology !== 'string') throw new Error("Missing 'generation.topology'");
 
-    // 3b. Optional Generation Constraints
-    // Minimum system spacing (0 disables). We validate basic type safety here.
-    if (s.generation.minimumSystemSpacingLy !== undefined && s.generation.minimumSystemSpacingLy !== null) {
-        if (typeof s.generation.minimumSystemSpacingLy !== 'number' || !Number.isFinite(s.generation.minimumSystemSpacingLy)) {
-            throw new Error("Invalid 'generation.minimumSystemSpacingLy' (expected a finite number)");
-        }
-        if (s.generation.minimumSystemSpacingLy < 0) {
-            throw new Error("Invalid 'generation.minimumSystemSpacingLy' (must be >= 0; use 0 to disable)");
-        }
-    }
-
     // 4. Setup
     if (!s.setup || typeof s.setup !== 'object') throw new Error("Missing 'setup'");
     if (!Array.isArray(s.setup.factions) || s.setup.factions.length === 0) throw new Error("Missing or empty 'setup.factions'");
@@ -56,32 +46,6 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
     for (const f of s.setup.factions) {
         if (typeof f.id !== 'string') throw new Error("Invalid faction ID");
         factionIds.add(f.id);
-    }
-
-    // 6b. Optional Territory Allocation Validation
-    if (s.setup.territoryAllocation !== undefined && s.setup.territoryAllocation !== null) {
-        const ta = s.setup.territoryAllocation as any;
-        if (ta.type !== 'percentages') throw new Error("Unsupported setup.territoryAllocation.type");
-        if (!ta.byFactionId || typeof ta.byFactionId !== 'object') throw new Error("Missing setup.territoryAllocation.byFactionId");
-
-        let sum = 0;
-        for (const [fid, share] of Object.entries(ta.byFactionId)) {
-            if (!factionIds.has(fid)) throw new Error(`territoryAllocation references unknown factionId: '${fid}'`);
-            if (typeof share !== 'number' || !isFinite(share) || share < 0 || share > 1) {
-                throw new Error(`Invalid territoryAllocation share for '${fid}'`);
-            }
-            sum += share;
-        }
-
-        if (ta.neutralShare !== undefined && ta.neutralShare !== null) {
-            if (typeof ta.neutralShare !== 'number' || !isFinite(ta.neutralShare) || ta.neutralShare < 0 || ta.neutralShare > 1) {
-                throw new Error("Invalid territoryAllocation.neutralShare");
-            }
-            sum += ta.neutralShare;
-        }
-
-        // Allow small floating errors
-        if (sum > 1.00001) throw new Error(`territoryAllocation shares sum to > 1.0 (${sum})`);
     }
 
     for (const fleet of s.setup.initialFleets) {

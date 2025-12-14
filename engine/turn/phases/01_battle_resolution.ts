@@ -1,7 +1,7 @@
 
 import { GameState, Battle, Fleet } from '../../../types';
 import { TurnContext } from '../types';
-import { resolveBattle } from '../../systems/battle/resolution';
+import { resolveBattle } from '../../../services/battle/resolution';
 
 export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Identify Scheduled Battles

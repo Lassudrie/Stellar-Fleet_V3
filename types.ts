@@ -1,5 +1,5 @@
+
 import { Vec3 } from './engine/math/vec3';
-import type { EngagementState } from './engagementRewards.types';
 
 // Replaces enum Faction
 export type FactionId = string;
@@ -62,19 +62,9 @@ export interface ShipEntity {
 export interface Army {
   id: string;
   factionId: FactionId; // Renamed from faction
-
-  /** Current strength (e.g., soldier count or abstract power). */
   strength: number;
-
-  /** Max strength baseline used for experience dilution (defaults to initial strength). */
-  maxStrength: number;
-
-  /** Cumulative experience points earned by this army (persists through casualties). */
-  xp: number;
-
   state: ArmyState;
   containerId: string;
-  embarkedFleetId?: string; // Fleet ID if army is embarked on a fleet
 }
 
 export interface StarSystem {
@@ -85,12 +75,6 @@ export interface StarSystem {
   size: number;
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
-
-  /**
-   * Turn number when the current owner took control of the system.
-   * Optional for backward compatibility with existing saves.
-   */
-  captureTurn?: number;
 }
 
 export interface Fleet {
@@ -105,8 +89,6 @@ export interface Fleet {
   stateStartTurn: number; // Turn when the current state began (Used for VFX)
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
-  currentSystemId?: string | null; // System ID where the fleet is currently located (if in orbit)
-  embarkedArmyIds?: string[]; // Array of army IDs embarked on this fleet
 }
 
 export interface LaserShot {
@@ -186,9 +168,6 @@ export interface GameplayRules {
   useAdvancedCombat: boolean;
   aiEnabled: boolean;
   totalWar: boolean;
-
-  /** If true, enables the Army Experience system (veterancy & morale effects). */
-  useArmyExperience?: boolean;
 }
 
 export interface GameState {
@@ -214,5 +193,4 @@ export interface GameState {
   aiState?: AIState; // TODO: Can be a Map<FactionId, AIState> for multi-AI later
   objectives: GameObjectives;
   rules: GameplayRules;
-  engagement?: EngagementState;
 }

@@ -80,9 +80,6 @@ class AIDebugger {
   private history: AIDebugTurnLog[] = [];
   private currentLog: AIDebugTurnLog | null = null;
   private readonly MAX_HISTORY = 100;
-  private aiState: any = null;
-  private plannedTasks: any[] = [];
-  private plannedCommands: any[] = [];
 
   public setEnabled(enabled: boolean) {
     this.isEnabled = enabled;
@@ -167,19 +164,6 @@ class AIDebugger {
   public logText(text: string) {
     if (!this.isEnabled || !this.currentLog) return;
     this.currentLog.logs.push(text);
-  }
-
-  // Methods for new AI system
-  public setAIState(state: any) {
-    this.aiState = state;
-  }
-
-  public setPlannedTasks(tasks: any[]) {
-    this.plannedTasks = tasks;
-  }
-
-  public setPlannedCommands(commands: any[]) {
-    this.plannedCommands = commands;
   }
 }
 

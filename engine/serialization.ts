@@ -1,19 +1,19 @@
+
 import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
 import { Vec3, vec3 } from './math/vec3';
 import { 
   SAVE_VERSION, 
-  SaveFileV2,
-  GameStateDTO,
-  Vector3DTO,
-  StarSystemDTO,
-  FleetDTO,
+  SaveFileV2, 
+  GameStateDTO, 
+  Vector3DTO, 
+  StarSystemDTO, 
+  FleetDTO, 
   LaserShotDTO,
   BattleDTO,
   AIStateDTO,
   EnemySightingDTO,
   ArmyDTO
 } from './saveFormat';
-import { sanitizeEngagementState } from './features/engagementRewards/state';
 
 // --- HELPERS ---
 
@@ -79,8 +79,6 @@ export const serializeGameState = (state: GameState): string => {
       id: a.id,
       factionId: a.factionId,
       strength: a.strength,
-      maxStrength: a.maxStrength,
-      xp: a.xp,
       state: a.state,
       containerId: a.containerId
     })),
@@ -93,15 +91,14 @@ export const serializeGameState = (state: GameState): string => {
       ...b,
       winnerFactionId: b.winnerFactionId,
       initialShips: b.initialShips?.map(s => ({...s, factionId: s.factionId})),
-      shipsLost: b.shipsLost
+      shipsLost: b.shipsLost 
     })),
     logs: state.logs,
     selectedFleetId: state.selectedFleetId,
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
     objectives: state.objectives,
-    rules: state.rules,
-    engagement: state.engagement
+    rules: state.rules
   };
 
   const saveFile: SaveFileV2 = {
@@ -166,32 +163,13 @@ export const deserializeGameState = (json: string): GameState => {
     }));
 
     // Armies
-    const armies: Army[] = (dto.armies || []).map((a: any) => {
-      const strengthRaw = typeof a?.strength === 'number' && Number.isFinite(a.strength)
-        ? a.strength
-        : 0;
-      const strength = Math.floor(strengthRaw);
-
-      const maxStrengthRaw = typeof a?.maxStrength === 'number' && Number.isFinite(a.maxStrength)
-        ? a.maxStrength
-        : strength;
-      const maxStrength = Math.max(Math.floor(maxStrengthRaw), strength);
-
-      const xpRaw = typeof a?.xp === 'number' && Number.isFinite(a.xp)
-        ? a.xp
-        : 0;
-      const xp = Math.max(0, Math.floor(xpRaw));
-
-      return {
-        id: a.id,
-        factionId: a.factionId || a.faction, // Migration
-        strength,
-        maxStrength,
-        xp,
-        state: a.state,
-        containerId: a.containerId
-      };
-    });
+    const armies: Army[] = (dto.armies || []).map((a: any) => ({
+      id: a.id,
+      factionId: a.factionId || a.faction, // Migration
+      strength: a.strength,
+      state: a.state,
+      containerId: a.containerId
+    }));
 
     const lasers: LaserShot[] = (dto.lasers || []).map((l: any) => ({
       id: l.id,
@@ -262,14 +240,7 @@ export const deserializeGameState = (json: string): GameState => {
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
       aiState,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
-      rules: {
-        fogOfWar: dto.rules?.fogOfWar ?? true,
-        aiEnabled: dto.rules?.aiEnabled ?? true,
-        useAdvancedCombat: dto.rules?.useAdvancedCombat ?? true,
-        totalWar: dto.rules?.totalWar ?? true,
-        useArmyExperience: dto.rules?.useArmyExperience ?? false
-      },
-      engagement: sanitizeEngagementState(dto.engagement)
+      rules: dto.rules || { fogOfWar: true, aiEnabled: true, useAdvancedCombat: true, totalWar: true }
     };
 
     return state;

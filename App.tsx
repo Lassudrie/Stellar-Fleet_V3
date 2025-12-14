@@ -1,42 +1,37 @@
 
 import React, { useState, useEffect } from 'react';
-import { ThreeEvent } from '@react-three/fiber';
 import { GameEngine } from './engine/GameEngine';
 import { GameState, StarSystem, Fleet, EnemySighting } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
+import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
-import OptionsScreen from './components/screens/OptionsScreen';
 import { buildScenario } from './scenarios';
-import { GameScenario } from './scenarios/types';
-import { generateWorld } from './engine/systems/world/worldGenerator';
+import { generateWorld } from './services/world/worldGenerator';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from './engine/fogOfWar';
 import { calculateFleetPower } from './engine/world';
-import { clone, equals, distSq } from './engine/math/vec3';
-import { CAPTURE_RANGE } from './data/static';
+import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'TROOP_TRANSFER_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
 
 const App: React.FC = () => {
   const { t } = useI18n();
-  const [screen, setScreen] = useState<'MENU' | 'SCENARIO' | 'LOAD_GAME' | 'GAME' | 'OPTIONS'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'OPTIONS' | 'SCENARIO'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState<number>(0);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
+  const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
-  const [troopTransferMode, setTroopTransferMode] = useState<'embark' | 'disembark' | null>(null);
-  const [troopTransferFleetId, setTroopTransferFleetId] = useState<string | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -87,10 +82,10 @@ const App: React.FC = () => {
       }
 
       // Edge Case: If the currently selected fleet was hidden by Fog of War, deselect it
-      if (nextView.selectedFleetId) {
-          const fleetExists = nextView.fleets.find(f => f.id === nextView.selectedFleetId);
+      if (selectedFleetId) {
+          const fleetExists = nextView.fleets.find(f => f.id === selectedFleetId);
           if (!fleetExists) {
-              if (engine) engine.setSelectedFleetId(null);
+              setSelectedFleetId(null);
               if (uiMode !== 'SYSTEM_MENU') {
                   setUiMode('NONE');
               }
@@ -98,66 +93,35 @@ const App: React.FC = () => {
       }
   };
 
-  // Helper to force reference changes for React.memo until engine is fully immutable
-  const getViewSnapshot = (state: GameState): GameState => ({
-      ...state,
-      fleets: [...state.fleets],
-      systems: [...state.systems],
-      armies: [...state.armies],
-      lasers: [...state.lasers],
-      battles: [...state.battles],
-      logs: [...state.logs],
-  });
-
   useEffect(() => {
     if (engine) {
-      updateViewState(getViewSnapshot(engine.state));
+      updateViewState(engine.state);
       
       const unsub = engine.subscribe(() => {
-        updateViewState(getViewSnapshot(engine.state));
+        updateViewState(engine.state);
       });
-      return () => { unsub(); };
+      return unsub;
     }
   }, [engine, godEyes]); 
 
-  const handleLaunchGame = (scenarioArg: number | GameScenario) => {
-    setLoadingProgress(0);
+  const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
-    setEnemySightings({});
-
-    // Defer heavy world generation until the LoadingScreen has had a chance to render.
-    requestAnimationFrame(() => {
+    setEnemySightings({}); 
+    setTimeout(() => {
         // Handle both simple seed (number) and full Scenario object
-        let scenario: GameScenario;
+        let scenario;
         if (typeof scenarioArg === 'number') {
              scenario = buildScenario('conquest_sandbox', scenarioArg);
         } else {
              scenario = scenarioArg;
         }
 
-        // Step 1/4: Scenario resolved
-        setLoadingProgress(0.25);
-
-        // Give React one frame to paint the updated progress before blocking generation.
-        requestAnimationFrame(() => {
-            const { state } = generateWorld(scenario);
-            // Step 2/4: World generated
-            setLoadingProgress(0.5);
-
-            const newEngine = new GameEngine(state);
-            // Step 3/4: Engine initialized
-            setLoadingProgress(0.75);
-
-            // Prepare the initial view state synchronously so we never exit loading with a null/stale view.
-            updateViewState(getViewSnapshot(newEngine.state));
-            setEngine(newEngine);
-            setScreen('GAME');
-
-            // Step 4/4: Game is ready => allow 100% only at the point we can render GAME.
-            setLoadingProgress(1);
-            setLoading(false);
-        });
-    });
+        const { state } = generateWorld(scenario);
+        const newEngine = new GameEngine(state);
+        setEngine(newEngine);
+        setScreen('GAME');
+        setLoading(false);
+    }, 500);
   };
 
   // --- SAVE / LOAD HANDLERS ---
@@ -187,33 +151,21 @@ const App: React.FC = () => {
   };
 
   const handleLoad = async (file: File) => {
-      setLoadingProgress(0);
       setLoading(true);
       try {
-          // Step 1/4: Reading save file
-          setLoadingProgress(0.25);
           const text = await file.text();
-
-          // Step 2/4: Deserializing state
-          setLoadingProgress(0.5);
           const state = deserializeGameState(text);
           
           const newEngine = new GameEngine(state);
-          newEngine.setSelectedFleetId(null);
-
-          // Step 3/4: Engine initialized
-          setLoadingProgress(0.75);
           setEngine(newEngine);
           
           setEnemySightings({}); 
+          setSelectedFleetId(null);
           setUiMode('NONE');
           
           updateViewState(newEngine.state);
-
+          
           setScreen('GAME');
-
-          // Step 4/4: Game is ready => allow 100% only at the point we can render GAME.
-          setLoadingProgress(1);
       } catch (e) {
           console.error("Load failed:", e);
           alert(t('msg.invalidSave') + "\n" + (e as Error).message);
@@ -224,14 +176,14 @@ const App: React.FC = () => {
 
   // --- INTERACTION HANDLERS ---
 
-  const handleSystemClick = (sys: StarSystem, event: ThreeEvent<MouseEvent>) => {
+  const handleSystemClick = (sys: StarSystem, event: any) => {
       setTargetSystem(sys);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setUiMode('SYSTEM_MENU');
   };
 
   const handleFleetSelect = (id: string | null) => {
-      if (engine) engine.setSelectedFleetId(id);
+      setSelectedFleetId(id);
   };
 
   const handleNextTurn = () => {
@@ -262,30 +214,13 @@ const App: React.FC = () => {
       setUiMode('INVASION_MODAL');
   };
 
-  const handleOpenTroopTransfer = (fleetId: string, mode: 'embark' | 'disembark') => {
-      setTroopTransferFleetId(fleetId);
-      setTroopTransferMode(mode);
-      setUiMode('TROOP_TRANSFER_MODAL');
-  };
-
-  const handleTroopTransferConfirm = (updatedWorld: GameState) => {
-      if (engine) {
-          // Update the engine state with the modified state
-          engine.state = updatedWorld;
-          engine.notify(); // Notify listeners of state change
-          updateViewState(getViewSnapshot(updatedWorld));
-      }
-      setUiMode('NONE');
-      setTroopTransferFleetId(null);
-      setTroopTransferMode(null);
-  };
-
-  const handleCommitInvasion = (fleetId: string) => { 
+  const handleCommitInvasion = (fleetId: any) => { 
+      const fId = fleetId as string;
       if (!targetSystem || !engine) return;
 
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
-          fleetId: fleetId,
+          fleetId: fId,
           targetSystemId: targetSystem.id
       });
 
@@ -296,145 +231,46 @@ const App: React.FC = () => {
               logType: 'move'
           });
       } else {
-          alert(t('msg.commandFailed', { error: result.error || 'Unknown error' }));
+          alert(t('msg.commandFailed', { error: result.error }));
       }
 
       setUiMode('NONE');
   };
 
   const handleSplitFleet = (shipIds: string[]) => {
-      if (engine && engine.state.selectedFleetId) {
+      if (engine && selectedFleetId) {
           engine.dispatchPlayerCommand({
               type: 'SPLIT_FLEET',
-              originalFleetId: engine.state.selectedFleetId,
+              originalFleetId: selectedFleetId,
               shipIds
           });
       }
   };
 
   const handleMergeFleet = (targetFleetId: string) => {
-      if (engine && engine.state.selectedFleetId) {
+      if (engine && selectedFleetId) {
           engine.dispatchPlayerCommand({
               type: 'MERGE_FLEETS',
-              sourceFleetId: engine.state.selectedFleetId,
+              sourceFleetId: selectedFleetId,
               targetFleetId
           });
       }
   };
 
-  // Find the system a fleet is orbiting (within CAPTURE_RANGE)
-  const findOrbitingSystem = (fleetId: string): StarSystem | null => {
-      if (!viewGameState) return null;
-      const fleet = viewGameState.fleets.find(f => f.id === fleetId);
-      if (!fleet) return null;
-      
-      const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-      for (const sys of viewGameState.systems) {
-          if (distSq(fleet.position, sys.position) <= captureSq) {
-              return sys;
-          }
-      }
-      return null;
-  };
+  // Placeholders
+  const handleDeploySingle = () => {};
+  const handleEmbarkArmy = () => {};
 
-  // Find the fleet containing a specific ship
-  const findFleetByShipId = (shipId: string): Fleet | null => {
-      if (!viewGameState) return null;
-      for (const fleet of viewGameState.fleets) {
-          if (fleet.ships.some(s => s.id === shipId)) {
-              return fleet;
-          }
-      }
-      return null;
-  };
+  if (loading) return <LoadingScreen />;
 
-  // Deploy army from transport to system
-  const handleDeploySingle = (shipId: string) => {
-      if (!engine || !viewGameState) return;
-
-      const fleet = findFleetByShipId(shipId);
-      if (!fleet) {
-          console.warn('[App] Deploy failed: fleet not found for ship', shipId);
-          return;
-      }
-
-      const ship = fleet.ships.find(s => s.id === shipId);
-      if (!ship || !ship.carriedArmyId) {
-          console.warn('[App] Deploy failed: ship has no army', shipId);
-          return;
-      }
-
-      const system = findOrbitingSystem(fleet.id);
-      if (!system) {
-          alert(t('msg.notOrbiting'));
-          return;
-      }
-
-      const result = engine.dispatchPlayerCommand({
-          type: 'DEPLOY_ARMY',
-          armyId: ship.carriedArmyId,
-          fleetId: fleet.id,
-          shipId: shipId,
-          systemId: system.id
-      });
-
-      if (result.ok) {
-          engine.dispatchCommand({
-              type: 'ADD_LOG',
-              text: t('msg.deployLog', { ship: shipId.slice(-4), system: system.name }),
-              logType: 'move'
-          });
-      } else {
-          console.warn('[App] Deploy command failed:', result.error);
-      }
-  };
-
-  // Embark army from system into transport
-  const handleEmbarkArmy = (shipId: string, armyId: string) => {
-      if (!engine || !viewGameState) return;
-
-      const fleet = findFleetByShipId(shipId);
-      if (!fleet) {
-          console.warn('[App] Embark failed: fleet not found for ship', shipId);
-          return;
-      }
-
-      const system = findOrbitingSystem(fleet.id);
-      if (!system) {
-          alert(t('msg.notOrbiting'));
-          return;
-      }
-
-      const result = engine.dispatchPlayerCommand({
-          type: 'LOAD_ARMY',
-          armyId: armyId,
-          fleetId: fleet.id,
-          shipId: shipId,
-          systemId: system.id
-      });
-
-      if (result.ok) {
-          engine.dispatchCommand({
-              type: 'ADD_LOG',
-              text: t('msg.embarkLog', { army: armyId.slice(-4), ship: shipId.slice(-4) }),
-              logType: 'move'
-          });
-      } else {
-          console.warn('[App] Embark command failed:', result.error);
-      }
-  };
-
-  if (loading) return <LoadingScreen progress={loadingProgress} />;
-
-  if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s)} />;
+  if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'OPTIONS' ? 'OPTIONS' : s === 'LOAD_GAME' ? 'LOAD_GAME' : s === 'NEW_GAME' ? 'SCENARIO' : 'MENU')} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
-  if (screen === 'OPTIONS') return <OptionsScreen onBack={() => setScreen('MENU')} />;
   
   if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
-      const selectedFleet = viewGameState.fleets.find(f => f.id === viewGameState.selectedFleetId) || null;
+      const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
@@ -445,7 +281,7 @@ const App: React.FC = () => {
                 onSystemClick={handleSystemClick}
                 onBackgroundClick={() => {
                     setUiMode('NONE');
-                    if (engine) engine.setSelectedFleetId(null);
+                    setSelectedFleetId(null);
                 }}
             />
             <UI 
@@ -462,8 +298,6 @@ const App: React.FC = () => {
                 battles={viewGameState.battles}
                 selectedBattleId={selectedBattleId}
                 gameState={viewGameState}
-                troopTransferMode={troopTransferMode}
-                troopTransferFleetId={troopTransferFleetId}
                 
                 onSplit={handleSplitFleet}
                 onMerge={handleMergeFleet}
@@ -475,7 +309,7 @@ const App: React.FC = () => {
                 onMoveCommand={handleMoveCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
                 onCloseMenu={() => setUiMode('NONE')}
-                onSelectFleet={handleFleetSelect}
+                onSelectFleet={setSelectedFleetId}
                 
                 onOpenBattle={(id) => {
                     setSelectedBattleId(id);
@@ -483,8 +317,6 @@ const App: React.FC = () => {
                 }}
                 onInvade={handleInvade}
                 onCommitInvasion={handleCommitInvasion}
-                onOpenTroopTransfer={handleOpenTroopTransfer}
-                onTroopTransferConfirm={handleTroopTransferConfirm}
 
                 onSave={handleSave}
                 

@@ -103,14 +103,6 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
                  {selectedTemplate.rules.aiEnabled && (
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.ai')}</span>
                  )}
-                 {selectedTemplate.rules.totalWar && (
-                   <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.total_war', { defaultValue: 'Total War' })}</span>
-                 )}
-                 {selectedTemplate.rules.groundCombat?.enabled && (
-                   <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">
-                     {t('scenario.groundCombat', { defaultValue: 'Ground Combat' })}
-                   </span>
-                 )}
               </div>
               <p className="text-slate-400 leading-relaxed text-sm max-w-lg border-l-2 border-blue-500/30 pl-4">
                 {getScenarioDesc(selectedTemplate)}

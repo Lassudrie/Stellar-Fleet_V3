@@ -1,6 +1,6 @@
 
-import { Fleet, StarSystem } from '../../../types';
-import { ORBIT_RADIUS, ORBIT_SPEED } from '../../../data/static';
+import { Fleet, StarSystem } from '../../types';
+import { ORBIT_RADIUS, ORBIT_SPEED } from '../../data/static';
 
 export const getOrbitAngle = (fleetId: string, timeInSeconds: number): number => {
   let hash = 0;

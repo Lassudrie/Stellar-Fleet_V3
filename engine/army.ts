@@ -1,3 +1,4 @@
+
 import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
 import { RNG } from './rng';
 
@@ -34,14 +35,10 @@ export const createArmy = (
     return null;
   }
 
-  const normalizedStrength = Math.floor(strength); // Ensure integer
-
   const army: Army = {
     id: rng.id('army'),
     factionId,
-    strength: normalizedStrength,
-    maxStrength: normalizedStrength,
-    xp: 0,
+    strength: Math.floor(strength), // Ensure integer
     state: initialState,
     containerId
   };

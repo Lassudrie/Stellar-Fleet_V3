@@ -75,7 +75,6 @@ Defines how the physical universe (Star Systems) is constructed.
 | `radius` | number | Yes | The physical radius of the playable galaxy (game units). |
 | `topology` | string | Yes | The algorithm used for star placement. Enum: `spiral`, `cluster`, `ring`, `scattered`. |
 | `density` | number | No | Optional modifier for distance between stars (default: 1.0). |
-| `minimumSystemSpacingLy` | number | No | Minimum distance between star systems (in ly / game units). Default: 5. Set to 0 to disable. |
 
 ---
 

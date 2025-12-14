@@ -1,8 +1,8 @@
 
-import { GameState, Battle, FactionId } from '../../../types';
-import { RNG } from '../../rng';
-import { CAPTURE_RANGE } from '../../../data/static';
-import { distSq } from '../../math/vec3';
+import { GameState, Battle, FactionId } from '../../types';
+import { RNG } from '../../engine/rng';
+import { CAPTURE_RANGE } from '../../data/static';
+import { distSq } from '../../engine/math/vec3';
 
 /**
  * Scans the galaxy for contested systems.

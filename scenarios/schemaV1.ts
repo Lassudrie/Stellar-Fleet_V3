@@ -1,3 +1,4 @@
+
 /**
  * SCENARIO DEFINITION SCHEMA V1
  * -----------------------------
@@ -40,16 +41,6 @@ export interface WorldGenerationConfig {
   
   /** Forme de la galaxie */
   topology: GalaxyTopology;
-
-  /**
-   * Espacement minimal entre deux systèmes stellaires (en années-lumière / unités logiques).
-   *
-   * Objectif : éviter les chevauchements visuels (systèmes trop proches) pour tous les scénarios.
-   *
-   * - Par défaut (si undefined) : 5
-   * - Pour désactiver : 0
-   */
-  minimumSystemSpacingLy?: number;
   
   /** 
    * Overrides spécifiques (optionnel).
@@ -105,26 +96,6 @@ export interface ScenarioSetup {
    * 'none': Aucun système possédé au départ (Battle Royale).
    */
   startingDistribution: 'scattered' | 'cluster' | 'none';
-
-  /**
-   * Allocation cible des systèmes au démarrage (optionnel).
-   * Si défini, le world generator tentera d'assigner un nombre de systèmes conforme
-   * aux pourcentages, en gardant une territorialité contiguë (croissance depuis le home).
-   *
-   * Exemple :
-   * {
-   *   type: 'percentages',
-   *   byFactionId: { red: 0.3, blue: 0.3 },
-   *   neutralShare: 0.4,
-   *   contiguity: 'clustered'
-   * }
-   */
-  territoryAllocation?: {
-    type: 'percentages';
-    byFactionId: Record<string, number>; // parts (0..1)
-    neutralShare?: number; // defaults to remaining share
-    contiguity?: 'clustered'; // defaults to 'clustered'
-  };
   
   /** Flottes présentes au début du tour 1 */
   initialFleets: FleetDefinition[];
@@ -160,14 +131,6 @@ export interface GameplayRules {
   aiEnabled: boolean;
   /** Si true, pas de diplomatie/échange (guerre totale) */
   totalWar: boolean;
-
-  /**
-   * Active le système d'expérience des armées (vétéran/élite, bonus combat & moral).
-   *
-   * - Optionnel pour rétrocompatibilité des scénarios.
-   * - Si absent/undefined, le moteur considère la feature désactivée.
-   */
-  useArmyExperience?: boolean;
 }
 
 // --- ROOT INTERFACE ---

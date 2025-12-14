@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { Fleet, StarSystem, ShipType, FactionId, FleetState } from '../../types';
 import { fleetLabel, shortId } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
-import { getFleetSpeed } from '../../engine/systems/movement/fleetSpeed';
+import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { dist } from '../../engine/math/vec3';
 
 interface InvasionModalProps {

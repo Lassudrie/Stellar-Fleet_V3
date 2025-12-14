@@ -1,7 +1,7 @@
 
-import { GameState, FleetState, LogEntry } from '../../../types';
+import { GameState, FleetState } from '../../../types';
 import { TurnContext } from '../types';
-import { detectNewBattles } from '../../systems/battle/detection';
+import { detectNewBattles } from '../../../services/battle/detection';
 
 export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameState => {
     // Only detect if advanced combat is enabled
@@ -32,23 +32,9 @@ export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameSt
         return f;
     });
 
-    // 4. Generate combat scheduled logs (for UI alerts)
-    // Sort by systemId for deterministic log order
-    const sortedBattles = [...newBattles].sort((a, b) => a.systemId.localeCompare(b.systemId));
-    const newLogs: LogEntry[] = sortedBattles.map(battle => {
-        const systemName = state.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
-        return {
-            id: ctx.rng.id('log'),
-            day: state.day,
-            text: `Battle scheduled at ${systemName}. Fleets engaged: ${battle.involvedFleetIds.length}.`,
-            type: 'combat' as const
-        };
-    });
-
     return {
         ...state,
         fleets: nextFleets,
-        battles: [...state.battles, ...newBattles],
-        logs: [...state.logs, ...newLogs]
+        battles: [...state.battles, ...newBattles]
     };
 };

@@ -24,6 +24,12 @@ export const fr = {
   'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
   'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
 
+  // New Game Screen
+  'newgame.title': 'Nouvelle Simulation',
+  'newgame.subtitle': 'Configuration des paramètres d\'initialisation.',
+  'newgame.faction': 'Faction',
+  'newgame.cancel': 'Annuler',
+  'newgame.launch': 'Lancer',
 
   // Load/Options Placeholders
   'screen.underConstruction': '[ MODULE EN CONSTRUCTION ]',
@@ -138,7 +144,6 @@ export const fr = {
   'msg.mergeFailed': 'Fusion échouée : {{error}}',
   'msg.notOrbiting': 'La flotte n\'est pas en orbite stable.',
   'msg.deployLog': 'Armée déployée du vaisseau {{ship}} vers {{system}}.',
-  'msg.embarkLog': 'Armée {{army}} embarquée sur transport {{ship}}.',
   'msg.invasionLog': 'Invasion initiée sur {{system}}. {{count}} armées déployées.',
   'msg.invasionFail': 'Déployé : {{success}}. Échec : {{fail}}.\nRaison : {{error}}',
   'msg.saveFail': 'Échec de la sauvegarde',

@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem, FleetState } from '../../types';
-import { getFleetSpeed } from '../../engine/systems/movement/fleetSpeed';
+import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { dist } from '../../engine/math/vec3';

@@ -63,7 +63,7 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
     return list;
   }, [sightings, currentDay, visibleFleetIds]);
 
-  return <group raycast={() => null}>{ghosts}</group>;
+  return <group pointerEvents="none">{ghosts}</group>;
 });
 
 export default IntelGhosts;

@@ -25,8 +25,6 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   let nextState = state;
 
   // 1. Resolve battles from previous turn (Scheduled -> Resolved)
-  // Note: For turn-based games, battles are typically resolved at the start 
-  // of the next turn. However, for MVP we also resolve immediately after detection.
   nextState = phaseBattleResolution(nextState, ctx);
 
   // 2. AI Planning & Execution (Generates commands)
@@ -38,11 +36,6 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 4. Detect New Battles (Locks fleets for next turn)
   nextState = phaseBattleDetection(nextState, ctx);
 
-  // 4b. MVP: Resolve newly detected battles in the SAME turn
-  // This ensures battles detected after movement are resolved immediately
-  // rather than waiting until the next turn.
-  nextState = phaseBattleResolution(nextState, ctx);
-
   // 5. Ground Combat & Conquest
   nextState = phaseGround(nextState, ctx);
 
@@ -52,11 +45,9 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 7. Cleanup & Maintenance
   nextState = phaseCleanup(nextState, ctx);
 
-  // 8. Time Advance & RNG State Preservation
-  // Save RNG state for deterministic replay/save functionality
+  // 8. Time Advance
   return {
       ...nextState,
-      day: nextState.day + 1,
-      rngState: rng.getState()
+      day: nextState.day + 1
   };
 };

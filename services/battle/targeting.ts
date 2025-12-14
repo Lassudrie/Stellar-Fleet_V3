@@ -1,4 +1,4 @@
-import { ShipType } from '../../../types';
+import { ShipType } from '../../types';
 import { BattleShipState } from './types';
 
 // Priority Tables (Lower index = Higher priority)

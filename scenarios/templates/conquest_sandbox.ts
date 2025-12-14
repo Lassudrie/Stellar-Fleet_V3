@@ -1,3 +1,4 @@
+
 import { ScenarioDefinitionV1 } from '../schemaV1';
 
 const conquestSandbox: ScenarioDefinitionV1 = {
@@ -5,14 +6,14 @@ const conquestSandbox: ScenarioDefinitionV1 = {
   id: "conquest_sandbox",
   meta: {
     title: "Conquest Sandbox",
-    description: "An open-ended sandbox conquest scenario with a Spiral galaxy. 30% Blue, 30% Red, the rest Neutral.",
+    description: "An open-ended sandbox scenario with a Ring topology and a central Galactic Core.",
     difficulty: 2,
-    tags: ["Sandbox", "Spiral", "Conquest"]
+    tags: ["Sandbox", "Ring"]
   },
   generation: {
-    systemCount: 50,
-    radius: 110,
-    topology: "spiral",
+    systemCount: 80,
+    radius: 120,
+    topology: "ring",
     staticSystems: [
       {
         id: "galactic_core",
@@ -27,16 +28,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
       { id: "blue", name: "United Earth Fleet", colorHex: "#3b82f6", isPlayable: true },
       { id: "red", name: "Martian Syndicate", colorHex: "#ef4444", isPlayable: false, aiProfile: "aggressive" }
     ],
-    startingDistribution: "cluster",
-
-    // Target ownership split at game start (total includes static systems; static systems remain neutral).
-    // 50 systems total -> Blue 15, Red 15, Neutral 20.
-    territoryAllocation: {
-      type: 'percentages',
-      byFactionId: { red: 0.3, blue: 0.3 },
-      neutralShare: 0.4,
-      contiguity: 'clustered'
-    },
+    startingDistribution: "cluster", // Should grant 1 Home + 4 Neighbors
     initialFleets: [
       {
         ownerFactionId: "blue",
@@ -71,10 +63,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
     fogOfWar: true,
     useAdvancedCombat: true,
     aiEnabled: true,
-    totalWar: true,
-
-    // Feature Flag: Army Experience (veterancy)
-    useArmyExperience: true
+    totalWar: true
   }
 };
 

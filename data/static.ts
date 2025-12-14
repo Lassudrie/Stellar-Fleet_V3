@@ -16,14 +16,6 @@ export const CAPTURE_RANGE = 5;
 // New: Territorial Control Radius (Matches Visuals)
 export const TERRITORY_RADIUS = 28;
 
-// AI Configuration
-export const AI_CONFIG = {
-    sightRange: SENSOR_RANGE, // Use sensor range for AI sight detection
-};
-
-// Maximum fleet size (for AI planning)
-export const MAX_FLEET_SIZE = 50;
-
 // Visual Constants
 export const ORBIT_RADIUS = 3;
 export const ORBIT_SPEED = 0.25;

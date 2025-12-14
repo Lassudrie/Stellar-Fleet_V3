@@ -1,7 +1,7 @@
 
-import { GameState, Battle, FactionId, Fleet, ShipEntity, ShipType, FleetState, BattleShipSnapshot } from '../../../types';
-import { RNG } from '../../rng';
-import { SHIP_STATS } from '../../../data/static';
+import { GameState, Battle, FactionId, Fleet, ShipEntity, ShipType, FleetState, BattleShipSnapshot } from '../../types';
+import { RNG } from '../../engine/rng';
+import { SHIP_STATS } from '../../data/static';
 import { BattleShipState, Projectile } from './types';
 import { selectTarget } from './targeting';
 import { 
@@ -9,9 +9,7 @@ import {
   BASE_ACCURACY, LOCK_GAIN_PER_ROUND, MAX_LAUNCH_PER_ROUND,
   INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP 
 } from './constants';
-import { withUpdatedFleetDerived } from '../../fleetDerived';
-import { findNearestAlliedSystemExcluding } from '../world/findNearestAlliedSystem';
-import { clone } from '../../math/vec3';
+import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
 
 // --- HELPERS ---
 
@@ -318,7 +316,6 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
 
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
-  const battleSystemId = battle.systemId;
 
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];
@@ -336,37 +333,12 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
 
     if (newShips.length > 0) {
         // Update fleet with new ships AND new derived stats (radius)
-        let updatedFleet = withUpdatedFleetDerived({
+        const updatedFleet = withUpdatedFleetDerived({
             ...oldFleet,
             ships: newShips,
             state: FleetState.ORBIT,
             stateStartTurn: state.day // Correctly update state timestamp to current turn
         });
-
-        // --- Retreat logic ---
-        // If this fleet's faction lost the battle, it must retreat
-        if (winnerFactionId !== 'draw' && oldFleet.factionId !== winnerFactionId) {
-            const retreatSystem = findNearestAlliedSystemExcluding(
-                oldFleet.factionId,
-                battleSystemId,
-                state.systems
-            );
-
-            if (retreatSystem) {
-                updatedFleet = {
-                    ...updatedFleet,
-                    retreating: true,
-                    targetSystemId: retreatSystem.id,
-                    targetPosition: clone(retreatSystem.position),
-                    state: FleetState.MOVING
-                };
-            } else {
-                // No valid allied system to retreat to → fleet destroyed
-                // Don't add to survivingFleets
-                return;
-            }
-        }
-
         survivingFleets.push(updatedFleet);
     }
   });
@@ -379,7 +351,6 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
   const updatedBattle: Battle = {
       ...battle,
       status: 'resolved',
-      turnResolved: state.day,
       initialShips: initialShips,
       logs: logs,
       winnerFactionId: winnerFactionId as any,

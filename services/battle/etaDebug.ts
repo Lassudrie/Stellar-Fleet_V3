@@ -1,13 +1,13 @@
 
 import { Vector3 } from 'three';
-import { GameState, Battle, FactionId, Fleet, ShipType, FleetState } from '../../../types';
-import { RNG } from '../../rng';
+import { GameState, Battle, FactionId, Fleet, ShipType, FleetState } from '../../types';
+import { RNG } from '../../engine/rng';
 import { resolveBattle } from './resolution';
 
 /**
  * DEBUG UTILITY
  * Run this function in console or main execution to verify ETA logic.
- * Usage: import { debugSimulateEta } from './engine/systems/battle/etaDebug'; debugSimulateEta();
+ * Usage: import { debugSimulateEta } from './services/battle/etaDebug'; debugSimulateEta();
  */
 export const debugSimulateEta = () => {
     console.log("--- DEBUGGING ETA LOGIC ---");

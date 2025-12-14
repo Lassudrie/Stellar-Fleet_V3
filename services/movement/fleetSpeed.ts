@@ -1,5 +1,5 @@
-import { Fleet } from '../../../types';
-import { BASE_FLEET_SPEED, SHIP_STATS } from '../../../data/static';
+import { Fleet } from '../../types';
+import { BASE_FLEET_SPEED, SHIP_STATS } from '../../data/static';
 
 /**
  * Calculates the movement speed of a fleet per turn.
