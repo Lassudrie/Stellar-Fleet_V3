@@ -7,7 +7,7 @@ import { useI18n } from '../../i18n';
 import { dist } from '../../engine/math/vec3';
 
 interface FleetPickerProps {
-  mode: 'MOVE' | 'LOAD' | 'UNLOAD';
+  mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
   targetSystem: StarSystem;
   blueFleets: Fleet[];
   onSelectFleet: (fleetId: string) => void;
@@ -24,7 +24,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
       const availableFleets = blueFleets.filter(fleet => {
           const distance = dist(fleet.position, targetPos);
 
-          if (mode === 'MOVE') {
+          if (mode === 'MOVE' || mode === 'ATTACK') {
               return distance > 1.0;
           }
 
@@ -43,15 +43,19 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
       ? 'picker.titleLoad'
       : mode === 'UNLOAD'
           ? 'picker.titleUnload'
-          : 'picker.title';
+          : mode === 'ATTACK'
+              ? 'picker.titleAttack'
+              : 'picker.title';
 
   const destinationKey = mode === 'LOAD'
       ? 'picker.destinationLoad'
       : mode === 'UNLOAD'
           ? 'picker.destinationUnload'
-          : 'picker.destination';
+          : mode === 'ATTACK'
+              ? 'picker.destinationAttack'
+              : 'picker.destination';
 
-  const emptyKey = mode === 'MOVE'
+  const emptyKey = mode === 'MOVE' || mode === 'ATTACK'
       ? 'picker.noFleets'
       : 'picker.noTransportFleets';
 

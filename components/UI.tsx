@@ -36,12 +36,13 @@ interface UIProps {
   onRestart: () => void;
   onNextTurn: () => void;
   onMoveCommand: (fleetId: string) => void;
+  onAttackCommand: (fleetId: string) => void;
   onLoadCommand: (fleetId: string) => void;
   onUnloadCommand: (fleetId: string) => void;
-  onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD') => void;
+  onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK') => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
-  fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | null;
+  fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
 
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
@@ -59,7 +60,7 @@ const UI: React.FC<UIProps> = ({
     onRestart, onNextTurn, 
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
-    onMoveCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
+    onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave,
@@ -107,20 +108,19 @@ const UI: React.FC<UIProps> = ({
   }, [selectedFleet, systems, gameState.armies, playerFactionId]);
 
   // Compute INVASION Visibility
-  // Rules: Not owned by player + Player Fleet in Orbit + Contains Loaded Troop Transport
+  // Rules: Enemy system + At least one player fleet carrying armies
   const showInvadeOption = useMemo(() => {
       if (!targetSystem) return false;
 
       if (targetSystem.ownerFactionId === playerFactionId) return false;
 
-      const detectionDistSq = (ORBIT_RADIUS * 2.5) ** 2; 
-
-      return blueFleets.some(f => 
-          f.state === FleetState.ORBIT &&
-          distSq(f.position, targetSystem.position) < detectionDistSq &&
-          hasInvadingForce(f)
-      );
+      return blueFleets.some(hasInvadingForce);
   }, [targetSystem, blueFleets, playerFactionId]);
+
+  const showAttackOption = useMemo(() => {
+      if (!targetSystem) return false;
+      return targetSystem.ownerFactionId !== playerFactionId;
+  }, [targetSystem, playerFactionId]);
 
   const showLoadOption = useMemo(() => {
       if (!targetSystem) return false;
@@ -203,12 +203,14 @@ const UI: React.FC<UIProps> = ({
             system={targetSystem}
             groundForces={groundForcesSummary}
             showInvadeOption={showInvadeOption}
+            showAttackOption={showAttackOption}
             showLoadOption={showLoadOption}
             showUnloadOption={showUnloadOption}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
             onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
             onOpenUnloadPicker={() => onOpenFleetPicker('UNLOAD')}
             onInvade={() => onInvade(targetSystem.id)}
+            onAttack={() => onOpenFleetPicker('ATTACK')}
             onClose={onCloseMenu}
         />
       )}
@@ -221,6 +223,7 @@ const UI: React.FC<UIProps> = ({
             onSelectFleet={(fleetId) => {
                 if (fleetPickerMode === 'LOAD') return onLoadCommand(fleetId);
                 if (fleetPickerMode === 'UNLOAD') return onUnloadCommand(fleetId);
+                if (fleetPickerMode === 'ATTACK') return onAttackCommand(fleetId);
                 return onMoveCommand(fleetId);
             }}
             onClose={onCloseMenu}

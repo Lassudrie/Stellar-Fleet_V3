@@ -32,7 +32,7 @@ const App: React.FC = () => {
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
-  const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | null>(null);
+  const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -210,6 +210,18 @@ const App: React.FC = () => {
       }
   };
 
+  const handleAttackCommand = (fleetId: string) => {
+      if (engine && targetSystem) {
+          engine.dispatchPlayerCommand({
+              type: 'MOVE_FLEET',
+              fleetId,
+              targetSystemId: targetSystem.id
+          });
+          setFleetPickerMode(null);
+          setUiMode('NONE');
+      }
+  };
+
   const handleLoadCommand = (fleetId: string) => {
       if (engine && targetSystem) {
           const result = engine.dispatchPlayerCommand({
@@ -242,7 +254,7 @@ const App: React.FC = () => {
       }
   };
 
-  const handleOpenFleetPicker = (mode: 'MOVE' | 'LOAD' | 'UNLOAD') => {
+  const handleOpenFleetPicker = (mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK') => {
       setFleetPickerMode(mode);
       setUiMode('FLEET_PICKER');
   };
@@ -353,6 +365,7 @@ const App: React.FC = () => {
                 onRestart={() => setScreen('MENU')}
                 onNextTurn={handleNextTurn}
                 onMoveCommand={handleMoveCommand}
+                onAttackCommand={handleAttackCommand}
                 onLoadCommand={handleLoadCommand}
                 onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
