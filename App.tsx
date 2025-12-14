@@ -16,11 +16,13 @@ import { applyFogOfWar } from './engine/fogOfWar';
 import { calculateFleetPower } from './engine/world';
 import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
+import { useButtonClickSound } from './services/audio/useButtonClickSound';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
 
 const App: React.FC = () => {
   const { t } = useI18n();
+  useButtonClickSound();
   const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'OPTIONS' | 'SCENARIO'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
