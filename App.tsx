@@ -17,6 +17,7 @@ import { calculateFleetPower } from './engine/world';
 import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
+import { aiDebugger } from './engine/aiDebugger';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
 
@@ -43,6 +44,29 @@ const App: React.FC = () => {
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
   const [aiDebug, setAiDebug] = useState(false);
+
+  const handleExportAiLogs = () => {
+      const history = aiDebugger.getHistory();
+      if (!history.length) return;
+
+      const json = JSON.stringify(history, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const filename = `stellar-fleet_ai-logs_day-${history[history.length - 1].turn}.json`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+  };
+
+  const handleClearAiLogs = () => {
+      aiDebugger.clear();
+  };
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = (baseState: GameState) => {
@@ -389,14 +413,18 @@ const App: React.FC = () => {
                 onCommitInvasion={handleCommitInvasion}
 
                 onSave={handleSave}
-                
+
                 devMode={devMode}
                 godEyes={godEyes}
                 onSetUiSettings={(s) => {
                     setDevMode(s.devMode);
                     setGodEyes(s.godEyes);
-                    setAiDebug(s.aiDebug || false);
+                    const enableAiDebug = s.aiDebug || false;
+                    setAiDebug(enableAiDebug);
+                    aiDebugger.setEnabled(enableAiDebug);
                 }}
+                onExportAiLogs={handleExportAiLogs}
+                onClearAiLogs={handleClearAiLogs}
             />
         </div>
       );
