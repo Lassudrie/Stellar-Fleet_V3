@@ -122,27 +122,27 @@ const UI: React.FC<UIProps> = ({
   const groundForcesSummary = useMemo(() => {
       if (!targetSystem || !gameState.armies) return null;
       
-      let playerForces = 0;
-      let playerPower = 0;
-      let enemyForces = 0;
-      let enemyPower = 0;
+      const summary = new Map<FactionId, { count: number, power: number }>();
 
       gameState.armies.forEach(army => {
           if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
-              if (army.factionId === playerFactionId) {
-                  playerForces++;
-                  playerPower += army.strength;
-              } else {
-                  enemyForces++;
-                  enemyPower += army.strength;
-              }
+             const current = summary.get(army.factionId) || { count: 0, power: 0 };
+             summary.set(army.factionId, {
+                 count: current.count + 1,
+                 power: current.power + army.strength
+             });
           }
       });
 
-      if (playerForces === 0 && enemyForces === 0) return null;
+      if (summary.size === 0) return null;
 
-      return { blueCount: playerForces, bluePower: playerPower, redCount: enemyForces, redPower: enemyPower };
-  }, [targetSystem, gameState.armies, playerFactionId]);
+      // Convert to array
+      return Array.from(summary.entries()).map(([fid, data]) => ({
+          factionId: fid,
+          count: data.count,
+          power: data.power
+      })).sort((a, b) => b.power - a.power);
+  }, [targetSystem, gameState.armies]);
 
   return (
     <div className="absolute inset-0 pointer-events-none safe-area">

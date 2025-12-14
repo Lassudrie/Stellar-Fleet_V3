@@ -11,6 +11,12 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     // Track armies to remove (destroyed)
     const armiesToDestroyIds = new Set<string>();
     
+    // Helper to get faction color
+    const getFactionColor = (id: FactionId): string => {
+        const f = state.factions.find(f => f.id === id);
+        return f ? f.color : '#999999';
+    };
+
     // 1. Resolve Conflict per System
     nextSystems = nextSystems.map(system => {
         // Pure calculation based on current state
@@ -36,7 +42,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             return {
                 ...system,
                 ownerFactionId: result.winnerFactionId,
-                color: result.winnerFactionId === 'blue' ? COLORS.blue : COLORS.red
+                color: getFactionColor(result.winnerFactionId)
             };
         }
         
