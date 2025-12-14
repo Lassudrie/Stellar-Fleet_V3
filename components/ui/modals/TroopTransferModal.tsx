@@ -1,177 +1,274 @@
-import React, { useState, useMemo } from 'react';
-import { GameState, Army, ArmyState } from '../../../types';
-import { useI18n } from '../../../i18n';
+import React, { useState } from 'react';
+import { GameState, Army, ArmyState, ShipType } from '../../../types';
 import { shortId } from '../../../engine/idUtils';
-import { embarkTroopsCommand } from '../../../engine/commands/embarkTroopsCommand';
-import { disembarkTroopsCommand } from '../../../engine/commands/disembarkTroopsCommand';
 import { findNearestSystem } from '../../../engine/world';
 import { ORBIT_RADIUS } from '../../../data/static';
 import { distSq } from '../../../engine/math/vec3';
 
 interface TroopTransferModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   mode: 'embark' | 'disembark';
   fleetId: string;
   world: GameState;
   onConfirm: (updatedWorld: GameState) => void;
-  onClose: () => void;
 }
 
+const ORBIT_THRESHOLD_SQ = (ORBIT_RADIUS * 3) * (ORBIT_RADIUS * 3);
+
 export function TroopTransferModal({
+  isOpen,
+  onClose,
   mode,
   fleetId,
   world,
-  onConfirm,
-  onClose
+  onConfirm
 }: TroopTransferModalProps) {
-  const { t } = useI18n();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedArmyIds, setSelectedArmyIds] = useState<Set<string>>(new Set());
 
   const fleet = world.fleets.find(f => f.id === fleetId);
-  if (!fleet) return null;
+  if (!isOpen || !fleet) return null;
 
-  // Determine current system
-  const currentSystem = fleet.currentSystemId
-    ? world.systems.find(s => s.id === fleet.currentSystemId)
-    : findNearestSystem(world.systems, fleet.position);
+  const currentSystem =
+    fleet.currentSystemId
+      ? world.systems.find(s => s.id === fleet.currentSystemId) || findNearestSystem(world.systems, fleet.position)
+      : findNearestSystem(world.systems, fleet.position);
 
   if (!currentSystem) return null;
 
-  // Verify fleet is in orbit
-  const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-  if (distSq(fleet.position, currentSystem.position) > orbitThresholdSq) return null;
+  const inOrbit = distSq(fleet.position, currentSystem.position) <= ORBIT_THRESHOLD_SQ;
+  if (!inOrbit) return null;
 
-  // Get available armies based on mode
-  const armies = useMemo(() => {
-    if (mode === 'embark') {
-      return world.armies.filter(
-        a =>
-          a.containerId === currentSystem.id &&
-          a.state === ArmyState.DEPLOYED &&
-          a.factionId === fleet.factionId &&
-          !a.embarkedFleetId
-      );
-    } else {
-      // disembark mode
-      return world.armies.filter(
-        a => a.embarkedFleetId === fleet.id
-      );
-    }
-  }, [mode, world.armies, currentSystem.id, fleet.id, fleet.factionId]);
+  const transportShips = fleet.ships.filter(s => s.type === ShipType.TROOP_TRANSPORT);
+  const emptyTransportShips = transportShips.filter(s => !s.carriedArmyId);
+  const loadedTransportShips = transportShips.filter(s => !!s.carriedArmyId);
 
-  function toggle(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setSelected(next);
+  const isAlliedSystem = currentSystem.ownerFactionId === fleet.factionId;
+
+  let availableArmies: Army[] = [];
+  if (mode === 'embark') {
+    availableArmies = world.armies
+      .filter(a =>
+        a.state === ArmyState.DEPLOYED &&
+        a.containerId === currentSystem.id &&
+        a.factionId === fleet.factionId
+      )
+      .sort((a, b) => b.strength - a.strength || a.id.localeCompare(b.id));
+  } else {
+    const carriedArmyIds = new Set<string>(
+      loadedTransportShips
+        .map(s => s.carriedArmyId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+
+    availableArmies = world.armies
+      .filter(a => carriedArmyIds.has(a.id))
+      .sort((a, b) => b.strength - a.strength || a.id.localeCompare(b.id));
   }
 
-  function handleConfirm() {
-    if (selected.size === 0) return;
+  const capacity = mode === 'embark' ? emptyTransportShips.length : loadedTransportShips.length;
 
-    // Apply commands and get updated state
-    const updatedWorld = mode === 'embark'
-      ? embarkTroopsCommand(world, fleetId, [...selected])
-      : disembarkTroopsCommand(world, fleetId, [...selected]);
+  const canConfirm =
+    selectedArmyIds.size > 0 &&
+    (mode === 'embark'
+      ? emptyTransportShips.length > 0
+      : isAlliedSystem && loadedTransportShips.length > 0);
 
-    // Notify parent with updated state
+  const toggleSelect = (armyId: string) => {
+    setSelectedArmyIds(prev => {
+      const next = new Set(prev);
+
+      if (next.has(armyId)) {
+        next.delete(armyId);
+        return next;
+      }
+
+      // Capacity guard (embark only)
+      if (mode === 'embark' && next.size >= emptyTransportShips.length) {
+        return next;
+      }
+
+      next.add(armyId);
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    if (selectedArmyIds.size === 0) return;
+
+    if (mode === 'disembark' && !isAlliedSystem) {
+      // Disembark into non-allied system is forbidden
+      return;
+    }
+
+    const selectedSorted = Array.from(selectedArmyIds).sort((a, b) => a.localeCompare(b));
+
+    if (mode === 'embark') {
+      const eligibleIdSet = new Set(availableArmies.map(a => a.id));
+      const requested = selectedSorted.filter(id => eligibleIdSet.has(id));
+
+      const availableShips = emptyTransportShips.slice().sort((a, b) => a.id.localeCompare(b.id));
+      const max = Math.min(requested.length, availableShips.length);
+      if (max <= 0) return;
+
+      const assignments = new Map<string, string>(); // shipId -> armyId
+      for (let i = 0; i < max; i++) {
+        assignments.set(availableShips[i].id, requested[i]);
+      }
+      const embarkedArmyIds = new Set(requested.slice(0, max));
+
+      const updatedWorld: GameState = {
+        ...world,
+        fleets: world.fleets.map(f => {
+          if (f.id !== fleet.id) return f;
+          return {
+            ...f,
+            ships: f.ships.map(s => {
+              const armyId = assignments.get(s.id);
+              if (!armyId) return s;
+              return { ...s, carriedArmyId: armyId };
+            })
+          };
+        }),
+        armies: world.armies.map(a => {
+          if (!embarkedArmyIds.has(a.id)) return a;
+          return {
+            ...a,
+            state: ArmyState.EMBARKED,
+            containerId: fleet.id
+          };
+        })
+      };
+
+      onConfirm(updatedWorld);
+      onClose();
+      return;
+    }
+
+    // Disembark: map carriedArmyId -> shipId
+    const carriedArmyIdToShipId = new Map<string, string>();
+    fleet.ships.forEach(s => {
+      if (s.type === ShipType.TROOP_TRANSPORT && s.carriedArmyId) {
+        carriedArmyIdToShipId.set(s.carriedArmyId, s.id);
+      }
+    });
+
+    const disembarkableArmyIds = selectedSorted.filter(id => carriedArmyIdToShipId.has(id));
+    if (disembarkableArmyIds.length === 0) return;
+
+    const disembarkSet = new Set(disembarkableArmyIds);
+    const shipsToClear = new Set<string>(disembarkableArmyIds.map(id => carriedArmyIdToShipId.get(id)!));
+
+    const updatedWorld: GameState = {
+      ...world,
+      fleets: world.fleets.map(f => {
+        if (f.id !== fleet.id) return f;
+        return {
+          ...f,
+          ships: f.ships.map(s => {
+            if (!shipsToClear.has(s.id)) return s;
+            return { ...s, carriedArmyId: null };
+          })
+        };
+      }),
+      armies: world.armies.map(a => {
+        if (!disembarkSet.has(a.id)) return a;
+        return {
+          ...a,
+          state: ArmyState.DEPLOYED,
+          containerId: currentSystem.id
+        };
+      })
+    };
+
     onConfirm(updatedWorld);
     onClose();
-  }
+  };
 
-  const title = mode === 'embark' ? 'Embark Troops' : 'Disembark Troops';
-  const actionLabel = mode === 'embark' ? 'Embark' : 'Disembark';
+  const title =
+    mode === 'embark'
+      ? `Embark Troops – Fleet ${shortId(fleet.id)}`
+      : `Disembark Troops – Fleet ${shortId(fleet.id)}`;
+
+  const subtitle =
+    mode === 'embark'
+      ? `System: ${currentSystem.name} • Slots available: ${emptyTransportShips.length}`
+      : `System: ${currentSystem.name} • Loaded transports: ${loadedTransportShips.length}`;
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-[2px] pointer-events-auto z-50 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-blue-500/50 w-11/12 max-w-lg max-h-[80vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
-        
-        {/* HEADER */}
-        <div className="bg-blue-950/30 p-4 border-b border-blue-900/50 flex justify-between items-center">
-          <div>
-            <h3 className="text-blue-400 font-bold text-lg tracking-wider uppercase flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                <path fillRule="evenodd" d="M8.25 6.75a3.75 3.75 0 117.5 0 3.75 3.75 0 01-7.5 0zM15.75 9.75a3 3 0 116 0 3 3 0 01-6 0zM2.25 9.75a3 3 0 116 0 3 3 0 01-6 0zM6.31 15.117A6.745 6.745 0 0112 12a6.745 6.745 0 016.709 7.498.75.75 0 01-.372.568A12.696 12.696 0 0112 21.75c-2.305 0-4.47-.612-6.337-1.684a.75.75 0 01-.372-.568 6.787 6.787 0 011.019-4.38z" clipRule="evenodd" />
-              </svg>
-              {title}
-            </h3>
-            <p className="text-xs text-blue-200/60 font-mono">
-              {mode === 'embark' 
-                ? `Select armies to embark from ${currentSystem.name}`
-                : `Select armies to disembark at ${currentSystem.name}`
-              }
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">✕</button>
-        </div>
-
-        {/* CONTENT */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-slate-900/50">
-          {armies.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 italic text-sm border border-dashed border-slate-700 rounded">
-              {mode === 'embark' 
-                ? 'No deployable armies available in this system'
-                : 'No armies embarked on this fleet'
-              }
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+      <div className="bg-slate-900 border border-slate-700 rounded-lg w-full max-w-md max-h-[80vh] flex flex-col">
+        <div className="p-4 border-b border-slate-700">
+          <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
+          <div className="text-sm text-slate-400">{subtitle}</div>
+          {mode === 'disembark' && !isAlliedSystem && (
+            <div className="mt-2 text-sm text-red-300">
+              Disembark is only allowed in allied systems.
             </div>
-          ) : (
-            armies.map(army => {
-              const isSelected = selected.has(army.id);
-              return (
-                <div
-                  key={army.id}
-                  onClick={() => toggle(army.id)}
-                  className={`cursor-pointer px-3 py-2 rounded border transition-all ${
-                    isSelected
-                      ? 'bg-blue-600/30 border-blue-500/50'
-                      : 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-700/40'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {isSelected && (
-                        <div className="w-2 h-2 rounded-full bg-blue-400"></div>
-                      )}
-                      <span className="font-mono text-sm text-slate-300">
-                        {shortId(army.id)}
-                      </span>
-                    </div>
-                    <span className="text-xs text-slate-400 font-bold">
-                      STR {army.strength.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              );
-            })
           )}
         </div>
 
-        {/* FOOTER */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-between items-center">
-          <div className="text-xs text-slate-400">
-            {selected.size > 0 && `${selected.size} army${selected.size > 1 ? 'ies' : ''} selected`}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white uppercase transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              disabled={selected.size === 0}
-              onClick={handleConfirm}
-              className={`px-4 py-2 text-xs font-bold uppercase transition-colors ${
-                selected.size > 0
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-              }`}
-            >
-              {actionLabel}
-            </button>
-          </div>
+        <div className="p-4 overflow-y-auto flex-1">
+          {availableArmies.length === 0 ? (
+            <div className="text-slate-400 text-sm">
+              No eligible armies available for this action.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {availableArmies.map(army => {
+                const isSelected = selectedArmyIds.has(army.id);
+                const disabled =
+                  mode === 'embark' &&
+                  !isSelected &&
+                  selectedArmyIds.size >= capacity;
+
+                return (
+                  <button
+                    key={army.id}
+                    onClick={() => toggleSelect(army.id)}
+                    disabled={disabled}
+                    className={`w-full flex items-center justify-between p-3 rounded-md border ${
+                      isSelected
+                        ? 'bg-blue-900/30 border-blue-500'
+                        : 'bg-slate-800 border-slate-700 hover:border-slate-500'
+                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className="flex flex-col items-start">
+                      <span className="text-slate-100 font-medium">
+                        Army {shortId(army.id)}
+                      </span>
+                      <span className="text-slate-400 text-sm">
+                        Strength: {army.strength}
+                      </span>
+                    </div>
+                    <div className="text-slate-300">
+                      {isSelected ? '✓' : '○'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-slate-700 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-md bg-slate-800 text-slate-200 hover:bg-slate-700"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+            className={`px-4 py-2 rounded-md ${
+              canConfirm
+                ? 'bg-blue-600 text-white hover:bg-blue-500'
+                : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+            }`}
+          >
+            Confirm ({selectedArmyIds.size}/{capacity})
+          </button>
         </div>
       </div>
     </div>

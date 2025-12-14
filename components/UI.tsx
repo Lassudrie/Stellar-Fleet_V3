@@ -219,6 +219,7 @@ const UI: React.FC<UIProps> = ({
 
       {uiMode === 'TROOP_TRANSFER_MODAL' && troopTransferMode && troopTransferFleetId && (
         <TroopTransferModal
+            isOpen={true}
             mode={troopTransferMode}
             fleetId={troopTransferFleetId}
             world={gameState}
