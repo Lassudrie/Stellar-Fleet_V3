@@ -18,7 +18,7 @@ interface FleetPanelProps {
   onEmbark: (shipId: string, armyId: string) => void;
   onOpenTroopTransfer: (fleetId: string, mode: 'embark' | 'disembark') => void;
   playerFactionId: string;
-  gameState: any; // GameState - need to import properly
+  gameState: GameState;
 }
 
 // Minimalist Ship Icons
