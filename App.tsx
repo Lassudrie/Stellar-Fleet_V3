@@ -29,6 +29,7 @@ const App: React.FC = () => {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState<number>(0);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -121,9 +122,12 @@ const App: React.FC = () => {
   }, [engine, godEyes]); 
 
   const handleLaunchGame = (scenarioArg: number | GameScenario) => {
+    setLoadingProgress(0);
     setLoading(true);
-    setEnemySightings({}); 
-    setTimeout(() => {
+    setEnemySightings({});
+
+    // Defer heavy world generation until the LoadingScreen has had a chance to render.
+    requestAnimationFrame(() => {
         // Handle both simple seed (number) and full Scenario object
         let scenario: GameScenario;
         if (typeof scenarioArg === 'number') {
@@ -132,12 +136,29 @@ const App: React.FC = () => {
              scenario = scenarioArg;
         }
 
-        const { state } = generateWorld(scenario);
-        const newEngine = new GameEngine(state);
-        setEngine(newEngine);
-        setScreen('GAME');
-        setLoading(false);
-    }, 500);
+        // Step 1/4: Scenario resolved
+        setLoadingProgress(0.25);
+
+        // Give React one frame to paint the updated progress before blocking generation.
+        requestAnimationFrame(() => {
+            const { state } = generateWorld(scenario);
+            // Step 2/4: World generated
+            setLoadingProgress(0.5);
+
+            const newEngine = new GameEngine(state);
+            // Step 3/4: Engine initialized
+            setLoadingProgress(0.75);
+
+            // Prepare the initial view state synchronously so we never exit loading with a null/stale view.
+            updateViewState(getViewSnapshot(newEngine.state));
+            setEngine(newEngine);
+            setScreen('GAME');
+
+            // Step 4/4: Game is ready => allow 100% only at the point we can render GAME.
+            setLoadingProgress(1);
+            setLoading(false);
+        });
+    });
   };
 
   // --- SAVE / LOAD HANDLERS ---
@@ -167,21 +188,33 @@ const App: React.FC = () => {
   };
 
   const handleLoad = async (file: File) => {
+      setLoadingProgress(0);
       setLoading(true);
       try {
+          // Step 1/4: Reading save file
+          setLoadingProgress(0.25);
           const text = await file.text();
+
+          // Step 2/4: Deserializing state
+          setLoadingProgress(0.5);
           const state = deserializeGameState(text);
           
           const newEngine = new GameEngine(state);
           newEngine.setSelectedFleetId(null);
+
+          // Step 3/4: Engine initialized
+          setLoadingProgress(0.75);
           setEngine(newEngine);
           
           setEnemySightings({}); 
           setUiMode('NONE');
           
           updateViewState(newEngine.state);
-          
+
           setScreen('GAME');
+
+          // Step 4/4: Game is ready => allow 100% only at the point we can render GAME.
+          setLoadingProgress(1);
       } catch (e) {
           console.error("Load failed:", e);
           alert(t('msg.invalidSave') + "\n" + (e as Error).message);
@@ -392,7 +425,7 @@ const App: React.FC = () => {
       }
   };
 
-  if (loading) return <LoadingScreen />;
+  if (loading) return <LoadingScreen progress={loadingProgress} />;
 
   if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'OPTIONS' ? 'OPTIONS' : s === 'LOAD_GAME' ? 'LOAD_GAME' : s === 'NEW_GAME' ? 'SCENARIO' : 'MENU')} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
