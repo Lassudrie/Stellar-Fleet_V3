@@ -121,3 +121,12 @@ export const getFleetArmies = (fleet: Fleet, allArmies: Army[]): Army[] => {
 export const getSystemArmies = (systemId: string, allArmies: Army[]): Army[] => {
   return allArmies.filter(army => army.state === ArmyState.DEPLOYED && army.containerId === systemId);
 };
+
+export const sanitizeArmies = (state: { armies: Army[] }): { armies: Army[]; logs: string[] } => {
+  // Legacy placeholder: retained for compatibility with cleanup phase.
+  return { armies: state.armies, logs: [] };
+};
+
+export const hasInvadingForce = (fleet: Fleet, armies: Army[]): boolean => {
+  return armies.some(army => army.containerId === fleet.id && army.state === ArmyState.EMBARKED);
+};

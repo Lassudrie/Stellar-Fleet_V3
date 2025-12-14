@@ -1,13 +1,16 @@
 import React, { useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScenarioTemplate } from '../../scenarios/templates';
-import { useGameStore } from '../../stores/gameStore';
+import { useI18n } from '../../i18n';
+import { SCENARIO_TEMPLATES } from '../../scenarios';
 
-export const ScenarioSelectScreen: React.FC = () => {
-  const { t } = useTranslation();
-  const { startScenario } = useGameStore();
+interface ScenarioSelectScreenProps {
+  onBack: () => void;
+  onLaunch: (seedOrScenario: number) => void;
+}
 
-  const templates = useMemo(() => ScenarioTemplate.getAll(), []);
+const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onLaunch }) => {
+  const { t } = useI18n();
+
+  const templates = useMemo(() => SCENARIO_TEMPLATES, []);
   const [selectedId, setSelectedId] = React.useState<string>(templates[0]?.id ?? '');
 
   const selectedTemplate = useMemo(() => templates.find(tpl => tpl.id === selectedId) ?? templates[0], [templates, selectedId]);
@@ -60,12 +63,20 @@ export const ScenarioSelectScreen: React.FC = () => {
               <p className="text-sm text-slate-400 mt-2">{selectedTemplate.description}</p>
             </div>
 
-            <button
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
-              onClick={() => startScenario(selectedTemplate.id)}
-            >
-              {t('scenario.start')}
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded border border-slate-700"
+                onClick={onBack}
+              >
+                {t('scenario.back', { defaultValue: 'Back' })}
+              </button>
+              <button
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
+                onClick={() => onLaunch(Date.now())}
+              >
+                {t('scenario.start')}
+              </button>
+            </div>
           </div>
 
           <div className="mt-6">
@@ -123,3 +134,5 @@ export const ScenarioSelectScreen: React.FC = () => {
     </div>
   );
 };
+
+export default ScenarioSelectScreen;

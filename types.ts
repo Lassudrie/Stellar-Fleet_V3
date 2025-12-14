@@ -54,6 +54,21 @@ export interface Fleet {
   maxFuel: number;
   destination?: Vector3;
   arrivedAt?: number;
+
+  // Runtime navigation state
+  state?: FleetState;
+  targetSystemId?: string | null;
+  targetPosition?: Vector3 | null;
+  invasionTargetSystemId?: string | null;
+  retreating?: boolean;
+  stateStartTurn?: number;
+  radius?: number;
+}
+
+export enum FleetState {
+  ORBIT = 'ORBIT',
+  MOVING = 'MOVING',
+  COMBAT = 'COMBAT'
 }
 
 export enum ArmyState {

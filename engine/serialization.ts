@@ -1,8 +1,8 @@
 import { Vec3, vec3 } from './math/vec3';
 import { AIState, Army, Battle, Fleet, GameObjectives, GameState, LaserShot, LogEntry, StarSystem } from '../types';
-import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO } from './saveFormat';
-import { SAVE_VERSION, EnemySightingDTO, toEnemySightings, fromEnemySightings } from './saveEnemies';
-import { deepFreezeDev } from './utils/deepFreezeDev';
+import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO, SAVE_VERSION } from './saveFormat';
+import { EnemySightingDTO, toEnemySightings, fromEnemySightings } from './saveEnemies';
+import { deepFreezeDev } from './state/immutability';
 
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
 const deserializeVector3 = (v: Vector3DTO): Vec3 => vec3(v.x, v.y, v.z);

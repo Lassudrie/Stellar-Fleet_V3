@@ -114,3 +114,5 @@ export const conquest_sandbox: ScenarioDefinitionV1 = {
     }
   ]
 };
+
+export default conquest_sandbox;
