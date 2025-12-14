@@ -3,7 +3,7 @@ import React from 'react';
 import { useI18n } from '../../i18n';
 
 type MainMenuProps = {
-  onNavigate: (screen: 'NEW_GAME' | 'LOAD_GAME' | 'OPTIONS') => void;
+  onNavigate: (screen: 'SCENARIO' | 'LOAD_GAME' | 'OPTIONS') => void;
 };
 
 const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
@@ -30,7 +30,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
 
         {/* Menu Buttons */}
         <div className="flex flex-col gap-4 w-64 md:w-80">
-          <MenuButton onClick={() => onNavigate('NEW_GAME')} label={t('menu.newGame')} primary />
+          <MenuButton onClick={() => onNavigate('SCENARIO')} label={t('menu.newGame')} primary />
           <MenuButton onClick={() => onNavigate('LOAD_GAME')} label={t('menu.loadGame')} />
           <MenuButton onClick={() => onNavigate('OPTIONS')} label={t('menu.options')} />
         </div>

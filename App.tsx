@@ -6,7 +6,6 @@ import { GameState, StarSystem, Fleet, EnemySighting } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
-import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import OptionsScreen from './components/screens/OptionsScreen';
@@ -25,7 +24,7 @@ type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVAS
 
 const App: React.FC = () => {
   const { t } = useI18n();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'OPTIONS' | 'SCENARIO'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'SCENARIO' | 'LOAD_GAME' | 'GAME' | 'OPTIONS'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -427,7 +426,7 @@ const App: React.FC = () => {
 
   if (loading) return <LoadingScreen progress={loadingProgress} />;
 
-  if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'OPTIONS' ? 'OPTIONS' : s === 'LOAD_GAME' ? 'LOAD_GAME' : s === 'NEW_GAME' ? 'SCENARIO' : 'MENU')} />;
+  if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s)} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
   if (screen === 'OPTIONS') return <OptionsScreen onBack={() => setScreen('MENU')} />;

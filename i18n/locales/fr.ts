@@ -24,12 +24,6 @@ export const fr = {
   'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
   'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
 
-  // New Game Screen
-  'newgame.title': 'Nouvelle Simulation',
-  'newgame.subtitle': 'Configuration des paramètres d\'initialisation.',
-  'newgame.faction': 'Faction',
-  'newgame.cancel': 'Annuler',
-  'newgame.launch': 'Lancer',
 
   // Load/Options Placeholders
   'screen.underConstruction': '[ MODULE EN CONSTRUCTION ]',

@@ -24,12 +24,6 @@ export const en = {
   'scenario.conquest_sandbox.title': 'Conquest Sandbox',
   'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
 
-  // New Game Screen
-  'newgame.title': 'New Simulation',
-  'newgame.subtitle': 'Configure initialization parameters.',
-  'newgame.faction': 'Faction',
-  'newgame.cancel': 'Cancel',
-  'newgame.launch': 'Launch',
 
   // Load/Options Placeholders
   'screen.underConstruction': '[ MODULE UNDER CONSTRUCTION ]',
