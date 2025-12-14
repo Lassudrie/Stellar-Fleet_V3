@@ -351,6 +351,7 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
   const updatedBattle: Battle = {
       ...battle,
       status: 'resolved',
+      turnResolved: state.day,
       initialShips: initialShips,
       logs: logs,
       winnerFactionId: winnerFactionId as any,
