@@ -1,7 +1,7 @@
 import { ShipType } from '../../types';
 import { ScenarioDefinitionV1 } from '../schemaV1';
 
-export const conquest_sandbox: ScenarioDefinitionV1 = {
+const conquestSandbox: ScenarioDefinitionV1 = {
   id: 'conquest_sandbox',
   name: 'Conquest Sandbox',
   description: 'A sandbox scenario for testing conquest mechanics',
@@ -114,3 +114,5 @@ export const conquest_sandbox: ScenarioDefinitionV1 = {
     }
   ]
 };
+
+export default conquestSandbox;
