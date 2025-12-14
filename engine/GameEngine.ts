@@ -1,56 +1,40 @@
-
 import { GameState, FactionId } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
-import { applyEngagementRewardsAfterTurn } from './features/engagementRewards/runner';
-
-type PlayerCommand = 
-    | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
-    | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
-    | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string }
-    | { type: 'LOAD_ARMY'; armyId: string; fleetId: string; shipId: string; systemId: string }
-    | { type: 'DEPLOY_ARMY'; armyId: string; fleetId: string; shipId: string; systemId: string };
+import { withTurnReportLogs } from './turnReport/computeTurnReport';
 
 export class GameEngine {
     state: GameState;
     rng: RNG;
-    private listeners: Set<() => void> = new Set();
+    listeners: Set<() => void>;
 
     constructor(initialState: GameState) {
         this.state = initialState;
-        this.rng = new RNG(initialState.seed);
-        
-        // Fix: Restore RNG state to ensure determinism and prevent ID collisions
-        if (initialState.rngState !== undefined) {
-            this.rng.setState(initialState.rngState);
-        }
+        this.rng = new RNG(initialState.seed, initialState.rngState);
+        this.listeners = new Set();
+        this.syncRngState();
     }
 
-    private syncRngState() {
-        // Persist current RNG cursor to state so next save/load continues correctly
+    // Ensure rng state in game state matches engine
+    syncRngState() {
         this.state.rngState = this.rng.getState();
 
-        // DEV Assertion: Check for duplicate Log IDs
-        if ((import.meta as any).env && (import.meta as any).env.DEV) {
-            const seen = new Set<string>();
-            let duplicates = 0;
-            for (const log of this.state.logs) {
-                if (seen.has(log.id)) {
-                    console.error(`[GameEngine] CRITICAL: Duplicate Log ID detected: ${log.id}`);
-                    duplicates++;
-                }
-                seen.add(log.id);
-            }
-            if (duplicates > 0) {
-                console.error(`[GameEngine] Found ${duplicates} duplicate IDs in logs. RNG Determinism broken.`);
+        // DEV: Validate no duplicate IDs. This catches RNG desync issues early.
+        if ((import.meta as any).env?.MODE !== 'production') {
+            const ids = [
+                ...this.state.systems.map(s => s.id),
+                ...this.state.fleets.map(f => f.id),
+                ...this.state.battles.map(b => b.id),
+                ...Object.keys(this.state.armies ?? {}),
+            ];
+            const set = new Set(ids);
+            if (set.size !== ids.length) {
+                // eslint-disable-next-line no-console
+                console.error('Duplicate IDs detected!', ids);
+                throw new Error('Duplicate IDs detected (possible RNG desync)');
             }
         }
-    }
-
-    notify() {
-        this.listeners.forEach(l => l());
     }
 
     subscribe(fn: () => void) {
@@ -58,140 +42,73 @@ export class GameEngine {
         return () => this.listeners.delete(fn);
     }
 
+    /**
+     * Read-only convenience accessor (used by UI code).
+     * Kept as a method to avoid leaking implementation details.
+     */
+    getState(): GameState {
+        return this.state;
+    }
+
+    notify() {
+        for (const fn of this.listeners) fn();
+    }
+
+    dispatch(command: GameCommand) {
+        // Check faction permission (only allow player to command their own faction)
+        if (command.factionId && command.factionId !== this.state.playerFactionId) {
+            console.warn(`Command rejected: faction ${command.factionId} != player faction ${this.state.playerFactionId}`);
+            return;
+        }
+
+        this.state = applyCommand(this.state, command, this.rng);
+        this.syncRngState();
+        this.notify();
+    }
+
     advanceTurn() {
-        const prev = this.state;
-        const turned = runTurn(this.state, this.rng);
+        const prevState = this.state;
+        const rawNextState = runTurn(prevState, this.rng);
 
-        // Optional post-turn engagement layer (must NOT consume the simulation RNG)
-        this.state = applyEngagementRewardsAfterTurn(prev, turned);
+        // Attach end-of-turn report logs (SITREP) without consuming RNG.
+        const nextState = withTurnReportLogs(prevState, rawNextState);
 
+        this.state = nextState;
         this.syncRngState();
         this.notify();
     }
 
-    dispatchCommand(cmd: GameCommand) {
-        this.state = applyCommand(this.state, cmd, this.rng);
-        this.syncRngState();
-        this.notify();
+    // Helper methods for convenience
+    getSystem(systemId: string) {
+        return this.state.systems.find(s => s.id === systemId);
     }
 
-    setSelectedFleetId(id: string | null) {
-        if (this.state.selectedFleetId !== id) {
-            this.state = {
-                ...this.state,
-                selectedFleetId: id
-            };
-            this.notify();
-        }
+    getFleet(fleetId: string) {
+        return this.state.fleets.find(f => f.id === fleetId);
     }
 
-    dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
-        if (command.type === 'MOVE_FLEET') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== 'blue') return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating and cannot receive commands.' };
+    // Get player faction
+    getPlayerFaction(): FactionId {
+        return this.state.playerFactionId;
+    }
 
-            const system = this.state.systems.find(s => s.id === command.targetSystemId);
-            if (!system) return { ok: false, error: 'System not found' };
+    // Get all fleets for a faction
+    getFactionFleets(factionId: FactionId) {
+        return this.state.fleets.filter(f => f.factionId === factionId);
+    }
 
-            this.state = applyCommand(this.state, {
-                type: 'MOVE_FLEET',
-                fleetId: command.fleetId,
-                targetSystemId: command.targetSystemId
-            }, this.rng);
-            
-            this.syncRngState();
-            this.notify();
-            return { ok: true };
-        }
+    // Get fleets in a system
+    getFleetsInSystem(systemId: string) {
+        return this.state.fleets.filter(f => f.location.systemId === systemId);
+    }
 
-        if (command.type === 'ORDER_INVASION') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== 'blue') return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+    // Get systems owned by a faction
+    getFactionSystems(factionId: FactionId) {
+        return this.state.systems.filter(s => s.ownerFactionId === factionId);
+    }
 
-            this.state = applyCommand(this.state, {
-                type: 'ORDER_INVASION_MOVE',
-                fleetId: command.fleetId,
-                targetSystemId: command.targetSystemId
-            }, this.rng);
-
-            this.syncRngState();
-            this.notify();
-            return { ok: true };
-        }
-
-        if (command.type === 'SPLIT_FLEET') {
-            // Placeholder logic
-            return { ok: true };
-        }
-
-        if (command.type === 'MERGE_FLEETS') {
-            // Placeholder logic
-            return { ok: true };
-        }
-
-        if (command.type === 'LOAD_ARMY') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your fleet' };
-
-            const ship = fleet.ships.find(s => s.id === command.shipId);
-            if (!ship) return { ok: false, error: 'Ship not found in fleet' };
-
-            const army = this.state.armies.find(a => a.id === command.armyId);
-            if (!army) return { ok: false, error: 'Army not found' };
-            if (army.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your army' };
-
-            const prevState = this.state;
-            this.state = applyCommand(this.state, {
-                type: 'LOAD_ARMY',
-                armyId: command.armyId,
-                fleetId: command.fleetId,
-                shipId: command.shipId,
-                systemId: command.systemId
-            }, this.rng);
-
-            // If state unchanged, validation failed inside applyCommand
-            if (this.state === prevState) {
-                return { ok: false, error: 'Load failed: check fleet orbit, ship capacity, or army state' };
-            }
-
-            this.syncRngState();
-            this.notify();
-            return { ok: true };
-        }
-
-        if (command.type === 'DEPLOY_ARMY') {
-            const fleet = this.state.fleets.find(f => f.id === command.fleetId);
-            if (!fleet) return { ok: false, error: 'Fleet not found' };
-            if (fleet.factionId !== this.state.playerFactionId) return { ok: false, error: 'Not your fleet' };
-
-            const ship = fleet.ships.find(s => s.id === command.shipId);
-            if (!ship) return { ok: false, error: 'Ship not found in fleet' };
-            if (ship.carriedArmyId !== command.armyId) return { ok: false, error: 'Ship does not carry this army' };
-
-            const prevState = this.state;
-            this.state = applyCommand(this.state, {
-                type: 'DEPLOY_ARMY',
-                armyId: command.armyId,
-                fleetId: command.fleetId,
-                shipId: command.shipId,
-                systemId: command.systemId
-            }, this.rng);
-
-            // If state unchanged, validation failed inside applyCommand
-            if (this.state === prevState) {
-                return { ok: false, error: 'Deploy failed: check fleet orbit or army state' };
-            }
-
-            this.syncRngState();
-            this.notify();
-            return { ok: true };
-        }
-
-        return { ok: false, error: 'Unknown command' };
+    // Execute a command as the player
+    dispatchPlayerCommand(command: Omit<GameCommand, 'factionId'>) {
+        this.dispatch({ ...command, factionId: this.state.playerFactionId } as GameCommand);
     }
 }

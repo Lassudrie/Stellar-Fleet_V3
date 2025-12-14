@@ -38,6 +38,7 @@ export const en = {
   'ui.report': 'Report',
   'ui.combat': 'Combat',
   'ui.comlink': 'Com-Link',
+  'ui.sitrep': 'SITREP',
 
   // UI SideMenu
   'sidemenu.command': 'Command',
@@ -61,6 +62,23 @@ export const en = {
   'sidemenu.godEyes': 'God Eyes',
   'sidemenu.aiDebugger': 'AI Debugger',
   'sidemenu.language': 'Language',
+
+  // Turn Reports (SITREP)
+  'reports.turnReports': 'Turn Reports',
+  'reports.enableHint': 'Generate end-of-turn reports (SITREP).',
+  'reports.available_one': '{{count}} report available',
+  'reports.available_other': '{{count}} reports available',
+  'reports.turnReport': 'Turn Report',
+
+  'reports.pills.newTurnReport': 'TURN REPORT',
+  'reports.pills.battles_one': '{{count}} Battle',
+  'reports.pills.battles_other': '{{count}} Battles',
+  'reports.pills.shipsLost_one': '{{count}} Ship lost',
+  'reports.pills.shipsLost_other': '{{count}} Ships lost',
+  'reports.pills.systems_other': 'Systems {{count}}',
+  'reports.pills.xp_other': '+{{count}} XP',
+  'reports.pills.open': 'Open',
+  'reports.pills.dismiss': 'Dismiss',
 
   // Context Menu
   'ctx.groundForces': 'Ground Forces',

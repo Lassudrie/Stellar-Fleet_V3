@@ -38,6 +38,7 @@ export const fr = {
   'ui.report': 'Rapport',
   'ui.combat': 'Combat',
   'ui.comlink': 'Com-Link',
+  'ui.sitrep': 'Rapport',
 
   // UI SideMenu
   'sidemenu.command': 'Commandement',
@@ -61,6 +62,23 @@ export const fr = {
   'sidemenu.godEyes': 'Vue Divine',
   'sidemenu.aiDebugger': 'Debug IA',
   'sidemenu.language': 'Langue',
+
+  // Rapports de tour (SITREP)
+  'reports.turnReports': 'Rapports de tour',
+  'reports.enableHint': 'Génère des rapports en fin de tour (SITREP).',
+  'reports.available_one': '{{count}} rapport disponible',
+  'reports.available_other': '{{count}} rapports disponibles',
+  'reports.turnReport': 'Rapport de tour',
+
+  'reports.pills.newTurnReport': 'RAPPORT DE TOUR',
+  'reports.pills.battles_one': '{{count}} Bataille',
+  'reports.pills.battles_other': '{{count}} Batailles',
+  'reports.pills.shipsLost_one': '{{count}} Vaisseau perdu',
+  'reports.pills.shipsLost_other': '{{count}} Vaisseaux perdus',
+  'reports.pills.systems_other': 'Systèmes {{count}}',
+  'reports.pills.xp_other': '+{{count}} XP',
+  'reports.pills.open': 'Ouvrir',
+  'reports.pills.dismiss': 'Masquer',
 
   // Context Menu
   'ctx.groundForces': 'Forces au Sol',
