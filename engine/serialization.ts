@@ -1,6 +1,6 @@
 import { Vec3, vec3 } from './math/vec3';
 import { AIState, Army, Battle, Fleet, FleetState, GameObjectives, GameState, LaserShot, LogEntry, StarSystem } from '../types';
-import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO, EnemySightingDTO } from './saveFormat';
+import { LaserShotDTO, SaveFileV2, GameStateDTO, Vector3DTO, ShipDTO, FleetDTO, StarSystemDTO, EnemySightingDTO, SAVE_VERSION } from './saveFormat';
 import { toEnemySightings, fromEnemySightings } from './saveEnemies';
 import { deepFreezeDev } from './state/immutability';
 
