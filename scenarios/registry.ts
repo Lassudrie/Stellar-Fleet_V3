@@ -1,4 +1,3 @@
-
 import { ScenarioTemplate } from './types';
 import conquestSandbox from './templates/conquest_sandbox';
 
@@ -31,6 +30,17 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
     if (typeof s.generation.systemCount !== 'number') throw new Error("Missing 'generation.systemCount'");
     if (typeof s.generation.radius !== 'number') throw new Error("Missing 'generation.radius'");
     if (typeof s.generation.topology !== 'string') throw new Error("Missing 'generation.topology'");
+
+    // 3b. Optional Generation Constraints
+    // Minimum system spacing (0 disables). We validate basic type safety here.
+    if (s.generation.minimumSystemSpacingLy !== undefined && s.generation.minimumSystemSpacingLy !== null) {
+        if (typeof s.generation.minimumSystemSpacingLy !== 'number' || !Number.isFinite(s.generation.minimumSystemSpacingLy)) {
+            throw new Error("Invalid 'generation.minimumSystemSpacingLy' (expected a finite number)");
+        }
+        if (s.generation.minimumSystemSpacingLy < 0) {
+            throw new Error("Invalid 'generation.minimumSystemSpacingLy' (must be >= 0; use 0 to disable)");
+        }
+    }
 
     // 4. Setup
     if (!s.setup || typeof s.setup !== 'object') throw new Error("Missing 'setup'");
