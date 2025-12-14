@@ -121,3 +121,63 @@ export const getFleetArmies = (fleet: Fleet, allArmies: Army[]): Army[] => {
 export const getSystemArmies = (systemId: string, allArmies: Army[]): Army[] => {
   return allArmies.filter(army => army.state === ArmyState.DEPLOYED && army.containerId === systemId);
 };
+
+/**
+ * High-performance integrity check and repair.
+ * Detects:
+ * - Armies failing validateArmyState (Orphans, Invalid Props)
+ * - Reference anomalies (Multiple ships claiming the same Army)
+ * 
+ * @returns Cleaned army list and a list of log messages describing fixes.
+ */
+export const sanitizeArmies = (state: any): { armies: Army[], logs: string[] } => {
+    const validArmies: Army[] = [];
+    const logs: string[] = [];
+    const claimedArmyIds = new Map<string, string[]>(); // ArmyID -> ShipID[]
+
+    // 1. O(F*S) Pre-calculation: Map all ship-army references
+    state.fleets.forEach((fleet: any) => {
+        fleet.ships.forEach((ship: ShipEntity) => {
+            if (ship.carriedArmyId) {
+                const list = claimedArmyIds.get(ship.carriedArmyId) || [];
+                list.push(`${ship.id} (${fleet.id})`);
+                claimedArmyIds.set(ship.carriedArmyId, list);
+            }
+        });
+    });
+
+    // 2. Iterate Armies
+    for (const army of state.armies) {
+        let isValid = true;
+
+        // Check A: Local Integrity (Standard Validation)
+        if (!validateArmyState(army, state)) {
+            logs.push(`Army ${army.id} failed validation (Orphaned or Invalid State). Removed.`);
+            isValid = false;
+        }
+
+        // Check B: Reference Integrity (for Embarked armies)
+        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
+            const carriers = claimedArmyIds.get(army.id);
+            
+            if (!carriers || carriers.length === 0) {
+                // Should have been caught by validateArmyState usually, but double check reverse link
+                logs.push(`Army ${army.id} is Embarked but no ship claims it. Removed.`);
+                isValid = false;
+            } else if (carriers.length > 1) {
+                // CRITICAL: Duplication Glitch
+                logs.push(`CRITICAL: Army ${army.id} claim conflict. Carried by multiple ships: [${carriers.join(', ')}]. Army destroyed to prevent paradox.`);
+                // We destroy the army. The ships will point to a non-existent army ID, 
+                // which is "safer" than cloning the army, or we could auto-clean the ships here.
+                // For now, removing the army is the safest state convergence.
+                isValid = false;
+            }
+        }
+
+        if (isValid) {
+            validArmies.push(army);
+        }
+    }
+
+    return { armies: validArmies, logs };
+};
