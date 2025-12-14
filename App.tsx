@@ -15,7 +15,8 @@ import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from './engine/fogOfWar';
 import { calculateFleetPower } from './engine/world';
-import { clone, equals } from './engine/math/vec3';
+import { clone, equals, distSq } from './engine/math/vec3';
+import { CAPTURE_RANGE } from './data/static';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
@@ -258,9 +259,107 @@ const App: React.FC = () => {
       }
   };
 
-  // Placeholders
-  const handleDeploySingle = () => {};
-  const handleEmbarkArmy = () => {};
+  // Find the system a fleet is orbiting (within CAPTURE_RANGE)
+  const findOrbitingSystem = (fleetId: string): StarSystem | null => {
+      if (!viewGameState) return null;
+      const fleet = viewGameState.fleets.find(f => f.id === fleetId);
+      if (!fleet) return null;
+      
+      const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
+      for (const sys of viewGameState.systems) {
+          if (distSq(fleet.position, sys.position) <= captureSq) {
+              return sys;
+          }
+      }
+      return null;
+  };
+
+  // Find the fleet containing a specific ship
+  const findFleetByShipId = (shipId: string): Fleet | null => {
+      if (!viewGameState) return null;
+      for (const fleet of viewGameState.fleets) {
+          if (fleet.ships.some(s => s.id === shipId)) {
+              return fleet;
+          }
+      }
+      return null;
+  };
+
+  // Deploy army from transport to system
+  const handleDeploySingle = (shipId: string) => {
+      if (!engine || !viewGameState) return;
+
+      const fleet = findFleetByShipId(shipId);
+      if (!fleet) {
+          console.warn('[App] Deploy failed: fleet not found for ship', shipId);
+          return;
+      }
+
+      const ship = fleet.ships.find(s => s.id === shipId);
+      if (!ship || !ship.carriedArmyId) {
+          console.warn('[App] Deploy failed: ship has no army', shipId);
+          return;
+      }
+
+      const system = findOrbitingSystem(fleet.id);
+      if (!system) {
+          alert(t('msg.notOrbiting'));
+          return;
+      }
+
+      const result = engine.dispatchPlayerCommand({
+          type: 'DEPLOY_ARMY',
+          armyId: ship.carriedArmyId,
+          fleetId: fleet.id,
+          shipId: shipId,
+          systemId: system.id
+      });
+
+      if (result.ok) {
+          engine.dispatchCommand({
+              type: 'ADD_LOG',
+              text: t('msg.deployLog', { ship: shipId.slice(-4), system: system.name }),
+              logType: 'move'
+          });
+      } else {
+          console.warn('[App] Deploy command failed:', result.error);
+      }
+  };
+
+  // Embark army from system into transport
+  const handleEmbarkArmy = (shipId: string, armyId: string) => {
+      if (!engine || !viewGameState) return;
+
+      const fleet = findFleetByShipId(shipId);
+      if (!fleet) {
+          console.warn('[App] Embark failed: fleet not found for ship', shipId);
+          return;
+      }
+
+      const system = findOrbitingSystem(fleet.id);
+      if (!system) {
+          alert(t('msg.notOrbiting'));
+          return;
+      }
+
+      const result = engine.dispatchPlayerCommand({
+          type: 'LOAD_ARMY',
+          armyId: armyId,
+          fleetId: fleet.id,
+          shipId: shipId,
+          systemId: system.id
+      });
+
+      if (result.ok) {
+          engine.dispatchCommand({
+              type: 'ADD_LOG',
+              text: t('msg.embarkLog', { army: armyId.slice(-4), ship: shipId.slice(-4) }),
+              logType: 'move'
+          });
+      } else {
+          console.warn('[App] Embark command failed:', result.error);
+      }
+  };
 
   if (loading) return <LoadingScreen />;
 

@@ -144,6 +144,7 @@ export const en = {
   'msg.mergeFailed': 'Merge Failed: {{error}}',
   'msg.notOrbiting': 'Fleet is not in stable orbit of a system.',
   'msg.deployLog': 'Deployed army from ship {{ship}} to {{system}}.',
+  'msg.embarkLog': 'Army {{army}} embarked on transport {{ship}}.',
   'msg.invasionLog': 'Invasion Initiated on {{system}}. {{count}} armies deployed.',
   'msg.invasionFail': 'Deployed: {{success}}. Failed: {{fail}}.\nReason: {{error}}',
   'msg.saveFail': 'Failed to save game',

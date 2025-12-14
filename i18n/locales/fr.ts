@@ -144,6 +144,7 @@ export const fr = {
   'msg.mergeFailed': 'Fusion échouée : {{error}}',
   'msg.notOrbiting': 'La flotte n\'est pas en orbite stable.',
   'msg.deployLog': 'Armée déployée du vaisseau {{ship}} vers {{system}}.',
+  'msg.embarkLog': 'Armée {{army}} embarquée sur transport {{ship}}.',
   'msg.invasionLog': 'Invasion initiée sur {{system}}. {{count}} armées déployées.',
   'msg.invasionFail': 'Déployé : {{success}}. Échec : {{fail}}.\nRaison : {{error}}',
   'msg.saveFail': 'Échec de la sauvegarde',
