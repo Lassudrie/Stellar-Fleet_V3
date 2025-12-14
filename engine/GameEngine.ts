@@ -3,6 +3,7 @@ import { GameState, FactionId } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
+import { applyEngagementRewardsAfterTurn } from './features/engagementRewards/runner';
 
 type PlayerCommand = 
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -58,7 +59,12 @@ export class GameEngine {
     }
 
     advanceTurn() {
-        this.state = runTurn(this.state, this.rng);
+        const prev = this.state;
+        const turned = runTurn(this.state, this.rng);
+
+        // Optional post-turn engagement layer (must NOT consume the simulation RNG)
+        this.state = applyEngagementRewardsAfterTurn(prev, turned);
+
         this.syncRngState();
         this.notify();
     }

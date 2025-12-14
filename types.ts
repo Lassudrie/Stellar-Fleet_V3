@@ -1,4 +1,5 @@
 import { Vec3 } from './engine/math/vec3';
+import type { EngagementState } from './engagementRewards.types';
 
 // Replaces enum Faction
 export type FactionId = string;
@@ -213,4 +214,5 @@ export interface GameState {
   aiState?: AIState; // TODO: Can be a Map<FactionId, AIState> for multi-AI later
   objectives: GameObjectives;
   rules: GameplayRules;
+  engagement?: EngagementState;
 }

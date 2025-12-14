@@ -1,4 +1,5 @@
 import { FleetState, ResourceType, ShipType, LogEntry, BattleStatus, ArmyState, VictoryType, GameplayRules, FactionState } from '../types';
+import type { EngagementState } from '../engagementRewards.types';
 
 export const SAVE_VERSION = 2 as const; // Bumped version
 export type SaveVersion = typeof SAVE_VERSION;
@@ -136,9 +137,10 @@ export interface GameStateDTO {
   logs?: LogEntry[];
   selectedFleetId: string | null;
   winnerFactionId: string | null; // Renamed
-  
+
   objectives?: GameObjectivesDTO;
   rules?: GameplayRules; 
+  engagement?: EngagementState;
   aiState?: AIStateDTO;
 }
 
