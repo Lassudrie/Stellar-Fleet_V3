@@ -1,236 +1,123 @@
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
-import { RNG } from './rng';
+import { Army, ArmyState, Fleet, ShipEntity } from '../types';
 
 export const MIN_ARMY_STRENGTH = 10000;
 
-/**
- * Creates a new Army entity.
- * Enforces the rule: Minimum 10,000 soldiers.
- * 
- * @param factionId The faction owning the army.
- * @param strength Number of soldiers.
- * @param containerId ID of the Fleet (if embarked) or System (if deployed).
- * @param initialState Initial state (default: EMBARKED).
- * @param rng Random Number Generator for ID creation.
- * @returns The created Army object or null if validation fails.
- */
-export const createArmy = (
-  factionId: FactionId,
-  strength: number,
-  containerId: string,
-  initialState: ArmyState,
-  rng: RNG
-): Army | null => {
-  
-  // Rule Check: Minimum Strength
-  if (strength < MIN_ARMY_STRENGTH) {
-    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_STRENGTH}.`);
-    return null;
-  }
+// Default scaling used by deterministic ground combat.
+// IMPORTANT: This is intentionally duplicated here (instead of importing) to keep the Army module
+// independent from optional ground combat modules.
+const DEFAULT_GROUND_COMBAT_STRENGTH_UNIT = 1000;
+const DEFAULT_INITIAL_MORALE = 100;
 
-  // Rule Check: Valid Container ID (Basic check)
-  if (!containerId) {
-    console.error(`[Army] Creation Failed: No container ID provided.`);
-    return null;
-  }
-
-  const normalizedStrength = Math.floor(strength); // Ensure integer
-
-  const army: Army = {
-    id: rng.id('army'),
-    factionId,
-    strength: normalizedStrength,
-    maxStrength: normalizedStrength,
-    xp: 0,
-    state: initialState,
-    containerId
-  };
-
-  console.log(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
-  return army;
+const deriveBaseCombatStat = (strengthSoldiers: number): number => {
+  const safe = Number.isFinite(strengthSoldiers) ? strengthSoldiers : 0;
+  return Math.max(1, Math.floor(safe / DEFAULT_GROUND_COMBAT_STRENGTH_UNIT));
 };
 
-/**
- * Validates an Army's integrity within the GameState.
- * Ensures the army is in a valid location based on its state.
- */
-export const validateArmyState = (army: Army, state: GameState): boolean => {
-  // 1. Strength Integrity
-  if (army.strength < MIN_ARMY_STRENGTH) {
-    // console.warn(`[Army] Invalid Strength: Army ${army.id} has ${army.strength} soldiers.`);
+export const createArmy = (
+  id: string,
+  factionId: string,
+  strength: number,
+  state: ArmyState,
+  containerId: string
+): Army => {
+  const safeStrength = Number.isFinite(strength) ? Math.floor(strength) : MIN_ARMY_STRENGTH;
+  const initialStrength = Math.max(MIN_ARMY_STRENGTH, safeStrength);
+
+  // Baseline ground-combat stats are derived from size so that old scenarios remain playable.
+  const baseCombatStat = deriveBaseCombatStat(initialStrength);
+
+  return {
+    id,
+    factionId,
+    strength: initialStrength,
+    state,
+    containerId,
+
+    // Ground combat defaults
+    maxStrength: initialStrength,
+    morale: DEFAULT_INITIAL_MORALE,
+    experience: 0,
+    level: 1,
+    groundAttack: baseCombatStat,
+    groundDefense: baseCombatStat,
+  };
+};
+
+export const validateArmyState = (army: Army, state: any): boolean => {
+  // Keep validation permissive: attrition can reduce armies below MIN_ARMY_STRENGTH.
+  if (!Number.isFinite(army.strength) || army.strength <= 0) {
+    console.warn(`[validateArmyState] Invalid or dead army strength: ${army.id} (${army.strength})`);
     return false;
   }
 
-  // 2. Location Integrity
+  // In deployed state, containerId should be a system id
   if (army.state === ArmyState.DEPLOYED) {
-    // Must be in a valid System
-    const system = state.systems.find(s => s.id === army.containerId);
-    if (!system) {
-      // console.warn(`[Army] Orphaned Deployed Army: ${army.id} refers to missing system ${army.containerId}.`);
+    const systemExists = state.systems.some((s: any) => s.id === army.containerId);
+    if (!systemExists) {
+      console.warn(`[validateArmyState] Army ${army.id} deployed to non-existent system ${army.containerId}`);
       return false;
     }
-  } else if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
-    // Must be in a valid Fleet
-    const fleet = state.fleets.find(f => f.id === army.containerId);
-    if (!fleet) {
-      // console.warn(`[Army] Orphaned Embarked Army: ${army.id} refers to missing fleet ${army.containerId}.`);
-      return false;
-    }
-    
-    // STRICT RULE: Must be linked to a specific ship
-    const transportShip = fleet.ships.find(s => s.carriedArmyId === army.id);
-    if (!transportShip) {
-        // console.warn(`[Army] Floating Army: ${army.id} is in fleet ${fleet.id} but assigned to no ship.`);
-        return false;
-    }
+    return true;
   }
+
+  // In embarked or in_transit state, containerId should be a fleet id AND linked to a specific transport ship
+  if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
+    const fleet = state.fleets.find((f: any) => f.id === army.containerId);
+    if (!fleet) {
+      console.warn(`[validateArmyState] Army ${army.id} has invalid fleet container ${army.containerId}`);
+      return false;
+    }
+
+    // Verify transport ship has this army loaded
+    const transportShip = fleet.ships.find((s: ShipEntity) => s.carriedArmyId === army.id);
+    if (!transportShip) {
+      console.warn(
+        `[validateArmyState] Army ${army.id} not found in any transport ship in fleet ${fleet.id}`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  console.warn(`[validateArmyState] Unknown army state: ${army.id} (${army.state})`);
+  return false;
+};
+
+export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
+  if (ship.carriedArmyId) {
+    console.warn(`[loadArmyIntoShip] Ship ${ship.id} already carrying army ${ship.carriedArmyId}`);
+    return false;
+  }
+
+  ship.carriedArmyId = army.id;
+  army.state = ArmyState.EMBARKED;
+  army.containerId = fleet.id;
 
   return true;
 };
 
-/**
- * High-performance integrity check and repair.
- * Detects:
- * - Armies failing validateArmyState (Orphans, Invalid Props)
- * - Reference anomalies (Multiple ships claiming the same Army)
- * 
- * @returns Cleaned army list and a list of log messages describing fixes.
- */
-export const sanitizeArmies = (state: GameState): { armies: Army[], logs: string[] } => {
-    const validArmies: Army[] = [];
-    const logs: string[] = [];
-    const claimedArmyIds = new Map<string, string[]>(); // ArmyID -> ShipID[]
+export const unloadArmyFromShip = (army: Army, ship: ShipEntity, systemId: string): boolean => {
+  if (ship.carriedArmyId !== army.id) {
+    console.warn(`[unloadArmyFromShip] Ship ${ship.id} not carrying army ${army.id}`);
+    return false;
+  }
 
-    // 1. O(F*S) Pre-calculation: Map all ship-army references
-    state.fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
-            if (ship.carriedArmyId) {
-                const list = claimedArmyIds.get(ship.carriedArmyId) || [];
-                list.push(`${ship.id} (${fleet.id})`);
-                claimedArmyIds.set(ship.carriedArmyId, list);
-            }
-        });
-    });
+  ship.carriedArmyId = null;
+  army.state = ArmyState.DEPLOYED;
+  army.containerId = systemId;
 
-    // 2. Iterate Armies
-    for (const army of state.armies) {
-        let isValid = true;
-
-        // Check A: Local Integrity (Standard Validation)
-        if (!validateArmyState(army, state)) {
-            logs.push(`Army ${army.id} failed validation (Orphaned or Invalid State). Removed.`);
-            isValid = false;
-        }
-
-        // Check B: Reference Integrity (for Embarked armies)
-        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
-            const carriers = claimedArmyIds.get(army.id);
-            
-            if (!carriers || carriers.length === 0) {
-                // Should have been caught by validateArmyState usually, but double check reverse link
-                logs.push(`Army ${army.id} is Embarked but no ship claims it. Removed.`);
-                isValid = false;
-            } else if (carriers.length > 1) {
-                // CRITICAL: Duplication Glitch
-                logs.push(`CRITICAL: Army ${army.id} claim conflict. Carried by multiple ships: [${carriers.join(', ')}]. Army destroyed to prevent paradox.`);
-                // We destroy the army. The ships will point to a non-existent army ID, 
-                // which is "safer" than cloning the army, or we could auto-clean the ships here.
-                // For now, removing the army is the safest state convergence.
-                isValid = false;
-            }
-        }
-
-        if (isValid) {
-            validArmies.push(army);
-        }
-    }
-
-    return { armies: validArmies, logs };
+  return true;
 };
 
-// --- TRANSPORT LOGIC ---
+export const getFleetArmies = (fleet: Fleet, allArmies: Army[]): Army[] => {
+  const armyIds = fleet.ships
+    .filter(ship => ship.carriedArmyId)
+    .map(ship => ship.carriedArmyId!);
 
-/**
- * Checks if a ship is a valid candidate to carry an army.
- * Rule 1: Must be TROOP_TRANSPORT.
- * Rule 2: Must be empty.
- */
-export const canLoadArmy = (ship: ShipEntity): boolean => {
-    if (ship.type !== ShipType.TROOP_TRANSPORT) return false;
-    if (ship.carriedArmyId) return false; // Already full
-    return true;
+  return allArmies.filter(army => armyIds.includes(army.id));
 };
 
-/**
- * Loads an army into a transport ship.
- * Updates both the Ship (carriedArmyId) and the Army (state, containerId).
- * 
- * @returns true if successful, false if validation failed.
- */
-export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
-    if (!canLoadArmy(ship)) {
-        console.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
-        return false;
-    }
-    
-    if (army.factionId !== fleet.factionId) {
-        console.error(`[Army] Load Failed: Faction mismatch.`);
-        return false;
-    }
-
-    if (army.state !== ArmyState.DEPLOYED) {
-        console.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
-        return false;
-    }
-
-    // Mutate State (Simulated)
-    ship.carriedArmyId = army.id;
-    army.containerId = fleet.id;
-    army.state = ArmyState.EMBARKED;
-    
-    console.log(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
-    return true;
-};
-
-/**
- * Unloads an army from a ship to a system.
- * 
- * @returns true if successful.
- */
-export const deployArmyToSystem = (army: Army, ship: ShipEntity, system: StarSystem): boolean => {
-    if (ship.carriedArmyId !== army.id) {
-        console.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-        return false;
-    }
-
-    ship.carriedArmyId = null;
-    army.state = ArmyState.DEPLOYED;
-    army.containerId = system.id;
-    
-    console.log(`[Army] ${army.id} DEPLOYED to ${system.name}.`);
-    return true;
-};
-
-/**
- * Unloads an army from a ship (Generic / Destruction context).
- * Does NOT set new state (Caller must handle that, e.g. deleting army).
- */
-export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
-    if (ship.carriedArmyId === army.id) {
-        ship.carriedArmyId = null;
-        console.log(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
-    } else {
-        console.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-    }
-};
-
-/**
- * Checks if a fleet contains at least one Troop Transport with an embarked army.
- * Used for UI logic (Can I invade?).
- */
-export const hasInvadingForce = (fleet: Fleet): boolean => {
-    return fleet.ships.some(s => 
-        s.type === ShipType.TROOP_TRANSPORT && 
-        !!s.carriedArmyId
-    );
+export const getSystemArmies = (systemId: string, allArmies: Army[]): Army[] => {
+  return allArmies.filter(army => army.state === ArmyState.DEPLOYED && army.containerId === systemId);
 };

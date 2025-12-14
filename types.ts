@@ -1,54 +1,36 @@
-import { Vec3 } from './engine/math/vec3';
-import type { EngagementState } from './engagementRewards.types';
-
-// Replaces enum Faction
 export type FactionId = string;
 
-export interface FactionState {
-  id: FactionId;
+export interface Vector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface StarSystem {
+  id: string;
   name: string;
+  position: Vector3;
+  ownerFactionId: FactionId | null;
+  population: number;
+  maxPopulation: number;
+  economy: number;
+  defenseLevel: number;
+  resources: {
+    metal: number;
+    crystal: number;
+    fuel: number;
+  };
   color: string;
-  isPlayable: boolean;
-  aiProfile?: string; // If present, controlled by AI
-}
-
-export enum FleetState {
-  ORBIT = 'ORBIT',
-  MOVING = 'MOVING',
-  COMBAT = 'COMBAT',
-}
-
-export enum ArmyState {
-  EMBARKED = 'EMBARKED',
-  DEPLOYED = 'DEPLOYED',
-  IN_TRANSIT = 'IN_TRANSIT',
 }
 
 export enum ShipType {
-  CARRIER = 'carrier',
-  CRUISER = 'cruiser',
-  DESTROYER = 'destroyer',
-  FRIGATE = 'frigate',
   FIGHTER = 'fighter',
   BOMBER = 'bomber',
-  TROOP_TRANSPORT = 'troop_transport',
-}
-
-export type ResourceType = 'none' | 'gas';
-
-export interface ShipStats {
-  maxHp: number;
-  damage: number;
-  speed: number;
-  cost: number;
-  pdStrength: number;
-  evasion: number;
-  maneuverability: number;
-  missileStock: number;
-  missileDamage: number;
-  torpedoStock: number;
-  torpedoDamage: number;
-  role: 'capital' | 'screen' | 'striker' | 'transport';
+  FRIGATE = 'frigate',
+  DESTROYER = 'destroyer',
+  CRUISER = 'cruiser',
+  CARRIER = 'carrier',
+  TROOP_TRANSPORT = 'troop_transport'
 }
 
 export interface ShipEntity {
@@ -56,129 +38,96 @@ export interface ShipEntity {
   type: ShipType;
   hp: number;
   maxHp: number;
+  missileCooldown: number;
   carriedArmyId: string | null;
+  veteranLevel?: number; // XP level for ship crew
+  kills?: number; // Track ship kills
+}
+
+export interface Fleet {
+  id: string;
+  name: string;
+  factionId: FactionId;
+  position: Vector3;
+  ships: ShipEntity[];
+  fuel: number;
+  maxFuel: number;
+  destination?: Vector3;
+  arrivedAt?: number;
+}
+
+export enum ArmyState {
+  DEPLOYED = 'deployed',
+  EMBARKED = 'embarked',
+  IN_TRANSIT = 'in_transit'
 }
 
 export interface Army {
   id: string;
   factionId: FactionId; // Renamed from faction
-
-  /** Current strength (e.g., soldier count or abstract power). */
   strength: number;
-
-  /** Max strength baseline used for experience dilution (defaults to initial strength). */
-  maxStrength: number;
-
-  /** Cumulative experience points earned by this army (persists through casualties). */
-  xp: number;
-
   state: ArmyState;
   containerId: string;
   embarkedFleetId?: string; // Fleet ID if army is embarked on a fleet
+
+  // --- Ground Combat (Deterministic Attrition Model) ---
+  // Persistent / long-term stats (evolve slowly via recruitment & XP)
+  groundAttack?: number;    // offensive capability (dimensionless points)
+  groundDefense?: number;   // defensive capability (dimensionless points)
+  maxStrength?: number;     // maximum theoretical strength (in "soldiers")
+  experience?: number;      // cumulative XP
+  level?: number;           // derived from experience (stored for convenience)
+
+  // Dynamic / battle stats (fluctuate during fights)
+  morale?: number;          // 0..100
+  fatigue?: number;         // optional (not required in baseline v1)
 }
 
-export interface StarSystem {
+export interface Battle {
   id: string;
-  name: string;
-  position: Vec3;
-  color: string; // Visual color (usually matches owner color)
-  size: number;
-  ownerFactionId: FactionId | null; // Renamed from owner
-  resourceType: ResourceType;
-
-  /**
-   * Turn number when the current owner took control of the system.
-   * Optional for backward compatibility with existing saves.
-   */
-  captureTurn?: number;
-}
-
-export interface Fleet {
-  id: string;
-  factionId: FactionId; // Renamed from faction
-  ships: ShipEntity[];
-  position: Vec3;
-  state: FleetState;
-  targetSystemId: string | null;
-  targetPosition: Vec3 | null;
-  radius: number; // Visual size based on ship count (Derived field)
-  stateStartTurn: number; // Turn when the current state began (Used for VFX)
-  retreating?: boolean; // True if the fleet is forced to retreat after a defeat
-  invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
-  currentSystemId?: string | null; // System ID where the fleet is currently located (if in orbit)
-  embarkedArmyIds?: string[]; // Array of army IDs embarked on this fleet
-}
-
-export interface LaserShot {
-  id: string;
-  start: Vec3;
-  end: Vec3;
-  color: string;
-  life: number;
+  systemId: string;
+  fleets: string[];
+  resolved: boolean;
 }
 
 export interface LogEntry {
   id: string;
   day: number;
   text: string;
-  type: 'info' | 'combat' | 'move' | 'ai';
+  type: 'info' | 'combat' | 'diplomacy' | 'objective';
 }
 
-export type BattleStatus = 'scheduled' | 'resolved';
-
-export interface BattleShipSnapshot {
-  shipId: string;
-  fleetId: string;
-  factionId: FactionId; // Renamed from faction
-  type: ShipType;
-  maxHp: number;
-  startingHp: number;
-}
-
-export interface Battle {
+export interface LaserShot {
   id: string;
-  systemId: string;
-  turnCreated: number;
-  turnResolved?: number;
-  status: BattleStatus;
-  involvedFleetIds: string[];
-  logs: string[];
-  initialShips?: BattleShipSnapshot[];
-  survivorShipIds?: string[];
-  winnerFactionId?: FactionId | 'draw'; // Renamed from winner
-  roundsPlayed?: number;
-  shipsLost?: Record<FactionId, number>; // Keys are FactionId strings
-  missilesIntercepted?: number;
-  projectilesDestroyedByPd?: number;
+  start: Vector3;
+  end: Vector3;
+  color: string;
+  createdAt: number;
+  duration: number;
 }
 
 export interface EnemySighting {
   fleetId: string;
-  systemId: string | null;
-  position: Vec3;
-  daySeen: number;
-  estimatedPower: number;
-  confidence: number;
+  position: Vector3;
+  lastSeen: number;
 }
 
 export interface AIState {
-  sightings: Record<string, EnemySighting>;
-  targetPriorities: Record<string, number>;
-  systemLastSeen: Record<string, number>;
-  lastOwnerBySystemId: Record<string, FactionId | null>;
-  holdUntilTurnBySystemId: Record<string, number>;
-}
-
-export type VictoryType = 'elimination' | 'domination' | 'survival' | 'king_of_the_hill';
-
-export interface VictoryCondition {
-  type: VictoryType;
-  value?: number | string;
+  enemySightings: Record<string, EnemySighting[]>; // factionId -> sightings
 }
 
 export interface GameObjectives {
-  conditions: VictoryCondition[];
-  maxTurns?: number;
+  targetSystems: number;
+  eliminateAllEnemies: boolean;
+}
+
+export type GroundCombatModel = 'legacy' | 'deterministic_attrition_v1';
+
+export interface GroundCombatRules {
+  enabled: boolean;
+  model: GroundCombatModel;
+  /** Optional balance/scenario config id (data-driven). */
+  configId?: string;
 }
 
 export interface GameplayRules {
@@ -187,32 +136,42 @@ export interface GameplayRules {
   aiEnabled: boolean;
   totalWar: boolean;
 
-  /** If true, enables the Army Experience system (veterancy & morale effects). */
-  useArmyExperience?: boolean;
+  /**
+   * Optional: deterministic ground combat toggle.
+   * - If absent or enabled=false, the game uses the legacy ground conquest resolver.
+   */
+  groundCombat?: GroundCombatRules;
 }
 
 export interface GameState {
-  scenarioId: string;
-  scenarioTitle?: string;
-  
-  // Faction System
-  playerFactionId: FactionId; // The ID of the local player
-  factions: FactionState[];   // Registry of all factions in this game
-
-  seed: number;
-  rngState: number;
-  startYear: number;
-  day: number;
   systems: StarSystem[];
   fleets: Fleet[];
   armies: Army[];
-  lasers: LaserShot[];
+  factions: {
+    id: FactionId;
+    name: string;
+    color: string;
+    resources: {
+      metal: number;
+      crystal: number;
+      fuel: number;
+    };
+    aiControlled: boolean;
+    eliminated?: boolean;
+  }[];
   battles: Battle[];
   logs: LogEntry[];
+  laserShots: LaserShot[];
+  day: number;
+  currentPlayer: FactionId;
   selectedFleetId: string | null;
-  winnerFactionId: FactionId | null; // Renamed from winner
-  aiState?: AIState; // TODO: Can be a Map<FactionId, AIState> for multi-AI later
-  objectives: GameObjectives;
+  selectedSystemId: string | null;
+  cameraPosition: Vector3;
+  cameraTarget: Vector3;
   rules: GameplayRules;
-  engagement?: EngagementState;
+  aiState: AIState;
+  gameStarted: boolean;
+  gameOver: boolean;
+  winner: FactionId | null;
+  objectives: GameObjectives;
 }
