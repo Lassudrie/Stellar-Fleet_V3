@@ -1,8 +1,9 @@
 
-import { GameState, FactionId } from '../types';
+import { ArmyState, FactionId, Fleet, GameState, ShipType, StarSystem } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
+import { distSq } from './math/vec3';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -69,6 +70,123 @@ export class GameEngine {
         this.notify();
     }
 
+    private isFleetAtSystem(fleet: Fleet, system: StarSystem): boolean {
+        // Allow a small epsilon to guard against floating point drift
+        return distSq(fleet.position, system.position) < 0.0001;
+    }
+
+    private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
+        if (!this.isFleetAtSystem(fleet, system)) return false;
+
+        const availableArmies = this.state.armies.filter(a =>
+            a.containerId === system.id &&
+            a.factionId === fleet.factionId &&
+            a.state === ArmyState.DEPLOYED
+        );
+
+        const transports = fleet.ships.filter(s => !s.carriedArmyId && s.type === ShipType.TROOP_TRANSPORT);
+        const loadableArmies = Math.min(availableArmies.length, transports.length);
+
+        if (loadableArmies === 0) return false;
+
+        const updatedArmies = this.state.armies.map(army => {
+            const shouldLoad =
+                army.containerId === system.id &&
+                army.factionId === fleet.factionId &&
+                army.state === ArmyState.DEPLOYED &&
+                availableArmies.findIndex(a => a.id === army.id) < loadableArmies;
+
+            if (!shouldLoad) return army;
+
+            return {
+                ...army,
+                state: ArmyState.EMBARKED,
+                containerId: fleet.id
+            };
+        });
+
+        let loadedCount = 0;
+        const updatedFleet: Fleet = {
+            ...fleet,
+            ships: fleet.ships.map(ship => {
+                if (ship.type !== ShipType.TROOP_TRANSPORT || ship.carriedArmyId) return ship;
+                const army = availableArmies[loadedCount];
+                if (!army || loadedCount >= loadableArmies) return ship;
+                loadedCount++;
+                return { ...ship, carriedArmyId: army.id };
+            })
+        };
+
+        const newLog = {
+            id: this.rng.id('log'),
+            day: this.state.day,
+            text: `Fleet ${fleet.id} loaded ${loadableArmies} armies at ${system.name}.`,
+            type: 'move' as const
+        };
+
+        this.state = {
+            ...this.state,
+            fleets: this.state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
+            armies: updatedArmies,
+            logs: [...this.state.logs, newLog]
+        };
+
+        return true;
+    }
+
+    private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
+        if (!this.isFleetAtSystem(fleet, system)) return false;
+
+        const embarkedArmies = this.state.armies.filter(a =>
+            a.containerId === fleet.id &&
+            a.factionId === fleet.factionId &&
+            a.state === ArmyState.EMBARKED
+        );
+
+        if (embarkedArmies.length === 0) return false;
+
+        let unloadedCount = 0;
+
+        const updatedFleet: Fleet = {
+            ...fleet,
+            ships: fleet.ships.map(ship => {
+                if (!ship.carriedArmyId) return ship;
+                const carryingArmy = embarkedArmies.find(a => a.id === ship.carriedArmyId);
+                if (!carryingArmy) return ship;
+                unloadedCount++;
+                return { ...ship, carriedArmyId: null };
+            })
+        };
+
+        if (unloadedCount === 0) return false;
+
+        const updatedArmies = this.state.armies.map(army => {
+            if (!embarkedArmies.some(a => a.id === army.id)) return army;
+
+            return {
+                ...army,
+                state: ArmyState.DEPLOYED,
+                containerId: system.id
+            };
+        });
+
+        const newLog = {
+            id: this.rng.id('log'),
+            day: this.state.day,
+            text: `Fleet ${fleet.id} unloaded ${unloadedCount} armies at ${system.name}.`,
+            type: 'move' as const
+        };
+
+        this.state = {
+            ...this.state,
+            fleets: this.state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
+            armies: updatedArmies,
+            logs: [...this.state.logs, newLog]
+        };
+
+        return true;
+    }
+
     dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
         const playerFactionId = this.state.playerFactionId;
 
@@ -125,6 +243,13 @@ export class GameEngine {
 
             if (!hasAlliedArmies) return { ok: false, error: 'No allied armies to load' };
 
+            const loadedImmediately = this.tryImmediateLoad(fleet, system);
+            if (loadedImmediately) {
+                this.syncRngState();
+                this.notify();
+                return { ok: true };
+            }
+
             this.state = applyCommand(this.state, {
                 type: 'ORDER_LOAD_MOVE',
                 fleetId: command.fleetId,
@@ -146,6 +271,13 @@ export class GameEngine {
             if (!system) return { ok: false, error: 'System not found' };
 
             if (system.ownerFactionId !== playerFactionId) return { ok: false, error: 'System is not allied' };
+
+            const unloadedImmediately = this.tryImmediateUnload(fleet, system);
+            if (unloadedImmediately) {
+                this.syncRngState();
+                this.notify();
+                return { ok: true };
+            }
 
             this.state = applyCommand(this.state, {
                 type: 'ORDER_UNLOAD_MOVE',
