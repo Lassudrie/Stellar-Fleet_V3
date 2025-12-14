@@ -9,7 +9,7 @@ import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
-import { hasInvadingForce } from '../engine/army';
+import { hasInvadingForce, canLoadArmy } from '../engine/army';
 import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
 
@@ -19,7 +19,7 @@ interface UIProps {
   selectedFleet: Fleet | null;
   logs: LogEntry[];
   
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'FLEET_PICKER_LOAD' | 'FLEET_PICKER_UNLOAD' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -36,13 +36,17 @@ interface UIProps {
   onRestart: () => void;
   onNextTurn: () => void;
   onMoveCommand: (fleetId: string) => void;
+  onLoadCommand: (fleetId: string) => void;
+  onUnloadCommand: (fleetId: string) => void;
   onOpenFleetPicker: () => void;
+  onOpenLoadPicker: () => void;
+  onOpenUnloadPicker: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
-  onCommitInvasion: (shipIds: string[]) => void;
+  onCommitInvasion: (fleetId: string) => void;
 
   onSave: () => void;
 
@@ -56,7 +60,9 @@ const UI: React.FC<UIProps> = ({
     onRestart, onNextTurn, 
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
-    onMoveCommand, onOpenFleetPicker, onCloseMenu, onSelectFleet,
+    onMoveCommand, onLoadCommand, onUnloadCommand,
+    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker,
+    onCloseMenu, onSelectFleet,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave,
     devMode, godEyes, onSetUiSettings
@@ -117,6 +123,24 @@ const UI: React.FC<UIProps> = ({
           hasInvadingForce(f)
       );
   }, [targetSystem, blueFleets, playerFactionId]);
+
+  // Compute LOAD Visibility
+  // Rules: System has player armies (DEPLOYED)
+  const showLoadOption = useMemo(() => {
+      if (!targetSystem || !gameState.armies) return false;
+      return gameState.armies.some(a =>
+          a.containerId === targetSystem.id &&
+          a.state === ArmyState.DEPLOYED &&
+          a.factionId === playerFactionId
+      );
+  }, [targetSystem, gameState.armies, playerFactionId]);
+
+  // Compute UNLOAD Visibility
+  // Rules: System is Allied (Owned by Player)
+  const showUnloadOption = useMemo(() => {
+      if (!targetSystem) return false;
+      return targetSystem.ownerFactionId === playerFactionId;
+  }, [targetSystem, playerFactionId]);
 
   // Compute Ground Forces Summary for Context Menu
   const groundForcesSummary = useMemo(() => {
@@ -184,7 +208,11 @@ const UI: React.FC<UIProps> = ({
             system={targetSystem}
             groundForces={groundForcesSummary}
             showInvadeOption={showInvadeOption}
+            showLoadOption={showLoadOption}
+            showUnloadOption={showUnloadOption}
             onOpenFleetPicker={onOpenFleetPicker}
+            onOpenLoadPicker={onOpenLoadPicker}
+            onOpenUnloadPicker={onOpenUnloadPicker}
             onInvade={() => onInvade(targetSystem.id)}
             onClose={onCloseMenu}
         />
@@ -195,6 +223,34 @@ const UI: React.FC<UIProps> = ({
             targetSystem={targetSystem}
             blueFleets={blueFleets}
             onMoveCommand={onMoveCommand}
+            onClose={onCloseMenu}
+        />
+      )}
+
+      {/* LOAD Picker */}
+      {uiMode === 'FLEET_PICKER_LOAD' && targetSystem && (
+        <FleetPicker
+            targetSystem={targetSystem}
+            // Filter: Must have at least one empty transport
+            blueFleets={blueFleets.filter(f => f.ships.some(s => canLoadArmy(s)))}
+            onMoveCommand={(fleetId) => {
+                 onLoadCommand(fleetId);
+                 onCloseMenu();
+            }}
+            onClose={onCloseMenu}
+        />
+      )}
+
+      {/* UNLOAD Picker */}
+      {uiMode === 'FLEET_PICKER_UNLOAD' && targetSystem && (
+        <FleetPicker
+            targetSystem={targetSystem}
+            // Filter: Must have at least one FULL transport
+            blueFleets={blueFleets.filter(f => hasInvadingForce(f))}
+            onMoveCommand={(fleetId) => {
+                 onUnloadCommand(fleetId);
+                 onCloseMenu();
+            }}
             onClose={onCloseMenu}
         />
       )}

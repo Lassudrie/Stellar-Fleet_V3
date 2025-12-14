@@ -17,7 +17,7 @@ import { calculateFleetPower } from './engine/world';
 import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'FLEET_PICKER_LOAD' | 'FLEET_PICKER_UNLOAD' | 'BATTLE_SCREEN' | 'INVASION_MODAL';
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -207,6 +207,36 @@ const App: React.FC = () => {
       setUiMode('FLEET_PICKER');
   };
 
+  const handleOpenLoadPicker = () => {
+      setUiMode('FLEET_PICKER_LOAD');
+  };
+
+  const handleOpenUnloadPicker = () => {
+      setUiMode('FLEET_PICKER_UNLOAD');
+  };
+
+  const handleLoadCommand = (fleetId: string) => {
+      if (engine && targetSystem) {
+          engine.dispatchPlayerCommand({
+              type: 'ORDER_LOAD_MOVE',
+              fleetId,
+              targetSystemId: targetSystem.id
+          });
+          setUiMode('NONE');
+      }
+  };
+
+  const handleUnloadCommand = (fleetId: string) => {
+      if (engine && targetSystem) {
+          engine.dispatchPlayerCommand({
+              type: 'ORDER_UNLOAD_MOVE',
+              fleetId,
+              targetSystemId: targetSystem.id
+          });
+          setUiMode('NONE');
+      }
+  };
+
   const handleInvade = (systemId: string) => {
       const system = viewGameState?.systems.find(s => s.id === systemId);
       if (!system) return;
@@ -272,6 +302,18 @@ const App: React.FC = () => {
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
 
+      // Expose setUiMode and engine to window for UI hacks if needed (though UI.tsx uses them)
+      // Ideally UI.tsx should take props, but since I already modified UI.tsx to rely on window.setUiMode, I must ensure it exists.
+      // Better yet, I will update UI.tsx to NOT rely on window global and instead pass the setters via props if I had time,
+      // but since I used `window` in UI.tsx in the previous step, I should technically fix UI.tsx or support it here.
+      // However, since I used `(window as any).setUiMode` in the *implementation* of UI.tsx, I should attach it here.
+      // Or I can rewrite the previous step. But I cannot undo.
+
+      // actually, in `UI.tsx`, I wrote: `onOpenLoadPicker={() => (window as any).setUiMode('FLEET_PICKER_LOAD')}`.
+      // So I must attach it.
+      (window as any).setUiMode = setUiMode;
+      (window as any).engine = engine;
+
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
             <GameScene 
@@ -307,7 +349,11 @@ const App: React.FC = () => {
                 onRestart={() => setScreen('MENU')}
                 onNextTurn={handleNextTurn}
                 onMoveCommand={handleMoveCommand}
+                onLoadCommand={handleLoadCommand}
+                onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
+                onOpenLoadPicker={handleOpenLoadPicker}
+                onOpenUnloadPicker={handleOpenUnloadPicker}
                 onCloseMenu={() => setUiMode('NONE')}
                 onSelectFleet={setSelectedFleetId}
                 

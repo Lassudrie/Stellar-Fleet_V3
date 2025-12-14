@@ -8,14 +8,18 @@ interface SystemContextMenuProps {
   system: StarSystem;
   groundForces: { blueCount: number, bluePower: number, redCount: number, redPower: number } | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
+  showLoadOption: boolean;
+  showUnloadOption: boolean;
   onOpenFleetPicker: () => void;
+  onOpenLoadPicker: () => void;
+  onOpenUnloadPicker: () => void;
   onInvade: () => void;
   onClose: () => void;
 }
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({ 
-    position, system, groundForces, showInvadeOption,
-    onOpenFleetPicker, onInvade, onClose 
+    position, system, groundForces, showInvadeOption, showLoadOption, showUnloadOption,
+    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onClose
 }) => {
   const { t } = useI18n();
 
@@ -77,6 +81,32 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                  <path d="M5.082 14.254a6.755 6.755 0 01-1.717-1.432 12.78 12.78 0 011.855-4.243C5.22 8.579 5.25 8.579 5.25 8.579c0 .139.186.206.29.105l.507-.507a6 6 0 013.78-1.55 6.002 6.002 0 013.78 1.55l.507.507c.104.101.29.034.29-.105 0 0 .03 0 .029.001a12.78 12.78 0 011.855 4.243 6.755 6.755 0 01-1.717 1.432l-.258.129a8 8 0 00-2.275-.853A6.71 6.71 0 0012 13.5a6.71 6.71 0 00-2.292.407 8 8 0 00-2.275.853l-.258-.129z" opacity="0.5"/>
               </svg>
               {t('ctx.invade')}
+          </button>
+      )}
+
+      {/* LOAD ACTION (Conditional) */}
+      {showLoadOption && (
+          <button
+              onClick={onOpenLoadPicker}
+              className="text-left px-3 py-2 hover:bg-blue-600/20 text-blue-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+              </svg>
+              {t('ctx.load')}
+          </button>
+      )}
+
+      {/* UNLOAD ACTION (Conditional) */}
+      {showUnloadOption && (
+          <button
+              onClick={onOpenUnloadPicker}
+              className="text-left px-3 py-2 hover:bg-blue-600/20 text-blue-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+              </svg>
+              {t('ctx.unload')}
           </button>
       )}
 

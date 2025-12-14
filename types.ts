@@ -89,6 +89,7 @@ export interface Fleet {
   stateStartTurn: number; // Turn when the current state began (Used for VFX)
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
+  loadingTargetSystemId?: string | null; // If set, fleet will load armies automatically upon arrival at this system
 }
 
 export interface LaserShot {
