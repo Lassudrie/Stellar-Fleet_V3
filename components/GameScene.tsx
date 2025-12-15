@@ -21,6 +21,13 @@ interface GameSceneProps {
   onBackgroundClick: () => void;
 }
 
+interface MapBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
   const lineRef = useRef<any>(null);
   
@@ -116,6 +123,32 @@ const GameScene: React.FC<GameSceneProps> = ({
       return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
   }, [gameState.systems]);
 
+  const mapBounds = useMemo<MapBounds | null>(() => {
+    if (gameState.systems.length === 0) {
+      return null;
+    }
+
+    const margin = 30;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+
+    for (const system of gameState.systems) {
+      minX = Math.min(minX, system.position.x);
+      maxX = Math.max(maxX, system.position.x);
+      minZ = Math.min(minZ, system.position.z);
+      maxZ = Math.max(maxZ, system.position.z);
+    }
+
+    return {
+      minX: minX - margin,
+      maxX: maxX + margin,
+      minZ: minZ - margin,
+      maxZ: maxZ + margin,
+    };
+  }, [gameState.systems]);
+
   const battlingSystemIds = useMemo(() => {
     if (!gameState.battles) return new Set<string>();
     return new Set(
@@ -148,6 +181,7 @@ const GameScene: React.FC<GameSceneProps> = ({
               initialPosition={cameraPosition}
               initialTarget={cameraTarget}
               ready={isScenarioReady}
+              mapBounds={mapBounds ?? undefined}
             />
             <ambientLight intensity={0.4} color="#aaccff" />
             <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
