@@ -110,6 +110,45 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   const cameraPosition = useMemo(() => [playerHomeworld.x, playerHomeworld.y + 80, playerHomeworld.z + 50] as [number, number, number], [playerHomeworld]);
 
+  const mapMetrics = useMemo(() => {
+    const systems = gameState.systems;
+    const fallbackRadius = 120;
+
+    if (systems.length === 0) {
+      return { center: { x: 0, y: 0, z: 0 }, radius: fallbackRadius };
+    }
+
+    let minX = systems[0].position.x;
+    let maxX = systems[0].position.x;
+    let minY = systems[0].position.y;
+    let maxY = systems[0].position.y;
+    let minZ = systems[0].position.z;
+    let maxZ = systems[0].position.z;
+
+    systems.forEach(({ position }) => {
+      minX = Math.min(minX, position.x);
+      maxX = Math.max(maxX, position.x);
+      minY = Math.min(minY, position.y);
+      maxY = Math.max(maxY, position.y);
+      minZ = Math.min(minZ, position.z);
+      maxZ = Math.max(maxZ, position.z);
+    });
+
+    const center = {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      z: (minZ + maxZ) / 2
+    };
+
+    const extentX = maxX - minX;
+    const extentY = maxY - minY;
+    const extentZ = maxZ - minZ;
+    const boundingDiagonal = Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
+    const radius = Math.max(boundingDiagonal / 2, fallbackRadius);
+
+    return { center, radius };
+  }, [gameState.systems]);
+
   const isScenarioReady = gameState.systems.length > 0;
 
   const ownershipSignature = useMemo(() => {
@@ -148,6 +187,7 @@ const GameScene: React.FC<GameSceneProps> = ({
               initialPosition={cameraPosition}
               initialTarget={cameraTarget}
               ready={isScenarioReady}
+              mapRadius={mapMetrics.radius}
             />
             <ambientLight intensity={0.4} color="#aaccff" />
             <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
