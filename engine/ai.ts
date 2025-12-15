@@ -17,7 +17,10 @@ const cfg = {
   scoutProb: 0.1,
   targetInertiaDecay: 0.9,
   targetInertiaMin: 50,
+  holdTurns: 3,
 };
+
+export const AI_HOLD_TURNS = cfg.holdTurns;
 
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
@@ -48,6 +51,8 @@ export const planAiTurn = (
   const myFleets = state.fleets.filter(f => f.factionId === factionId);
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
 
+  const activeHoldSystems: Record<string, number> = {};
+
   // Initialize or clone memory
   // Note: For now we share one AIState object in GameState,
   // but strictly speaking each AI faction should have its own.
@@ -59,6 +64,17 @@ export const planAiTurn = (
     lastOwnerBySystemId: {},
     holdUntilTurnBySystemId: {}
   };
+
+  Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
+    const system = state.systems.find(s => s.id === systemId);
+
+    if (!system || system.ownerFactionId !== factionId || holdUntil <= state.day) {
+      delete memory.holdUntilTurnBySystemId[systemId];
+      return;
+    }
+
+    activeHoldSystems[systemId] = holdUntil;
+  });
 
   const observedSystemIds = state.rules.fogOfWar
     ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
@@ -120,6 +136,23 @@ export const planAiTurn = (
 
   // 3. TASK GENERATION
   const tasks: Task[] = [];
+
+  Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
+    const sysData = analysisArray.find(data => data.id === systemId);
+    const fogAge = sysData?.fogAge ?? 0;
+    const fogFactor = 1 / (1 + fogAge * 0.1);
+    const inertia = memory.targetPriorities[systemId] || 0;
+    const basePriority = 800 + (sysData?.value ?? 0);
+    const requiredPower = Math.max(100, (sysData?.threat || 0) * cfg.attackRatio);
+
+    tasks.push({
+      type: 'HOLD',
+      systemId,
+      priority: basePriority * fogFactor + inertia,
+      requiredPower,
+      reason: `Hold garrison until turn ${holdUntil}`
+    });
+  });
 
   analysisArray.forEach(sysData => {
     const inertia = memory.targetPriorities[sysData.id] || 0;
