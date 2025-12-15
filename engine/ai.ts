@@ -18,6 +18,9 @@ const cfg = {
   targetInertiaDecay: 0.9,
   targetInertiaMin: 50,
   holdTurns: 3,
+  sightingForgetAfterTurns: 12,
+  sightingConfidenceDecayPerTurn: 0.1,
+  sightingMinConfidence: 0.05,
 };
 
 export const AI_HOLD_TURNS = cfg.holdTurns;
@@ -65,6 +68,28 @@ export const planAiTurn = (
     holdUntilTurnBySystemId: {}
   };
 
+  Object.entries(memory.sightings).forEach(([fleetId, sighting]) => {
+    const fleetExists = state.fleets.some(f => f.id === fleetId);
+    const turnsSinceSeen = state.day - sighting.daySeen;
+    const lastUpdateDay = sighting.lastUpdateDay ?? sighting.daySeen;
+    const turnsSinceUpdate = Math.max(0, state.day - lastUpdateDay);
+
+    if (!fleetExists || turnsSinceSeen > cfg.sightingForgetAfterTurns) {
+      delete memory.sightings[fleetId];
+      return;
+    }
+
+    if (turnsSinceUpdate > 0) {
+      const decayFactor = Math.pow(1 - cfg.sightingConfidenceDecayPerTurn, turnsSinceUpdate);
+      sighting.confidence *= decayFactor;
+      sighting.lastUpdateDay = state.day;
+    }
+
+    if (sighting.confidence < cfg.sightingMinConfidence) {
+      delete memory.sightings[fleetId];
+    }
+  });
+
   Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
     const system = state.systems.find(s => s.id === systemId);
 
@@ -91,7 +116,8 @@ export const planAiTurn = (
       position: { ...fleet.position },
       daySeen: state.day,
       estimatedPower: calculateFleetPower(fleet),
-      confidence: 1.0
+      confidence: 1.0,
+      lastUpdateDay: state.day
     };
   });
 

@@ -143,6 +143,7 @@ export interface EnemySighting {
   daySeen: number;
   estimatedPower: number;
   confidence: number;
+  lastUpdateDay?: number;
 }
 
 export interface AIState {
