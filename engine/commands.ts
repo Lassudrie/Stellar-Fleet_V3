@@ -6,13 +6,13 @@ import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 
 export type GameCommand =
-  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
+  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
-  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string }
-  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string }
-  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string };
+  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string };
 
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): GameState => {
     // Enforce Immutability in Dev

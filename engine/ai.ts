@@ -3,7 +3,7 @@ import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState } from '../
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
-import { aiDebugger } from './aiDebugger';
+import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE } from '../data/static';
@@ -90,7 +90,7 @@ interface Task {
   priority: number;
   requiredPower: number;
   distanceToClosestFleet: number;
-  reason?: string;
+  reason: string;
 }
 
 interface FleetAssignment {
@@ -217,13 +217,14 @@ export const planAiTurn = (
     fogAge: number
   }[] = [];
   const totalMyPower = myFleets.reduce((sum, f) => sum + calculateFleetPower(f), 0);
-  
+
   state.systems.forEach(sys => {
       let value = 10;
       if (sys.resourceType !== 'none') value += 50;
       if (sys.ownerFactionId === factionId) value += 20;
 
       const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
+      const distanceToEmpire = minDistanceBySystemId[sys.id] ?? Infinity;
 
       const visibleFleetsHere = perceivedState.fleets
         .filter(f => f.factionId !== factionId)
@@ -238,6 +239,13 @@ export const planAiTurn = (
       const fogThreatFactor = fogAge === 0 ? 1 : 1 / (1 + fogAge * 0.2);
       const threat = threatVisible + (threatMemory * fogThreatFactor);
 
+      const expansionBias = sys.ownerFactionId === factionId ? cfg.defendBias : cfg.attackRatio;
+      const frontierScore = 1 + Math.min(1, fogAge * 0.05) + (Number.isFinite(distanceToEmpire) ? Math.min(1, distanceToEmpire / 200) : 0);
+      const finalScore = (value * expansionBias * frontierScore) - threat;
+      const decision: SystemEvalLog['decision'] = (sys.ownerFactionId === factionId && threat > 0) || (!sys.ownerFactionId && value > 20)
+        ? 'TARGET_CANDIDATE'
+        : 'IGNORED';
+
       const data = {
           id: sys.id,
           value,
@@ -248,6 +256,22 @@ export const planAiTurn = (
           fogAge
       };
       analysisArray.push(data);
+
+      if (aiDebugger.getEnabled()) {
+        aiDebugger.logSystemEval({
+          systemId: sys.id,
+          systemName: sys.name,
+          isOwned: sys.ownerFactionId === factionId,
+          distanceToEmpire,
+          fogAge,
+          baseValue: value,
+          expansionBias,
+          frontierScore,
+          threatDetected: threat,
+          finalScore,
+          decision
+        });
+      }
   });
 
   const embarkedFriendlyArmies = new Set(
@@ -426,7 +450,7 @@ export const planAiTurn = (
         if (f.state === FleetState.MOVING && f.targetSystemId === task.systemId) {
             d = Math.max(0, d - (cfg.inertiaBonus * cfg.inertiaBonus));
         }
-        
+
         let suitability = 10000 - d;
 
         if (task.type === 'SCOUT') {
@@ -444,7 +468,21 @@ export const planAiTurn = (
             }
         }
 
-        return { fObj, distSq: d, suitability };
+        const fleetEval = { fObj, distSq: d, suitability };
+
+        if (aiDebugger.getEnabled()) {
+          aiDebugger.logFleetEval(`${task.type}:${task.systemId}`, {
+            fleetId: f.id,
+            state: f.state,
+            position: f.position,
+            shipCount: f.ships.length,
+            totalPower: fObj.power,
+            distanceToTarget: Math.sqrt(d),
+            suitabilityScore: suitability
+          });
+        }
+
+        return fleetEval;
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
 
@@ -483,7 +521,7 @@ export const planAiTurn = (
           executed: taskAssigned,
           assignedFleetId: assigned[0]?.fObj.fleet.id || null,
           status: taskAssigned ? 'ASSIGNED' : 'SKIPPED_POWER_MISMATCH',
-          reason: task.reason
+          reason: task.reason || 'No reason provided'
       });
     }
   }
@@ -509,7 +547,8 @@ export const planAiTurn = (
                           fleetId: fleet.id,
                           shipId: ship.id,
                           armyId: ship.carriedArmyId,
-                          systemId: task.systemId
+                          systemId: task.systemId,
+                          reason: 'Unload embarked army for invasion objective'
                       });
                   });
           }
@@ -526,7 +565,8 @@ export const planAiTurn = (
               commands.push({
                   type: 'ORDER_INVASION_MOVE',
                   fleetId: fleet.id,
-                  targetSystemId: task.systemId
+                  targetSystemId: task.systemId,
+                  reason: 'Reaffirm invasion move toward assigned target'
               });
           }
           return;
@@ -538,13 +578,15 @@ export const planAiTurn = (
           commands.push({
               type: 'ORDER_INVASION_MOVE',
               fleetId: fleet.id,
-              targetSystemId: task.systemId
+              targetSystemId: task.systemId,
+              reason: 'Advance to invade target system'
           });
       } else {
           commands.push({
               type: 'MOVE_FLEET',
               fleetId: fleet.id,
-              targetSystemId: task.systemId
+              targetSystemId: task.systemId,
+              reason: `Move fleet for ${task.type} task`
           });
       }
   });
