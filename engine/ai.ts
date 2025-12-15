@@ -313,11 +313,24 @@ export const planAiTurn = (
       const { fleet, task } = assign;
       
       // Check if fleet is already at destination
-      if (fleet.state === FleetState.ORBIT && 
+      if (fleet.state === FleetState.ORBIT &&
           state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
+          if (task.type === 'INVADE') {
+              fleet.ships
+                  .filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
+                  .forEach(ship => {
+                      if (!ship.carriedArmyId) return;
+                      commands.push({
+                          type: 'UNLOAD_ARMY',
+                          fleetId: fleet.id,
+                          shipId: ship.id,
+                          armyId: ship.carriedArmyId,
+                          systemId: task.systemId
+                      });
+                  });
+          }
+
           // Already at target, no movement needed
-          // Note: Invasion auto-deployment is handled by movementPhase when fleet arrives
-          // with invasionTargetSystemId set. If already in orbit, armies should already be deployed.
           return;
       }
 
@@ -337,16 +350,13 @@ export const planAiTurn = (
 
       // Issue movement command
       // Use ORDER_INVASION_MOVE for INVADE tasks to auto-deploy armies on arrival
-      const embarkedCount = fleet.ships.filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId)).length;
-
-      if (task.type === 'INVADE' && embarkedCount > 0) {
+      if (task.type === 'INVADE') {
           commands.push({
               type: 'ORDER_INVASION_MOVE',
               fleetId: fleet.id,
               targetSystemId: task.systemId
           });
       } else {
-          // Future improvement: introduce a LOAD phase to embark armies before invading.
           commands.push({
               type: 'MOVE_FLEET',
               fleetId: fleet.id,

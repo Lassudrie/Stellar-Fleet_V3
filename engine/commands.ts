@@ -1,8 +1,8 @@
 
-import { GameState, FleetState, AIState, FactionId } from '../types';
+import { GameState, FleetState, AIState, FactionId, ArmyState } from '../types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
-import { clone } from './math/vec3';
+import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 
 export type GameCommand =
@@ -161,9 +161,53 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
         }
 
         case 'UNLOAD_ARMY': {
-            // Placeholder: No-op for now as manual unload is not fully implemented
-            // logic is usually handled by movement phase auto-invasion or specific handlers
-            return state;
+            const system = getSystemById(state.systems, command.systemId);
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            const army = state.armies.find(a => a.id === command.armyId);
+
+            if (!system || !fleet || !army) return state;
+
+            const inOrbit = fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) < 0.0001;
+            if (!inOrbit) return state;
+
+            const ship = fleet.ships.find(s => s.id === command.shipId && s.carriedArmyId === command.armyId);
+            if (!ship) return state;
+
+            const validArmy = army.state === ArmyState.EMBARKED && army.containerId === fleet.id && army.factionId === fleet.factionId;
+            if (!validArmy) return state;
+
+            const updatedFleet = {
+                ...fleet,
+                ships: fleet.ships.map(s => {
+                    if (s.id !== command.shipId) return s;
+                    if (s.carriedArmyId !== command.armyId) return s;
+                    return { ...s, carriedArmyId: null };
+                })
+            };
+
+            const updatedArmies = state.armies.map(a => {
+                if (a.id !== command.armyId) return a;
+
+                return {
+                    ...a,
+                    state: ArmyState.DEPLOYED,
+                    containerId: system.id
+                };
+            });
+
+            const newLog = {
+                id: rng.id('log'),
+                day: state.day,
+                text: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`,
+                type: 'move' as const
+            };
+
+            return {
+                ...state,
+                fleets: state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
+                armies: updatedArmies,
+                logs: [...state.logs, newLog]
+            };
         }
 
         default:
