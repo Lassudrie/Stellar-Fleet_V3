@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, MapControls } from '@react-three/drei';
 import { MapControls as ThreeMapControls } from 'three-stdlib';
+import { Vector3 } from 'three';
 import { Vec3 } from '../engine/math/vec3';
 
 interface GameCameraProps {
@@ -8,9 +9,15 @@ interface GameCameraProps {
   initialTarget?: Vec3 | [number, number, number];
   ready?: boolean;
   mapRadius?: number;
+  mapBounds?: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  };
 }
 
-const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius }) => {
+const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
 
   const targetArray = useMemo<[number, number, number]>(() => {
@@ -35,6 +42,47 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     return { minDistance, maxDistance };
   }, [mapRadius]);
 
+  const clampControls = useCallback(() => {
+    if (!controlsRef.current || !mapBounds) return;
+
+    const { object: camera, target, minDistance, maxDistance } = controlsRef.current;
+    const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+    const direction = new Vector3().subVectors(camera.position, target);
+
+    const clampedTargetX = clampValue(target.x, mapBounds.minX, mapBounds.maxX);
+    const clampedTargetZ = clampValue(target.z, mapBounds.minZ, mapBounds.maxZ);
+    const targetChanged = clampedTargetX !== target.x || clampedTargetZ !== target.z;
+
+    target.set(clampedTargetX, target.y, clampedTargetZ);
+
+    const desiredPosition = new Vector3().addVectors(target, direction);
+    const clampedPositionX = clampValue(desiredPosition.x, mapBounds.minX, mapBounds.maxX);
+    const clampedPositionZ = clampValue(desiredPosition.z, mapBounds.minZ, mapBounds.maxZ);
+    desiredPosition.setX(clampedPositionX).setZ(clampedPositionZ);
+
+    const offsetFromTarget = new Vector3().subVectors(desiredPosition, target);
+    const currentDistance = offsetFromTarget.length();
+    const distanceLimits = {
+      min: minDistance ?? distanceConfig.minDistance,
+      max: maxDistance ?? distanceConfig.maxDistance
+    };
+
+    const clampedDistance = clampValue(currentDistance || distanceLimits.min, distanceLimits.min, distanceLimits.max);
+
+    const safeDirection = offsetFromTarget.lengthSq() === 0
+      ? new Vector3(0, 1, 0)
+      : offsetFromTarget.normalize();
+
+    const finalPosition = new Vector3().addVectors(target, safeDirection.multiplyScalar(clampedDistance));
+    const positionChanged = !finalPosition.equals(camera.position);
+
+    if (targetChanged || positionChanged) {
+      camera.position.copy(finalPosition);
+      controlsRef.current.update();
+    }
+  }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
+
   useEffect(() => {
     if (!ready || !controlsRef.current) return;
     const controls = controlsRef.current;
@@ -44,7 +92,12 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     controls.object.up.set(0, 1, 0);
     controls.object.lookAt(...targetArray);
     controls.update();
-  }, [ready, targetArray, positionArray]);
+    clampControls();
+  }, [ready, targetArray, positionArray, clampControls]);
+
+  useEffect(() => {
+    clampControls();
+  }, [clampControls, mapBounds]);
 
   return (
     <>
@@ -72,6 +125,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}
         screenSpacePanning={false}
+        onChange={clampControls}
       />
     </>
   );
