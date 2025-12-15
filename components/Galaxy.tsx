@@ -48,14 +48,15 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
 
     useFrame(({ camera }) => {
         const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
-        const maxDist = isOwned ? 90 : 60;
-        const fadeStart = maxDist - 20;
+        const maxDist = isOwned ? 135 : 90;
+        const fadeRange = 30;
+        const fadeStart = maxDist - fadeRange;
 
         let opacity = 1;
         if (dist > maxDist) {
             opacity = 0;
         } else if (dist > fadeStart) {
-            opacity = 1 - (dist - fadeStart) / 20;
+            opacity = 1 - (dist - fadeStart) / fadeRange;
         }
 
         const isVisible = opacity > 0.05;
