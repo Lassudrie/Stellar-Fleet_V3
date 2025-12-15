@@ -86,12 +86,10 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   }, [clampToBounds, ready, targetArray]);
 
   useEffect(() => {
-    const controls = controlsRef.current;
-    if (!controls) return;
-
-    controls.addEventListener('change', clampToBounds);
-    return () => controls.removeEventListener('change', clampToBounds);
-  }, [clampToBounds]);
+    if (mapBounds) {
+      clampToBounds();
+    }
+  }, [clampToBounds, mapBounds]);
 
   return (
     <>
@@ -119,6 +117,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         maxDistance={250}
         dampingFactor={0.05}
         screenSpacePanning={false}
+        onChange={clampToBounds}
       />
     </>
   );
