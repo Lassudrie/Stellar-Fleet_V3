@@ -1,8 +1,8 @@
 
 import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, Euler, DoubleSide, Vector3 } from 'three';
-import { ThreeEvent, useThree, useFrame } from '@react-three/fiber';
+import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
+import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { StarSystem, Army, ArmyState } from '../types';
 import { CAPTURE_RANGE, COLORS } from '../data/static';
 
@@ -20,7 +20,7 @@ interface ArmyInfo {
     hasConflict: boolean;
 }
 
-const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: ArmyInfo }> = ({ system, rotation, armyInfo }) => {
+const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ system, armyInfo }) => {
     const textRef = useRef<any>(null);
     const iconRef = useRef<any>(null);
     const armyIconRef = useRef<any>(null);
@@ -93,7 +93,6 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
                      <Text
                         ref={iconRef}
                         position={[0, 1.3, 0]}
-                        rotation={rotation}
                         fontSize={1.2}
                         anchorX="center"
                         anchorY="bottom"
@@ -110,7 +109,6 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
                      <Text
                         ref={armyIconRef}
                         position={[0, resourceIcon ? 2.8 : 1.5, 0]}
-                        rotation={rotation}
                         fontSize={1.0}
                         color={armyVisual.color}
                         anchorX="center"
@@ -128,7 +126,6 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
                 <Text
                     ref={textRef}
                     position={[0, -1.5, 0]}
-                    rotation={rotation}
                     fontSize={0.9}
                     color={system.color} // Use system color (which defaults to white or owner color)
                     anchorX="center"
@@ -145,12 +142,6 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
 };
 
 const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSystemIds, onSystemClick, playerFactionId }) => {
-  const { camera } = useThree();
-
-  const textRotation = useMemo(() => {
-    return camera.rotation;
-  }, [camera]);
-
   const armyMap = useMemo(() => {
       const map = new Map<string, ArmyInfo>();
       if (!armies) return map;
@@ -246,7 +237,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
 
         {systems.map((sys) => (
             <group key={`label-${sys.id}`} position={[sys.position.x, sys.position.y, sys.position.z]}>
-                <SystemLabel system={sys} rotation={textRotation} armyInfo={armyMap.get(sys.id)} />
+                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} />
             </group>
         ))}
     </group>
