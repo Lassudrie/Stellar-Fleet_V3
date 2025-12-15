@@ -68,7 +68,44 @@ export const planAiTurn = (
     holdUntilTurnBySystemId: {}
   };
 
+  Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
+    const system = state.systems.find(s => s.id === systemId);
+
+    if (!system || system.ownerFactionId !== factionId || holdUntil <= state.day) {
+      delete memory.holdUntilTurnBySystemId[systemId];
+      return;
+    }
+
+    activeHoldSystems[systemId] = holdUntil;
+  });
+
+  const observedSystemIds = state.rules.fogOfWar
+    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
+    : new Set(state.systems.map(s => s.id));
+
+  // Update memory with real observations through fog-of-war helpers
+  const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
+  const refreshedSightings = new Set<string>();
+
+  visibleEnemyFleets.forEach(fleet => {
+    const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+    memory.sightings[fleet.id] = {
+      fleetId: fleet.id,
+      systemId: systemInRange ? systemInRange.id : null,
+      position: { ...fleet.position },
+      daySeen: state.day,
+      estimatedPower: calculateFleetPower(fleet),
+      confidence: 1.0,
+      lastUpdateDay: state.day
+    };
+    refreshedSightings.add(fleet.id);
+  });
+
   Object.entries(memory.sightings).forEach(([fleetId, sighting]) => {
+    if (refreshedSightings.has(fleetId)) {
+      return;
+    }
+
     const fleetExists = state.fleets.some(f => f.id === fleetId);
     const turnsSinceSeen = state.day - sighting.daySeen;
     const lastUpdateDay = sighting.lastUpdateDay ?? sighting.daySeen;
@@ -88,37 +125,6 @@ export const planAiTurn = (
     if (sighting.confidence < cfg.sightingMinConfidence) {
       delete memory.sightings[fleetId];
     }
-  });
-
-  Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
-    const system = state.systems.find(s => s.id === systemId);
-
-    if (!system || system.ownerFactionId !== factionId || holdUntil <= state.day) {
-      delete memory.holdUntilTurnBySystemId[systemId];
-      return;
-    }
-
-    activeHoldSystems[systemId] = holdUntil;
-  });
-
-  const observedSystemIds = state.rules.fogOfWar
-    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
-    : new Set(state.systems.map(s => s.id));
-
-  // Update memory with real observations through fog-of-war helpers
-  const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
-
-  visibleEnemyFleets.forEach(fleet => {
-    const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
-    memory.sightings[fleet.id] = {
-      fleetId: fleet.id,
-      systemId: systemInRange ? systemInRange.id : null,
-      position: { ...fleet.position },
-      daySeen: state.day,
-      estimatedPower: calculateFleetPower(fleet),
-      confidence: 1.0,
-      lastUpdateDay: state.day
-    };
   });
 
   observedSystemIds.forEach(id => {
