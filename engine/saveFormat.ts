@@ -92,6 +92,7 @@ export interface EnemySightingDTO {
   daySeen: number;
   estimatedPower: number;
   confidence: number;
+  lastUpdateDay?: number;
 }
 
 export interface AIStateDTO {
