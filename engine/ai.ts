@@ -136,7 +136,15 @@ export const planAiTurn = (
   });
 
   // 2. STRATEGIC ANALYSIS (System Valuation)
-  const analysisArray: { id: string, value: number, threat: number, isOwner: boolean, fogAge: number }[] = [];
+  const analysisArray: {
+    id: string,
+    value: number,
+    threat: number,
+    threatVisible: number,
+    threatMemory: number,
+    isOwner: boolean,
+    fogAge: number
+  }[] = [];
   const totalMyPower = myFleets.reduce((sum, f) => sum + calculateFleetPower(f), 0);
   
   state.systems.forEach(sys => {
@@ -146,14 +154,25 @@ export const planAiTurn = (
 
       const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
 
-      // Estimate threat at system using current sightings only
+      const visibleFleetsHere = perceivedState.fleets
+        .filter(f => f.factionId !== factionId)
+        .filter(f => distSq(f.position, sys.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+
+      const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
+
+      // Estimate threat using stored sightings
       const sightingsHere = Object.values(memory.sightings).filter(s => s.systemId === sys.id);
-      const threat = sightingsHere.reduce((sum, sighting) => sum + (sighting.estimatedPower * sighting.confidence), 0);
+      const threatMemory = sightingsHere.reduce((sum, sighting) => sum + (sighting.estimatedPower * sighting.confidence), 0);
+
+      const fogThreatFactor = fogAge === 0 ? 1 : 1 / (1 + fogAge * 0.2);
+      const threat = threatVisible + (threatMemory * fogThreatFactor);
 
       const data = {
           id: sys.id,
           value,
           threat,
+          threatVisible,
+          threatMemory,
           isOwner: sys.ownerFactionId === factionId,
           fogAge
       };
