@@ -7,9 +7,10 @@ interface GameCameraProps {
   initialPosition?: Vec3 | [number, number, number];
   initialTarget?: Vec3 | [number, number, number];
   ready?: boolean;
+  mapRadius?: number;
 }
 
-const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready }) => {
+const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
 
   const targetArray = useMemo<[number, number, number]>(() => {
@@ -23,6 +24,16 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     if (Array.isArray(initialPosition)) return initialPosition;
     return [initialPosition.x, initialPosition.y, initialPosition.z];
   }, [initialPosition]);
+
+  const distanceConfig = useMemo(() => {
+    const fallbackRadius = 120;
+    const radius = Math.max(mapRadius ?? fallbackRadius, 1);
+
+    const maxDistance = Math.max(radius * 2.5, fallbackRadius * 2);
+    const minDistance = Math.min(Math.max(20, radius * 0.3), maxDistance * 0.8);
+
+    return { minDistance, maxDistance };
+  }, [mapRadius]);
 
   useEffect(() => {
     if (!ready || !controlsRef.current) return;
@@ -52,8 +63,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         enableRotate={false}
         enablePan={true}
         enableZoom={true}
-        minDistance={20}
-        maxDistance={250}
+        minDistance={distanceConfig.minDistance}
+        maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}
         screenSpacePanning={false}
       />
