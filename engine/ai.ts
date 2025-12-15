@@ -169,12 +169,11 @@ const updateMemory = (
       return;
     }
 
-    const fleetExists = state.fleets.some(f => f.id === fleetId);
     const turnsSinceSeen = state.day - sighting.daySeen;
     const lastUpdateDay = sighting.lastUpdateDay ?? sighting.daySeen;
     const turnsSinceUpdate = Math.max(0, state.day - lastUpdateDay);
 
-    if (!fleetExists || turnsSinceSeen > cfg.sightingForgetAfterTurns) {
+    if (turnsSinceSeen > cfg.sightingForgetAfterTurns) {
       delete memory.sightings[fleetId];
       return;
     }
