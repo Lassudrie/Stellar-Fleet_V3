@@ -175,8 +175,9 @@ export const deserializeGameState = (json: string): GameState => {
       color: s.color,
       size: s.size,
       resourceType: s.resourceType,
+      isHomeworld: s.isHomeworld ?? false,
       // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
-      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null) 
+      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null)
     }));
 
     // Fleets

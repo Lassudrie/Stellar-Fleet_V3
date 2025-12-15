@@ -75,6 +75,7 @@ export interface StarSystem {
   size: number;
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
+  isHomeworld: boolean;
 }
 
 export interface Fleet {
