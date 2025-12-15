@@ -320,6 +320,21 @@ const generateTasks = (
     return basePriority * proximityWeight;
   };
 
+  const findNearestOwnedSystem = (targetSystemId: string) => {
+    const targetSystem = state.systems.find(sys => sys.id === targetSystemId);
+    if (!targetSystem) return null;
+
+    let best: { systemId: string; distanceSq: number } | null = null;
+    mySystems.forEach(sys => {
+      const distanceSq = distSq(sys.position, targetSystem.position);
+      if (!best || distanceSq < best.distanceSq) {
+        best = { systemId: sys.id, distanceSq };
+      }
+    });
+
+    return best;
+  };
+
   Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
     const sysData = analysisArray.find(data => data.id === systemId);
     const fogAge = sysData?.fogAge ?? 0;
@@ -385,6 +400,31 @@ const generateTasks = (
             distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
             reason: 'Expansion opportunity'
           });
+      } else {
+          const staging = findNearestOwnedSystem(sysData.id);
+
+          if (staging) {
+            const distanceWeightedPriority = applyDistanceWeight(staging.systemId, 300 + sysData.value * 0.5);
+            const regroupPower = Math.max(30, Math.min(300, sysData.threat * 0.3));
+            tasks.push({
+              type: 'HOLD',
+              systemId: staging.systemId,
+              priority: applyTaskPreference('HOLD', applyFog(distanceWeightedPriority) + inertia),
+              requiredPower: regroupPower,
+              distanceToClosestFleet: minDistanceBySystemId[staging.systemId] ?? Infinity,
+              reason: 'Regroup near strong target'
+            });
+          }
+
+          const scoutPriority = applyFog(150 + sysData.value * 0.3) + inertia;
+          tasks.push({
+            type: 'SCOUT',
+            systemId: sysData.id,
+            priority: applyTaskPreference('SCOUT', scoutPriority),
+            requiredPower: 30,
+            distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
+            reason: 'Probe heavily defended target'
+          });
       }
     }
   });
@@ -448,6 +488,21 @@ const assignFleets = (
   }));
 
   const assignments: FleetAssignment[] = [];
+
+  const findStagingSystemId = (targetSystemId: string) => {
+    const targetSystem = getSystemById(state.systems, targetSystemId);
+    if (!targetSystem) return null;
+
+    let best: { systemId: string; distanceSq: number } | null = null;
+    mySystems.forEach(sys => {
+      const distanceSq = distSq(sys.position, targetSystem.position);
+      if (!best || distanceSq < best.distanceSq) {
+        best = { systemId: sys.id, distanceSq };
+      }
+    });
+
+    return best?.systemId || null;
+  };
 
   if (aiDebugger.getEnabled()) {
       aiDebugger.startTurn(state.day, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
@@ -519,6 +574,9 @@ const assignFleets = (
 
     let assignedPower = 0;
     const assigned: typeof candidates = [];
+    const isAssaultTask = task.type === 'ATTACK' || task.type === 'INVADE';
+    const partialThreshold = isAssaultTask ? task.requiredPower * 0.7 : task.requiredPower;
+    const flexibleTask = task.type === 'DEFEND' || task.type === 'HOLD';
 
     for (const cand of candidates) {
         if (assignedPower >= task.requiredPower) break;
@@ -526,13 +584,34 @@ const assignFleets = (
         assignedPower += cand.fObj.power;
     }
 
-    const taskAssigned = assignedPower >= task.requiredPower || (assignedPower > 0 && task.type === 'DEFEND');
+    const taskAssigned =
+      assignedPower >= task.requiredPower ||
+      (assignedPower >= partialThreshold && isAssaultTask) ||
+      (assignedPower > 0 && flexibleTask);
+
+    let regroupAssigned = false;
 
     if (taskAssigned) {
         assigned.forEach(c => {
             c.fObj.assigned = true;
             assignments.push({ fleet: c.fObj.fleet, task });
         });
+    } else if (assigned.length && isAssaultTask) {
+        const fallbackSystemId = findStagingSystemId(task.systemId) || task.systemId;
+        const regroupTask: Task = {
+          ...task,
+          type: 'HOLD',
+          systemId: fallbackSystemId,
+          requiredPower: 0,
+          reason: `Regroup for ${task.type.toLowerCase()} on ${task.systemId}`
+        };
+
+        assigned.forEach(c => {
+          c.fObj.assigned = true;
+          assignments.push({ fleet: c.fObj.fleet, task: regroupTask });
+        });
+
+        regroupAssigned = true;
     }
 
     if (aiDebugger.getEnabled()) {
@@ -542,9 +621,9 @@ const assignFleets = (
           priority: task.priority,
           requiredPower: task.requiredPower,
           assignedPower: assignedPower,
-          executed: taskAssigned,
+          executed: taskAssigned || regroupAssigned,
           assignedFleetId: assigned[0]?.fObj.fleet.id || null,
-          status: taskAssigned ? 'ASSIGNED' : 'SKIPPED_POWER_MISMATCH',
+          status: taskAssigned ? 'ASSIGNED' : regroupAssigned ? 'REGROUPING' : 'SKIPPED_POWER_MISMATCH',
           reason: task.reason || 'No reason provided'
       });
     }
@@ -592,12 +671,23 @@ const generateCommands = (
       }
 
       if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
-          if (task.type === 'INVADE' && fleet.invasionTargetSystemId !== task.systemId) {
+          if (task.type === 'INVADE') {
+              const reason = fleet.invasionTargetSystemId === task.systemId
+                ? 'Maintain invasion course toward assigned target'
+                : 'Reaffirm invasion move toward assigned target';
+
               commands.push({
                   type: 'ORDER_INVASION_MOVE',
                   fleetId: fleet.id,
                   targetSystemId: task.systemId,
-                  reason: 'Reaffirm invasion move toward assigned target'
+                  reason
+              });
+          } else {
+              commands.push({
+                  type: 'MOVE_FLEET',
+                  fleetId: fleet.id,
+                  targetSystemId: task.systemId,
+                  reason: 'Maintain course toward assigned target'
               });
           }
           return;
