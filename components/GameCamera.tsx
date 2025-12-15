@@ -37,9 +37,13 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
 
   useEffect(() => {
     if (!ready || !controlsRef.current) return;
-    controlsRef.current.target.set(...targetArray);
-    controlsRef.current.update();
-  }, [ready, targetArray]);
+    const controls = controlsRef.current;
+
+    controls.object.position.set(...positionArray);
+    controls.target.set(...targetArray);
+    controls.object.lookAt(...targetArray);
+    controls.update();
+  }, [ready, targetArray, positionArray]);
 
   return (
     <>
