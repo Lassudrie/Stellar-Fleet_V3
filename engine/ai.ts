@@ -8,8 +8,30 @@ import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE } from '../data/static';
 
-// Configuration
-const cfg = {
+type AiProfile = 'aggressive' | 'defensive' | 'balanced';
+
+interface AiTaskTargets {
+  attack: number;
+  defense: number;
+  scout: number;
+}
+
+interface AiConfig {
+  defendBias: number;
+  attackRatio: number;
+  minMoveCommitTurns: number;
+  inertiaBonus: number;
+  scoutProb: number;
+  targetInertiaDecay: number;
+  targetInertiaMin: number;
+  holdTurns: number;
+  sightingForgetAfterTurns: number;
+  sightingConfidenceDecayPerTurn: number;
+  sightingMinConfidence: number;
+  taskTargets: AiTaskTargets;
+}
+
+const BASE_AI_CONFIG: AiConfig = {
   defendBias: 1.5,
   attackRatio: 1.2,
   minMoveCommitTurns: 3,
@@ -21,9 +43,44 @@ const cfg = {
   sightingForgetAfterTurns: 12,
   sightingConfidenceDecayPerTurn: 0.1,
   sightingMinConfidence: 0.05,
+  taskTargets: {
+    attack: 1,
+    defense: 1,
+    scout: 1,
+  },
 };
 
-export const AI_HOLD_TURNS = cfg.holdTurns;
+const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
+  ...BASE_AI_CONFIG,
+  ...overrides,
+  taskTargets: {
+    ...BASE_AI_CONFIG.taskTargets,
+    ...overrides.taskTargets,
+  },
+});
+
+const AI_PROFILE_CONFIGS: Record<AiProfile, AiConfig> = {
+  aggressive: withOverrides({
+    defendBias: 1.2,
+    attackRatio: 1.0,
+    scoutProb: 0.12,
+    taskTargets: { attack: 1.2, defense: 0.9, scout: 1.1 },
+  }),
+  defensive: withOverrides({
+    defendBias: 1.8,
+    attackRatio: 1.3,
+    scoutProb: 0.08,
+    taskTargets: { attack: 0.9, defense: 1.2, scout: 0.9 },
+  }),
+  balanced: BASE_AI_CONFIG,
+};
+
+const getAiConfig = (profile?: string): AiConfig => {
+  const key = (profile as AiProfile) || 'balanced';
+  return AI_PROFILE_CONFIGS[key] ?? BASE_AI_CONFIG;
+};
+
+export const AI_HOLD_TURNS = BASE_AI_CONFIG.holdTurns;
 
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
@@ -47,6 +104,9 @@ export const planAiTurn = (
   rng: RNG
 ): GameCommand[] => {
   const commands: GameCommand[] = [];
+
+  const factionProfile = state.factions.find(faction => faction.id === factionId)?.aiProfile;
+  const cfg = getAiConfig(factionProfile);
   
   // 1. MEMORY & PERCEPTION UPDATE
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
@@ -188,6 +248,18 @@ export const planAiTurn = (
   // 3. TASK GENERATION
   const tasks: Task[] = [];
 
+  const taskPreferenceWeights: Record<TaskType, number> = {
+    ATTACK: cfg.taskTargets.attack,
+    INVADE: cfg.taskTargets.attack,
+    DEFEND: cfg.taskTargets.defense,
+    HOLD: cfg.taskTargets.defense,
+    SCOUT: cfg.taskTargets.scout,
+  };
+
+  const applyTaskPreference = (taskType: TaskType, priority: number): number => {
+    return priority * (taskPreferenceWeights[taskType] ?? 1);
+  };
+
   Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
     const sysData = analysisArray.find(data => data.id === systemId);
     const fogAge = sysData?.fogAge ?? 0;
@@ -199,7 +271,7 @@ export const planAiTurn = (
     tasks.push({
       type: 'HOLD',
       systemId,
-      priority: basePriority * fogFactor + inertia,
+      priority: applyTaskPreference('HOLD', basePriority * fogFactor + inertia),
       requiredPower,
       reason: `Hold garrison until turn ${holdUntil}`
     });
@@ -216,7 +288,7 @@ export const planAiTurn = (
       tasks.push({
         type: 'DEFEND',
         systemId: sysData.id,
-        priority: applyFog((1000 + sysData.value) * cfg.defendBias) + inertia,
+        priority: applyTaskPreference('DEFEND', applyFog((1000 + sysData.value) * cfg.defendBias) + inertia),
         requiredPower: sysData.threat * 1.1,
         reason: 'Hostiles in sector'
       });
@@ -233,19 +305,19 @@ export const planAiTurn = (
           const hasEmbarkedArmies = myFleets.some(f =>
               f.ships.some(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
           );
-          
+
           let type: TaskType = 'ATTACK';
-          let priority = applyFog(500 + sysData.value) + inertia;
+          let basePriority = applyFog(500 + sysData.value) + inertia;
 
           if (hasEmbarkedArmies) {
                type = 'INVADE';
-               priority += 200;
+               basePriority += 200;
           }
 
           tasks.push({
             type,
             systemId: sysData.id,
-            priority,
+            priority: applyTaskPreference(type, basePriority),
             requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
             reason: 'Expansion opportunity'
           });
@@ -273,7 +345,7 @@ export const planAiTurn = (
       tasks.push({
         type: 'SCOUT',
         systemId: target.id,
-        priority: 200 + target.value,
+        priority: applyTaskPreference('SCOUT', 200 + target.value),
         requiredPower: 50,
         reason: 'Reconnaissance target'
       });
