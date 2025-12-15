@@ -1,7 +1,7 @@
 
-import { GameState } from '../../../types';
+import { GameState, FactionId, AIState } from '../../../types';
 import { TurnContext } from '../types';
-import { planAiTurn } from '../../ai';
+import { createEmptyAIState, planAiTurn } from '../../ai';
 import { applyCommand } from '../../commands';
 
 export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
@@ -11,10 +11,19 @@ export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
         .filter(faction => faction.aiProfile)
         .sort((a, b) => a.id.localeCompare(b.id));
 
-    let nextState = state;
+    const ensuredAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
+
+    aiFactions.forEach(faction => {
+        if (!ensuredAiStates[faction.id]) {
+            const legacyState = faction.id === 'red' ? state.aiState : undefined;
+            ensuredAiStates[faction.id] = legacyState ?? createEmptyAIState();
+        }
+    });
+
+    let nextState: GameState = { ...state, aiStates: ensuredAiStates };
 
     for (const faction of aiFactions) {
-        const existingAiState = state.aiStates?.[faction.id] || state.aiState;
+        const existingAiState = (nextState.aiStates ?? ensuredAiStates)[faction.id] ?? createEmptyAIState();
 
         const commands = planAiTurn(nextState, faction.id, existingAiState, ctx.rng);
 
@@ -23,5 +32,7 @@ export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
         }
     }
 
-    return nextState;
+    const mergedAiStates = { ...ensuredAiStates, ...(nextState.aiStates ?? {}) };
+
+    return { ...nextState, aiStates: mergedAiStates };
 };

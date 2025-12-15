@@ -82,6 +82,14 @@ const getAiConfig = (profile?: string): AiConfig => {
 
 export const AI_HOLD_TURNS = BASE_AI_CONFIG.holdTurns;
 
+export const createEmptyAIState = (): AIState => ({
+  sightings: {},
+  targetPriorities: {},
+  systemLastSeen: {},
+  lastOwnerBySystemId: {},
+  holdUntilTurnBySystemId: {},
+});
+
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
 interface Task {
@@ -120,13 +128,9 @@ const updateMemory = (
 
   const activeHoldSystems: Record<string, number> = {};
 
-  const memory: AIState = existingState ? JSON.parse(JSON.stringify(existingState)) : {
-    sightings: {},
-    targetPriorities: {},
-    systemLastSeen: {},
-    lastOwnerBySystemId: {},
-    holdUntilTurnBySystemId: {}
-  };
+  const memory: AIState = existingState
+    ? JSON.parse(JSON.stringify(existingState))
+    : createEmptyAIState();
 
   Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
     const system = state.systems.find(s => s.id === systemId);
