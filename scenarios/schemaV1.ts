@@ -71,7 +71,7 @@ export interface FactionDefinition {
   name: string;
   colorHex: string; // ex: "#3b82f6"
   isPlayable: boolean; // Si true, le joueur peut la sélectionner
-  aiProfile?: 'aggressive' | 'defensive' | 'expander'; // Indice pour l'IA
+  aiProfile?: 'aggressive' | 'defensive' | 'balanced'; // Indice pour l'IA
 }
 
 /** Composition d'une flotte initiale */
