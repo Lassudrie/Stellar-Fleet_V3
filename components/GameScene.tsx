@@ -3,8 +3,8 @@ import React, { Suspense, useMemo, useLayoutEffect, useRef } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { BufferGeometry, Vector3, BufferAttribute } from 'three';
-import { GameState, StarSystem, LaserShot, FleetState, EnemySighting, FactionId } from '../types';
+import { BufferGeometry, BufferAttribute } from 'three';
+import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../types';
 import { COLORS } from '../data/static';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
@@ -94,14 +94,24 @@ const TrajectoryRenderer: React.FC<{ fleets: GameState['fleets']; day: number; p
     );
 });
 
-const GameScene: React.FC<GameSceneProps> = ({ 
-  gameState, 
+const GameScene: React.FC<GameSceneProps> = ({
+  gameState,
   enemySightings,
-  onFleetSelect, 
-  onSystemClick, 
-  onBackgroundClick 
+  onFleetSelect,
+  onSystemClick,
+  onBackgroundClick
 }) => {
-  
+
+  const playerHomeworld = useMemo(() => {
+    return gameState.systems.find(system => system.ownerFactionId === gameState.playerFactionId)?.position || { x: 0, y: 0, z: 0 };
+  }, [gameState.playerFactionId, gameState.systems]);
+
+  const cameraTarget = useMemo(() => [playerHomeworld.x, playerHomeworld.y, playerHomeworld.z] as [number, number, number], [playerHomeworld]);
+
+  const cameraPosition = useMemo(() => [playerHomeworld.x, playerHomeworld.y + 80, playerHomeworld.z + 50] as [number, number, number], [playerHomeworld]);
+
+  const isScenarioReady = gameState.systems.length > 0;
+
   const ownershipSignature = useMemo(() => {
       return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
   }, [gameState.systems]);
@@ -124,8 +134,8 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   return (
     <div className="absolute inset-0 z-0 bg-black">
-      <Canvas 
-        gl={{ antialias: false, powerPreference: "high-performance" }} 
+      <Canvas
+        gl={{ antialias: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
         onClick={(e) => {
             if (e.target === e.currentTarget) {
@@ -134,7 +144,11 @@ const GameScene: React.FC<GameSceneProps> = ({
         }}
       >
         <Suspense fallback={null}>
-            <GameCamera />
+            <GameCamera
+              initialPosition={cameraPosition}
+              initialTarget={cameraTarget}
+              ready={isScenarioReady}
+            />
             <ambientLight intensity={0.4} color="#aaccff" />
             <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
             <Stars radius={200} depth={50} count={3000} factor={4} saturation={0} fade speed={0.5} />
