@@ -1,5 +1,5 @@
 import { GameEngine } from './GameEngine';
-import { planAiTurn } from './ai';
+import { createEmptyAIState, planAiTurn } from './ai';
 import { RNG } from './rng';
 import { buildScenario } from '../scenarios';
 import { generateWorld } from '../services/world/worldGenerator';
@@ -67,7 +67,8 @@ const countAiOrders = (state: GameState, rngSnapshot: RNG): number => {
   aiFactions
     .sort((a, b) => a.id.localeCompare(b.id))
     .forEach(faction => {
-      const aiState = state.aiStates?.[faction.id] ?? state.aiState;
+      const legacyState = faction.id === 'red' ? state.aiState : undefined;
+      const aiState = state.aiStates?.[faction.id] ?? legacyState ?? createEmptyAIState();
       const commands = planAiTurn(state, faction.id, aiState, rngSnapshot);
       commandCount += commands.filter(cmd => cmd.type !== 'AI_UPDATE_STATE').length;
     });

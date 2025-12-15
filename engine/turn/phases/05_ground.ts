@@ -3,14 +3,22 @@ import { GameState, FactionId, AIState } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
-import { AI_HOLD_TURNS } from '../../ai';
+import { AI_HOLD_TURNS, createEmptyAIState } from '../../ai';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextSystems = [...state.systems];
     let nextLogs = [...state.logs];
-    let nextAiStates = state.aiStates;
+    let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
 
     const aiFactionIds = new Set(state.factions.filter(faction => faction.aiProfile).map(faction => faction.id));
+
+    aiFactionIds.forEach(factionId => {
+        if (!nextAiStates[factionId]) {
+            const legacyState = factionId === 'red' ? state.aiState : undefined;
+            nextAiStates[factionId] = legacyState ?? createEmptyAIState();
+        }
+    });
+
     const holdUpdates: Record<FactionId, string[]> = {};
     
     // Track armies to remove (destroyed)
@@ -62,16 +70,10 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     }
 
     if (Object.keys(holdUpdates).length > 0) {
-        nextAiStates = { ...(state.aiStates || {}) };
+        nextAiStates = { ...nextAiStates };
 
         Object.entries(holdUpdates).forEach(([factionId, systemIds]) => {
-            const existingState: AIState = nextAiStates?.[factionId] || state.aiState || {
-                sightings: {},
-                targetPriorities: {},
-                systemLastSeen: {},
-                lastOwnerBySystemId: {},
-                holdUntilTurnBySystemId: {}
-            };
+            const existingState: AIState = nextAiStates[factionId] ?? createEmptyAIState();
 
             const updatedState: AIState = {
                 ...existingState,
@@ -84,7 +86,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 }
             };
 
-            nextAiStates![factionId] = updatedState;
+            nextAiStates[factionId] = updatedState;
         });
     }
 
