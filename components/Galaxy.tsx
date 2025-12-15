@@ -1,6 +1,6 @@
 
 import React, { useMemo, useRef } from 'react';
-import { Instance, Instances, Text } from '@react-three/drei';
+import { Billboard, Instance, Instances, Text } from '@react-three/drei';
 import { BufferGeometry, Float32BufferAttribute, Euler, DoubleSide, Vector3 } from 'three';
 import { ThreeEvent, useThree, useFrame } from '@react-three/fiber';
 import { StarSystem, Army, ArmyState } from '../types';
@@ -89,51 +89,57 @@ const SystemLabel: React.FC<{ system: StarSystem; rotation: Euler; armyInfo?: Ar
     return (
         <group>
              {resourceIcon && (
-                 <Text
-                    ref={iconRef}
-                    position={[0, 1.3, 0]} 
-                    rotation={rotation}
-                    fontSize={1.2}
-                    anchorX="center"
-                    anchorY="bottom"
-                    outlineWidth={0.02}
-                    outlineColor="#000000"
-                 >
-                    {resourceIcon}
-                 </Text>
+                 <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
+                     <Text
+                        ref={iconRef}
+                        position={[0, 1.3, 0]}
+                        rotation={rotation}
+                        fontSize={1.2}
+                        anchorX="center"
+                        anchorY="bottom"
+                        outlineWidth={0.02}
+                        outlineColor="#000000"
+                     >
+                        {resourceIcon}
+                     </Text>
+                 </Billboard>
              )}
 
              {armyVisual && (
-                 <Text
-                    ref={armyIconRef}
-                    position={[0, resourceIcon ? 2.8 : 1.5, 0]} 
+                 <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
+                     <Text
+                        ref={armyIconRef}
+                        position={[0, resourceIcon ? 2.8 : 1.5, 0]}
+                        rotation={rotation}
+                        fontSize={1.0}
+                        color={armyVisual.color}
+                        anchorX="center"
+                        anchorY="bottom"
+                        outlineWidth={0.05}
+                        outlineColor="#000000"
+                        fontWeight="bold"
+                     >
+                        {armyVisual.text}
+                     </Text>
+                 </Billboard>
+             )}
+
+            <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
+                <Text
+                    ref={textRef}
+                    position={[0, -1.5, 0]}
                     rotation={rotation}
-                    fontSize={1.0}
-                    color={armyVisual.color}
+                    fontSize={0.9}
+                    color={system.color} // Use system color (which defaults to white or owner color)
                     anchorX="center"
-                    anchorY="bottom"
+                    anchorY="top"
                     outlineWidth={0.05}
                     outlineColor="#000000"
-                    fontWeight="bold"
-                 >
-                    {armyVisual.text}
-                 </Text>
-             )}
-             
-            <Text
-                ref={textRef}
-                position={[0, -1.5, 0]} 
-                rotation={rotation}
-                fontSize={0.9} 
-                color={system.color} // Use system color (which defaults to white or owner color)
-                anchorX="center"
-                anchorY="top"
-                outlineWidth={0.05}
-                outlineColor="#000000"
-                fontWeight={isOwned ? 'bold' : 'normal'}
-            >
-                {system.name}
-            </Text>
+                    fontWeight={isOwned ? 'bold' : 'normal'}
+                >
+                    {system.name}
+                </Text>
+            </Billboard>
         </group>
     );
 };
