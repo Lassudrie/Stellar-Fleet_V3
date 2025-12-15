@@ -15,6 +15,8 @@ const cfg = {
   minMoveCommitTurns: 3,
   inertiaBonus: 50,
   scoutProb: 0.1,
+  targetInertiaDecay: 0.9,
+  targetInertiaMin: 50,
 };
 
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
@@ -317,6 +319,30 @@ export const planAiTurn = (
           });
       }
   });
+
+  // 6. INERTIA UPDATE
+  const targetPriorities: Record<string, number> = {};
+
+  // Decay existing inertia values
+  Object.entries(memory.targetPriorities).forEach(([systemId, priority]) => {
+      const decayedPriority = priority * cfg.targetInertiaDecay;
+      if (decayedPriority >= cfg.targetInertiaMin) {
+          targetPriorities[systemId] = decayedPriority;
+      }
+  });
+
+  // Reinforce inertia for assigned targets with a discount
+  assignments.forEach(({ task }) => {
+      const discountedPriority = task.priority * cfg.targetInertiaDecay;
+      const existing = targetPriorities[task.systemId] || 0;
+      const updatedPriority = Math.max(existing, discountedPriority);
+
+      if (updatedPriority >= cfg.targetInertiaMin) {
+          targetPriorities[task.systemId] = updatedPriority;
+      }
+  });
+
+  memory.targetPriorities = targetPriorities;
 
   commands.push({
       type: 'AI_UPDATE_STATE',
