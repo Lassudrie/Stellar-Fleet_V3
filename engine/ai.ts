@@ -132,10 +132,12 @@ const updateMemory = (
     ? JSON.parse(JSON.stringify(existingState))
     : createEmptyAIState();
 
+  // Hold expirations are inclusive of the stored day: systems remain on hold
+  // while the current day is less than or equal to the recorded turn.
   Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
     const system = state.systems.find(s => s.id === systemId);
 
-    if (!system || system.ownerFactionId !== factionId || holdUntil <= state.day) {
+    if (!system || system.ownerFactionId !== factionId || holdUntil < state.day) {
       delete memory.holdUntilTurnBySystemId[systemId];
       return;
     }
