@@ -1,7 +1,7 @@
 
 import { FleetState, ResourceType, ShipType, LogEntry, BattleStatus, ArmyState, VictoryType, GameplayRules, FactionState } from '../types';
 
-export const SAVE_VERSION = 2 as const; // Bumped version
+export const SAVE_VERSION = 3 as const;
 export type SaveVersion = typeof SAVE_VERSION;
 
 // --- DTOs (Data Transfer Objects) ---
@@ -132,10 +132,11 @@ export interface GameStateDTO {
   logs?: LogEntry[];
   selectedFleetId: string | null;
   winnerFactionId: string | null; // Renamed
-  
+
   objectives?: GameObjectivesDTO;
-  rules?: GameplayRules; 
+  rules?: GameplayRules;
   aiState?: AIStateDTO;
+  aiStates?: Record<string, AIStateDTO>;
 }
 
 export interface SaveFileV2 {
@@ -144,4 +145,10 @@ export interface SaveFileV2 {
   state: GameStateDTO;
 }
 
-export type SaveFile = SaveFileV2;
+export interface SaveFileV3 {
+  version: 3;
+  createdAt: string;
+  state: GameStateDTO;
+}
+
+export type SaveFile = SaveFileV2 | SaveFileV3;

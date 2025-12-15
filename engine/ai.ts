@@ -315,6 +315,7 @@ export const planAiTurn = (
 
   commands.push({
       type: 'AI_UPDATE_STATE',
+      factionId,
       newState: memory
   });
 
