@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState } from '../types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType } from '../types';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
@@ -290,6 +290,7 @@ const generateTasks = (
   memory: AIState,
   minDistanceBySystemId: Record<string, number>,
   myFleets: Fleet[],
+  mySystems: GameState['systems'],
   totalMyPower: number,
   rng: RNG,
   activeHoldSystems: Record<string, number>
@@ -636,18 +637,98 @@ const assignFleets = (
   return assignments;
 };
 
+const planArmyEmbarkation = (
+  state: GameState,
+  factionId: FactionId,
+  assignments: FleetAssignment[],
+  embarkedFriendlyArmies: Set<string>
+) => {
+  const availableArmyCounts: Record<string, number> = {};
+  state.armies.forEach(army => {
+    if (army.factionId !== factionId || army.state !== ArmyState.DEPLOYED) return;
+    availableArmyCounts[army.containerId] = (availableArmyCounts[army.containerId] || 0) + 1;
+  });
+
+  const loadCommands: GameCommand[] = [];
+  const loadPlannedFleetIds = new Set<string>();
+
+  const updatedAssignments = assignments.map(assign => {
+    const { fleet, task } = assign;
+    const isAssaultTask = task.type === 'ATTACK' || task.type === 'INVADE';
+    if (!isAssaultTask) return assign;
+
+    const hasEmbarkedArmies = fleet.ships.some(
+      ship => ship.carriedArmyId && embarkedFriendlyArmies.has(ship.carriedArmyId)
+    );
+    const freeTransports = fleet.ships.filter(
+      ship => ship.type === ShipType.TROOP_TRANSPORT && !ship.carriedArmyId
+    ).length;
+
+    if (hasEmbarkedArmies && task.type === 'ATTACK') {
+      const promoteTask: Task = { ...task, type: 'INVADE', reason: `${task.reason} (embarked armies ready)` };
+      return { fleet, task: promoteTask };
+    }
+
+    if (freeTransports === 0) return assign;
+
+    let bestSystemId: string | null = null;
+    let bestDistance = Infinity;
+
+    state.systems.forEach(system => {
+      const available = availableArmyCounts[system.id] || 0;
+      if (available <= 0) return;
+
+      const distance = dist(fleet.position, system.position);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSystemId = system.id;
+      }
+    });
+
+    if (!bestSystemId) return assign;
+
+    const loadableCount = Math.min(freeTransports, availableArmyCounts[bestSystemId]);
+    if (loadableCount <= 0) return assign;
+
+    availableArmyCounts[bestSystemId] -= loadableCount;
+    loadPlannedFleetIds.add(fleet.id);
+
+    const loadReason = `Load armies at ${getSystemById(state.systems, bestSystemId)?.name ?? bestSystemId} for invasion`;
+    loadCommands.push({
+      type: 'ORDER_LOAD_MOVE',
+      fleetId: fleet.id,
+      targetSystemId: bestSystemId,
+      reason: loadReason
+    });
+
+    const updatedTask: Task = task.type === 'INVADE'
+      ? task
+      : { ...task, type: 'INVADE', reason: `${task.reason} (prepare invasion after embarkation)` };
+
+    return { fleet, task: updatedTask };
+  });
+
+  return { loadCommands, loadPlannedFleetIds, updatedAssignments };
+};
+
 const generateCommands = (
   state: GameState,
   factionId: FactionId,
   assignments: FleetAssignment[],
   embarkedFriendlyArmies: Set<string>,
   memory: AIState,
-  cfg: AiConfig
+  cfg: AiConfig,
+  plannedLoadCommands: GameCommand[] = [],
+  loadPlannedFleetIds: Set<string> = new Set()
 ) => {
-  const commands: GameCommand[] = [];
+  const commands: GameCommand[] = [...plannedLoadCommands];
 
   assignments.forEach(assign => {
       const { fleet, task } = assign;
+
+      if (loadPlannedFleetIds.has(fleet.id)) {
+          return;
+      }
 
       if (fleet.state === FleetState.ORBIT &&
           state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
@@ -769,12 +850,30 @@ export const planAiTurn = (
     memory,
     minDistanceBySystemId,
     myFleets,
+    mySystems,
     totalMyPower,
     rng,
     activeHoldSystems
   );
 
   const assignments = assignFleets(state, factionId, cfg, tasks, myFleets, mySystems, embarkedFriendlyArmies);
+  const { loadCommands, loadPlannedFleetIds, updatedAssignments } = planArmyEmbarkation(
+    state,
+    factionId,
+    assignments,
+    embarkedFriendlyArmies
+  );
 
-  return generateCommands(state, factionId, assignments, embarkedFriendlyArmies, memory, cfg);
+  const commandList = generateCommands(
+    state,
+    factionId,
+    updatedAssignments,
+    embarkedFriendlyArmies,
+    memory,
+    cfg,
+    loadCommands,
+    loadPlannedFleetIds
+  );
+
+  return commandList;
 };
