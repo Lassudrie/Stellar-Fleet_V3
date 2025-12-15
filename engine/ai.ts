@@ -98,20 +98,13 @@ interface FleetAssignment {
   task: Task;
 }
 
-export const planAiTurn = (
+const updateMemory = (
   state: GameState,
   factionId: FactionId,
   existingState: AIState | undefined,
-  rng: RNG
-): GameCommand[] => {
-  const commands: GameCommand[] = [];
-
-  const factionProfile = state.factions.find(faction => faction.id === factionId)?.aiProfile;
-  const cfg = getAiConfig(factionProfile);
-  
-  // 1. MEMORY & PERCEPTION UPDATE
+  cfg: AiConfig
+) => {
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
-
   const myFleets = state.fleets.filter(f => f.factionId === factionId);
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
 
@@ -127,10 +120,6 @@ export const planAiTurn = (
 
   const activeHoldSystems: Record<string, number> = {};
 
-  // Initialize or clone memory
-  // Note: For now we share one AIState object in GameState,
-  // but strictly speaking each AI faction should have its own.
-  // Assuming single AI ('red') for now in V1 compatibility, or shared memory if multi-AI.
   const memory: AIState = existingState ? JSON.parse(JSON.stringify(existingState)) : {
     sightings: {},
     targetPriorities: {},
@@ -154,7 +143,6 @@ export const planAiTurn = (
     ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
     : new Set(state.systems.map(s => s.id));
 
-  // Update memory with real observations through fog-of-war helpers
   const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
   const refreshedSightings = new Set<string>();
 
@@ -206,7 +194,17 @@ export const planAiTurn = (
     }
   });
 
-  // 2. STRATEGIC ANALYSIS (System Valuation)
+  return { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory };
+};
+
+const evaluateSystems = (
+  state: GameState,
+  factionId: FactionId,
+  perceivedState: GameState,
+  memory: AIState,
+  minDistanceBySystemId: Record<string, number>,
+  cfg: AiConfig
+) => {
   const analysisArray: {
     id: string,
     value: number,
@@ -216,7 +214,9 @@ export const planAiTurn = (
     isOwner: boolean,
     fogAge: number
   }[] = [];
-  const totalMyPower = myFleets.reduce((sum, f) => sum + calculateFleetPower(f), 0);
+  const totalMyPower = perceivedState.fleets
+    .filter(f => f.factionId === factionId)
+    .reduce((sum, f) => sum + calculateFleetPower(f), 0);
 
   state.systems.forEach(sys => {
       let value = 10;
@@ -274,13 +274,27 @@ export const planAiTurn = (
       }
   });
 
+  return { analysisArray, totalMyPower };
+};
+
+const generateTasks = (
+  state: GameState,
+  factionId: FactionId,
+  cfg: AiConfig,
+  analysisArray: { id: string; value: number; threat: number; threatVisible: number; threatMemory: number; isOwner: boolean; fogAge: number }[],
+  memory: AIState,
+  minDistanceBySystemId: Record<string, number>,
+  myFleets: Fleet[],
+  totalMyPower: number,
+  rng: RNG,
+  activeHoldSystems: Record<string, number>
+) => {
   const embarkedFriendlyArmies = new Set(
     state.armies
       .filter(a => a.factionId === factionId && a.state === ArmyState.EMBARKED)
       .map(a => a.id)
   );
 
-  // 3. TASK GENERATION
   const tasks: Task[] = [];
 
   const taskPreferenceWeights: Record<TaskType, number> = {
@@ -327,7 +341,6 @@ export const planAiTurn = (
 
     const applyFog = (base: number) => base * fogFactor;
 
-    // Priority 1: DEFEND (Owned + Threat)
     if (sysData.isOwner && sysData.threat > 0) {
       const distanceWeightedPriority = applyDistanceWeight(sysData.id, (1000 + sysData.value) * cfg.defendBias);
       tasks.push({
@@ -338,9 +351,7 @@ export const planAiTurn = (
         distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
         reason: 'Hostiles in sector'
       });
-    }
-    // Priority 2: ATTACK or INVADE (Expansion)
-    else if (!sysData.isOwner && sysData.value > 20) {
+    } else if (!sysData.isOwner && sysData.value > 20) {
       if (sysData.threat < totalMyPower * 0.8) {
           const defenders = state.armies.filter(a =>
               a.containerId === sysData.id &&
@@ -373,7 +384,6 @@ export const planAiTurn = (
     }
   });
 
-  // Optional SCOUT task generation
   if (rng.next() < cfg.scoutProb) {
     const scoutCandidates = analysisArray
       .filter(sysData => sysData.fogAge > 0)
@@ -401,7 +411,6 @@ export const planAiTurn = (
     }
   }
 
-  // Sort Tasks
   tasks.sort((a, b) => {
     const priorityDiff = b.priority - a.priority;
     if (priorityDiff !== 0) return priorityDiff;
@@ -415,7 +424,18 @@ export const planAiTurn = (
     return a.systemId.localeCompare(b.systemId);
   });
 
-  // 4. FLEET ASSIGNMENT
+  return { tasks, embarkedFriendlyArmies };
+};
+
+const assignFleets = (
+  state: GameState,
+  factionId: FactionId,
+  cfg: AiConfig,
+  tasks: Task[],
+  myFleets: Fleet[],
+  mySystems: GameState['systems'],
+  embarkedFriendlyArmies: Set<string>
+) => {
   const availableFleetObjs = myFleets.map(f => ({
       fleet: f,
       power: calculateFleetPower(f),
@@ -423,7 +443,6 @@ export const planAiTurn = (
   }));
 
   const assignments: FleetAssignment[] = [];
-  const operationalLogs: string[] = [];
 
   if (aiDebugger.getEnabled()) {
       aiDebugger.startTurn(state.day, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
@@ -435,18 +454,18 @@ export const planAiTurn = (
       .map(fObj => {
         const f = fObj.fleet;
         const moveAge = f.stateStartTurn ? (state.day - f.stateStartTurn) : 999;
-        const isLocked = f.state === FleetState.MOVING && 
-                         f.targetSystemId !== task.systemId && 
-                         moveAge < cfg.minMoveCommitTurns && 
+        const isLocked = f.state === FleetState.MOVING &&
+                         f.targetSystemId !== task.systemId &&
+                         moveAge < cfg.minMoveCommitTurns &&
                          task.type !== 'DEFEND';
-        
+
         if (isLocked) return null;
 
         const targetSys = getSystemById(state.systems, task.systemId);
         if (!targetSys) return null;
 
         let d = distSq(f.position, targetSys.position);
-        
+
         if (f.state === FleetState.MOVING && f.targetSystemId === task.systemId) {
             d = Math.max(0, d - (cfg.inertiaBonus * cfg.inertiaBonus));
         }
@@ -525,16 +544,27 @@ export const planAiTurn = (
       });
     }
   }
-  
+
   if (aiDebugger.getEnabled()) {
       aiDebugger.commitTurn();
   }
 
-  // 5. COMMAND GENERATION
+  return assignments;
+};
+
+const generateCommands = (
+  state: GameState,
+  factionId: FactionId,
+  assignments: FleetAssignment[],
+  embarkedFriendlyArmies: Set<string>,
+  memory: AIState,
+  cfg: AiConfig
+) => {
+  const commands: GameCommand[] = [];
+
   assignments.forEach(assign => {
       const { fleet, task } = assign;
-      
-      // Check if fleet is already at destination
+
       if (fleet.state === FleetState.ORBIT &&
           state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
           if (task.type === 'INVADE') {
@@ -553,15 +583,11 @@ export const planAiTurn = (
                   });
           }
 
-          // Already at target, no movement needed
           return;
       }
 
-      // Check if already moving to target
       if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
-          // Already heading there - check if invasion order needs to be set
           if (task.type === 'INVADE' && fleet.invasionTargetSystemId !== task.systemId) {
-              // Re-issue as invasion move to set the flag
               commands.push({
                   type: 'ORDER_INVASION_MOVE',
                   fleetId: fleet.id,
@@ -572,8 +598,6 @@ export const planAiTurn = (
           return;
       }
 
-      // Issue movement command
-      // Use ORDER_INVASION_MOVE for INVADE tasks to auto-deploy armies on arrival
       if (task.type === 'INVADE') {
           commands.push({
               type: 'ORDER_INVASION_MOVE',
@@ -591,10 +615,8 @@ export const planAiTurn = (
       }
   });
 
-  // 6. INERTIA UPDATE
   const targetPriorities: Record<string, number> = {};
 
-  // Decay existing inertia values
   Object.entries(memory.targetPriorities).forEach(([systemId, priority]) => {
       const decayedPriority = priority * cfg.targetInertiaDecay;
       if (decayedPriority >= cfg.targetInertiaMin) {
@@ -602,7 +624,6 @@ export const planAiTurn = (
       }
   });
 
-  // Reinforce inertia for assigned targets with a discount
   assignments.forEach(({ task }) => {
       const discountedPriority = task.priority * cfg.targetInertiaDecay;
       const existing = targetPriorities[task.systemId] || 0;
@@ -622,4 +643,43 @@ export const planAiTurn = (
   });
 
   return commands;
+};
+
+export const planAiTurn = (
+  state: GameState,
+  factionId: FactionId,
+  existingState: AIState | undefined,
+  rng: RNG
+): GameCommand[] => {
+  const factionProfile = state.factions.find(faction => faction.id === factionId)?.aiProfile;
+  const cfg = getAiConfig(factionProfile);
+
+  const { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory } =
+    updateMemory(state, factionId, existingState, cfg);
+
+  const { analysisArray, totalMyPower } = evaluateSystems(
+    state,
+    factionId,
+    perceivedState,
+    memory,
+    minDistanceBySystemId,
+    cfg
+  );
+
+  const { tasks, embarkedFriendlyArmies } = generateTasks(
+    state,
+    factionId,
+    cfg,
+    analysisArray,
+    memory,
+    minDistanceBySystemId,
+    myFleets,
+    totalMyPower,
+    rng,
+    activeHoldSystems
+  );
+
+  const assignments = assignFleets(state, factionId, cfg, tasks, myFleets, mySystems, embarkedFriendlyArmies);
+
+  return generateCommands(state, factionId, assignments, embarkedFriendlyArmies, memory, cfg);
 };
