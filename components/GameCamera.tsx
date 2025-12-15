@@ -75,10 +75,16 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       : offsetFromTarget.normalize();
 
     const finalPosition = new Vector3().addVectors(target, safeDirection.multiplyScalar(clampedDistance));
-    const positionChanged = !finalPosition.equals(camera.position);
+    const boundedPosition = new Vector3(
+      clampValue(finalPosition.x, mapBounds.minX, mapBounds.maxX),
+      finalPosition.y,
+      clampValue(finalPosition.z, mapBounds.minZ, mapBounds.maxZ)
+    );
+
+    const positionChanged = !boundedPosition.equals(camera.position);
 
     if (targetChanged || positionChanged) {
-      camera.position.copy(finalPosition);
+      camera.position.copy(boundedPosition);
       controlsRef.current.update();
     }
   }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
