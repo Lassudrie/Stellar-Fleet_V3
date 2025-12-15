@@ -169,6 +169,33 @@ export const planAiTurn = (
     }
   });
 
+  // Optional SCOUT task generation
+  if (rng.next() < cfg.scoutProb) {
+    const scoutCandidates = analysisArray
+      .filter(sysData => sysData.fogAge > 0)
+      .sort((a, b) => {
+        const fogDiff = b.fogAge - a.fogAge;
+        if (fogDiff !== 0) return fogDiff;
+
+        const valueDiff = b.value - a.value;
+        if (valueDiff !== 0) return valueDiff;
+
+        return a.id.localeCompare(b.id);
+      });
+
+    const target = scoutCandidates[0];
+
+    if (target) {
+      tasks.push({
+        type: 'SCOUT',
+        systemId: target.id,
+        priority: 200 + target.value,
+        requiredPower: 50,
+        reason: 'Reconnaissance target'
+      });
+    }
+  }
+
   // Sort Tasks
   tasks.sort((a, b) => {
     const priorityDiff = b.priority - a.priority;
@@ -216,7 +243,15 @@ export const planAiTurn = (
             d = Math.max(0, d - (cfg.inertiaBonus * cfg.inertiaBonus));
         }
         
-        let suitability = 10000 - d + fObj.power; 
+        let suitability = 10000 - d;
+
+        if (task.type === 'SCOUT') {
+            const sizePenalty = fObj.power * 0.5;
+            const agilityBonus = Math.max(0, 300 - fObj.power);
+            suitability += agilityBonus - sizePenalty;
+        } else {
+            suitability += fObj.power;
+        }
 
         if (task.type === 'INVADE') {
             const embarkedCount = f.ships.filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId)).length;
