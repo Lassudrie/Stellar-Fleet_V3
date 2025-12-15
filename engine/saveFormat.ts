@@ -48,6 +48,7 @@ export interface StarSystemDTO {
   size: number;
   ownerFactionId: string | null; // Renamed
   resourceType: ResourceType;
+  isHomeworld?: boolean;
 }
 
 export interface LaserShotDTO {

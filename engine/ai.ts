@@ -227,6 +227,7 @@ const evaluateSystems = (
       let value = 10;
       if (sys.resourceType !== 'none') value += 50;
       if (sys.ownerFactionId === factionId) value += 20;
+      if (sys.isHomeworld) value += 150;
 
       const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
       const distanceToEmpire = minDistanceBySystemId[sys.id] ?? Infinity;
