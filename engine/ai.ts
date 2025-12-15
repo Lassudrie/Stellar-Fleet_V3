@@ -89,6 +89,7 @@ interface Task {
   systemId: string;
   priority: number;
   requiredPower: number;
+  distanceToClosestFleet: number;
   reason?: string;
 }
 
@@ -113,6 +114,16 @@ export const planAiTurn = (
 
   const myFleets = state.fleets.filter(f => f.factionId === factionId);
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
+
+  const minDistanceBySystemId: Record<string, number> = {};
+  state.systems.forEach(system => {
+    const minDistance = myFleets.reduce((currentMin, fleet) => {
+      const distance = dist(fleet.position, system.position);
+      return Math.min(currentMin, distance);
+    }, Infinity);
+
+    minDistanceBySystemId[system.id] = minDistance;
+  });
 
   const activeHoldSystems: Record<string, number> = {};
 
@@ -260,6 +271,12 @@ export const planAiTurn = (
     return priority * (taskPreferenceWeights[taskType] ?? 1);
   };
 
+  const applyDistanceWeight = (systemId: string, basePriority: number): number => {
+    const distance = minDistanceBySystemId[systemId];
+    const proximityWeight = Number.isFinite(distance) ? 1 + 50 / (50 + distance) : 1;
+    return basePriority * proximityWeight;
+  };
+
   Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
     const sysData = analysisArray.find(data => data.id === systemId);
     const fogAge = sysData?.fogAge ?? 0;
@@ -267,12 +284,15 @@ export const planAiTurn = (
     const inertia = memory.targetPriorities[systemId] || 0;
     const basePriority = 800 + (sysData?.value ?? 0);
     const requiredPower = Math.max(100, (sysData?.threat || 0) * cfg.attackRatio);
+    const distanceToClosestFleet = minDistanceBySystemId[systemId] ?? Infinity;
+    const distanceWeightedPriority = applyDistanceWeight(systemId, basePriority);
 
     tasks.push({
       type: 'HOLD',
       systemId,
-      priority: applyTaskPreference('HOLD', basePriority * fogFactor + inertia),
+      priority: applyTaskPreference('HOLD', distanceWeightedPriority * fogFactor + inertia),
       requiredPower,
+      distanceToClosestFleet,
       reason: `Hold garrison until turn ${holdUntil}`
     });
   });
@@ -285,11 +305,13 @@ export const planAiTurn = (
 
     // Priority 1: DEFEND (Owned + Threat)
     if (sysData.isOwner && sysData.threat > 0) {
+      const distanceWeightedPriority = applyDistanceWeight(sysData.id, (1000 + sysData.value) * cfg.defendBias);
       tasks.push({
         type: 'DEFEND',
         systemId: sysData.id,
-        priority: applyTaskPreference('DEFEND', applyFog((1000 + sysData.value) * cfg.defendBias) + inertia),
+        priority: applyTaskPreference('DEFEND', applyFog(distanceWeightedPriority) + inertia),
         requiredPower: sysData.threat * 1.1,
+        distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
         reason: 'Hostiles in sector'
       });
     }
@@ -307,7 +329,8 @@ export const planAiTurn = (
           );
 
           let type: TaskType = 'ATTACK';
-          let basePriority = applyFog(500 + sysData.value) + inertia;
+          const distanceWeightedPriority = applyDistanceWeight(sysData.id, 500 + sysData.value);
+          let basePriority = applyFog(distanceWeightedPriority) + inertia;
 
           if (hasEmbarkedArmies) {
                type = 'INVADE';
@@ -319,6 +342,7 @@ export const planAiTurn = (
             systemId: sysData.id,
             priority: applyTaskPreference(type, basePriority),
             requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
+            distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
             reason: 'Expansion opportunity'
           });
       }
@@ -347,6 +371,7 @@ export const planAiTurn = (
         systemId: target.id,
         priority: applyTaskPreference('SCOUT', 200 + target.value),
         requiredPower: 50,
+        distanceToClosestFleet: minDistanceBySystemId[target.id] ?? Infinity,
         reason: 'Reconnaissance target'
       });
     }
@@ -356,6 +381,9 @@ export const planAiTurn = (
   tasks.sort((a, b) => {
     const priorityDiff = b.priority - a.priority;
     if (priorityDiff !== 0) return priorityDiff;
+
+    const distanceDiff = a.distanceToClosestFleet - b.distanceToClosestFleet;
+    if (distanceDiff !== 0) return distanceDiff;
 
     const typeDiff = a.type.localeCompare(b.type);
     if (typeDiff !== 0) return typeDiff;
