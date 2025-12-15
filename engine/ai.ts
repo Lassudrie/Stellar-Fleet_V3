@@ -513,7 +513,7 @@ const assignFleets = (
       .filter(fObj => !fObj.assigned)
       .map(fObj => {
         const f = fObj.fleet;
-        const moveAge = f.stateStartTurn ? (state.day - f.stateStartTurn) : 999;
+        const moveAge = state.day - (f.stateStartTurn ?? state.day);
         const isLocked = f.state === FleetState.MOVING &&
                          f.targetSystemId !== task.systemId &&
                          moveAge < cfg.minMoveCommitTurns &&
