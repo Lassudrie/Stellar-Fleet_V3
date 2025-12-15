@@ -7,7 +7,7 @@ import { deepFreezeDev } from './state/immutability';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
-  | { type: 'AI_UPDATE_STATE'; newState: AIState }
+  | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string }
@@ -136,8 +136,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
         }
 
         case 'AI_UPDATE_STATE': {
+            const updatedAiStates = {
+                ...(state.aiStates || {}),
+                [command.factionId]: command.newState
+            };
+
             return {
                 ...state,
+                aiStates: updatedAiStates,
                 aiState: command.newState
             };
         }

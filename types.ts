@@ -192,7 +192,8 @@ export interface GameState {
   logs: LogEntry[];
   selectedFleetId: string | null;
   winnerFactionId: FactionId | null; // Renamed from winner
-  aiState?: AIState; // TODO: Can be a Map<FactionId, AIState> for multi-AI later
+  aiStates?: Record<FactionId, AIState>;
+  aiState?: AIState; // Legacy single-AI state kept for transition
   objectives: GameObjectives;
   rules: GameplayRules;
 }

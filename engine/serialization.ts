@@ -1,13 +1,13 @@
 
 import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
 import { Vec3, vec3 } from './math/vec3';
-import { 
-  SAVE_VERSION, 
-  SaveFileV2, 
-  GameStateDTO, 
-  Vector3DTO, 
-  StarSystemDTO, 
-  FleetDTO, 
+import {
+  SAVE_VERSION,
+  SaveFile,
+  GameStateDTO,
+  Vector3DTO,
+  StarSystemDTO,
+  FleetDTO,
   LaserShotDTO,
   BattleDTO,
   AIStateDTO,
@@ -20,6 +20,46 @@ import {
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
 const deserializeVector3 = (v: Vector3DTO): Vec3 => vec3(v.x, v.y, v.z);
 
+const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
+  if (!aiState) return undefined;
+
+  const sightings: Record<string, EnemySightingDTO> = {};
+  Object.entries(aiState.sightings).forEach(([key, s]) => {
+    sightings[key] = {
+      ...s,
+      position: serializeVector3(s.position)
+    };
+  });
+
+  return {
+    sightings,
+    targetPriorities: aiState.targetPriorities,
+    systemLastSeen: aiState.systemLastSeen,
+    lastOwnerBySystemId: aiState.lastOwnerBySystemId,
+    holdUntilTurnBySystemId: aiState.holdUntilTurnBySystemId
+  };
+};
+
+const deserializeAiState = (aiStateDto?: AIStateDTO): AIState | undefined => {
+  if (!aiStateDto) return undefined;
+
+  const sightings: Record<string, EnemySighting> = {};
+  Object.entries(aiStateDto.sightings || {}).forEach(([key, s]: [string, any]) => {
+    sightings[key] = {
+      ...s,
+      position: deserializeVector3(s.position)
+    };
+  });
+
+  return {
+    sightings,
+    targetPriorities: aiStateDto.targetPriorities,
+    systemLastSeen: aiStateDto.systemLastSeen || {},
+    lastOwnerBySystemId: aiStateDto.lastOwnerBySystemId || {},
+    holdUntilTurnBySystemId: aiStateDto.holdUntilTurnBySystemId || {}
+  };
+};
+
 // --- VALIDATORS & MIGRATION ---
 
 // Helper to provide default factions if missing (Backward Compat)
@@ -29,23 +69,19 @@ const DEFAULT_FACTIONS: FactionState[] = [
 ];
 
 export const serializeGameState = (state: GameState): string => {
-  // Serialize AI State
-  let aiStateDto: AIStateDTO | undefined;
-  if (state.aiState) {
-    const sightings: Record<string, EnemySightingDTO> = {};
-    Object.entries(state.aiState.sightings).forEach(([key, s]) => {
-      sightings[key] = {
-        ...s,
-        position: serializeVector3(s.position)
-      };
+  const aiStateDto = serializeAiState(state.aiState);
+  let aiStatesDto: Record<string, AIStateDTO> | undefined;
+  if (state.aiStates) {
+    aiStatesDto = {};
+    Object.entries(state.aiStates).forEach(([factionId, aiState]) => {
+      const serialized = serializeAiState(aiState);
+      if (serialized) {
+        aiStatesDto![factionId] = serialized;
+      }
     });
-    aiStateDto = {
-      sightings,
-      targetPriorities: state.aiState.targetPriorities,
-      systemLastSeen: state.aiState.systemLastSeen,
-      lastOwnerBySystemId: state.aiState.lastOwnerBySystemId,
-      holdUntilTurnBySystemId: state.aiState.holdUntilTurnBySystemId
-    };
+    if (Object.keys(aiStatesDto).length === 0) {
+      aiStatesDto = undefined;
+    }
   }
 
   const stateDto: GameStateDTO = {
@@ -97,11 +133,12 @@ export const serializeGameState = (state: GameState): string => {
     selectedFleetId: state.selectedFleetId,
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
+    aiStates: aiStatesDto,
     objectives: state.objectives,
     rules: state.rules
   };
 
-  const saveFile: SaveFileV2 = {
+  const saveFile: SaveFile = {
     version: SAVE_VERSION,
     createdAt: new Date().toISOString(),
     state: stateDto
@@ -203,23 +240,27 @@ export const deserializeGameState = (json: string): GameState => {
         };
     });
 
-    let aiState: AIState | undefined;
-    if (dto.aiState) {
-      const sightings: Record<string, EnemySighting> = {};
-      Object.entries(dto.aiState.sightings || {}).forEach(([key, s]: [string, any]) => {
-        sightings[key] = {
-          ...s,
-          position: deserializeVector3(s.position)
-        };
-      });
-      aiState = {
-        sightings,
-        targetPriorities: dto.aiState.targetPriorities,
-        systemLastSeen: dto.aiState.systemLastSeen || {},
-        lastOwnerBySystemId: dto.aiState.lastOwnerBySystemId || {},
-        holdUntilTurnBySystemId: dto.aiState.holdUntilTurnBySystemId || {}
-      };
-    }
+    const aiStatesDto = dto.aiStates as Record<string, AIStateDTO> | undefined;
+    const aiStates: Record<FactionId, AIState> | undefined = aiStatesDto
+      ? Object.entries(aiStatesDto).reduce<Record<FactionId, AIState>>((acc, [factionId, aiStateDto]) => {
+          const parsed = deserializeAiState(aiStateDto);
+          if (parsed) {
+            acc[factionId] = parsed;
+          }
+          return acc;
+        }, {})
+      : undefined;
+
+    const legacyAiState = deserializeAiState(dto.aiState);
+    const DEFAULT_AI_FACTION_ID: FactionId = 'red';
+
+    const migratedAiStates = aiStates && Object.keys(aiStates).length > 0
+      ? aiStates
+      : legacyAiState
+        ? { [DEFAULT_AI_FACTION_ID]: legacyAiState }
+        : undefined;
+
+    const primaryAiState = migratedAiStates?.[DEFAULT_AI_FACTION_ID] || legacyAiState;
 
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
@@ -238,7 +279,8 @@ export const deserializeGameState = (json: string): GameState => {
       logs: dto.logs || [],
       selectedFleetId: dto.selectedFleetId ?? null,
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
-      aiState,
+      aiStates: migratedAiStates,
+      aiState: primaryAiState,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: dto.rules || { fogOfWar: true, aiEnabled: true, useAdvancedCombat: true, totalWar: true }
     };
