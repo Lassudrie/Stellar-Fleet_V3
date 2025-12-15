@@ -41,6 +41,8 @@ export const planAiTurn = (
   const commands: GameCommand[] = [];
   
   // 1. MEMORY & PERCEPTION UPDATE
+  const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
+
   const myFleets = state.fleets.filter(f => f.factionId === factionId);
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
 
@@ -57,12 +59,11 @@ export const planAiTurn = (
   };
 
   const observedSystemIds = state.rules.fogOfWar
-    ? getObservedSystemIds(state, factionId, myFleets)
+    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
     : new Set(state.systems.map(s => s.id));
 
   // Update memory with real observations through fog-of-war helpers
-  const visibleState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
-  const visibleEnemyFleets = visibleState.fleets.filter(f => f.factionId !== factionId);
+  const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
 
   visibleEnemyFleets.forEach(fleet => {
     const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
@@ -78,6 +79,10 @@ export const planAiTurn = (
 
   observedSystemIds.forEach(id => {
     memory.systemLastSeen[id] = state.day;
+    const observedSystem = perceivedState.systems.find(sys => sys.id === id);
+    if (observedSystem) {
+      memory.lastOwnerBySystemId[id] = observedSystem.ownerFactionId;
+    }
   });
 
   // 2. STRATEGIC ANALYSIS (System Valuation)
