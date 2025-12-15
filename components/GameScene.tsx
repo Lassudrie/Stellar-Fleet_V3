@@ -113,9 +113,19 @@ const GameScene: React.FC<GameSceneProps> = ({
   const mapMetrics = useMemo(() => {
     const systems = gameState.systems;
     const fallbackRadius = 120;
+    const fallbackMargin = 40;
 
     if (systems.length === 0) {
-      return { center: { x: 0, y: 0, z: 0 }, radius: fallbackRadius };
+      return {
+        center: { x: 0, y: 0, z: 0 },
+        radius: fallbackRadius,
+        bounds: {
+          minX: -fallbackRadius - fallbackMargin,
+          maxX: fallbackRadius + fallbackMargin,
+          minZ: -fallbackRadius - fallbackMargin,
+          maxZ: fallbackRadius + fallbackMargin
+        }
+      };
     }
 
     let minX = systems[0].position.x;
@@ -146,7 +156,18 @@ const GameScene: React.FC<GameSceneProps> = ({
     const boundingDiagonal = Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
     const radius = Math.max(boundingDiagonal / 2, fallbackRadius);
 
-    return { center, radius };
+    const margin = Math.max(20, Math.max(extentX, extentZ) * 0.1);
+
+    return {
+      center,
+      radius,
+      bounds: {
+        minX: minX - margin,
+        maxX: maxX + margin,
+        minZ: minZ - margin,
+        maxZ: maxZ + margin
+      }
+    };
   }, [gameState.systems]);
 
   const isScenarioReady = gameState.systems.length > 0;
@@ -188,6 +209,7 @@ const GameScene: React.FC<GameSceneProps> = ({
               initialTarget={cameraTarget}
               ready={isScenarioReady}
               mapRadius={mapMetrics.radius}
+              mapBounds={mapMetrics.bounds}
             />
             <ambientLight intensity={0.4} color="#aaccff" />
             <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
