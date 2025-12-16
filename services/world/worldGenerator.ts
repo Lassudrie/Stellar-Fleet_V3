@@ -1,7 +1,7 @@
 import { GameState, StarSystem, Fleet, FactionId, ShipType, Army, ArmyState, FleetState, FactionState } from '../../types';
 import { RNG } from '../../engine/rng';
 import { GameScenario } from '../../scenarios/types';
-import { createArmy } from '../../engine/army';
+import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../../engine/army';
 import { createShip } from '../../engine/world';
 import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
@@ -502,7 +502,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               if (ship.type === ShipType.TROOP_TRANSPORT) {
                   const army = createArmy(
                       factionId,
-                      10000,
+                      MIN_ARMY_CREATION_STRENGTH,
                       fleet.id,
                       ArmyState.EMBARKED,
                       rng
@@ -529,7 +529,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           for (let i = 0; i < garrisonCount; i++) {
               const army = createArmy(
                   sys.ownerFactionId,
-                  10000,
+                  MIN_ARMY_CREATION_STRENGTH,
                   sys.id, // Container is System ID
                   ArmyState.DEPLOYED,
                   rng

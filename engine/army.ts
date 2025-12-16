@@ -2,7 +2,8 @@
 import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
 import { RNG } from './rng';
 
-export const MIN_ARMY_STRENGTH = 10000;
+export const MIN_ARMY_CREATION_STRENGTH = 10000;
+export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
 
 /**
  * Creates a new Army entity.
@@ -24,8 +25,8 @@ export const createArmy = (
 ): Army | null => {
   
   // Rule Check: Minimum Strength
-  if (strength < MIN_ARMY_STRENGTH) {
-    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_STRENGTH}.`);
+  if (strength < MIN_ARMY_CREATION_STRENGTH) {
+    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
     return null;
   }
 
@@ -55,7 +56,7 @@ export const createArmy = (
  */
 export const validateArmyState = (army: Army, state: GameState): boolean => {
   // 1. Strength Integrity
-  if (army.strength < MIN_ARMY_STRENGTH) {
+  if (army.maxStrength < MIN_ARMY_CREATION_STRENGTH) {
     // console.warn(`[Army] Invalid Strength: Army ${army.id} has ${army.strength} soldiers.`);
     return false;
   }
@@ -135,6 +136,15 @@ export const sanitizeArmies = (state: GameState): { armies: Army[], logs: string
                 // We destroy the army. The ships will point to a non-existent army ID, 
                 // which is "safer" than cloning the army, or we could auto-clean the ships here.
                 // For now, removing the army is the safest state convergence.
+                isValid = false;
+            }
+        }
+
+        // Check C: Destruction threshold
+        if (isValid) {
+            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+            if (army.strength <= destructionThreshold) {
+                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
                 isValid = false;
             }
         }

@@ -1,7 +1,7 @@
 
 import { GameState, StarSystem, FactionId, ArmyState, Army } from '../types';
 import { COLORS, CAPTURE_RANGE } from '../data/static';
-import { MIN_ARMY_STRENGTH } from './army';
+import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
 import { Vec3, distSq } from './math/vec3';
 
 export interface ConquestResult {
@@ -23,7 +23,10 @@ const MAX_CASUALTY_FRACTION_PER_TURN = 0.35;
 const MORALE_LOSS_MULTIPLIER = 0.6;
 const MIN_MORALE_FACTOR = 0.25;
 const MAX_MORALE_FACTOR = 2;
-const DESTRUCTION_THRESHOLD = MIN_ARMY_STRENGTH;
+
+const buildDestructionThresholdMap = (entries: { armyId: string; threshold: number }[]): Map<string, number> => {
+    return new Map(entries.map(entry => [entry.armyId, entry.threshold]));
+};
 
 /**
  * Validates if a faction can conquer a specific system.
@@ -95,9 +98,15 @@ const applyLosses = (
     armies: Army[],
     totalStrengthLoss: number,
     lossFraction: number
-): { updates: { armyId: string; strength: number; morale: number }[]; destroyedIds: string[]; strengthLost: number; moraleLost: number } => {
+): {
+    updates: { armyId: string; strength: number; morale: number }[];
+    destroyedIds: string[];
+    strengthLost: number;
+    moraleLost: number;
+    thresholds: { armyId: string; threshold: number }[];
+} => {
     if (armies.length === 0 || totalStrengthLoss <= 0) {
-        return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0 };
+        return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0, thresholds: [] };
     }
 
     const sortedArmies = [...armies].sort((a, b) => a.id.localeCompare(b.id));
@@ -107,6 +116,7 @@ const applyLosses = (
     let moraleLost = 0;
     const updates: { armyId: string; strength: number; morale: number }[] = [];
     const destroyedIds: string[] = [];
+    const thresholds: { armyId: string; threshold: number }[] = [];
 
     sortedArmies.forEach((army, index) => {
         if (remainingLoss <= 0) {
@@ -120,18 +130,20 @@ const applyLosses = (
         const newStrength = Math.max(0, army.strength - loss);
         const moralePenalty = lossFraction * MORALE_LOSS_MULTIPLIER;
         const newMorale = clampMoraleFactor(army.morale * (1 - moralePenalty));
+        const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
 
         appliedLoss += army.strength - newStrength;
         remainingLoss -= loss;
         moraleLost += Math.max(0, army.morale - newMorale);
 
         updates.push({ armyId: army.id, strength: newStrength, morale: newMorale });
-        if (newStrength < DESTRUCTION_THRESHOLD) {
+        thresholds.push({ armyId: army.id, threshold: destructionThreshold });
+        if (newStrength <= destructionThreshold) {
             destroyedIds.push(army.id);
         }
     });
 
-    return { updates, destroyedIds, strengthLost: appliedLoss, moraleLost };
+    return { updates, destroyedIds, strengthLost: appliedLoss, moraleLost, thresholds };
 };
 
 /**
@@ -190,8 +202,11 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         const blueOutcome = applyLosses(blueArmies, blueStrengthLoss, blueLossFraction);
         const redOutcome = applyLosses(redArmies, redStrengthLoss, redLossFraction);
 
-        const blueSurvivors = blueOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
-        const redSurvivors = redOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
+        const blueThresholdMap = buildDestructionThresholdMap(blueOutcome.thresholds);
+        const redThresholdMap = buildDestructionThresholdMap(redOutcome.thresholds);
+
+        const blueSurvivors = blueOutcome.updates.filter(u => u.strength > (blueThresholdMap.get(u.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
+        const redSurvivors = redOutcome.updates.filter(u => u.strength > (redThresholdMap.get(u.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
 
         armiesToDestroy.push(...blueOutcome.destroyedIds, ...redOutcome.destroyedIds);
         armyUpdates = [...blueOutcome.updates, ...redOutcome.updates];
