@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
     "smoke": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/aiSmoke.ts",
-    "test": "npm run smoke"
+    "test": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/engine.spec.ts"
   },
   "dependencies": {
     "react": "^19.2.1",
