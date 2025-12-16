@@ -9,6 +9,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextSystems = [...state.systems];
     let nextLogs = [...state.logs];
     let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
+    const armyUpdates: Record<string, { strength?: number; morale?: number }> = {};
 
     const aiFactionIds = new Set(state.factions.filter(faction => faction.aiProfile).map(faction => faction.id));
 
@@ -33,6 +34,17 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         
         // Queue destroyed armies
         result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+
+        // Merge stat updates
+        result.armyUpdates?.forEach(update => {
+            const existingPatch = armyUpdates[update.id] ?? {};
+
+            armyUpdates[update.id] = {
+                ...existingPatch,
+                ...(update.strength !== undefined ? { strength: update.strength } : {}),
+                ...(update.morale !== undefined ? { morale: update.morale } : {})
+            };
+        });
         
         // Add Logs
         result.logs.forEach(txt => {
@@ -63,10 +75,21 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         return system;
     });
 
-    // 2. Filter Destroyed Armies
-    let nextArmies = state.armies;
+    // 2. Apply Army Updates then Filter Destroyed Armies
+    let nextArmies = state.armies.map(army => {
+        const patch = armyUpdates[army.id];
+
+        if (!patch) return army;
+
+        return {
+            ...army,
+            ...(patch.strength !== undefined ? { strength: patch.strength } : {}),
+            ...(patch.morale !== undefined ? { morale: patch.morale } : {})
+        };
+    });
+
     if (armiesToDestroyIds.size > 0) {
-        nextArmies = state.armies.filter(a => !armiesToDestroyIds.has(a.id));
+        nextArmies = nextArmies.filter(a => !armiesToDestroyIds.has(a.id));
     }
 
     if (Object.keys(holdUpdates).length > 0) {
