@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".smoke-dist",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false
+  },
+  "include": [
+    "engine/**/*.ts",
+    "services/battle/**/*.ts",
+    "services/movement/**/*.ts",
+    "services/world/**/*.ts",
+    "scenarios/**/*.ts",
+    "data/**/*.ts",
+    "types.ts"
+  ],
+  "exclude": [
+    "components/**/*",
+    "services/audio/**/*",
+    "App.tsx",
+    "i18n/**/*"
+  ]
+}

@@ -96,6 +96,8 @@ List of participants.
 }
 ```
 
+Supported AI profiles: `aggressive`, `defensive`, or `balanced`.
+
 ### 6.2 Starting Distribution
 Defines how factions are placed relative to the map topology.
 
@@ -240,7 +242,7 @@ To ensure stability, the Engine's Scenario Loader must enforce:
   "setup": {
     "factions": [
       { "id": "defenders", "name": "Guardians", "colorHex": "#FFFFFF", "isPlayable": true },
-      { "id": "swarm", "name": "The Hive", "colorHex": "#00FF00", "isPlayable": false, "aiProfile": "aggressive_swarm" }
+      { "id": "swarm", "name": "The Hive", "colorHex": "#00FF00", "isPlayable": false, "aiProfile": "aggressive" }
     ],
     "startingDistribution": "none",
     "initialFleets": [

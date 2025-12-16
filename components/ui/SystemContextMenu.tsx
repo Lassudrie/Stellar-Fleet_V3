@@ -33,8 +33,13 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
       className="absolute z-40 bg-slate-900/95 border border-blue-500/30 text-white p-2 rounded shadow-2xl backdrop-blur min-w-[200px] animate-in fade-in zoom-in-95 duration-100 pointer-events-auto flex flex-col gap-1"
       style={{ left: position.x, top: position.y }}
     >
-      <div className="px-3 py-2 text-xs font-bold text-blue-200 border-b border-slate-700 mb-1 uppercase tracking-wider">
-          {system.name}
+      <div className="px-3 py-2 text-xs font-bold text-blue-200 border-b border-slate-700 mb-1 uppercase tracking-wider flex items-center gap-2">
+          <span>{system.name}</span>
+          {system.isHomeworld && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-100 border border-blue-500/30">
+                  {t('ctx.homeworld')}
+              </span>
+          )}
       </div>
 
       {canSelectFleet && (

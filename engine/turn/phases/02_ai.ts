@@ -1,22 +1,38 @@
 
-import { GameState } from '../../../types';
+import { GameState, FactionId, AIState } from '../../../types';
 import { TurnContext } from '../types';
-import { planAiTurn } from '../../ai';
+import { createEmptyAIState, planAiTurn } from '../../ai';
 import { applyCommand } from '../../commands';
 
 export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
     if (!state.rules.aiEnabled) return state;
 
-    // 1. Generate Commands for Red Faction
-    // Uses current state (after battle resolution)
-    // Assuming 'red' is the AI faction for now, based on legacy logic
-    const commands = planAiTurn(state, 'red', state.aiState, ctx.rng);
-    
-    // 2. Apply Commands Sequentially
-    let nextState = state;
-    for (const cmd of commands) {
-        nextState = applyCommand(nextState, cmd, ctx.rng);
+    const aiFactions = state.factions
+        .filter(faction => faction.aiProfile)
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+    const ensuredAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
+
+    aiFactions.forEach(faction => {
+        if (!ensuredAiStates[faction.id]) {
+            const legacyState = faction.id === 'red' ? state.aiState : undefined;
+            ensuredAiStates[faction.id] = legacyState ?? createEmptyAIState();
+        }
+    });
+
+    let nextState: GameState = { ...state, aiStates: ensuredAiStates };
+
+    for (const faction of aiFactions) {
+        const existingAiState = (nextState.aiStates ?? ensuredAiStates)[faction.id] ?? createEmptyAIState();
+
+        const commands = planAiTurn(nextState, faction.id, existingAiState, ctx.rng);
+
+        for (const cmd of commands) {
+            nextState = applyCommand(nextState, cmd, ctx.rng);
+        }
     }
-    
-    return nextState;
+
+    const mergedAiStates = { ...ensuredAiStates, ...(nextState.aiStates ?? {}) };
+
+    return { ...nextState, aiStates: mergedAiStates };
 };

@@ -61,7 +61,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       color: '#ffffff', // Will be updated if owned later
       size: 1.5, // Static systems are usually significant
       ownerFactionId: null,
-      resourceType: def.resourceType
+      resourceType: def.resourceType,
+      isHomeworld: false
     });
     staticNames.add(def.name);
   });
@@ -261,7 +262,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       color: '#ffffff',
       size: rng.range(0.8, 1.2),
       ownerFactionId: null,
-      resourceType: rng.next() > 0.75 ? 'gas' : 'none'
+      resourceType: rng.next() > 0.75 ? 'gas' : 'none',
+      isHomeworld: false
     });
   }
 
@@ -312,6 +314,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               const sys = systems[bestIdx];
               sys.ownerFactionId = faction.id;
               sys.color = faction.color; // IMMEDIATE COLOR UPDATE
+              sys.isHomeworld = true;
               homeSystems.set(faction.id, sys);
           }
       });
@@ -518,9 +521,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   // --- 4. GARRISONS (Ground Defenses) ---
   systems.forEach(sys => {
       if (sys.ownerFactionId) {
-          const factionHome = homeSystems.get(sys.ownerFactionId);
-          const isCapital = factionHome && factionHome.id === sys.id;
-          
+          const isCapital = sys.isHomeworld;
+
           // Capital gets 3 armies, other owned territory gets 1
           const garrisonCount = isCapital ? 3 : 1;
 

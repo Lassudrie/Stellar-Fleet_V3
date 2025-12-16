@@ -75,6 +75,7 @@ export interface StarSystem {
   size: number;
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
+  isHomeworld: boolean;
 }
 
 export interface Fleet {
@@ -143,6 +144,7 @@ export interface EnemySighting {
   daySeen: number;
   estimatedPower: number;
   confidence: number;
+  lastUpdateDay?: number;
 }
 
 export interface AIState {
@@ -192,7 +194,8 @@ export interface GameState {
   logs: LogEntry[];
   selectedFleetId: string | null;
   winnerFactionId: FactionId | null; // Renamed from winner
-  aiState?: AIState; // TODO: Can be a Map<FactionId, AIState> for multi-AI later
+  aiStates?: Record<FactionId, AIState>;
+  aiState?: AIState; // Legacy single-AI state kept for transition
   objectives: GameObjectives;
   rules: GameplayRules;
 }
