@@ -4,6 +4,7 @@ import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
+import { computeUnloadOps } from './armyOps';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string }
@@ -176,37 +177,25 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const validArmy = army.state === ArmyState.EMBARKED && army.containerId === fleet.id && army.factionId === fleet.factionId;
             if (!validArmy) return state;
 
-            const updatedFleet = {
-                ...fleet,
-                ships: fleet.ships.map(s => {
-                    if (s.id !== command.shipId) return s;
-                    if (s.carriedArmyId !== command.armyId) return s;
-                    return { ...s, carriedArmyId: null };
-                })
-            };
-
-            const updatedArmies = state.armies.map(a => {
-                if (a.id !== command.armyId) return a;
-
-                return {
-                    ...a,
-                    state: ArmyState.DEPLOYED,
-                    containerId: system.id
-                };
+            const unloadResult = computeUnloadOps({
+                fleet,
+                system,
+                armies: state.armies,
+                day: state.day,
+                rng,
+                fleetLabel: fleet.id,
+                allowedArmyIds: new Set([command.armyId]),
+                allowedShipIds: new Set([command.shipId]),
+                logText: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`
             });
 
-            const newLog = {
-                id: rng.id('log'),
-                day: state.day,
-                text: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`,
-                type: 'move' as const
-            };
+            if (unloadResult.count === 0) return state;
 
             return {
                 ...state,
-                fleets: state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
-                armies: updatedArmies,
-                logs: [...state.logs, newLog]
+                fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
+                armies: unloadResult.armies,
+                logs: [...state.logs, ...unloadResult.logs]
             };
         }
 
