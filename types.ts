@@ -63,6 +63,8 @@ export interface Army {
   id: string;
   factionId: FactionId; // Renamed from faction
   strength: number;
+  maxStrength: number;
+  morale: number;
   state: ArmyState;
   containerId: string;
 }
