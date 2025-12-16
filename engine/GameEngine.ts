@@ -1,9 +1,10 @@
 
-import { ArmyState, FactionId, Fleet, GameState, ShipType, StarSystem } from '../types';
+import { ArmyState, FactionId, Fleet, GameState, StarSystem } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
 import { distSq } from './math/vec3';
+import { computeLoadOps, computeUnloadOps } from './armyOps';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -78,57 +79,22 @@ export class GameEngine {
     private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
         if (!this.isFleetAtSystem(fleet, system)) return false;
 
-        const availableArmies = this.state.armies.filter(a =>
-            a.containerId === system.id &&
-            a.factionId === fleet.factionId &&
-            a.state === ArmyState.DEPLOYED
-        );
-
-        const transports = fleet.ships.filter(s => !s.carriedArmyId && s.type === ShipType.TROOP_TRANSPORT);
-        const loadableArmies = Math.min(availableArmies.length, transports.length);
-
-        if (loadableArmies === 0) return false;
-
-        const updatedArmies = this.state.armies.map(army => {
-            const shouldLoad =
-                army.containerId === system.id &&
-                army.factionId === fleet.factionId &&
-                army.state === ArmyState.DEPLOYED &&
-                availableArmies.findIndex(a => a.id === army.id) < loadableArmies;
-
-            if (!shouldLoad) return army;
-
-            return {
-                ...army,
-                state: ArmyState.EMBARKED,
-                containerId: fleet.id
-            };
+        const loadResult = computeLoadOps({
+            fleet,
+            system,
+            armies: this.state.armies,
+            day: this.state.day,
+            rng: this.rng,
+            fleetLabel: fleet.id
         });
 
-        let loadedCount = 0;
-        const updatedFleet: Fleet = {
-            ...fleet,
-            ships: fleet.ships.map(ship => {
-                if (ship.type !== ShipType.TROOP_TRANSPORT || ship.carriedArmyId) return ship;
-                const army = availableArmies[loadedCount];
-                if (!army || loadedCount >= loadableArmies) return ship;
-                loadedCount++;
-                return { ...ship, carriedArmyId: army.id };
-            })
-        };
-
-        const newLog = {
-            id: this.rng.id('log'),
-            day: this.state.day,
-            text: `Fleet ${fleet.id} loaded ${loadableArmies} armies at ${system.name}.`,
-            type: 'move' as const
-        };
+        if (loadResult.count === 0) return false;
 
         this.state = {
             ...this.state,
-            fleets: this.state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
-            armies: updatedArmies,
-            logs: [...this.state.logs, newLog]
+            fleets: this.state.fleets.map(f => (f.id === fleet.id ? loadResult.fleet : f)),
+            armies: loadResult.armies,
+            logs: [...this.state.logs, ...loadResult.logs]
         };
 
         return true;
@@ -137,51 +103,22 @@ export class GameEngine {
     private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
         if (!this.isFleetAtSystem(fleet, system)) return false;
 
-        const embarkedArmies = this.state.armies.filter(a =>
-            a.containerId === fleet.id &&
-            a.factionId === fleet.factionId &&
-            a.state === ArmyState.EMBARKED
-        );
-
-        if (embarkedArmies.length === 0) return false;
-
-        let unloadedCount = 0;
-
-        const updatedFleet: Fleet = {
-            ...fleet,
-            ships: fleet.ships.map(ship => {
-                if (!ship.carriedArmyId) return ship;
-                const carryingArmy = embarkedArmies.find(a => a.id === ship.carriedArmyId);
-                if (!carryingArmy) return ship;
-                unloadedCount++;
-                return { ...ship, carriedArmyId: null };
-            })
-        };
-
-        if (unloadedCount === 0) return false;
-
-        const updatedArmies = this.state.armies.map(army => {
-            if (!embarkedArmies.some(a => a.id === army.id)) return army;
-
-            return {
-                ...army,
-                state: ArmyState.DEPLOYED,
-                containerId: system.id
-            };
+        const unloadResult = computeUnloadOps({
+            fleet,
+            system,
+            armies: this.state.armies,
+            day: this.state.day,
+            rng: this.rng,
+            fleetLabel: fleet.id
         });
 
-        const newLog = {
-            id: this.rng.id('log'),
-            day: this.state.day,
-            text: `Fleet ${fleet.id} unloaded ${unloadedCount} armies at ${system.name}.`,
-            type: 'move' as const
-        };
+        if (unloadResult.count === 0) return false;
 
         this.state = {
             ...this.state,
-            fleets: this.state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
-            armies: updatedArmies,
-            logs: [...this.state.logs, newLog]
+            fleets: this.state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
+            armies: unloadResult.armies,
+            logs: [...this.state.logs, ...unloadResult.logs]
         };
 
         return true;
