@@ -14,6 +14,7 @@ export interface GroundBattleResult {
     winnerFactionId: FactionId | 'draw' | null;
     conquestOccurred: boolean;
     armiesDestroyed: string[]; // IDs of destroyed armies
+    armyUpdates?: { id: string; strength?: number; morale?: number }[];
     logs: string[];
 }
 
