@@ -39,6 +39,8 @@ export const createArmy = (
     id: rng.id('army'),
     factionId,
     strength: Math.floor(strength), // Ensure integer
+    maxStrength: Math.floor(strength),
+    morale: 1,
     state: initialState,
     containerId
   };

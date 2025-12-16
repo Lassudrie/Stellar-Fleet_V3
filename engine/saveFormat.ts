@@ -36,6 +36,8 @@ export interface ArmyDTO {
   id: string;
   factionId: string; // Renamed
   strength: number;
+  maxStrength?: number;
+  morale?: number;
   state: ArmyState;
   containerId: string;
 }
