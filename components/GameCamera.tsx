@@ -19,6 +19,7 @@ interface GameCameraProps {
 
 const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
+  const hasInitialized = useRef(false);
 
   const targetArray = useMemo<[number, number, number]>(() => {
     if (!initialTarget) return [0, 0, 0];
@@ -90,7 +91,13 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
 
   useEffect(() => {
-    if (!ready || !controlsRef.current) return;
+    if (!ready) {
+      hasInitialized.current = false;
+    }
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready || hasInitialized.current || !controlsRef.current) return;
     const controls = controlsRef.current;
 
     controls.object.position.set(...positionArray);
@@ -99,6 +106,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     controls.object.lookAt(...targetArray);
     controls.update();
     clampControls();
+
+    hasInitialized.current = true;
   }, [ready, targetArray, positionArray, clampControls]);
 
   useEffect(() => {
