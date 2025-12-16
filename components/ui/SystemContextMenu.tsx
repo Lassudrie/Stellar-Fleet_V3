@@ -3,10 +3,22 @@ import React from 'react';
 import { StarSystem } from '../../types';
 import { useI18n } from '../../i18n';
 
+type GroundForceStats = {
+  count: number;
+  currentStrength: number;
+  maxStrength: number;
+  losses: number;
+  lossPercent: number;
+  averageMorale: number;
+};
+
 interface SystemContextMenuProps {
   position: { x: number, y: number };
   system: StarSystem;
-  groundForces: { blueCount: number, bluePower: number, redCount: number, redPower: number } | null;
+  groundForces: {
+    blue: GroundForceStats | null;
+    red: GroundForceStats | null;
+  } | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
   showAttackOption: boolean;
   showLoadOption: boolean;
@@ -27,6 +39,31 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
+
+  const renderFactionBlock = (
+      label: string,
+      stats: GroundForceStats | null,
+      colorClass: string,
+  ) => {
+      if (!stats) return null;
+
+      return (
+          <div className={`flex flex-col gap-0.5 ${colorClass}`}>
+              <div className="flex justify-between text-sm">
+                  <span>{label} x{stats.count}</span>
+                  <span className="font-mono">{stats.currentStrength.toLocaleString()} / {stats.maxStrength.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-300">
+                  <span>{t('ctx.losses')}</span>
+                  <span className="font-mono">-{stats.losses.toLocaleString()} ({stats.lossPercent.toFixed(1)}%)</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-300">
+                  <span>{t('ctx.morale')}</span>
+                  <span className="font-mono">{stats.averageMorale.toFixed(0)}%</span>
+              </div>
+          </div>
+      );
+  };
 
   return (
     <div
@@ -64,19 +101,9 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   </svg>
                   {t('ctx.groundForces')}
               </div>
-              <div className="flex flex-col gap-0.5">
-                  {groundForces.blueCount > 0 && (
-                      <div className="flex justify-between text-blue-300">
-                          <span>BLUE x{groundForces.blueCount}</span>
-                          <span className="font-mono">{groundForces.bluePower.toLocaleString()}</span>
-                      </div>
-                  )}
-                  {groundForces.redCount > 0 && (
-                      <div className="flex justify-between text-red-400">
-                          <span>RED x{groundForces.redCount}</span>
-                          <span className="font-mono">{groundForces.redPower.toLocaleString()}</span>
-                      </div>
-                  )}
+              <div className="flex flex-col gap-1">
+                  {renderFactionBlock('BLUE', groundForces.blue, 'text-blue-300')}
+                  {renderFactionBlock('RED', groundForces.red, 'text-red-400')}
               </div>
           </div>
       )}

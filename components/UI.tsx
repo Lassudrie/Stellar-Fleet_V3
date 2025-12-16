@@ -170,27 +170,45 @@ const UI: React.FC<UIProps> = ({
   // Compute Ground Forces Summary for Context Menu
   const groundForcesSummary = useMemo(() => {
       if (!targetSystem || !gameState.armies) return null;
-      
-      let playerForces = 0;
-      let playerPower = 0;
-      let enemyForces = 0;
-      let enemyPower = 0;
+
+      const aggregates = {
+          blue: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 },
+          red: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 }
+      };
 
       gameState.armies.forEach(army => {
           if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
-              if (army.factionId === playerFactionId) {
-                  playerForces++;
-                  playerPower += army.strength;
-              } else {
-                  enemyForces++;
-                  enemyPower += army.strength;
-              }
+              const bucket = army.factionId === playerFactionId ? aggregates.blue : aggregates.red;
+              bucket.count += 1;
+              bucket.currentStrength += army.strength;
+              bucket.maxStrength += army.maxStrength;
+              bucket.moraleSum += army.morale;
           }
       });
 
-      if (playerForces === 0 && enemyForces === 0) return null;
+      const buildSummary = (bucket: { count: number, currentStrength: number, maxStrength: number, moraleSum: number }) => {
+          if (bucket.count === 0) return null;
 
-      return { blueCount: playerForces, bluePower: playerPower, redCount: enemyForces, redPower: enemyPower };
+          const losses = bucket.maxStrength - bucket.currentStrength;
+          const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
+          const averageMorale = bucket.moraleSum / bucket.count;
+
+          return {
+              count: bucket.count,
+              currentStrength: bucket.currentStrength,
+              maxStrength: bucket.maxStrength,
+              losses,
+              lossPercent,
+              averageMorale,
+          };
+      };
+
+      const blue = buildSummary(aggregates.blue);
+      const red = buildSummary(aggregates.red);
+
+      if (!blue && !red) return null;
+
+      return { blue, red };
   }, [targetSystem, gameState.armies, playerFactionId]);
 
   const handleSelectFleetAtSystem = () => {

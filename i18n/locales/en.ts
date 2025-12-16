@@ -77,6 +77,8 @@ export const en = {
   'ctx.attack': 'Attack',
   'ctx.load': 'Load armies',
   'ctx.unload': 'Unload armies',
+  'ctx.losses': 'Losses',
+  'ctx.morale': 'Morale',
   'ctx.cancel': 'Cancel',
 
   // Fleet Picker
