@@ -1,5 +1,5 @@
 
-import React, { Suspense, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -107,13 +107,29 @@ const GameScene: React.FC<GameSceneProps> = ({
     return gameState.systems.find(system => system.ownerFactionId === gameState.playerFactionId)?.position || { x: 0, y: 0, z: 0 };
   }, [gameState.playerFactionId, gameState.systems]);
 
-  const cameraTarget = useMemo(() => [playerHomeworld.x, playerHomeworld.y, playerHomeworld.z] as [number, number, number], [playerHomeworld]);
+  const isScenarioReady = gameState.systems.length > 0;
 
-  const cameraPosition = useMemo(() => [playerHomeworld.x, playerHomeworld.y + 80, playerHomeworld.z + 50] as [number, number, number], [playerHomeworld]);
+  const initialHomeworldRef = useRef<Vec3 | null>(null);
+
+  useEffect(() => {
+    if (isScenarioReady && !initialHomeworldRef.current) {
+      initialHomeworldRef.current = playerHomeworld;
+    }
+  }, [isScenarioReady, playerHomeworld]);
+
+  const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
+
+  const cameraTarget = useMemo(
+    () => [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z] as [number, number, number],
+    [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
+  );
+
+  const cameraPosition = useMemo(
+    () => [homeworldForCamera.x, homeworldForCamera.y + 80, homeworldForCamera.z + 50] as [number, number, number],
+    [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
+  );
 
   const mapMetrics = useMapMetrics(gameState.systems);
-
-  const isScenarioReady = gameState.systems.length > 0;
 
   const ownershipSignature = useMemo(() => {
       return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
