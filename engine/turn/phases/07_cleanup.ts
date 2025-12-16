@@ -2,7 +2,7 @@
 import { GameState } from '../../../types';
 import { TurnContext } from '../types';
 import { pruneBattles } from '../../../services/battle/detection';
-import { sanitizeArmies } from '../../army';
+import { sanitizeArmyLinks } from '../../army';
 
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Prune Old Battles
@@ -10,10 +10,10 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     
     // 2. Sanitize Armies (Remove orphans, fix references)
     // Note: We use a temp state with pruned battles to ensure army logic has fresh context
-    const { armies: sanitizedArmies, logs: sanitizationLogs } = sanitizeArmies({ ...state, battles: activeBattles });
-    
+    const { state: sanitizedArmyState, logs: sanitizationLogs } = sanitizeArmyLinks({ ...state, battles: activeBattles });
+
     // 3. Add Tech Logs
-    const newLogs = [...state.logs];
+    const newLogs = [...sanitizedArmyState.logs];
     sanitizationLogs.forEach(txt => {
         newLogs.push({
             id: ctx.rng.id('log'),
@@ -24,9 +24,8 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     return {
-        ...state,
+        ...sanitizedArmyState,
         battles: activeBattles,
-        armies: sanitizedArmies,
         logs: newLogs
     };
 };
