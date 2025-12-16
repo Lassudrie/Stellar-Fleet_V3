@@ -79,6 +79,18 @@ const casualtyFraction = (ownPower: number, enemyPower: number): number => {
     return Math.min(MAX_CASUALTY_FRACTION_PER_TURN, pressure);
 };
 
+export const isOrbitContested = (system: StarSystem, state: GameState): boolean => {
+    const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
+    const hasBlueFleet = state.fleets.some(
+        f => f.factionId === 'blue' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq
+    );
+    const hasRedFleet = state.fleets.some(
+        f => f.factionId === 'red' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq
+    );
+
+    return hasBlueFleet && hasRedFleet;
+};
+
 const applyLosses = (
     armies: Army[],
     totalStrengthLoss: number,
@@ -133,8 +145,8 @@ const applyLosses = (
  */
 export const resolveGroundConflict = (system: StarSystem, state: GameState): GroundBattleResult | null => {
     // 1. Gather Forces
-    const armiesOnGround = state.armies.filter(a => 
-        a.containerId === system.id && 
+    const armiesOnGround = state.armies.filter(a =>
+        a.containerId === system.id &&
         a.state === ArmyState.DEPLOYED
     );
 
@@ -147,90 +159,89 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
     const redCount = redArmies.length;
 
     // 2. Identify Conflict Type
-    // Case A: Unopposed (One faction present)
-    if (blueCount > 0 && redCount === 0) {
-        if (system.ownerFactionId === 'blue') return null; // Already owned, just garrisoned
-        return {
-            systemId: system.id,
-            winnerFactionId: 'blue',
-            conquestOccurred: true,
-            armiesDestroyed: [],
-            armyUpdates: [],
-            casualties: [],
-            logs: [`System ${system.name} secured by BLUE ground forces (Unopposed).`]
-        };
-    }
-
-    if (redCount > 0 && blueCount === 0) {
-        if (system.ownerFactionId === 'red') return null;
-        return {
-            systemId: system.id,
-            winnerFactionId: 'red',
-            conquestOccurred: true,
-            armiesDestroyed: [],
-            armyUpdates: [],
-            casualties: [],
-            logs: [`System ${system.name} secured by RED ground forces (Unopposed).`]
-        };
-    }
-
-    // Case B: Active Combat
-    let winnerFactionId: FactionId | 'draw' | null;
+    let winnerFactionId: FactionId | 'draw' | null = null;
     const armiesToDestroy: string[] = [];
-    let conquestOccurred = false;
     let logText = '';
+    let armyUpdates: { armyId: string; strength: number; morale: number }[] = [];
+    let casualties: { factionId: FactionId; strengthLost: number; moraleLost: number; destroyed: string[] }[] = [];
 
-    const bluePower = calculatePower(blueArmies);
-    const redPower = calculatePower(redArmies);
-
-    const blueStrength = calculateTotalStrength(blueArmies);
-    const redStrength = calculateTotalStrength(redArmies);
-
-    const blueLossFraction = casualtyFraction(bluePower, redPower);
-    const redLossFraction = casualtyFraction(redPower, bluePower);
-
-    const blueStrengthLoss = Math.floor(blueStrength * blueLossFraction);
-    const redStrengthLoss = Math.floor(redStrength * redLossFraction);
-
-    const blueOutcome = applyLosses(blueArmies, blueStrengthLoss, blueLossFraction);
-    const redOutcome = applyLosses(redArmies, redStrengthLoss, redLossFraction);
-
-    const blueSurvivors = blueOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
-    const redSurvivors = redOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
-
-    armiesToDestroy.push(...blueOutcome.destroyedIds, ...redOutcome.destroyedIds);
-
-    if (blueSurvivors.length > 0 && redSurvivors.length === 0) {
+    if (blueCount > 0 && redCount === 0) {
         winnerFactionId = 'blue';
-        conquestOccurred = system.ownerFactionId !== 'blue';
-        logText = `Ground Battle at ${system.name}: BLUE prevails (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
-    } else if (redSurvivors.length > 0 && blueSurvivors.length === 0) {
+        logText = `System ${system.name} secured by BLUE ground forces (Unopposed).`;
+        casualties = [];
+    } else if (redCount > 0 && blueCount === 0) {
         winnerFactionId = 'red';
-        conquestOccurred = system.ownerFactionId !== 'red';
-        logText = `Ground Battle at ${system.name}: RED prevails (${redPower.toFixed(0)} vs ${bluePower.toFixed(0)}).`;
-    } else if (blueSurvivors.length > 0 && redSurvivors.length > 0) {
-        winnerFactionId = 'draw';
-        conquestOccurred = false;
-        logText = `Ground Battle at ${system.name}: Stalemate (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}). Both forces hold.`;
+        logText = `System ${system.name} secured by RED ground forces (Unopposed).`;
+        casualties = [];
     } else {
-        winnerFactionId = null;
-        conquestOccurred = false;
-        logText = `Ground Battle at ${system.name}: Mutual destruction (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
+        // Case B: Active Combat
+        const bluePower = calculatePower(blueArmies);
+        const redPower = calculatePower(redArmies);
+
+        const blueStrength = calculateTotalStrength(blueArmies);
+        const redStrength = calculateTotalStrength(redArmies);
+
+        const blueLossFraction = casualtyFraction(bluePower, redPower);
+        const redLossFraction = casualtyFraction(redPower, bluePower);
+
+        const blueStrengthLoss = Math.floor(blueStrength * blueLossFraction);
+        const redStrengthLoss = Math.floor(redStrength * redLossFraction);
+
+        const blueOutcome = applyLosses(blueArmies, blueStrengthLoss, blueLossFraction);
+        const redOutcome = applyLosses(redArmies, redStrengthLoss, redLossFraction);
+
+        const blueSurvivors = blueOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
+        const redSurvivors = redOutcome.updates.filter(u => u.strength >= DESTRUCTION_THRESHOLD);
+
+        armiesToDestroy.push(...blueOutcome.destroyedIds, ...redOutcome.destroyedIds);
+        armyUpdates = [...blueOutcome.updates, ...redOutcome.updates];
+        casualties = [
+            { factionId: 'blue', strengthLost: blueOutcome.strengthLost, moraleLost: blueOutcome.moraleLost, destroyed: blueOutcome.destroyedIds },
+            { factionId: 'red', strengthLost: redOutcome.strengthLost, moraleLost: redOutcome.moraleLost, destroyed: redOutcome.destroyedIds }
+        ];
+
+        if (blueSurvivors.length > 0 && redSurvivors.length === 0) {
+            winnerFactionId = 'blue';
+            logText = `Ground Battle at ${system.name}: BLUE prevails (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
+        } else if (redSurvivors.length > 0 && blueSurvivors.length === 0) {
+            winnerFactionId = 'red';
+            logText = `Ground Battle at ${system.name}: RED prevails (${redPower.toFixed(0)} vs ${bluePower.toFixed(0)}).`;
+        } else if (blueSurvivors.length > 0 && redSurvivors.length > 0) {
+            winnerFactionId = 'draw';
+            logText = `Ground Battle at ${system.name}: Stalemate (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}). Both forces hold.`;
+        } else {
+            winnerFactionId = null;
+            logText = `Ground Battle at ${system.name}: Mutual destruction (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
+        }
+
+        if (winnerFactionId !== null) {
+            logText += ` Losses - BLUE: ${blueOutcome.strengthLost} soldiers (${blueOutcome.destroyedIds.length} units destroyed), RED: ${redOutcome.strengthLost} soldiers (${redOutcome.destroyedIds.length} units destroyed).`;
+        }
     }
 
-    // --- RULE: ORBITAL CONTESTATION ---
-    // If conquest happened, verify orbital supremacy. 
-    // If active fleets from BOTH factions are present, the winner cannot secure the planet (Owner Flip blocked).
-    if (conquestOccurred && winnerFactionId && winnerFactionId !== 'draw') {
-        const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-        
-        const hasBlueFleet = state.fleets.some(f => f.factionId === 'blue' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq);
-        const hasRedFleet = state.fleets.some(f => f.factionId === 'red' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq);
+    let conquestOccurred = false;
+    const conquestAttempt =
+        winnerFactionId === 'blue'
+            ? system.ownerFactionId !== 'blue'
+            : winnerFactionId === 'red'
+                ? system.ownerFactionId !== 'red'
+                : false;
 
-        if (hasBlueFleet && hasRedFleet) {
-            conquestOccurred = false;
-            logText += " Orbital contestation prevents establishing sovereign control.";
+    if (conquestAttempt && winnerFactionId && winnerFactionId !== 'draw') {
+        const contested = isOrbitContested(system, state);
+        if (contested) {
+            logText += ' Orbital contestation within capture range blocks the capture.';
+        } else {
+            conquestOccurred = true;
         }
+    }
+
+    if (winnerFactionId === 'blue' && system.ownerFactionId === 'blue' && !conquestAttempt) {
+        return null;
+    }
+
+    if (winnerFactionId === 'red' && system.ownerFactionId === 'red' && !conquestAttempt) {
+        return null;
     }
 
     return {
@@ -238,14 +249,9 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         winnerFactionId,
         conquestOccurred,
         armiesDestroyed: armiesToDestroy,
-        armyUpdates: [...blueOutcome.updates, ...redOutcome.updates],
-        casualties: [
-            { factionId: 'blue', strengthLost: blueOutcome.strengthLost, moraleLost: blueOutcome.moraleLost, destroyed: blueOutcome.destroyedIds },
-            { factionId: 'red', strengthLost: redOutcome.strengthLost, moraleLost: redOutcome.moraleLost, destroyed: redOutcome.destroyedIds }
-        ],
-        logs: [
-            `${logText} Losses - BLUE: ${blueOutcome.strengthLost} soldiers (${blueOutcome.destroyedIds.length} units destroyed), RED: ${redOutcome.strengthLost} soldiers (${redOutcome.destroyedIds.length} units destroyed).`
-        ]
+        armyUpdates,
+        casualties,
+        logs: [logText]
     };
 };
 
