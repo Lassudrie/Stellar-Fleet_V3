@@ -117,6 +117,8 @@ export const serializeGameState = (state: GameState): string => {
       id: a.id,
       factionId: a.factionId,
       strength: a.strength,
+      maxStrength: a.maxStrength,
+      morale: a.morale,
       state: a.state,
       containerId: a.containerId
     })),
@@ -207,6 +209,8 @@ export const deserializeGameState = (json: string): GameState => {
       id: a.id,
       factionId: a.factionId || a.faction, // Migration
       strength: a.strength,
+      maxStrength: a.maxStrength ?? a.strength,
+      morale: a.morale ?? 1,
       state: a.state,
       containerId: a.containerId
     }));
