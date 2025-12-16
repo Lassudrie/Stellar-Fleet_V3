@@ -9,11 +9,21 @@ export interface ConquestResult {
   reason: string;
 }
 
+export interface ArmyCasualty {
+    armyId: string;
+    factionId: FactionId;
+    strengthLost: number;
+    moraleLost: number;
+    destroyed: boolean;
+}
+
 export interface GroundBattleResult {
     systemId: string;
     winnerFactionId: FactionId | 'draw' | null;
     conquestOccurred: boolean;
     armiesDestroyed: string[]; // IDs of destroyed armies
+    armyUpdates: Record<string, Partial<Army>>;
+    casualties: ArmyCasualty[];
     logs: string[];
 }
 
@@ -56,7 +66,48 @@ export const canConquerSystem = (
  * Helper to calculate total ground power
  */
 const calculatePower = (armies: Army[]): number => {
-    return armies.reduce((sum, army) => sum + army.strength, 0);
+    return armies.reduce((sum, army) => sum + (army.strength * (army.morale ?? 1)), 0);
+};
+
+const MAX_LOSS_RATIO_PER_TURN = 0.35;
+const MORALE_LOSS_FACTOR = 0.5;
+
+const distributeCasualties = (
+    armies: Army[],
+    lossRatio: number
+): { updates: Record<string, Partial<Army>>; destroyed: string[]; casualties: ArmyCasualty[] } => {
+    const updates: Record<string, Partial<Army>> = {};
+    const destroyed: string[] = [];
+    const casualties: ArmyCasualty[] = [];
+
+    armies.forEach(army => {
+        const strengthLost = Math.floor(army.strength * lossRatio);
+        const moraleLost = lossRatio * MORALE_LOSS_FACTOR;
+        const nextStrength = Math.max(0, army.strength - strengthLost);
+        const nextMorale = Math.max(0, Math.min(1, army.morale - moraleLost));
+        const isDestroyed = nextStrength < MIN_ARMY_STRENGTH;
+
+        if (isDestroyed) {
+            destroyed.push(army.id);
+        } else if (strengthLost > 0 || moraleLost > 0) {
+            updates[army.id] = {
+                strength: nextStrength,
+                morale: nextMorale
+            };
+        }
+
+        if (strengthLost > 0 || moraleLost > 0 || isDestroyed) {
+            casualties.push({
+                armyId: army.id,
+                factionId: army.factionId,
+                strengthLost,
+                moraleLost,
+                destroyed: isDestroyed
+            });
+        }
+    });
+
+    return { updates, destroyed, casualties };
 };
 
 /**
@@ -72,8 +123,8 @@ const calculatePower = (armies: Army[]): number => {
  */
 export const resolveGroundConflict = (system: StarSystem, state: GameState): GroundBattleResult | null => {
     // 1. Gather Forces
-    const armiesOnGround = state.armies.filter(a => 
-        a.containerId === system.id && 
+    const armiesOnGround = state.armies.filter(a =>
+        a.containerId === system.id &&
         a.state === ArmyState.DEPLOYED
     );
 
@@ -94,6 +145,8 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
             winnerFactionId: 'blue',
             conquestOccurred: true,
             armiesDestroyed: [],
+            armyUpdates: {},
+            casualties: [],
             logs: [`System ${system.name} secured by BLUE ground forces (Unopposed).`]
         };
     }
@@ -105,79 +158,71 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
             winnerFactionId: 'red',
             conquestOccurred: true,
             armiesDestroyed: [],
+            armyUpdates: {},
+            casualties: [],
             logs: [`System ${system.name} secured by RED ground forces (Unopposed).`]
         };
     }
 
     // Case B: Active Combat
-    let winnerFactionId: FactionId | 'draw';
+    let winnerFactionId: FactionId | 'draw' = 'draw';
     let armiesToDestroy: string[] = [];
     let conquestOccurred = false;
     let logText = '';
+    const armyUpdates: Record<string, Partial<Army>> = {};
+    const allCasualties: ArmyCasualty[] = [];
 
     const bluePower = calculatePower(blueArmies);
     const redPower = calculatePower(redArmies);
 
-    if (bluePower > redPower) {
-        // BLUE WINS
+    const totalPower = bluePower + redPower;
+    const blueLossRatio = totalPower > 0 ? Math.min(MAX_LOSS_RATIO_PER_TURN, redPower / totalPower) : 0;
+    const redLossRatio = totalPower > 0 ? Math.min(MAX_LOSS_RATIO_PER_TURN, bluePower / totalPower) : 0;
+
+    const blueOutcome = distributeCasualties(blueArmies, blueLossRatio);
+    const redOutcome = distributeCasualties(redArmies, redLossRatio);
+
+    Object.assign(armyUpdates, blueOutcome.updates, redOutcome.updates);
+    armiesToDestroy.push(...blueOutcome.destroyed, ...redOutcome.destroyed);
+    allCasualties.push(...blueOutcome.casualties, ...redOutcome.casualties);
+
+    const survivingBlue = blueArmies.filter(a => {
+        const nextStrength = armyUpdates[a.id]?.strength ?? a.strength;
+        return nextStrength >= MIN_ARMY_STRENGTH;
+    });
+
+    const survivingRed = redArmies.filter(a => {
+        const nextStrength = armyUpdates[a.id]?.strength ?? a.strength;
+        return nextStrength >= MIN_ARMY_STRENGTH;
+    });
+
+    const blueSurvives = survivingBlue.length > 0;
+    const redSurvives = survivingRed.length > 0;
+
+    if (blueSurvives && !redSurvives) {
         winnerFactionId = 'blue';
         conquestOccurred = system.ownerFactionId !== 'blue';
-        
-        // 1. Destroy Loser (All Red)
-        armiesToDestroy.push(...redArmies.map(a => a.id));
-
-        // 2. Calculate Winner Attrition
-        // Rule: 1 Loss per 2 "Divisions" (MIN_ARMY_STRENGTH) of enemy power
-        const attritionCount = Math.floor((redPower / MIN_ARMY_STRENGTH) * 0.5);
-        let blueLosses = 0;
-
-        if (attritionCount > 0) {
-            // Sort Blue armies deterministically: Weakest first, then by ID
-            blueArmies.sort((a, b) => (a.strength - b.strength) || a.id.localeCompare(b.id));
-            
-            // Take the first N armies
-            const casualties = blueArmies.slice(0, attritionCount);
-            armiesToDestroy.push(...casualties.map(a => a.id));
-            blueLosses = casualties.length;
-        }
-
-        logText = `Ground Battle at ${system.name}: BLUE wins (Power ${bluePower} vs ${redPower}). RED destroyed: ${redCount}, BLUE losses: ${blueLosses}.`;
-
-    } else if (redPower > bluePower) {
-        // RED WINS
+    } else if (redSurvives && !blueSurvives) {
         winnerFactionId = 'red';
         conquestOccurred = system.ownerFactionId !== 'red';
-
-        // 1. Destroy Loser (All Blue)
-        armiesToDestroy.push(...blueArmies.map(a => a.id));
-
-        // 2. Calculate Winner Attrition
-        const attritionCount = Math.floor((bluePower / MIN_ARMY_STRENGTH) * 0.5);
-        let redLosses = 0;
-
-        if (attritionCount > 0) {
-            // Sort Red armies deterministically
-            redArmies.sort((a, b) => (a.strength - b.strength) || a.id.localeCompare(b.id));
-            
-            const casualties = redArmies.slice(0, attritionCount);
-            armiesToDestroy.push(...casualties.map(a => a.id));
-            redLosses = casualties.length;
-        }
-
-        logText = `Ground Battle at ${system.name}: RED wins (Power ${redPower} vs ${bluePower}). BLUE destroyed: ${blueCount}, RED losses: ${redLosses}.`;
-
-    } else {
-        // DRAW
+    } else if (!blueSurvives && !redSurvives) {
         winnerFactionId = 'draw';
-        logText = `Ground Battle at ${system.name}: Stalemate (Power ${bluePower} vs ${redPower}). No territory change.`;
     }
+
+    const blueCasualties = allCasualties.filter(c => c.factionId === 'blue');
+    const redCasualties = allCasualties.filter(c => c.factionId === 'red');
+    const blueLossStrength = blueCasualties.reduce((sum, c) => sum + c.strengthLost, 0);
+    const redLossStrength = redCasualties.reduce((sum, c) => sum + c.strengthLost, 0);
+
+    logText = `Ground Battle at ${system.name}: power BLUE ${bluePower.toFixed(0)} vs RED ${redPower.toFixed(0)}.`;
+    logText += ` Losses -> BLUE: ${blueLossStrength} strength, ${blueCasualties.length} events; RED: ${redLossStrength} strength, ${redCasualties.length} events.`;
 
     // --- RULE: ORBITAL CONTESTATION ---
     // If conquest happened, verify orbital supremacy. 
     // If active fleets from BOTH factions are present, the winner cannot secure the planet (Owner Flip blocked).
     if (conquestOccurred && winnerFactionId !== 'draw') {
         const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-        
+
         const hasBlueFleet = state.fleets.some(f => f.factionId === 'blue' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq);
         const hasRedFleet = state.fleets.some(f => f.factionId === 'red' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq);
 
@@ -192,6 +237,8 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         winnerFactionId,
         conquestOccurred,
         armiesDestroyed: armiesToDestroy,
+        armyUpdates,
+        casualties: allCasualties,
         logs: [logText]
     };
 };

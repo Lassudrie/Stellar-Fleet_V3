@@ -1,5 +1,5 @@
 
-import { GameState, FactionId, AIState } from '../../../types';
+import { GameState, FactionId, AIState, Army } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
@@ -23,6 +23,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     
     // Track armies to remove (destroyed)
     const armiesToDestroyIds = new Set<string>();
+    const armyUpdates = new Map<string, Partial<Army>>();
     
     // 1. Resolve Conflict per System
     nextSystems = nextSystems.map(system => {
@@ -33,6 +34,16 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         
         // Queue destroyed armies
         result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+
+        // Apply partial updates (strength/morale)
+        Object.entries(result.armyUpdates).forEach(([armyId, update]) => {
+            if (!armiesToDestroyIds.has(armyId)) {
+                armyUpdates.set(armyId, {
+                    ...(armyUpdates.get(armyId) ?? {}),
+                    ...update
+                });
+            }
+        });
         
         // Add Logs
         result.logs.forEach(txt => {
@@ -63,11 +74,14 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         return system;
     });
 
-    // 2. Filter Destroyed Armies
-    let nextArmies = state.armies;
-    if (armiesToDestroyIds.size > 0) {
-        nextArmies = state.armies.filter(a => !armiesToDestroyIds.has(a.id));
-    }
+    // 2. Apply updates and filter Destroyed Armies
+    let nextArmies = state.armies
+        .map(army => {
+            if (armiesToDestroyIds.has(army.id)) return null;
+            const update = armyUpdates.get(army.id);
+            return update ? { ...army, ...update } : army;
+        })
+        .filter((a): a is Army => a !== null);
 
     if (Object.keys(holdUpdates).length > 0) {
         nextAiStates = { ...nextAiStates };
