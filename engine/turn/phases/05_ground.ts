@@ -1,5 +1,5 @@
 
-import { GameState, FactionId, AIState } from '../../../types';
+import { GameState, FactionId, AIState, Army } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
@@ -20,19 +20,27 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     const holdUpdates: Record<FactionId, string[]> = {};
-    
+
     // Track armies to remove (destroyed)
     const armiesToDestroyIds = new Set<string>();
+
+    // Track strength/morale updates for surviving armies
+    const armyUpdatesMap = new Map<string, { strength: number; morale: number }>();
     
     // 1. Resolve Conflict per System
     nextSystems = nextSystems.map(system => {
         // Pure calculation based on current state
         const result = resolveGroundConflict(system, state);
-        
+
         if (!result) return system;
-        
+
         // Queue destroyed armies
         result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+
+        // Queue army stat updates
+        result.armyUpdates.forEach(update => {
+            armyUpdatesMap.set(update.armyId, { strength: update.strength, morale: update.morale });
+        });
         
         // Add Logs
         result.logs.forEach(txt => {
@@ -64,10 +72,20 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     // 2. Filter Destroyed Armies
-    let nextArmies = state.armies;
-    if (armiesToDestroyIds.size > 0) {
-        nextArmies = state.armies.filter(a => !armiesToDestroyIds.has(a.id));
-    }
+    const nextArmies: Army[] = state.armies.reduce<Army[]>((acc, army) => {
+        if (armiesToDestroyIds.has(army.id)) {
+            return acc;
+        }
+
+        const pending = armyUpdatesMap.get(army.id);
+        if (pending) {
+            acc.push({ ...army, strength: pending.strength, morale: pending.morale });
+            return acc;
+        }
+
+        acc.push(army);
+        return acc;
+    }, []);
 
     if (Object.keys(holdUpdates).length > 0) {
         nextAiStates = { ...nextAiStates };
