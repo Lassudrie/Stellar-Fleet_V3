@@ -71,21 +71,16 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         return system;
     });
 
-    // 2. Filter Destroyed Armies
-    const nextArmies: Army[] = state.armies.reduce<Army[]>((acc, army) => {
-        if (armiesToDestroyIds.has(army.id)) {
-            return acc;
-        }
-
+    // 2. Apply accumulated updates then filter destroyed armies
+    const patchedArmies = state.armies.map(army => {
         const pending = armyUpdatesMap.get(army.id);
-        if (pending) {
-            acc.push({ ...army, strength: pending.strength, morale: pending.morale });
-            return acc;
-        }
 
-        acc.push(army);
-        return acc;
-    }, []);
+        if (!pending) return army;
+
+        return { ...army, strength: pending.strength, morale: pending.morale };
+    });
+
+    const nextArmies: Army[] = patchedArmies.filter(army => !armiesToDestroyIds.has(army.id));
 
     if (Object.keys(holdUpdates).length > 0) {
         nextAiStates = { ...nextAiStates };
