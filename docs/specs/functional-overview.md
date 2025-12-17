@@ -51,7 +51,8 @@ Pour capturer ou défendre un système :
 2.  L'ordre `UNLOAD_ARMY` doit être donné pour débarquer l'armée sur la planète (`ArmyState.DEPLOYED`).
 3.  Conditions de débarquement :
     *   Pas de bataille spatiale active dans le système.
-    *   Pas de flotte ennemie en orbite immédiate (Suprématie orbitale locale requise pour le drop).
+    *   Le débarquement est autorisé même en orbite contestée : les transports risquent alors d'être détruits avant de pouvoir déposer les troupes.
+    *   La supériorité orbitale réduit ce risque sans la supprimer.
 
 ### 6.2. Résolution du Conflit Terrestre
 À la fin du tour, si des armées de factions opposées sont présentes au sol (State `DEPLOYED`) :
