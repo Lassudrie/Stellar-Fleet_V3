@@ -171,7 +171,12 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
     };
 
     if (armiesByFaction.size === 1) {
-        const soleFaction = armiesByFaction.keys().next().value as FactionId;
+        const soleFactionResult = armiesByFaction.keys().next();
+        if (soleFactionResult.done || !soleFactionResult.value) {
+            // Safety guard: should never happen given size === 1, but prevents crash
+            return null;
+        }
+        const soleFaction = soleFactionResult.value as FactionId;
         winnerFactionId = soleFaction;
         logText = `System ${system.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
         casualties = [{ factionId: soleFaction, strengthLost: 0, moraleLost: 0, destroyed: [] }];
