@@ -132,7 +132,8 @@ const GameScene: React.FC<GameSceneProps> = ({
   const mapMetrics = useMapMetrics(gameState.systems);
 
   const ownershipSignature = useMemo(() => {
-      return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
+      // Full owner IDs avoid signature collisions (e.g. multiple factions sharing first letter).
+      return gameState.systems.map(s => s.ownerFactionId ?? 'N').join('|');
   }, [gameState.systems]);
 
   const battlingSystemIds = useMemo(() => {

@@ -469,7 +469,10 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               sysId = randomSys.id;
           }
       } else if (def.spawnLocation === 'random') {
-          const randomSys = rng.pick(systems);
+          // IMPORTANT: Random spawns are intended to be "footholds" on neutral space.
+          // Never spawn directly on an owned system (prevents enemy fleets starting inside player territory).
+          const neutralCandidates = systems.filter(s => !s.ownerFactionId && !staticSystemIds.has(s.id));
+          const randomSys = neutralCandidates.length > 0 ? rng.pick(neutralCandidates) : rng.pick(systems);
           position = clone(randomSys.position);
           sysId = randomSys.id;
       } else {

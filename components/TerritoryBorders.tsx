@@ -1,8 +1,8 @@
 
 import React, { useMemo } from 'react';
 import { Color, DoubleSide, BufferGeometry, BufferAttribute } from 'three';
-import { StarSystem, FactionId } from '../types';
-import { COLORS, TERRITORY_RADIUS } from '../data/static';
+import { StarSystem } from '../types';
+import { TERRITORY_RADIUS } from '../data/static';
 
 // --- CONFIGURATION ---
 const CIRCLE_SEGMENTS = 64;  
@@ -96,26 +96,38 @@ const clipPolygon = (
 interface TerritoryBordersProps {
     systems: StarSystem[];
     signature: string; // Used to trigger re-renders only when ownership changes
-    factions: any[]; // Used for coloring
+    factions: Array<{ id: string; color?: string; colorHex?: string }>; // Used for coloring
 }
 
-const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems, signature }) => {
+const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems, signature, factions }) => {
 
   const meshes = useMemo(() => {
     if (!systems || systems.length === 0) return [];
 
-    const groups: Record<string, StarSystem[]> = {
-        'blue': systems.filter(s => s.ownerFactionId === 'blue'),
-        'red': systems.filter(s => s.ownerFactionId === 'red'),
-    };
+    const factionColorById = new Map<string, string>();
+    (factions || []).forEach(f => {
+        const c = f?.color ?? f?.colorHex;
+        if (typeof f?.id === 'string' && f.id && typeof c === 'string' && c) {
+            factionColorById.set(f.id, c);
+        }
+    });
+
+    const ownedFactionIds = Array.from(
+        new Set(systems.map(s => s.ownerFactionId).filter((id): id is string => typeof id === 'string' && id.length > 0))
+    ).sort((a, b) => a.localeCompare(b));
+
+    const groups: Record<string, StarSystem[]> = {};
+    ownedFactionIds.forEach(fid => {
+        groups[fid] = systems.filter(s => s.ownerFactionId === fid);
+    });
 
     const resultMeshes: any[] = [];
 
-    Object.entries(groups).forEach(([factionStr, mySystems]) => {
+    Object.entries(groups).forEach(([factionId, mySystems]) => {
         if (mySystems.length === 0) return;
 
-        const baseColor = new Color(factionStr === 'blue' ? COLORS.blue : COLORS.red);
-        const borderColor = factionStr === 'blue' ? COLORS.blueHighlight : COLORS.redHighlight;
+        const baseColor = new Color(factionColorById.get(factionId) ?? '#999999');
+        const borderColor = baseColor.clone().lerp(new Color('#ffffff'), 0.35);
         
         // Glassy fill color
         const fillColor = baseColor.clone().lerp(new Color('#0f172a'), 0.5);
@@ -273,7 +285,7 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
         });
 
         const m: any = {
-            id: factionStr,
+            id: factionId,
             color: fillColor,
             borderColor,
             fillGeo: null,
@@ -303,7 +315,7 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
     // CRITICAL OPTIMIZATION:
     // Only recalculate when the ownership signature changes (capture event), or the number of systems changes (init).
     // Positional updates (which don't happen for systems) are irrelevant.
-  }, [signature, systems.length]);
+  }, [signature, systems.length, factions]);
 
   if (meshes.length === 0) return null;
 

@@ -1,9 +1,9 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight } from 'three';
-import { Fleet, FleetState, FactionId } from '../types';
-import { COLORS, ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color } from 'three';
+import { Fleet, FleetState } from '../types';
+import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
 import { Text, Billboard } from '@react-three/drei';
 import { fleetLabel } from '../engine/idUtils';
 
@@ -37,7 +37,7 @@ const EXTRUDE_SETTINGS = {
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
 
-const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected, onSelect, playerFactionId }) => {
+const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected, onSelect, color: factionColor }) => {
   // We use a Group to handle the Position of the entire fleet entity (ship + label + selection ring)
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
@@ -50,8 +50,16 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
 
   // Constants for visual representation
-  const color = fleet.factionId === 'blue' ? COLORS.blue : COLORS.red;
-  const highlightColor = fleet.factionId === 'blue' ? COLORS.blueHighlight : COLORS.redHighlight;
+  const { baseColor, highlightColor, labelColor } = useMemo(() => {
+      try {
+          const c = new Color(factionColor || '#999999');
+          const h = c.clone().lerp(new Color('#ffffff'), 0.35);
+          const l = h.clone().lerp(new Color('#ffffff'), 0.25);
+          return { baseColor: c.getStyle(), highlightColor: h.getStyle(), labelColor: l.getStyle() };
+      } catch {
+          return { baseColor: '#999999', highlightColor: '#ffffff', labelColor: '#ffffff' };
+      }
+  }, [factionColor]);
   const isOrbiting = fleet.state === FleetState.ORBIT;
 
   // Generate a stable random start angle based on fleet ID
@@ -178,8 +186,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         >
             <extrudeGeometry args={[CHEVRON_SHAPE, EXTRUDE_SETTINGS]} />
             <meshStandardMaterial 
-                color={isSelected ? highlightColor : color} 
-                emissive={isSelected ? highlightColor : color}
+                color={isSelected ? highlightColor : baseColor} 
+                emissive={isSelected ? highlightColor : baseColor}
                 emissiveIntensity={isSelected ? 0.6 : 0.4}
                 roughness={0.4}
                 metalness={0.6}
@@ -204,7 +212,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         >
             <Text
                 fontSize={1.2}
-                color={fleet.factionId === 'blue' ? '#93c5fd' : '#fca5a5'} // blue-300 / red-300
+                color={labelColor}
                 outlineWidth={0.1}
                 outlineColor="#000000"
                 fontWeight="bold"
