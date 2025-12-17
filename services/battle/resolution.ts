@@ -119,9 +119,10 @@ export const resolveBattle = (
     roundsPlayed = round;
     
     // Check for combat viability at start of round
-    const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-    const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-    if (blueAlive.length === 0 || redAlive.length === 0) break;
+    const activeShips = battleShips.filter(s => s.currentHp > 0);
+    const aliveFactions = new Set(activeShips.map(s => s.faction));
+    // Support arbitrary faction IDs: battle ends once only one (or zero) faction remains.
+    if (aliveFactions.size <= 1) break;
 
     logs.push(`--- ROUND ${round} ---`);
     
@@ -131,14 +132,10 @@ export const resolveBattle = (
         if (p.eta > 0) p.eta--;
     }
 
-    // Identify active participants (Array iteration is fine here as we need to process all)
-    const activeShips = battleShips.filter(s => s.currentHp > 0);
-    const blueShips = activeShips.filter(s => s.faction === 'blue');
-    const redShips = activeShips.filter(s => s.faction === 'red');
-
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
-      const enemies = ship.faction === 'blue' ? redShips : blueShips;
+      // Deterministic ordering: activeShips is already in shipId order.
+      const enemies = activeShips.filter(s => s.faction !== ship.faction);
       ship.targetId = selectTarget(ship, enemies, rng.next());
     }
 
@@ -309,12 +306,14 @@ export const resolveBattle = (
 
   // 4. FINALIZE & APPLY RESULTS
   
-  const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-  const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-  
-  const winnerFactionId = blueAlive.length > 0 && redAlive.length === 0 ? 'blue' 
-               : redAlive.length > 0 && blueAlive.length === 0 ? 'red' 
-               : 'draw';
+  const aliveCounts = new Map<FactionId, number>();
+  battleShips.forEach(s => {
+    if (s.currentHp <= 0) return;
+    aliveCounts.set(s.faction, (aliveCounts.get(s.faction) ?? 0) + 1);
+  });
+
+  const survivingFactions = Array.from(aliveCounts.keys()).sort((a, b) => a.localeCompare(b));
+  const winnerFactionId: FactionId | 'draw' = survivingFactions.length === 1 ? survivingFactions[0] : 'draw';
 
   logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
@@ -347,9 +346,14 @@ export const resolveBattle = (
     }
   });
 
-  const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
+  const shipsLost: Record<FactionId, number> = {} as Record<FactionId, number>;
+  involvedFleets.forEach(fleet => {
+    shipsLost[fleet.factionId] = 0;
+  });
   battleShips.forEach(s => {
-      if (s.currentHp <= 0) shipsLost[s.faction]++;
+      if (s.currentHp <= 0) {
+        shipsLost[s.faction] = (shipsLost[s.faction] ?? 0) + 1;
+      }
   });
 
   const updatedBattle: Battle = {
