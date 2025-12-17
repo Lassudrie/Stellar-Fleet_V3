@@ -105,8 +105,26 @@ const applyLosses = (
     moraleLost: number;
     thresholds: { armyId: string; threshold: number }[];
 } => {
-    if (armies.length === 0 || totalStrengthLoss <= 0) {
+    if (armies.length === 0) {
         return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0, thresholds: [] };
+    }
+
+    if (totalStrengthLoss <= 0) {
+        const thresholds = armies.map(army => ({ armyId: army.id, threshold: ARMY_DESTROY_THRESHOLD(army.maxStrength) }));
+        const strengthById = new Map(armies.map(army => [army.id, army.strength]));
+        const destroyedIds = thresholds
+            .filter(({ armyId, threshold }) => (strengthById.get(armyId) ?? 0) <= threshold)
+            .map(entry => entry.armyId);
+
+        const updates = armies.map(army => ({ armyId: army.id, strength: army.strength, morale: army.morale }));
+
+        return {
+            updates,
+            destroyedIds,
+            strengthLost: 0,
+            moraleLost: 0,
+            thresholds
+        };
     }
 
     const sortedArmies = [...armies].sort((a, b) => a.id.localeCompare(b.id));
