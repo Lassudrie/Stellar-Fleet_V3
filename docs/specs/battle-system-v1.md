@@ -32,7 +32,7 @@ Le Battle System V1 remplace la résolution instantanée par une simulation dét
 
 ## 3. Algorithme de Résolution (Par Round)
 
-La bataille dure **4 Rounds** fixes (sauf si un camp est anéanti avant).
+La bataille dure **6 Rounds** fixes (sauf si un camp est anéanti avant).
 
 ### 3.1. Phase de Ciblage (Targeting)
 Chaque vaisseau sélectionne une cible ennemie.
@@ -41,14 +41,14 @@ Chaque vaisseau sélectionne une cible ennemie.
 
 ### 3.2. Phase de Manœuvre
 *   Ajustement du `FireControlLock` (Bonus de précision).
-*   Si le vaisseau a une cible : +25% de Lock/round.
+*   Si le vaisseau a une cible : +35% de Lock/round.
 *   Si pas de cible : Dégradation du Lock.
 
 ### 3.3. Phase de Lancement (Launch)
 Les vaisseaux tirent leurs munitions limitées.
 *   **Torpilles** : Dégâts élevés, lents (`ETA = 3 rounds`). Prioritaire.
 *   **Missiles** : Dégâts moyens, rapides (`ETA = 2 rounds`). Saturation.
-*   **Limite** : Max 2 projectiles par vaisseau par round (Burst).
+*   **Limite** : Max 3 projectiles par vaisseau par round (Burst).
 
 ### 3.4. Phase d'Interception (Soft Kill)
 Les missiles en vol (ETA 0 ou 1) peuvent être interceptés par des contre-mesures.

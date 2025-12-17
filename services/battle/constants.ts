@@ -1,7 +1,7 @@
 
 // --- BATTLE CONFIGURATION ---
 
-export const MAX_ROUNDS = 4;
+export const MAX_ROUNDS = 6;
 
 export const ETA_MISSILE = 2;
 export const ETA_TORPEDO = 3;
@@ -10,10 +10,10 @@ export const ETA_TORPEDO = 3;
 export const BASE_ACCURACY = 0.6;
 
 // How much FireControlLock increases per round if focusing on positioning
-export const LOCK_GAIN_PER_ROUND = 0.25;
+export const LOCK_GAIN_PER_ROUND = 0.35;
 
 // Maximum missiles/torps a single ship can launch per round (Burst limit)
-export const MAX_LAUNCH_PER_ROUND = 2;
+export const MAX_LAUNCH_PER_ROUND = 3;
 
 // Interception
 export const INTERCEPTION_BASE_CHANCE = 0.5; // Base chance for an interceptor missile to kill an incoming missile
