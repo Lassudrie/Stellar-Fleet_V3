@@ -251,11 +251,10 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         }
     }
 
-    if (winnerFactionId === 'blue' && system.ownerFactionId === 'blue' && !conquestAttempt) {
-        return null;
-    }
+    const unopposed = blueCount === 0 || redCount === 0;
+    const hasUpdates = armyUpdates.length > 0 || armiesToDestroy.length > 0;
 
-    if (winnerFactionId === 'red' && system.ownerFactionId === 'red' && !conquestAttempt) {
+    if (!hasUpdates && !conquestAttempt && !conquestOccurred && unopposed) {
         return null;
     }
 

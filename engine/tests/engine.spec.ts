@@ -132,6 +132,33 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Damaged attackers are still removed when defenders already own the system',
+    run: () => {
+      const system = createSystem('sys-5', 'blue');
+      const blueArmy = createArmy('army-blue-hold', 'blue', 12000, ArmyState.DEPLOYED, system.id);
+      const redArmy: Army = {
+        id: 'army-red-broken',
+        factionId: 'red',
+        strength: 1500,
+        maxStrength: 20000,
+        morale: 0.5,
+        state: ArmyState.DEPLOYED,
+        containerId: system.id
+      };
+
+      const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
+
+      const result = resolveGroundConflict(system, state);
+      assert.ok(result, 'Ground conflict should be reported even without conquest');
+      assert.strictEqual(result?.winnerFactionId, 'blue', 'Defenders should be considered the winners');
+      assert.ok(result?.armiesDestroyed.includes(redArmy.id), 'Damaged attackers should be destroyed');
+
+      const redUpdate = result?.armyUpdates.find(update => update.armyId === redArmy.id);
+      assert.ok(redUpdate, 'Red army should receive an update before removal');
+      assert.ok(redUpdate!.strength < redArmy.strength, 'Red army should lose strength from the fight');
+    }
+  },
+  {
     name: 'Orphan carriedArmyId is cleared during cleanup',
     run: () => {
       const system = createSystem('sys-3', 'blue');
