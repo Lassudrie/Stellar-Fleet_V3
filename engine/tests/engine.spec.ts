@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { resolveGroundConflict } from '../conquest';
+import { isOrbitContested, resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
 import {
@@ -24,7 +24,8 @@ interface TestCase {
 
 const factions: FactionState[] = [
   { id: 'blue', name: 'Blue', color: COLORS.blue, isPlayable: true },
-  { id: 'red', name: 'Red', color: COLORS.red, isPlayable: true }
+  { id: 'red', name: 'Red', color: COLORS.red, isPlayable: true },
+  { id: 'green', name: 'Green', color: '#10b981', isPlayable: false }
 ];
 
 const baseVec: Vec3 = { x: 0, y: 0, z: 0 };
@@ -108,6 +109,42 @@ const tests: TestCase[] = [
       assert.strictEqual(result?.winnerFactionId, 'blue');
       assert.strictEqual(result?.conquestOccurred, false, 'Conquest must be blocked by contested orbit');
       assert.deepStrictEqual(result?.armiesDestroyed, [], 'Unopposed assault should not destroy armies');
+    }
+  },
+  {
+    name: 'Orbit is only contested when multiple factions are present',
+    run: () => {
+      const system = createSystem('sys-2a', 'blue');
+
+      const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [
+        { id: 'blue-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateWithSingleFaction = createBaseState({ systems: [system], fleets: [blueFleet] });
+      assert.strictEqual(
+        isOrbitContested(system, stateWithSingleFaction),
+        false,
+        'Single faction presence should not contest orbit'
+      );
+
+      const greenFleet = createFleet('fleet-green', 'green', { x: CAPTURE_RANGE - 1, y: 0, z: 0 }, [
+        { id: 'green-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateWithTwoFactions = createBaseState({ systems: [system], fleets: [blueFleet, greenFleet] });
+      assert.strictEqual(
+        isOrbitContested(system, stateWithTwoFactions),
+        true,
+        'Different factions in range should contest orbit'
+      );
+
+      const emptyRedFleet = createFleet('fleet-red', 'red', { x: CAPTURE_RANGE - 1, y: 0, z: 0 }, []);
+      const stateWithEmptyFleet = createBaseState({ systems: [system], fleets: [blueFleet, emptyRedFleet] });
+      assert.strictEqual(
+        isOrbitContested(system, stateWithEmptyFleet),
+        false,
+        'Fleets without ships should not contribute to contesting'
+      );
     }
   },
   {

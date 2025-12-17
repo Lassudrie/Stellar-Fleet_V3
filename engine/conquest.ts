@@ -84,14 +84,13 @@ const casualtyFraction = (ownPower: number, enemyPower: number): number => {
 
 export const isOrbitContested = (system: StarSystem, state: GameState): boolean => {
     const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-    const hasBlueFleet = state.fleets.some(
-        f => f.factionId === 'blue' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq
-    );
-    const hasRedFleet = state.fleets.some(
-        f => f.factionId === 'red' && f.ships.length > 0 && distSq(f.position, system.position) <= captureSq
+    const factionsInRange = new Set(
+        state.fleets
+            .filter(fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= captureSq)
+            .map(fleet => fleet.factionId)
     );
 
-    return hasBlueFleet && hasRedFleet;
+    return factionsInRange.size >= 2;
 };
 
 const applyLosses = (
