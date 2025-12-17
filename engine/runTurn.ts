@@ -18,7 +18,8 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // Enforce Immutability on Input
   deepFreezeDev(state);
 
-  const ctx: TurnContext = { rng };
+  const turn = state.day + 1;
+  const ctx: TurnContext = { rng, turn };
 
   // --- CANONICALIZE INPUT STATE ---
   // Ensures consistent iteration order for deterministic RNG consumption
@@ -27,17 +28,17 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // --- PIPELINE EXECUTION ---
   // Each phase takes (state, ctx) and returns nextState.
 
-  // 1. Resolve battles from previous turn (Scheduled -> Resolved)
-  nextState = phaseBattleResolution(nextState, ctx);
-
-  // 2. AI Planning & Execution (Generates commands)
+  // 1. AI Planning & Execution (Generates commands)
   nextState = phaseAI(nextState, ctx);
 
-  // 3. Movement (Updates positions)
+  // 2. Movement (Updates positions)
   nextState = phaseMovement(nextState, ctx);
 
-  // 4. Detect New Battles (Locks fleets for next turn)
+  // 3. Detect New Battles (Locks fleets and schedule resolution)
   nextState = phaseBattleDetection(nextState, ctx);
+
+  // 4. Resolve all scheduled battles immediately (Scheduled -> Resolved)
+  nextState = phaseBattleResolution(nextState, ctx);
 
   // 5. Ground Combat & Conquest
   nextState = phaseGround(nextState, ctx);
@@ -48,11 +49,16 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 7. Cleanup & Maintenance
   nextState = phaseCleanup(nextState, ctx);
 
+  const remainingBattles = nextState.battles.filter(b => b.status === 'scheduled');
+  if (remainingBattles.length > 0) {
+    throw new Error(`Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}`);
+  }
+
   // 8. Canonicalize output & Time Advance
   nextState = canonicalizeState(nextState);
-  
+
   return {
       ...nextState,
-      day: nextState.day + 1
+      day: turn
   };
 };

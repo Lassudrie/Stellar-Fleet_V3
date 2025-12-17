@@ -457,7 +457,7 @@ const tests: TestCase[] = [
       const greenArmy = createArmy('army-green', 'green', 8000, ArmyState.DEPLOYED, system.id);
 
       const state = createBaseState({ systems: [system], armies: [greenArmy], aiStates: {} });
-      const ctx = { rng: new RNG(21) };
+      const ctx = { rng: new RNG(21), turn: state.day + 1 };
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
@@ -467,7 +467,7 @@ const tests: TestCase[] = [
       assert.ok(nextState.aiStates?.green, 'AI state should be initialized for AI-controlled victors');
       assert.strictEqual(
         nextState.aiStates?.green?.holdUntilTurnBySystemId?.[system.id],
-        state.day + AI_HOLD_TURNS,
+        ctx.turn + AI_HOLD_TURNS,
         'AI hold orders should be scheduled for newly conquered systems'
       );
     }
