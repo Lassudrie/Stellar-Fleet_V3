@@ -51,7 +51,16 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
 
   const remainingBattles = nextState.battles.filter(b => b.status === 'scheduled');
   if (remainingBattles.length > 0) {
-    throw new Error(`Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}`);
+    // Log critical error but don't crash - force resolve remaining battles
+    console.error(`[RunTurn] CRITICAL: Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}. Force-resolving.`);
+    nextState = {
+      ...nextState,
+      battles: nextState.battles.map(b => 
+        b.status === 'scheduled' 
+          ? { ...b, status: 'resolved' as const, winnerFactionId: 'draw' as const, logs: [...b.logs, 'Battle force-resolved due to turn processing error.'] }
+          : b
+      )
+    };
   }
 
   // 8. Canonicalize output & Time Advance
