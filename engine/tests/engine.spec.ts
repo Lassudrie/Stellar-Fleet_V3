@@ -9,6 +9,8 @@ import {
   FactionState,
   Fleet,
   FleetState,
+  GameObjectives,
+  GameplayRules,
   GameState,
   LogEntry,
   ShipEntity,
@@ -16,6 +18,8 @@ import {
   StarSystem
 } from '../../types';
 import { Vec3 } from '../math/vec3';
+import { runTurn } from '../runTurn';
+import { RNG } from '../rng';
 
 interface TestCase {
   name: string;
@@ -69,24 +73,41 @@ const createArmy = (
   containerId
 });
 
-const createBaseState = (overrides: Partial<GameState>): GameState => ({
-  scenarioId: 'test',
-  playerFactionId: 'blue',
-  factions,
-  seed: 1,
-  rngState: 1,
-  startYear: 0,
-  day: 0,
-  systems: [],
-  fleets: [],
-  armies: [],
-  lasers: [],
-  battles: [],
-  logs: [],
-  selectedFleetId: null,
-  winnerFactionId: null,
-  ...overrides
-});
+const createBaseState = (overrides: Partial<GameState>): GameState => {
+  const defaultRules: GameplayRules = {
+    fogOfWar: false,
+    useAdvancedCombat: true,
+    aiEnabled: false,
+    totalWar: false
+  };
+
+  const defaultObjectives: GameObjectives = {
+    conditions: []
+  };
+
+  const { rules = defaultRules, objectives = defaultObjectives, ...restOverrides } = overrides;
+
+  return {
+    scenarioId: 'test',
+    playerFactionId: 'blue',
+    factions,
+    seed: 1,
+    rngState: 1,
+    startYear: 0,
+    day: 0,
+    systems: [],
+    fleets: [],
+    armies: [],
+    lasers: [],
+    battles: [],
+    logs: [],
+    selectedFleetId: null,
+    winnerFactionId: null,
+    objectives,
+    rules,
+    ...restOverrides
+  };
+};
 
 const tests: TestCase[] = [
   {
@@ -229,6 +250,51 @@ const tests: TestCase[] = [
 
       const followUp = resolveGroundConflict(system, updatedState);
       assert.strictEqual(followUp, null, 'Once the attacker is destroyed, the ground battle should not loop');
+    }
+  },
+  {
+    name: 'Embarked armies are lost if their transport dies before invasion',
+    run: () => {
+      const system = createSystem('sys-contested', 'red');
+
+      const blueArmy = createArmy('army-blue-embarked', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-transport');
+      const blueTransport = createFleet('fleet-blue-transport', 'blue', { ...baseVec }, [
+        { id: 'blue-transport', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: blueArmy.id }
+      ]);
+
+      const redFleet = createFleet('fleet-red-intercept', 'red', { ...baseVec }, [
+        { id: 'red-cruiser', type: ShipType.CRUISER, hp: 1200, maxHp: 1200, carriedArmyId: null }
+      ]);
+
+      const scheduledBattle: Battle = {
+        id: 'battle-contested',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueTransport.id, redFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        armies: [blueArmy],
+        fleets: [
+          { ...blueTransport, state: FleetState.COMBAT, invasionTargetSystemId: system.id },
+          { ...redFleet, state: FleetState.COMBAT }
+        ],
+        battles: [scheduledBattle]
+      });
+
+      const nextState = runTurn(state, new RNG(7));
+
+      const survivingBlueFleet = nextState.fleets.find(fleet => fleet.id === blueTransport.id);
+      assert.strictEqual(survivingBlueFleet, undefined, 'Transport fleet should be destroyed in the space battle');
+
+      const remainingArmy = nextState.armies.find(army => army.id === blueArmy.id);
+      assert.ok(!remainingArmy || remainingArmy.state !== ArmyState.DEPLOYED, 'Embarked army must not land after carrier loss');
+
+      const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Defenders should retain control when orbit is contested and transport dies');
     }
   },
   {
