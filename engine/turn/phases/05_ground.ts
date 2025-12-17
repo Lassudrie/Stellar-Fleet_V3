@@ -46,7 +46,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         result.logs.forEach(txt => {
             nextLogs.push({
                 id: ctx.rng.id('log'),
-                day: state.day,
+                day: ctx.turn,
                 text: txt,
                 type: 'combat'
             });
@@ -95,7 +95,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 holdUntilTurnBySystemId: {
                     ...existingState.holdUntilTurnBySystemId,
                     ...systemIds.reduce<Record<string, number>>((acc, systemId) => {
-                        acc[systemId] = state.day + AI_HOLD_TURNS;
+                        acc[systemId] = ctx.turn + AI_HOLD_TURNS;
                         return acc;
                     }, {})
                 }

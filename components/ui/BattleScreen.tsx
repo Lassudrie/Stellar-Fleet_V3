@@ -109,6 +109,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   
   const winnerText = battle.winnerFactionId === 'draw' ? t('battle.draw')
                      : battle.winnerFactionId === playerFactionId ? t('battle.victory', { winner: 'FLEET' })
+                     : battle.winnerFactionId ? t('battle.defeat')
                      : t('battle.unknown');
                      
   const winnerColor = battle.winnerFactionId === playerFactionId ? 'text-blue-500' 

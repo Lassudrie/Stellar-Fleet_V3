@@ -58,7 +58,11 @@ const short = (id: string) => id.split('_').pop()?.toUpperCase() || '???';
 // --- RESOLVER ---
 
 // Optimization: Removed unused masterRng param. The battle creates its own isolated RNG.
-export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
+export const resolveBattle = (
+  battle: Battle,
+  state: GameState,
+  turn: number
+): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
@@ -337,7 +341,7 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
             ...oldFleet,
             ships: newShips,
             state: FleetState.ORBIT,
-            stateStartTurn: state.day // Correctly update state timestamp to current turn
+            stateStartTurn: turn // Correctly update state timestamp to current turn
         });
         survivingFleets.push(updatedFleet);
     }
@@ -350,9 +354,10 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
 
   const updatedBattle: Battle = {
       ...battle,
+      turnResolved: turn,
       status: 'resolved',
       initialShips: initialShips,
-      logs: logs,
+      logs: [...battle.logs, ...logs],
       winnerFactionId: winnerFactionId as any,
       roundsPlayed,
       shipsLost,
