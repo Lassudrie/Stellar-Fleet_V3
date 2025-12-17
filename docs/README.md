@@ -21,7 +21,7 @@ Structure des données.
 
 ## Scénario actif
 
-Le simulateur charge uniquement le scénario **Conquest Sandbox** situé dans `scenarios/templates/conquest_sandbox.ts`, référencé manuellement par le registre `scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
+Le simulateur propose désormais plusieurs scénarios, notamment **Conquest Sandbox** (`scenarios/templates/conquest_sandbox.ts`) et **Spiral Convergence** (`scenarios/templates/spiral_convergence.ts`), tous deux référencés manuellement dans `scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
 
 ## Installation & Démarrage
 
