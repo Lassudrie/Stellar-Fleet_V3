@@ -4,7 +4,7 @@ import { TurnContext } from '../types';
 import { resolveFleetMovement } from '../../../services/movement/movementPhase';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
-    const nextDay = state.day + 1; // Movement projects to next day positions
+    const nextDay = ctx.turn; // Movement projects to current turn positions
     
     const nextFleets: Fleet[] = [];
     const newLogs = [];

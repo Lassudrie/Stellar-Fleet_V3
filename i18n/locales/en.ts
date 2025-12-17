@@ -132,6 +132,7 @@ export const en = {
   'battle.rounds_other': '{{count}} ROUNDS',
   'battle.finished': 'FINISHED',
   'battle.victory': '{{winner}} VICTORY',
+  'battle.defeat': 'DEFEAT',
   'battle.draw': 'DRAW',
   'battle.unknown': 'RESULT UNKNOWN',
   'battle.close': 'Close Report',

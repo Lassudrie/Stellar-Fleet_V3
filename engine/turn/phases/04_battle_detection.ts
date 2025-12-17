@@ -8,7 +8,7 @@ export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameSt
     if (!state.rules.useAdvancedCombat) return state;
 
     // 1. Detect New Battles based on positions
-    const newBattles = detectNewBattles(state, ctx.rng);
+    const newBattles = detectNewBattles(state, ctx.rng, ctx.turn);
     
     if (newBattles.length === 0) return state;
 
@@ -22,9 +22,9 @@ export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameSt
         if (involvedFleetIds.has(f.id)) {
             // Force stop movement
             return { 
-                ...f, 
-                state: FleetState.COMBAT, 
-                stateStartTurn: state.day, // Mark conflict start
+                ...f,
+                state: FleetState.COMBAT,
+                stateStartTurn: ctx.turn, // Mark conflict start
                 targetSystemId: null,
                 targetPosition: null
             };
