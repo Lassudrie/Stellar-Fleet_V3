@@ -5,11 +5,13 @@ const spiralConvergence: ScenarioDefinitionV1 = {
   id: "spiral_convergence",
   meta: {
     title: "Spiral Convergence",
-    description: "Rival coalitions converge along a tightening spiral arm, racing to seize the core while defending scattered footholds.",
+    description: "Rival coalitions converge along a tightening spiral arm, racing to seize the core while defending their expanding frontier.",
     difficulty: 3,
     tags: ["Spiral", "Conquest"]
   },
   generation: {
+    // Fixed seed ensures the same map + initial placements every run (stable difficulty & tuning).
+    fixedSeed: 230017,
     systemCount: 72,
     radius: 140,
     topology: "spiral",
@@ -34,7 +36,15 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       { id: "aurora", name: "Aurora Coalition", colorHex: "#38bdf8", isPlayable: true },
       { id: "ember", name: "Ember Dominion", colorHex: "#f97316", isPlayable: false, aiProfile: "balanced" }
     ],
-    startingDistribution: "scattered",
+    // Cohesive starting territory instead of isolated starts.
+    startingDistribution: "cluster",
+    // Grow contiguous territory from each homeworld toward target shares.
+    territoryAllocation: {
+      type: "percentages",
+      byFactionId: { aurora: 0.12, ember: 0.12 },
+      neutralShare: 0.76,
+      contiguity: "clustered"
+    },
     initialFleets: [
       {
         ownerFactionId: "aurora",
@@ -89,7 +99,8 @@ const spiralConvergence: ScenarioDefinitionV1 = {
   objectives: {
     win: [
       { type: "elimination" },
-      { type: "domination", value: 0.65 }
+      // Domination expects a 0..100 percentage in the current engine implementation.
+      { type: "domination", value: 65 }
     ]
   },
   rules: {

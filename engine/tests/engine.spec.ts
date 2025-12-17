@@ -518,12 +518,12 @@ const tests: TestCase[] = [
       exportedValues.forEach(symbol => {
         const declarations = symbol.getDeclarations() ?? [];
         const hasExternalReference = declarations.some(declaration => {
-          const identifier = declaration.name && ts.isIdentifier(declaration.name) ? declaration.name : null;
-          if (!identifier) {
+          const declarationName = ts.getNameOfDeclaration(declaration);
+          if (!declarationName || !ts.isIdentifier(declarationName)) {
             return false;
           }
 
-          const references = service.findReferences(conquestPath, identifier.getStart());
+          const references = service.findReferences(conquestPath, declarationName.getStart());
           return references?.flatMap(ref => ref.references).some(ref => ref.fileName !== conquestPath && !ref.isDefinition) ?? false;
         });
 
