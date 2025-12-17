@@ -150,6 +150,14 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         return map;
     }, new Map());
 
+    const defendingFactionId =
+        system.ownerFactionId && armiesByFaction.has(system.ownerFactionId) ? system.ownerFactionId : null;
+    const attackingFactions = defendingFactionId
+        ? Array.from(armiesByFaction.keys()).filter(factionId => factionId !== defendingFactionId)
+        : [];
+    const battleMode: 'coalition_vs_defender' | 'free_for_all' =
+        defendingFactionId && attackingFactions.length > 0 ? 'coalition_vs_defender' : 'free_for_all';
+
     // 2. Identify Conflict Type
     let winnerFactionId: FactionId | 'draw' | null = null;
     const armiesToDestroy: string[] = [];
@@ -168,7 +176,7 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         logText = `System ${system.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
         casualties = [{ factionId: soleFaction, strengthLost: 0, moraleLost: 0, destroyed: [] }];
     } else {
-        // Case B: Active Combat (free-for-all)
+        // Case B: Active Combat (rule depends on defender presence)
         const factionOutcomes = new Map<FactionId, LossOutcome>();
         const factionThresholds = new Map<FactionId, Map<string, number>>();
         const factionPowers = new Map<FactionId, number>();
@@ -179,12 +187,21 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
             factionStrengths.set(factionId, calculateTotalStrength(factionArmies));
         });
 
-        const totalPowers = Array.from(factionPowers.values()).reduce((sum, power) => sum + power, 0);
+        const getEnemyFactions = (factionId: FactionId): FactionId[] => {
+            if (battleMode === 'coalition_vs_defender' && defendingFactionId) {
+                if (factionId === defendingFactionId) return attackingFactions;
+                return [defendingFactionId];
+            }
+
+            return Array.from(armiesByFaction.keys()).filter(otherId => otherId !== factionId);
+        };
 
         armiesByFaction.forEach((factionArmies, factionId) => {
             const power = factionPowers.get(factionId) ?? 0;
             const strength = factionStrengths.get(factionId) ?? 0;
-            const enemyPower = Math.max(0, totalPowers - power);
+            const enemyPower = getEnemyFactions(factionId).reduce((sum, enemyId) => {
+                return sum + (factionPowers.get(enemyId) ?? 0);
+            }, 0);
             const lossFraction = casualtyFraction(power, enemyPower);
             const strengthLoss = Math.floor(strength * lossFraction);
 
@@ -226,15 +243,41 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
             survivingPowers.push({ factionId, remainingPower: calculatePower(reconstructedArmies) });
         });
 
-        if (survivingPowers.length === 0) {
-            winnerFactionId = null;
-        } else {
-            survivingPowers.sort((a, b) => b.remainingPower - a.remainingPower);
-            const [top, second] = survivingPowers;
-            if (second && Math.abs(top.remainingPower - second.remainingPower) < 1e-6) {
+        const defendersRemainingPower = defendingFactionId
+            ? survivingPowers
+                .filter(entry => entry.factionId === defendingFactionId)
+                .reduce((sum, entry) => sum + entry.remainingPower, 0)
+            : 0;
+        const attackersRemainingPower = battleMode === 'coalition_vs_defender'
+            ? survivingPowers
+                .filter(entry => entry.factionId !== defendingFactionId)
+                .reduce((sum, entry) => sum + entry.remainingPower, 0)
+            : 0;
+
+        if (battleMode === 'coalition_vs_defender' && defendingFactionId) {
+            if (attackersRemainingPower === 0 && defendersRemainingPower === 0) {
+                winnerFactionId = null;
+            } else if (Math.abs(attackersRemainingPower - defendersRemainingPower) < 1e-6) {
                 winnerFactionId = 'draw';
+            } else if (attackersRemainingPower > defendersRemainingPower) {
+                const topAttacker = survivingPowers
+                    .filter(entry => entry.factionId !== defendingFactionId)
+                    .sort((a, b) => b.remainingPower - a.remainingPower)[0];
+                winnerFactionId = topAttacker?.factionId ?? null;
             } else {
-                winnerFactionId = top.factionId;
+                winnerFactionId = defendingFactionId;
+            }
+        } else {
+            if (survivingPowers.length === 0) {
+                winnerFactionId = null;
+            } else {
+                survivingPowers.sort((a, b) => b.remainingPower - a.remainingPower);
+                const [top, second] = survivingPowers;
+                if (second && Math.abs(top.remainingPower - second.remainingPower) < 1e-6) {
+                    winnerFactionId = 'draw';
+                } else {
+                    winnerFactionId = top.factionId;
+                }
             }
         }
 
@@ -249,7 +292,12 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
             .map(entry => `${getFactionLabel(entry.factionId)} ${entry.remainingPower.toFixed(0)} power`)
             .join(', ');
 
-        logText = `Ground battle at ${system.name} resolved as a free-for-all (highest remaining ground power wins; ties result in a stalemate; no survivors means the site is neutralized). Outcome: ${outcomeLabel}.`;
+        const ruleDescription =
+            battleMode === 'coalition_vs_defender'
+                ? 'attacker coalition vs defender (attackers cooperate; strongest surviving attacker claims the conquest; defender keeps control on ties)'
+                : 'free-for-all (everyone fights everyone else; highest remaining ground power wins; ties are stalemates; no survivors neutralize the site)';
+
+        logText = `Ground battle at ${system.name} resolved as ${ruleDescription}. Outcome: ${outcomeLabel}.`;
         if (survivorsText.length > 0) {
             logText += ` Remaining power: ${survivorsText}.`;
         }

@@ -221,22 +221,64 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'Multi-faction ground battle rewards the strongest survivor',
+    name: 'Multi-faction ground battle with a defender uses the attacker coalition rule',
     run: () => {
-      const system = createSystem('sys-free-for-all', 'red');
+      const system = createSystem('sys-coalition-hold', 'red');
 
       const redArmy = createArmy('army-red', 'red', 10000, ArmyState.DEPLOYED, system.id);
-      const blueArmy = createArmy('army-blue', 'blue', 5000, ArmyState.DEPLOYED, system.id);
-      const greenArmy = createArmy('army-green', 'green', 5000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue', 'blue', 4000, ArmyState.DEPLOYED, system.id);
+      const greenArmy = createArmy('army-green', 'green', 3000, ArmyState.DEPLOYED, system.id);
 
       const state = createBaseState({ systems: [system], armies: [redArmy, blueArmy, greenArmy] });
 
       const result = resolveGroundConflict(system, state);
 
       assert.ok(result, 'Ground conflict should be resolved when multiple factions are present');
-      assert.strictEqual(result?.winnerFactionId, 'red', 'Red should keep control thanks to the highest remaining power');
+      assert.strictEqual(result?.winnerFactionId, 'red', 'Defenders should keep control against a weaker coalition');
       assert.strictEqual(result?.casualties.length, 3, 'All involved factions should be tracked in the casualty report');
-      assert.ok(result?.logs.some(log => log.includes('free-for-all')), 'Logs should describe the free-for-all resolution rule');
+      assert.ok(
+        result?.logs.some(log => log.includes('attacker coalition vs defender')),
+        'Logs should describe the coalition vs defender resolution rule'
+      );
+    }
+  },
+  {
+    name: 'The strongest surviving attacker claims conquest after a coalition victory',
+    run: () => {
+      const system = createSystem('sys-coalition-win', 'red');
+
+      const redArmy = createArmy('army-red-win', 'red', 3000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue-win', 'blue', 9000, ArmyState.DEPLOYED, system.id);
+      const greenArmy = createArmy('army-green-win', 'green', 7000, ArmyState.DEPLOYED, system.id);
+
+      const state = createBaseState({ systems: [system], armies: [redArmy, blueArmy, greenArmy] });
+
+      const result = resolveGroundConflict(system, state);
+
+      assert.ok(result, 'Ground conflict should resolve for coalition attacks');
+      assert.strictEqual(result?.winnerFactionId, 'blue', 'Top surviving attacker should be credited with the coalition win');
+      assert.ok(
+        result?.logs.some(log => log.includes('attacker coalition vs defender')),
+        'Logs should highlight the coalition rule when attackers cooperate'
+      );
+    }
+  },
+  {
+    name: 'Free-for-all fights remain supported on neutral ground',
+    run: () => {
+      const system = createSystem('sys-ffa', null);
+
+      const alphaArmy = createArmy('army-alpha', 'blue', 6000, ArmyState.DEPLOYED, system.id);
+      const betaArmy = createArmy('army-beta', 'red', 4000, ArmyState.DEPLOYED, system.id);
+      const gammaArmy = createArmy('army-gamma', 'green', 2000, ArmyState.DEPLOYED, system.id);
+
+      const state = createBaseState({ systems: [system], armies: [alphaArmy, betaArmy, gammaArmy] });
+
+      const result = resolveGroundConflict(system, state);
+
+      assert.ok(result, 'Free-for-all ground conflicts should resolve');
+      assert.strictEqual(result?.winnerFactionId, 'blue', 'Highest remaining ground power should win on neutral ground');
+      assert.ok(result?.logs.some(log => log.includes('free-for-all')), 'Logs should describe the free-for-all rule');
     }
   },
   {
