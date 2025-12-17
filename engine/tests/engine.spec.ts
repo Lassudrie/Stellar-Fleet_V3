@@ -159,6 +159,42 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Exhausted invaders are cleared so the ground battle does not loop',
+    run: () => {
+      const system = createSystem('sys-loop-1', 'blue');
+      const blueArmy = createArmy('army-blue-loop', 'blue', 18000, ArmyState.DEPLOYED, system.id);
+      const redArmy: Army = {
+        id: 'army-red-loop',
+        factionId: 'red',
+        strength: 0,
+        maxStrength: 20000,
+        morale: 0.8,
+        state: ArmyState.DEPLOYED,
+        containerId: system.id
+      };
+
+      const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
+
+      const firstResult = resolveGroundConflict(system, state);
+      assert.ok(firstResult, 'Ground conflict should resolve even with exhausted invaders present');
+      assert.strictEqual(firstResult?.winnerFactionId, 'blue', 'Defenders should secure their own system');
+      assert.ok(firstResult?.armiesDestroyed.includes(redArmy.id), 'Invading army at zero strength must be removed');
+
+      const updatedState: GameState = {
+        ...state,
+        armies: state.armies
+          .map(army => {
+            const update = firstResult?.armyUpdates.find(entry => entry.armyId === army.id);
+            return update ? { ...army, strength: update.strength, morale: update.morale } : army;
+          })
+          .filter(army => !(firstResult?.armiesDestroyed || []).includes(army.id))
+      };
+
+      const followUp = resolveGroundConflict(system, updatedState);
+      assert.strictEqual(followUp, null, 'Once the attacker is destroyed, the ground battle should not loop');
+    }
+  },
+  {
     name: 'Orphan carriedArmyId is cleared during cleanup',
     run: () => {
       const system = createSystem('sys-3', 'blue');
