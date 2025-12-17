@@ -1,10 +1,12 @@
 import { ScenarioTemplate } from './types';
 import conquestSandbox from './templates/conquest_sandbox';
+import spiralConvergence from './templates/spiral_convergence';
 
 // Manually register templates. 
 // Note: We use TS files now instead of JSON to avoid module resolution issues in some environments.
 const templatesToLoad = [
-    { data: conquestSandbox, name: 'conquest_sandbox.ts' }
+    { data: conquestSandbox, name: 'conquest_sandbox.ts' },
+    { data: spiralConvergence, name: 'spiral_convergence.ts' }
 ];
 
 /**
