@@ -23,6 +23,8 @@ export const fr = {
   'scenario.back': 'Retour Menu',
   'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
   'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
+  'scenario.spiral_convergence.title': 'Convergence Spiralée',
+  'scenario.spiral_convergence.desc': 'Des coalitions rivales se dirigent vers le noyau galactique le long d\'un bras spiral, en combinant expansion et invasions au sol.',
 
   // New Game Screen
   'newgame.title': 'Nouvelle Simulation',

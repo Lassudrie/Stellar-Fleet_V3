@@ -23,6 +23,8 @@ export const en = {
   'scenario.back': 'Back to Menu',
   'scenario.conquest_sandbox.title': 'Conquest Sandbox',
   'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
+  'scenario.spiral_convergence.title': 'Spiral Convergence',
+  'scenario.spiral_convergence.desc': 'Opposing coalitions push toward the galactic core along a spiral arm, balancing expansion with ground invasions.',
 
   // New Game Screen
   'newgame.title': 'New Simulation',
