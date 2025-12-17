@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isOrbitContested, resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
+import { AI_HOLD_TURNS } from '../ai';
 import {
   Army,
   ArmyState,
@@ -21,6 +22,7 @@ import {
 import { Vec3 } from '../math/vec3';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
+import { phaseGround } from '../turn/phases/05_ground';
 import ts from 'typescript';
 
 interface TestCase {
@@ -31,7 +33,7 @@ interface TestCase {
 const factions: FactionState[] = [
   { id: 'blue', name: 'Blue', color: COLORS.blue, isPlayable: true },
   { id: 'red', name: 'Red', color: COLORS.red, isPlayable: true },
-  { id: 'green', name: 'Green', color: '#10b981', isPlayable: false }
+  { id: 'green', name: 'Green', color: '#10b981', isPlayable: false, aiProfile: 'aggressive' }
 ];
 
 const baseVec: Vec3 = { x: 0, y: 0, z: 0 };
@@ -219,6 +221,25 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Multi-faction ground battle rewards the strongest survivor',
+    run: () => {
+      const system = createSystem('sys-free-for-all', 'red');
+
+      const redArmy = createArmy('army-red', 'red', 10000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue', 'blue', 5000, ArmyState.DEPLOYED, system.id);
+      const greenArmy = createArmy('army-green', 'green', 5000, ArmyState.DEPLOYED, system.id);
+
+      const state = createBaseState({ systems: [system], armies: [redArmy, blueArmy, greenArmy] });
+
+      const result = resolveGroundConflict(system, state);
+
+      assert.ok(result, 'Ground conflict should be resolved when multiple factions are present');
+      assert.strictEqual(result?.winnerFactionId, 'red', 'Red should keep control thanks to the highest remaining power');
+      assert.strictEqual(result?.casualties.length, 3, 'All involved factions should be tracked in the casualty report');
+      assert.ok(result?.logs.some(log => log.includes('free-for-all')), 'Logs should describe the free-for-all resolution rule');
+    }
+  },
+  {
     name: 'Exhausted invaders are cleared so the ground battle does not loop',
     run: () => {
       const system = createSystem('sys-loop-1', 'blue');
@@ -297,6 +318,28 @@ const tests: TestCase[] = [
 
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
       assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Defenders should retain control when orbit is contested and transport dies');
+    }
+  },
+  {
+    name: 'Phase ground conquest uses faction color and AI hold updates for any winner',
+    run: () => {
+      const system = createSystem('sys-green-capture', 'red');
+      const greenArmy = createArmy('army-green', 'green', 8000, ArmyState.DEPLOYED, system.id);
+
+      const state = createBaseState({ systems: [system], armies: [greenArmy], aiStates: {} });
+      const ctx = { rng: new RNG(21) };
+
+      const nextState = phaseGround(state, ctx);
+      const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'Green forces should capture an unopposed enemy world');
+      assert.strictEqual(updatedSystem?.color, factions[2].color, 'Captured system color should match the winner faction color');
+      assert.ok(nextState.aiStates?.green, 'AI state should be initialized for AI-controlled victors');
+      assert.strictEqual(
+        nextState.aiStates?.green?.holdUntilTurnBySystemId?.[system.id],
+        state.day + AI_HOLD_TURNS,
+        'AI hold orders should be scheduled for newly conquered systems'
+      );
     }
   },
   {

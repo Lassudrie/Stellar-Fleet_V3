@@ -53,17 +53,19 @@ export const isOrbitContested = (system: StarSystem, state: GameState): boolean 
     return factionsInRange.size >= 2;
 };
 
-const applyLosses = (
-    armies: Army[],
-    totalStrengthLoss: number,
-    lossFraction: number
-): {
+interface LossOutcome {
     updates: { armyId: string; strength: number; morale: number }[];
     destroyedIds: string[];
     strengthLost: number;
     moraleLost: number;
     thresholds: { armyId: string; threshold: number }[];
-} => {
+}
+
+const applyLosses = (
+    armies: Army[],
+    totalStrengthLoss: number,
+    lossFraction: number
+): LossOutcome => {
     if (armies.length === 0) {
         return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0, thresholds: [] };
     }
@@ -141,11 +143,12 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
 
     if (armiesOnGround.length === 0) return null;
 
-    const blueArmies = armiesOnGround.filter(a => a.factionId === 'blue');
-    const redArmies = armiesOnGround.filter(a => a.factionId === 'red');
-
-    const blueCount = blueArmies.length;
-    const redCount = redArmies.length;
+    const armiesByFaction = armiesOnGround.reduce<Map<FactionId, Army[]>>((map, army) => {
+        const current = map.get(army.factionId) ?? [];
+        current.push(army);
+        map.set(army.factionId, current);
+        return map;
+    }, new Map());
 
     // 2. Identify Conflict Type
     let winnerFactionId: FactionId | 'draw' | null = null;
@@ -154,70 +157,113 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
     let armyUpdates: { armyId: string; strength: number; morale: number }[] = [];
     let casualties: { factionId: FactionId; strengthLost: number; moraleLost: number; destroyed: string[] }[] = [];
 
-    if (blueCount > 0 && redCount === 0) {
-        winnerFactionId = 'blue';
-        logText = `System ${system.name} secured by BLUE ground forces (Unopposed).`;
-        casualties = [];
-    } else if (redCount > 0 && blueCount === 0) {
-        winnerFactionId = 'red';
-        logText = `System ${system.name} secured by RED ground forces (Unopposed).`;
-        casualties = [];
+    const getFactionLabel = (factionId: FactionId): string => {
+        const faction = state.factions.find(f => f.id === factionId);
+        return faction?.name ?? factionId.toUpperCase();
+    };
+
+    if (armiesByFaction.size === 1) {
+        const soleFaction = armiesByFaction.keys().next().value as FactionId;
+        winnerFactionId = soleFaction;
+        logText = `System ${system.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
+        casualties = [{ factionId: soleFaction, strengthLost: 0, moraleLost: 0, destroyed: [] }];
     } else {
-        // Case B: Active Combat
-        const bluePower = calculatePower(blueArmies);
-        const redPower = calculatePower(redArmies);
+        // Case B: Active Combat (free-for-all)
+        const factionOutcomes = new Map<FactionId, LossOutcome>();
+        const factionThresholds = new Map<FactionId, Map<string, number>>();
+        const factionPowers = new Map<FactionId, number>();
+        const factionStrengths = new Map<FactionId, number>();
 
-        const blueStrength = calculateTotalStrength(blueArmies);
-        const redStrength = calculateTotalStrength(redArmies);
+        armiesByFaction.forEach((factionArmies, factionId) => {
+            factionPowers.set(factionId, calculatePower(factionArmies));
+            factionStrengths.set(factionId, calculateTotalStrength(factionArmies));
+        });
 
-        const blueLossFraction = casualtyFraction(bluePower, redPower);
-        const redLossFraction = casualtyFraction(redPower, bluePower);
+        const totalPowers = Array.from(factionPowers.values()).reduce((sum, power) => sum + power, 0);
 
-        const blueStrengthLoss = Math.floor(blueStrength * blueLossFraction);
-        const redStrengthLoss = Math.floor(redStrength * redLossFraction);
+        armiesByFaction.forEach((factionArmies, factionId) => {
+            const power = factionPowers.get(factionId) ?? 0;
+            const strength = factionStrengths.get(factionId) ?? 0;
+            const enemyPower = Math.max(0, totalPowers - power);
+            const lossFraction = casualtyFraction(power, enemyPower);
+            const strengthLoss = Math.floor(strength * lossFraction);
 
-        const blueOutcome = applyLosses(blueArmies, blueStrengthLoss, blueLossFraction);
-        const redOutcome = applyLosses(redArmies, redStrengthLoss, redLossFraction);
+            const outcome = applyLosses(factionArmies, strengthLoss, lossFraction);
+            factionOutcomes.set(factionId, outcome);
+            factionThresholds.set(factionId, buildDestructionThresholdMap(outcome.thresholds));
+        });
 
-        const blueThresholdMap = buildDestructionThresholdMap(blueOutcome.thresholds);
-        const redThresholdMap = buildDestructionThresholdMap(redOutcome.thresholds);
+        const survivorsByFaction = new Map<FactionId, { updates: { armyId: string; strength: number; morale: number }[] }>();
+        const originalArmiesById = new Map(armiesOnGround.map(army => [army.id, army]));
 
-        const blueSurvivors = blueOutcome.updates.filter(u => u.strength > (blueThresholdMap.get(u.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
-        const redSurvivors = redOutcome.updates.filter(u => u.strength > (redThresholdMap.get(u.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
+        factionOutcomes.forEach((outcome, factionId) => {
+            const thresholdMap = factionThresholds.get(factionId) ?? new Map<string, number>();
+            const survivors = outcome.updates.filter(update => update.strength > (thresholdMap.get(update.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
+            survivorsByFaction.set(factionId, { updates: survivors });
 
-        armiesToDestroy.push(...blueOutcome.destroyedIds, ...redOutcome.destroyedIds);
-        armyUpdates = [...blueOutcome.updates, ...redOutcome.updates];
-        casualties = [
-            { factionId: 'blue', strengthLost: blueOutcome.strengthLost, moraleLost: blueOutcome.moraleLost, destroyed: blueOutcome.destroyedIds },
-            { factionId: 'red', strengthLost: redOutcome.strengthLost, moraleLost: redOutcome.moraleLost, destroyed: redOutcome.destroyedIds }
-        ];
+            armiesToDestroy.push(...outcome.destroyedIds);
+            armyUpdates.push(...outcome.updates);
+            casualties.push({
+                factionId,
+                strengthLost: outcome.strengthLost,
+                moraleLost: outcome.moraleLost,
+                destroyed: outcome.destroyedIds
+            });
+        });
 
-        if (blueSurvivors.length > 0 && redSurvivors.length === 0) {
-            winnerFactionId = 'blue';
-            logText = `Ground Battle at ${system.name}: BLUE prevails (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
-        } else if (redSurvivors.length > 0 && blueSurvivors.length === 0) {
-            winnerFactionId = 'red';
-            logText = `Ground Battle at ${system.name}: RED prevails (${redPower.toFixed(0)} vs ${bluePower.toFixed(0)}).`;
-        } else if (blueSurvivors.length > 0 && redSurvivors.length > 0) {
-            winnerFactionId = 'draw';
-            logText = `Ground Battle at ${system.name}: Stalemate (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}). Both forces hold.`;
-        } else {
+        const survivingPowers: { factionId: FactionId; remainingPower: number }[] = [];
+
+        survivorsByFaction.forEach((survivors, factionId) => {
+            if (survivors.updates.length === 0) return;
+
+            const reconstructedArmies: Army[] = survivors.updates.map(update => {
+                const baseArmy = originalArmiesById.get(update.armyId);
+                return baseArmy
+                    ? { ...baseArmy, strength: update.strength, morale: update.morale }
+                    : { id: update.armyId, factionId, strength: update.strength, morale: update.morale, maxStrength: update.strength, state: ArmyState.DEPLOYED, containerId: system.id };
+            });
+
+            survivingPowers.push({ factionId, remainingPower: calculatePower(reconstructedArmies) });
+        });
+
+        if (survivingPowers.length === 0) {
             winnerFactionId = null;
-            logText = `Ground Battle at ${system.name}: Mutual destruction (${bluePower.toFixed(0)} vs ${redPower.toFixed(0)}).`;
+        } else {
+            survivingPowers.sort((a, b) => b.remainingPower - a.remainingPower);
+            const [top, second] = survivingPowers;
+            if (second && Math.abs(top.remainingPower - second.remainingPower) < 1e-6) {
+                winnerFactionId = 'draw';
+            } else {
+                winnerFactionId = top.factionId;
+            }
         }
 
-        if (winnerFactionId !== null) {
-            logText += ` Losses - BLUE: ${blueOutcome.strengthLost} soldiers (${blueOutcome.destroyedIds.length} units destroyed), RED: ${redOutcome.strengthLost} soldiers (${redOutcome.destroyedIds.length} units destroyed).`;
+        const outcomeLabel =
+            winnerFactionId === null
+                ? 'mutual destruction'
+                : winnerFactionId === 'draw'
+                    ? 'stalemate'
+                    : `${getFactionLabel(winnerFactionId)} leads`;
+
+        const survivorsText = survivingPowers
+            .map(entry => `${getFactionLabel(entry.factionId)} ${entry.remainingPower.toFixed(0)} power`)
+            .join(', ');
+
+        logText = `Ground battle at ${system.name} resolved as a free-for-all (highest remaining ground power wins; ties result in a stalemate; no survivors means the site is neutralized). Outcome: ${outcomeLabel}.`;
+        if (survivorsText.length > 0) {
+            logText += ` Remaining power: ${survivorsText}.`;
+        }
+
+        if (casualties.length > 0) {
+            const lossSummary = casualties
+                .map(entry => `${getFactionLabel(entry.factionId)} lost ${entry.strengthLost} strength (${entry.destroyed.length} units destroyed)`)
+                .join(', ');
+            logText += ` Losses - ${lossSummary}.`;
         }
     }
 
     let conquestOccurred = false;
-    const conquestAttempt =
-        winnerFactionId === 'blue'
-            ? system.ownerFactionId !== 'blue'
-            : winnerFactionId === 'red'
-                ? system.ownerFactionId !== 'red'
-                : false;
+    const conquestAttempt = winnerFactionId && winnerFactionId !== 'draw' && system.ownerFactionId !== winnerFactionId;
 
     if (conquestAttempt && winnerFactionId && winnerFactionId !== 'draw') {
         const contested = isOrbitContested(system, state);
@@ -228,7 +274,7 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         }
     }
 
-    const unopposed = blueCount === 0 || redCount === 0;
+    const unopposed = armiesByFaction.size === 1;
     const hasUpdates = armyUpdates.length > 0 || armiesToDestroy.length > 0;
 
     if (!hasUpdates && !conquestAttempt && !conquestOccurred && unopposed) {

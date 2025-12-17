@@ -61,10 +61,12 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 holdUpdates[result.winnerFactionId].push(system.id);
             }
 
+            const winnerColor = state.factions.find(faction => faction.id === result.winnerFactionId)?.color ?? system.color ?? COLORS.star;
+
             return {
                 ...system,
                 ownerFactionId: result.winnerFactionId,
-                color: result.winnerFactionId === 'blue' ? COLORS.blue : COLORS.red
+                color: winnerColor
             };
         }
         
