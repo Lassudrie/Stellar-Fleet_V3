@@ -8,7 +8,7 @@ import { distSq } from '../../engine/math/vec3';
  * Scans the galaxy for contested systems.
  * Rule: A battle starts if at least two DIFFERENT factions have fleets within range.
  */
-export const detectNewBattles = (state: GameState, rng: RNG): Battle[] => {
+export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Battle[] => {
   const newBattles: Battle[] = [];
   
   const activeBattleSystemIds = new Set(
@@ -39,7 +39,7 @@ export const detectNewBattles = (state: GameState, rng: RNG): Battle[] => {
       const battle: Battle = {
         id: battleId,
         systemId: system.id,
-        turnCreated: state.day,
+        turnCreated: turn,
         status: 'scheduled',
         involvedFleetIds: involvedFleetIds,
         logs: [`Battle detected at ${system.name}. Factions involved: ${Array.from(presentFactionIds).join(', ')}.`]
@@ -52,11 +52,11 @@ export const detectNewBattles = (state: GameState, rng: RNG): Battle[] => {
   return newBattles;
 };
 
-export const pruneBattles = (battles: Battle[], currentDay: number): Battle[] => {
-  const KEEP_HISTORY = 5; 
+export const pruneBattles = (battles: Battle[], currentTurn: number): Battle[] => {
+  const KEEP_HISTORY = 5;
   return battles.filter(b => {
     if (b.status !== 'resolved') return true;
     if (b.turnResolved === undefined) return false;
-    return b.turnResolved >= currentDay - KEEP_HISTORY;
+    return b.turnResolved >= currentTurn - KEEP_HISTORY;
   });
 };

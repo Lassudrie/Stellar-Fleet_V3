@@ -6,7 +6,7 @@ import { sanitizeArmyLinks } from '../../army';
 
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Prune Old Battles
-    const activeBattles = pruneBattles(state.battles, state.day);
+    const activeBattles = pruneBattles(state.battles, ctx.turn);
     
     // 2. Sanitize Armies (Remove orphans, fix references)
     // Note: We use a temp state with pruned battles to ensure army logic has fresh context
@@ -17,7 +17,7 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     sanitizationLogs.forEach(txt => {
         newLogs.push({
             id: ctx.rng.id('log'),
-            day: state.day,
+            day: ctx.turn,
             text: `[SYSTEM] ${txt}`,
             type: 'info'
         });

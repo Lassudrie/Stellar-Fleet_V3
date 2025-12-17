@@ -132,6 +132,7 @@ export const fr = {
   'battle.rounds_other': '{{count}} ROUNDS',
   'battle.finished': 'TERMINE',
   'battle.victory': 'VICTOIRE {{winner}}',
+  'battle.defeat': 'DEFAITE',
   'battle.draw': 'EGALITE',
   'battle.unknown': 'RESULTAT INCONNU',
   'battle.close': 'Fermer Rapport',
