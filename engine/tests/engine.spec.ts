@@ -4,6 +4,7 @@ import { isOrbitContested, resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
+import { applyCommand } from '../commands';
 import {
   Army,
   ArmyState,
@@ -218,6 +219,93 @@ const tests: TestCase[] = [
       const redUpdate = result?.armyUpdates.find(update => update.armyId === redArmy.id);
       assert.ok(redUpdate, 'Red army should receive an update before removal');
       assert.ok(redUpdate!.strength < redArmy.strength, 'Red army should lose strength from the fight');
+    }
+  },
+  {
+    name: 'Unloading proceeds safely when orbit is clear',
+    run: () => {
+      const system = createSystem('sys-unload-clear', null);
+      const transport: ShipEntity = {
+        id: 'blue-transport',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: 'army-blue-unload'
+      };
+
+      const blueArmy = createArmy(transport.carriedArmyId!, 'blue', 8000, ArmyState.EMBARKED, 'fleet-blue');
+      const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [transport]);
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet], armies: [blueArmy] });
+      const rng = new RNG(1);
+
+      const updated = applyCommand(
+        state,
+        { type: 'UNLOAD_ARMY', fleetId: blueFleet.id, shipId: transport.id, armyId: blueArmy.id, systemId: system.id },
+        rng
+      );
+
+      const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.ok(unloadedArmy, 'Army should still exist after unloading');
+      assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must be deployed on the surface');
+      assert.strictEqual(unloadedArmy?.containerId, system.id, 'Army container should move to the system');
+      assert.strictEqual(unloadedArmy?.strength, blueArmy.strength, 'No risk should apply in a clear orbit');
+
+      const combatLogs = updated.logs.filter(log => log.type === 'combat');
+      assert.strictEqual(combatLogs.length, 0, 'No combat logs should be generated when orbit is clear');
+    }
+  },
+  {
+    name: 'Contested orbit applies deterministic risk to unloading armies',
+    run: () => {
+      const system = createSystem('sys-unload-risk', null);
+      const transport: ShipEntity = {
+        id: 'blue-risk-transport',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: 'army-blue-risk'
+      };
+
+      const blueArmy = createArmy(transport.carriedArmyId!, 'blue', 9000, ArmyState.EMBARKED, 'fleet-blue-risk');
+      const blueFleet = createFleet('fleet-blue-risk', 'blue', { ...baseVec }, [transport]);
+      const redFleet = createFleet(
+        'fleet-red-risk',
+        'red',
+        { x: CAPTURE_RANGE - 0.5, y: 0, z: 0 },
+        [{ id: 'red-escort', type: ShipType.FIGHTER, hp: 40, maxHp: 40, carriedArmyId: null }]
+      );
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], armies: [blueArmy] });
+      const rng = new RNG(7); // Deterministic roll below threshold to trigger losses
+
+      const updated = applyCommand(
+        state,
+        {
+          type: 'UNLOAD_ARMY',
+          fleetId: blueFleet.id,
+          shipId: transport.id,
+          armyId: blueArmy.id,
+          systemId: system.id
+        },
+        rng
+      );
+
+      const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.ok(unloadedArmy, 'Army should persist after contested unload');
+      assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must still disembark');
+      assert.strictEqual(unloadedArmy?.containerId, system.id, 'Army container should move to the system');
+      assert.ok(
+        (unloadedArmy?.strength ?? 0) < blueArmy.strength,
+        'Contested unload should apply deterministic strength loss'
+      );
+
+      const combatLog = updated.logs.find(log => log.type === 'combat');
+      assert.ok(combatLog, 'Risk resolution should produce a combat log');
+      assert.ok(
+        combatLog?.text.includes('took fire'),
+        'Combat log should record the contested drop losses'
+      );
     }
   },
   {
