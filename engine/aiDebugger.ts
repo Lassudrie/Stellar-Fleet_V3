@@ -26,7 +26,7 @@ export interface TaskLog {
   assignedPower: number;
   executed: boolean;
   assignedFleetId: string | null;
-  status: 'ASSIGNED' | 'SKIPPED_NO_FLEET' | 'SKIPPED_POWER_MISMATCH';
+  status: 'ASSIGNED' | 'REGROUPING' | 'SKIPPED_NO_FLEET' | 'SKIPPED_POWER_MISMATCH';
   reason?: string; // NEW: Contextual reason (e.g., "RECENTLY_CAPTURED_HOLD")
 }
 
