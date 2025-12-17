@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import path from 'node:path';
 import { isOrbitContested, resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
@@ -20,6 +21,7 @@ import {
 import { Vec3 } from '../math/vec3';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
+import ts from 'typescript';
 
 interface TestCase {
   name: string;
@@ -295,6 +297,71 @@ const tests: TestCase[] = [
 
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
       assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Defenders should retain control when orbit is contested and transport dies');
+    }
+  },
+  {
+    name: 'Conquest exports remain referenced outside their module',
+    run: () => {
+      const projectRoot = path.resolve(new URL('../..', import.meta.url).pathname);
+      const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
+      const tsConfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+      const parsedConfig = ts.parseJsonConfigFileContent(tsConfig.config, ts.sys, projectRoot);
+      const fileNames = parsedConfig.fileNames.filter(file => !file.includes('node_modules'));
+
+      const languageServiceHost: ts.LanguageServiceHost = {
+        getScriptFileNames: () => fileNames,
+        getScriptVersion: () => '0',
+        getScriptSnapshot: fileName => {
+          const fileText = ts.sys.readFile(fileName);
+          return fileText === undefined ? undefined : ts.ScriptSnapshot.fromString(fileText);
+        },
+        getCurrentDirectory: () => projectRoot,
+        getCompilationSettings: () => parsedConfig.options,
+        getDefaultLibFileName: options => ts.getDefaultLibFilePath(options),
+        fileExists: ts.sys.fileExists,
+        readFile: ts.sys.readFile,
+        readDirectory: ts.sys.readDirectory
+      };
+
+      const service = ts.createLanguageService(languageServiceHost, ts.createDocumentRegistry());
+      const program = service.getProgram();
+
+      assert.ok(program, 'Unable to create TypeScript program for orphan helper detection');
+
+      const conquestPath = path.join(projectRoot, 'engine', 'conquest.ts');
+      const conquestSource = program!.getSourceFile(conquestPath);
+      assert.ok(conquestSource, 'Conquest source should be part of the TypeScript program');
+
+      const checker = program!.getTypeChecker();
+      const conquestSymbol = checker.getSymbolAtLocation(conquestSource!);
+      assert.ok(conquestSymbol, 'Conquest module symbol should be available for analysis');
+
+      const exportedValues = checker
+        .getExportsOfModule(conquestSymbol!)
+        .filter(symbol => symbol.getEscapedName() !== 'default' && (symbol.getFlags() & ts.SymbolFlags.Value));
+
+      const orphans: string[] = [];
+
+      exportedValues.forEach(symbol => {
+        const declarations = symbol.getDeclarations() ?? [];
+        const hasExternalReference = declarations.some(declaration => {
+          const identifier = declaration.name && ts.isIdentifier(declaration.name) ? declaration.name : null;
+          if (!identifier) {
+            return false;
+          }
+
+          const references = service.findReferences(conquestPath, identifier.getStart());
+          return references?.flatMap(ref => ref.references).some(ref => ref.fileName !== conquestPath && !ref.isDefinition) ?? false;
+        });
+
+        if (!hasExternalReference) {
+          orphans.push(symbol.getName());
+        }
+      });
+
+      if (orphans.length > 0) {
+        throw new Error(`Orphan exports in engine/conquest.ts: ${orphans.join(', ')}`);
+      }
     }
   },
   {

@@ -4,11 +4,6 @@ import { COLORS, CAPTURE_RANGE } from '../data/static';
 import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
 import { Vec3, distSq } from './math/vec3';
 
-export interface ConquestResult {
-  allowed: boolean;
-  reason: string;
-}
-
 export interface GroundBattleResult {
     systemId: string;
     winnerFactionId: FactionId | 'draw' | null;
@@ -26,41 +21,6 @@ const MAX_MORALE_FACTOR = 2;
 
 const buildDestructionThresholdMap = (entries: { armyId: string; threshold: number }[]): Map<string, number> => {
     return new Map(entries.map(entry => [entry.armyId, entry.threshold]));
-};
-
-/**
- * Validates if a faction can conquer a specific system.
- * 
- * NEW RULE: A system can never change owner without at least one 
- * Army deployed on the ground (ArmyState.DEPLOYED).
- * Orbital presence (Fleets) is insufficient.
- */
-export const canConquerSystem = (
-  system: StarSystem,
-  attackerFactionId: FactionId,
-  state: GameState
-): ConquestResult => {
-  // 0. Sanity Check
-  if (system.ownerFactionId === attackerFactionId) {
-    return { allowed: false, reason: 'System already owned.' };
-  }
-
-  // 1. ABSOLUTE RULE: Boots on the Ground
-  // Check for at least one deployed army belonging to the attacker on this system.
-  const hasBootsOnGround = state.armies.some(army => 
-    army.factionId === attackerFactionId &&
-    army.state === ArmyState.DEPLOYED &&
-    army.containerId === system.id
-  );
-
-  if (!hasBootsOnGround) {
-    return { 
-      allowed: false, 
-      reason: 'Conquest Failed: Orbital supremacy established, but no Ground Army deployed.' 
-    };
-  }
-
-  return { allowed: true, reason: 'Ground forces established.' };
 };
 
 /**
@@ -284,48 +244,4 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         casualties,
         logs: [logText]
     };
-};
-
-// --- STRATEGIC AI HELPERS ---
-
-/**
- * Determines if a system is a valid target for invasion by the specified faction.
- */
-export const canInvade = (systemId: string, state: GameState, attackerFactionId: FactionId): boolean => {
-    const system = state.systems.find(s => s.id === systemId);
-    if (!system) return false;
-    
-    // Valid if we don't own it
-    return system.ownerFactionId !== attackerFactionId;
-};
-
-/**
- * Estimates the minimum number of armies required to capture the system.
- * Based on current intelligence (state).
- * Rule: Must strictly exceed defender count.
- */
-export const estimateRequiredArmies = (systemId: string, state: GameState, attackerFactionId: FactionId): number => {
-    const defenders = state.armies.filter(a => 
-        a.containerId === systemId && 
-        a.state === ArmyState.DEPLOYED && 
-        a.factionId !== attackerFactionId
-    );
-    
-    // Simple Heuristic: Match count + 1 (Assuming equal strength)
-    return defenders.length + 1;
-};
-
-/**
- * Calculates a heuristic cost for the invasion operation.
- * Used by AI to weigh targets.
- */
-export const estimateInvasionCost = (systemId: string, state: GameState, attackerFactionId: FactionId): number => {
-    const required = estimateRequiredArmies(systemId, state, attackerFactionId);
-    
-    // Cost Heuristic: 
-    // 100 per required army (Recruitment/Transport effort)
-    const cost = required * 100;
-    
-    // console.log(`[Strategy] Eval ${systemId}: Needs ${required} armies. Cost Index: ${cost}`);
-    return cost;
 };
