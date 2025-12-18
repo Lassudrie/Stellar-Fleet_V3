@@ -4,6 +4,7 @@ import { RNG } from './rng';
 import { buildScenario } from '../scenarios';
 import { generateWorld } from '../services/world/worldGenerator';
 import { Fleet, GameState, StarSystem } from '../types';
+import { devLog } from '../tools/devLogger';
 
 const parseTurnCount = (): number => {
   const raw = process.env.SMOKE_TURNS ?? '100';
@@ -116,8 +117,8 @@ const runSmokeTest = () => {
 
   // Final validation after completing the loop
   const totalRuntimeTurns = engine.state.day - state.day;
-  console.log(`AI smoke test completed: ${totalRuntimeTurns} turns with seed ${seed}.`);
-  console.log(`AI issued ${totalAiOrders} commands across ${aiOrderTurns} active turns.`);
+  devLog(`AI smoke test completed: ${totalRuntimeTurns} turns with seed ${seed}.`);
+  devLog(`AI issued ${totalAiOrders} commands across ${aiOrderTurns} active turns.`);
 };
 
 runSmokeTest();

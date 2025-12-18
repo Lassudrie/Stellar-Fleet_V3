@@ -10,6 +10,7 @@ import {
   INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
+import { devWarn } from '../../tools/devLogger';
 
 const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
@@ -23,7 +24,7 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
   }
   const stats = SHIP_STATS[ship.type];
   if (!stats) {
-       console.warn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
+       devWarn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
   }
 
   const maxHp = ship.maxHp ?? stats?.maxHp ?? 100;
@@ -117,7 +118,7 @@ export const resolveBattle = (
 
   // Safety guard: if no valid ships, return early with a draw
   if (battleShips.length === 0) {
-    console.warn(`[Battle] No valid ships in battle ${battle.id}. Resolving as draw.`);
+    devWarn(`[Battle] No valid ships in battle ${battle.id}. Resolving as draw.`);
     return {
       updatedBattle: {
         ...battle,
