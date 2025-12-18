@@ -52,7 +52,7 @@ const applyContestedUnloadRisk = (
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
-  | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState }
+  | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -201,7 +201,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             return {
                 ...state,
                 aiStates: updatedAiStates,
-                aiState: command.newState
+                aiState: command.primaryAi ? command.newState : state.aiState
             };
         }
 
