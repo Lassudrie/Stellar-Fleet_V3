@@ -91,7 +91,7 @@ export const pruneBattles = (battles: Battle[], currentTurn: number): Battle[] =
   const KEEP_HISTORY = 5;
   return battles.filter(b => {
     if (b.status !== 'resolved') return true;
-    if (b.turnResolved === undefined) return false;
-    return b.turnResolved >= currentTurn - KEEP_HISTORY;
+    const resolutionTurn = b.turnResolved ?? b.turnCreated ?? currentTurn;
+    return resolutionTurn >= currentTurn - KEEP_HISTORY;
   });
 };
