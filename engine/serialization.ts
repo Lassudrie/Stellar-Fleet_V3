@@ -21,7 +21,21 @@ import { COLORS, SHIP_STATS } from '../data/static';
 // --- HELPERS ---
 
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
-const deserializeVector3 = (v: Vector3DTO): Vec3 => vec3(v.x, v.y, v.z);
+const deserializeVector3 = (v: Vector3DTO | undefined, context = 'vector'): Vec3 => {
+  if (!v || typeof v !== 'object') {
+    throw new Error(`Invalid ${context}: expected an object with numeric x, y, z components.`);
+  }
+
+  const components: Array<keyof Vector3DTO> = ['x', 'y', 'z'];
+  components.forEach(component => {
+    const value = (v as any)[component];
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid ${context}: '${component}' must be a finite number (received ${value}).`);
+    }
+  });
+
+  return vec3(v.x, v.y, v.z);
+};
 
 const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   if (!aiState) return undefined;
@@ -66,7 +80,7 @@ const deserializeAiState = (
       ...s,
       factionId,
       lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
-      position: deserializeVector3(s.position)
+      position: deserializeVector3(s.position, `AI sighting '${key}' position`)
     };
   });
 
@@ -231,7 +245,7 @@ export const deserializeGameState = (json: string): GameState => {
       return {
         id: s.id,
         name: s.name,
-        position: deserializeVector3(s.position),
+        position: deserializeVector3(s.position, `system '${s.id ?? 'unknown'}' position`),
         color,
         size: s.size,
         resourceType: s.resourceType,
@@ -255,10 +269,12 @@ export const deserializeGameState = (json: string): GameState => {
         id: f.id,
         // Map Legacy 'faction' to 'factionId'
         factionId: f.factionId || f.faction,
-        position: deserializeVector3(f.position),
+        position: deserializeVector3(f.position, `fleet '${f.id ?? 'unknown'}' position`),
         state: f.state,
         targetSystemId: f.targetSystemId,
-        targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
+        targetPosition: f.targetPosition
+          ? deserializeVector3(f.targetPosition, `fleet '${f.id ?? 'unknown'}' targetPosition`)
+          : null,
         radius,
         stateStartTurn: f.stateStartTurn ?? 0,
         retreating: f.retreating ?? false,
@@ -299,8 +315,8 @@ export const deserializeGameState = (json: string): GameState => {
       id: l.id,
       color: l.color,
       life: l.life,
-      start: deserializeVector3(l.start),
-      end: deserializeVector3(l.end)
+      start: deserializeVector3(l.start, `laser '${l.id ?? 'unknown'}' start`),
+      end: deserializeVector3(l.end, `laser '${l.id ?? 'unknown'}' end`)
     }));
 
     // Battles
