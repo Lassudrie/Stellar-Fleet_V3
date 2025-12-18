@@ -198,7 +198,15 @@ export const deserializeGameState = (json: string): GameState => {
   
   const factions: FactionState[] = dto.factions || DEFAULT_FACTIONS;
   const validFactionIds = new Set(factions.map(f => f.id));
-  const playerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+  const rawPlayerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+
+  const playerFactionId = validFactionIds.has(rawPlayerFactionId)
+    ? rawPlayerFactionId
+    : factions[0]?.id;
+
+  if (!playerFactionId) {
+    throw new Error("Unable to determine player faction: no factions provided in save file.");
+  }
 
   try {
     // Systems
