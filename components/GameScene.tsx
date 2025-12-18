@@ -17,6 +17,7 @@ import { useMapMetrics } from './hooks/useMapMetrics';
 interface GameSceneProps {
   gameState: GameState;
   enemySightings: Record<string, EnemySighting>;
+  selectedFleetId: string | null;
   onFleetSelect: (id: string | null) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
   onBackgroundClick: () => void;
@@ -98,6 +99,7 @@ const TrajectoryRenderer: React.FC<{ fleets: GameState['fleets']; day: number; p
 const GameScene: React.FC<GameSceneProps> = ({
   gameState,
   enemySightings,
+  selectedFleetId,
   onFleetSelect,
   onSystemClick,
   onBackgroundClick
@@ -198,11 +200,11 @@ const GameScene: React.FC<GameSceneProps> = ({
                 />
 
                 {gameState.fleets.map(fleet => (
-                    <FleetMesh 
-                        key={fleet.id} 
+                    <FleetMesh
+                        key={fleet.id}
                         fleet={fleet}
                         day={gameState.day}
-                        isSelected={gameState.selectedFleetId === fleet.id}
+                        isSelected={selectedFleetId === fleet.id}
                         onSelect={(e) => {
                             e.stopPropagation();
                             onFleetSelect(fleet.id);
