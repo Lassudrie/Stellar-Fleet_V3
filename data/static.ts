@@ -20,6 +20,8 @@ export const TERRITORY_RADIUS = 28;
 export const ORBIT_RADIUS = 3;
 export const ORBIT_SPEED = 0.25;
 
+export const ORBIT_PROXIMITY_RANGE_SQ = (ORBIT_RADIUS * 3) ** 2;
+
 // --- V1 SHIP BALANCING ---
 export const SHIP_STATS: Record<ShipType, ShipStats> = {
   [ShipType.CARRIER]: {
