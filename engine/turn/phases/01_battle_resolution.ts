@@ -25,7 +25,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
 
     // 2. Resolve Each Battle
     scheduledBattles.forEach(battle => {
-        const result = resolveBattle(battle, state, ctx.turn);
+        const result = resolveBattle(battle, { ...state, fleets: nextFleets }, ctx.turn);
 
         // Update Battle in list (Mark as resolved, add logs, stats)
         nextBattles = nextBattles.map(b => b.id === battle.id ? result.updatedBattle : b);
