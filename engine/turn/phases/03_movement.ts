@@ -13,7 +13,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
     // 1. Process each fleet
     state.fleets.forEach(fleet => {
         // resolveFleetMovement is pure, returns nextFleet + effects
-        const res = resolveFleetMovement(fleet, state.systems, state.armies, nextDay, ctx.rng);
+        const res = resolveFleetMovement(fleet, state.systems, state.armies, nextDay, ctx.rng, state.fleets);
         nextFleets.push(res.nextFleet);
         newLogs.push(...res.logs);
         res.armyUpdates.forEach(u => armyUpdates.set(u.id, u.changes));
