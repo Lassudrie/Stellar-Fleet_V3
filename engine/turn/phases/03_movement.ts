@@ -1,39 +1,41 @@
 
 import { GameState, Fleet, Army } from '../../../types';
 import { TurnContext } from '../types';
-import { resolveFleetMovement } from '../../../services/movement/movementPhase';
+import { resolveFleetMovement, ArmyUpdate } from '../../../services/movement/movementPhase';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
     const nextDay = ctx.turn; // Movement projects to current turn positions
-    
-    const nextFleets: Fleet[] = [];
+
+    const fleetsToProcess = [...state.fleets].sort((a, b) => a.id.localeCompare(b.id));
     const newLogs = [];
-    const armyUpdates = new Map<string, Partial<Army>>();
+
+    const applyArmyUpdates = (armies: Army[], updates: ArmyUpdate[]): Army[] => {
+        if (updates.length === 0) {
+            return armies;
+        }
+
+        const updatesById = new Map<string, Partial<Army>>(updates.map(update => [update.id, update.changes]));
+
+        return armies.map(army => (updatesById.has(army.id) ? { ...army, ...updatesById.get(army.id) } : army));
+    };
+
+    let workingArmies = state.armies;
+    let workingFleets = fleetsToProcess;
 
     // 1. Process each fleet
-    state.fleets.forEach(fleet => {
+    fleetsToProcess.forEach(fleet => {
         // resolveFleetMovement is pure, returns nextFleet + effects
-        const res = resolveFleetMovement(fleet, state.systems, state.armies, nextDay, ctx.rng, state.fleets);
-        nextFleets.push(res.nextFleet);
-        newLogs.push(...res.logs);
-        res.armyUpdates.forEach(u => armyUpdates.set(u.id, u.changes));
-    });
+        const res = resolveFleetMovement(fleet, state.systems, workingArmies, nextDay, ctx.rng, workingFleets);
 
-    // 2. Apply Army Updates (Embark/Deploy)
-    let nextArmies = state.armies;
-    if (armyUpdates.size > 0) {
-        nextArmies = state.armies.map(a => {
-            if (armyUpdates.has(a.id)) {
-                return { ...a, ...armyUpdates.get(a.id) };
-            }
-            return a;
-        });
-    }
+        workingArmies = applyArmyUpdates(workingArmies, res.armyUpdates);
+        workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? res.nextFleet : existing));
+        newLogs.push(...res.logs);
+    });
 
     return {
         ...state,
-        fleets: nextFleets,
-        armies: nextArmies,
+        fleets: workingFleets,
+        armies: workingArmies,
         logs: [...state.logs, ...newLogs]
     };
 };
