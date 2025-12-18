@@ -43,14 +43,27 @@ const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   };
 };
 
-const deserializeAiState = (aiStateDto?: AIStateDTO): AIState | undefined => {
+const deserializeAiState = (
+  aiStateDto?: AIStateDTO,
+  validFactionIds?: Set<FactionId>
+): AIState | undefined => {
   if (!aiStateDto) return undefined;
 
   const sightings: Record<string, EnemySighting> = {};
   Object.entries(aiStateDto.sightings || {}).forEach(([key, s]: [string, any]) => {
+    const factionId: FactionId | undefined = s.factionId;
+
+    if (!factionId) {
+      return; // Drop malformed sightings lacking faction attribution
+    }
+
+    if (validFactionIds && !validFactionIds.has(factionId)) {
+      throw new Error(`AI sighting references unknown faction '${factionId}'.`);
+    }
+
     sightings[key] = {
       ...s,
-      factionId: s.factionId || 'unknown',
+      factionId,
       lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
       position: deserializeVector3(s.position)
     };
@@ -173,6 +186,7 @@ export const deserializeGameState = (json: string): GameState => {
   const isLegacy = !dto.playerFactionId || !dto.factions;
   
   const factions: FactionState[] = dto.factions || DEFAULT_FACTIONS;
+  const validFactionIds = new Set(factions.map(f => f.id));
   const playerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
 
   try {
@@ -272,7 +286,7 @@ export const deserializeGameState = (json: string): GameState => {
     const aiStatesDto = dto.aiStates as Record<string, AIStateDTO> | undefined;
     const aiStates: Record<FactionId, AIState> | undefined = aiStatesDto
       ? Object.entries(aiStatesDto).reduce<Record<FactionId, AIState>>((acc, [factionId, aiStateDto]) => {
-          const parsed = deserializeAiState(aiStateDto);
+          const parsed = deserializeAiState(aiStateDto, validFactionIds);
           if (parsed) {
             acc[factionId] = parsed;
           }
@@ -280,7 +294,7 @@ export const deserializeGameState = (json: string): GameState => {
         }, {})
       : undefined;
 
-    const legacyAiState = deserializeAiState(dto.aiState);
+    const legacyAiState = deserializeAiState(dto.aiState, validFactionIds);
     const aiFactionIds = getAiFactionIds(factions);
     const legacyAiFactionId = getLegacyAiFactionId(factions);
 
