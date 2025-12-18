@@ -141,7 +141,9 @@ const GameScene: React.FC<GameSceneProps> = ({
   const mapMetrics = useMapMetrics(gameState.systems);
 
   const ownershipSignature = useMemo(() => {
-      return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
+      const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
+      owners.sort();
+      return owners.join('|');
   }, [gameState.systems]);
 
   const battlingSystemIds = useMemo(() => {
