@@ -81,6 +81,7 @@ export const fr = {
   'ctx.unload': 'Décharger les armées',
   'ctx.losses': 'Pertes',
   'ctx.morale': 'Moral',
+  'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
 
   // Fleet Picker

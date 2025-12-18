@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { StarSystem } from '../../types';
+import { FactionId, StarSystem } from '../../types';
 import { useI18n } from '../../i18n';
 
 type GroundForceStats = {
@@ -12,13 +12,17 @@ type GroundForceStats = {
   averageMoralePercent: number;
 };
 
+export type GroundForceSummaryEntry = GroundForceStats & {
+  factionId: FactionId;
+  factionName: string;
+  color: string;
+  isPlayer: boolean;
+};
+
 interface SystemContextMenuProps {
   position: { x: number, y: number };
   system: StarSystem;
-  groundForces: {
-    blue: GroundForceStats | null;
-    red: GroundForceStats | null;
-  } | null;
+  groundForces: Record<FactionId, GroundForceSummaryEntry> | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
   showAttackOption: boolean;
   showLoadOption: boolean;
@@ -40,26 +44,22 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
 }) => {
   const { t } = useI18n();
 
-  const renderFactionBlock = (
-      label: string,
-      stats: GroundForceStats | null,
-      colorClass: string,
-  ) => {
-      if (!stats) return null;
+  const renderFactionBlock = (entry: GroundForceSummaryEntry, labelOverride?: string) => {
+      const colorStyle = { color: entry.color };
 
       return (
-          <div className={`flex flex-col gap-0.5 ${colorClass}`}>
-              <div className="flex justify-between text-sm">
-                  <span>{label} x{stats.count}</span>
-                  <span className="font-mono">{stats.currentStrength.toLocaleString()} / {stats.maxStrength.toLocaleString()}</span>
+          <div key={entry.factionId} className="flex flex-col gap-0.5">
+              <div className="flex justify-between text-sm" style={colorStyle}>
+                  <span>{labelOverride ?? entry.factionName} x{entry.count}</span>
+                  <span className="font-mono">{entry.currentStrength.toLocaleString()} / {entry.maxStrength.toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-[10px] text-slate-300">
                   <span>{t('ctx.losses')}</span>
-                  <span className="font-mono">-{stats.losses.toLocaleString()} ({stats.lossPercent.toFixed(1)}%)</span>
+                  <span className="font-mono">-{entry.losses.toLocaleString()} ({entry.lossPercent.toFixed(1)}%)</span>
               </div>
               <div className="flex justify-between text-[10px] text-slate-300">
                   <span>{t('ctx.morale')}</span>
-                  <span className="font-mono">{stats.averageMoralePercent.toFixed(1)}%</span>
+                  <span className="font-mono">{entry.averageMoralePercent.toFixed(1)}%</span>
               </div>
           </div>
       );
@@ -102,8 +102,55 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   {t('ctx.groundForces')}
               </div>
               <div className="flex flex-col gap-1">
-                  {renderFactionBlock('BLUE', groundForces.blue, 'text-blue-300')}
-                  {renderFactionBlock('RED', groundForces.red, 'text-red-400')}
+                  {(() => {
+                      const entries = Object.values(groundForces);
+                      const playerEntry = entries.find(entry => entry.isPlayer);
+                      const hostileEntries = entries
+                          .filter(entry => !entry.isPlayer)
+                          .sort((a, b) => b.currentStrength - a.currentStrength || b.maxStrength - a.maxStrength);
+
+                      const highlightedHostiles = hostileEntries.slice(0, 2);
+                      const coalitionEntries = hostileEntries.slice(2);
+
+                          const coalition = coalitionEntries.length > 0
+                          ? coalitionEntries.reduce<GroundForceSummaryEntry | null>((acc, entry) => {
+                              if (!acc) {
+                                  return {
+                                      ...entry,
+                                      factionId: 'hostile-coalition',
+                                      factionName: t('ctx.hostileCoalition'),
+                                      color: '#f87171',
+                                      isPlayer: false,
+                                  };
+                              }
+
+                              const totalCount = acc.count + entry.count;
+                              const combinedMorale = (acc.averageMoralePercent * acc.count) + (entry.averageMoralePercent * entry.count);
+
+                              const updatedMax = acc.maxStrength + entry.maxStrength;
+                              const updatedCurrent = acc.currentStrength + entry.currentStrength;
+                              const updatedLosses = updatedMax - updatedCurrent;
+
+                              return {
+                                  ...acc,
+                                  count: totalCount,
+                                  currentStrength: updatedCurrent,
+                                  maxStrength: updatedMax,
+                                  losses: updatedLosses,
+                                  lossPercent: updatedMax > 0 ? (updatedLosses / updatedMax) * 100 : 0,
+                                  averageMoralePercent: totalCount > 0 ? combinedMorale / totalCount : 0,
+                              };
+                          }, null)
+                          : null;
+
+                      return (
+                          <>
+                              {playerEntry && renderFactionBlock(playerEntry)}
+                              {highlightedHostiles.map(renderFactionBlock)}
+                              {coalition && renderFactionBlock(coalition)}
+                          </>
+                      );
+                  })()}
               </div>
           </div>
       )}
