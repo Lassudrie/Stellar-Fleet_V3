@@ -207,10 +207,11 @@ const GameScene: React.FC<GameSceneProps> = ({
                   playerFactionId={gameState.playerFactionId}
                 />
 
-                <IntelGhosts 
-                    sightings={enemySightings} 
-                    currentDay={gameState.day} 
-                    visibleFleetIds={visibleFleetIds} 
+                <IntelGhosts
+                    sightings={enemySightings}
+                    currentDay={gameState.day}
+                    visibleFleetIds={visibleFleetIds}
+                    getFactionColor={getFactionColor}
                 />
 
                 {gameState.fleets.map(fleet => (

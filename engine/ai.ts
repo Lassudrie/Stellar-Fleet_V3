@@ -177,6 +177,7 @@ const updateMemory = (
 
     memory.sightings[fleet.id] = {
       fleetId: fleet.id,
+      factionId: fleet.factionId,
       systemId: closestSystemId,
       position: { ...fleet.position },
       daySeen: state.day,
