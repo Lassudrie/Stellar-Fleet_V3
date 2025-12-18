@@ -413,6 +413,47 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'LOAD_ARMY respecte le ciblage du vaisseau imposé',
+    run: () => {
+      const system = createSystem('sys-load-targeted', null);
+      const allowedTransport: ShipEntity = {
+        id: 'blue-transport-allowed',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      };
+      const blockedTransport: ShipEntity = {
+        id: 'blue-transport-blocked',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      };
+
+      const blueArmy = createArmy('army-blue-load', 'blue', 7000, ArmyState.DEPLOYED, system.id);
+      const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [allowedTransport, blockedTransport]);
+      const rng = new RNG(9);
+
+      const updated = applyCommand(
+        createBaseState({ systems: [system], fleets: [blueFleet], armies: [blueArmy] }),
+        { type: 'LOAD_ARMY', fleetId: blueFleet.id, shipId: allowedTransport.id, armyId: blueArmy.id, systemId: system.id },
+        rng
+      );
+
+      const loadedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.strictEqual(loadedArmy?.state, ArmyState.EMBARKED, 'Army must embark after load');
+      assert.strictEqual(loadedArmy?.containerId, blueFleet.id, 'Army container should move to the fleet');
+
+      const updatedFleet = updated.fleets.find(fleet => fleet.id === blueFleet.id);
+      const allowedShip = updatedFleet?.ships.find(ship => ship.id === allowedTransport.id);
+      const blockedShip = updatedFleet?.ships.find(ship => ship.id === blockedTransport.id);
+
+      assert.strictEqual(allowedShip?.carriedArmyId, blueArmy.id, 'Allowed transport should carry the army');
+      assert.strictEqual(blockedShip?.carriedArmyId, null, 'Blocked transport must remain empty');
+    }
+  },
+  {
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
