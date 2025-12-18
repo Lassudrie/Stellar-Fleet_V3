@@ -10,29 +10,46 @@ const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'stellar_fleet_lang';
 
-// Detection Logic: LocalStorage -> Navigator -> Fallback 'en'
+const isDomAvailable =
+  typeof window !== 'undefined' &&
+  typeof document !== 'undefined' &&
+  typeof navigator !== 'undefined';
+
+const canUseLocalStorage =
+  typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+
 const getInitialLocale = (): Locale => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === 'en' || saved === 'fr') return saved;
-  
-  const nav = navigator.language.split('-')[0];
-  if (nav === 'fr') return 'fr';
-  
+  if (canUseLocalStorage) {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === 'en' || saved === 'fr') return saved;
+  }
+
+  if (isDomAvailable) {
+    const nav = navigator.language?.split('-')[0];
+    if (nav === 'fr') return 'fr';
+  }
+
   return 'en';
 };
 
 export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [locale, setLocaleState] = useState<Locale>(getInitialLocale);
+  const [locale, setLocaleState] = useState<Locale>(() => getInitialLocale());
 
   const setLocale = (lang: Locale) => {
     setLocaleState(lang);
-    localStorage.setItem(STORAGE_KEY, lang);
-    document.documentElement.lang = lang;
+    if (canUseLocalStorage) {
+      localStorage.setItem(STORAGE_KEY, lang);
+    }
+    if (isDomAvailable) {
+      document.documentElement.lang = lang;
+    }
   };
 
   // Sync html lang on mount
   useEffect(() => {
-    document.documentElement.lang = locale;
+    if (isDomAvailable) {
+      document.documentElement.lang = locale;
+    }
   }, [locale]);
 
   const t = (key: string, params?: TranslationParams & { defaultValue?: string }): string => {
@@ -72,3 +89,6 @@ export const useI18n = (): I18nContextType => {
   }
   return context;
 };
+
+// Exported for testing SSR-safe initialization
+export { getInitialLocale };
