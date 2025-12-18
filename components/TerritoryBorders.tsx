@@ -111,8 +111,13 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
         return acc;
     }, {});
 
-    const groups = systems.reduce<Record<FactionId, StarSystem[]>>((acc, system) => {
-        if (!system.ownerFactionId) return acc;
+    const ownedSystems = systems.filter(
+        (system): system is StarSystem & { ownerFactionId: FactionId } => Boolean(system.ownerFactionId)
+    );
+
+    if (ownedSystems.length === 0) return [];
+
+    const groups = ownedSystems.reduce<Record<FactionId, StarSystem[]>>((acc, system) => {
         const list = acc[system.ownerFactionId] || [];
         list.push(system);
         acc[system.ownerFactionId] = list;
@@ -138,10 +143,10 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
         mySystems.forEach(sys => {
             const center = { x: sys.position.x, y: sys.position.z };
             let poly = createCircle(center, TERRITORY_RADIUS);
-            
+
             const myBisectorEdges: { segment: Segment; key: string }[] = [];
 
-            systems.forEach(other => {
+            ownedSystems.forEach(other => {
                 if (sys.id === other.id) return;
 
                 const dx = other.position.x - sys.position.x;
