@@ -27,11 +27,20 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
        devWarn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
   }
 
-  const maxHp = ship.maxHp ?? stats?.maxHp ?? 100;
-  const currentHp = Math.min(ship.hp, maxHp);
-  const offensiveMissilesLeft = ship.offensiveMissilesLeft ?? stats?.offensiveMissileStock ?? 0;
-  const torpedoesLeft = ship.torpedoesLeft ?? stats?.torpedoStock ?? 0;
-  const interceptorsLeft = ship.interceptorsLeft ?? stats?.interceptorStock ?? 0;
+  const normalizedMaxHpFallback = Number.isFinite(stats?.maxHp) && (stats?.maxHp ?? 0) > 0 ? (stats?.maxHp as number) : 100;
+  const maxHpCandidate = ship.maxHp;
+  const maxHp = Number.isFinite(maxHpCandidate) && (maxHpCandidate as number) > 0
+    ? (maxHpCandidate as number)
+    : normalizedMaxHpFallback;
+  const rawHp = Number.isFinite(ship.hp) ? (ship.hp as number) : maxHp;
+  const currentHp = Math.min(Math.max(0, rawHp), maxHp);
+  const normalizeStock = (value: number | undefined | null, fallback: number) => {
+    const normalizedFallback = Number.isFinite(fallback) && fallback >= 0 ? fallback : 0;
+    return Number.isFinite(value) && (value as number) >= 0 ? (value as number) : normalizedFallback;
+  };
+  const offensiveMissilesLeft = normalizeStock(ship.offensiveMissilesLeft, stats?.offensiveMissileStock ?? 0);
+  const torpedoesLeft = normalizeStock(ship.torpedoesLeft, stats?.torpedoStock ?? 0);
+  const interceptorsLeft = normalizeStock(ship.interceptorsLeft, stats?.interceptorStock ?? 0);
   const evasion = stats?.evasion ?? 0.1;
   const pdStrength = stats?.pdStrength ?? 0;
   const damage = stats?.damage ?? 10;
