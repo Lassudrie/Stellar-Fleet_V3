@@ -30,6 +30,10 @@ export interface FleetDTO {
   targetPosition: Vector3DTO | null;
   radius: number;
   stateStartTurn: number;
+  retreating?: boolean;
+  invasionTargetSystemId?: string | null;
+  loadTargetSystemId?: string | null;
+  unloadTargetSystemId?: string | null;
 }
 
 export interface ArmyDTO {
