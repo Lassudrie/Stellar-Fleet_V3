@@ -55,9 +55,15 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
     console.error(`[RunTurn] CRITICAL: Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}. Force-resolving.`);
     nextState = {
       ...nextState,
-      battles: nextState.battles.map(b => 
-        b.status === 'scheduled' 
-          ? { ...b, status: 'resolved' as const, winnerFactionId: 'draw' as const, logs: [...b.logs, 'Battle force-resolved due to turn processing error.'] }
+      battles: nextState.battles.map(b =>
+        b.status === 'scheduled'
+          ? {
+              ...b,
+              turnResolved: ctx.turn,
+              status: 'resolved' as const,
+              winnerFactionId: 'draw' as const,
+              logs: [...b.logs, 'Battle force-resolved due to turn processing error.']
+            }
           : b
       )
     };
