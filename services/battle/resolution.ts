@@ -26,7 +26,8 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
        console.warn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
   }
 
-  const maxHp = stats?.maxHp ?? 100;
+  const maxHp = ship.maxHp ?? stats?.maxHp ?? 100;
+  const currentHp = Math.min(ship.hp, maxHp);
   const missilesLeft = stats?.missileStock ?? 0;
   const torpedoesLeft = stats?.torpedoStock ?? 0;
   const evasion = stats?.evasion ?? 0.1;
@@ -40,7 +41,7 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     fleetId,
     faction,
     type: ship.type,
-    currentHp: ship.hp,
+    currentHp,
     maxHp,
     missilesLeft,
     torpedoesLeft,
