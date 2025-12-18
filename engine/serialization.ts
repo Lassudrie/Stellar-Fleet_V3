@@ -112,6 +112,10 @@ export const serializeGameState = (state: GameState): string => {
       factionId: f.factionId,
       position: serializeVector3(f.position),
       targetPosition: f.targetPosition ? serializeVector3(f.targetPosition) : null,
+      retreating: f.retreating ?? false,
+      invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+      loadTargetSystemId: f.loadTargetSystemId ?? null,
+      unloadTargetSystemId: f.unloadTargetSystemId ?? null,
       ships: f.ships.map(s => ({
           id: s.id,
           type: s.type,
@@ -214,8 +218,10 @@ export const deserializeGameState = (json: string): GameState => {
         targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
         radius,
         stateStartTurn: f.stateStartTurn ?? 0,
-        retreating: f.retreating,
-        invasionTargetSystemId: f.invasionTargetSystemId,
+        retreating: f.retreating ?? false,
+        invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+        loadTargetSystemId: f.loadTargetSystemId ?? null,
+        unloadTargetSystemId: f.unloadTargetSystemId ?? null,
         ships: ships.map((s: any) => ({
             id: s.id,
             type: s.type,
