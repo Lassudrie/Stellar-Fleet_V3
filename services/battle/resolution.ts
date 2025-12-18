@@ -24,22 +24,16 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
   const stats = SHIP_STATS[ship.type];
   if (!stats) {
        console.warn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
-       return {
-            shipId: ship.id,
-            fleetId,
-            faction,
-            type: ship.type,
-            currentHp: ship.hp,
-            maxHp: 100,
-            missilesLeft: 0,
-            torpedoesLeft: 0,
-            fireControlLock: 0,
-            maneuverBudget: 0.5,
-            targetId: null,
-            evasion: 0.1,
-            pdStrength: 0
-       }
   }
+
+  const maxHp = stats?.maxHp ?? 100;
+  const missilesLeft = stats?.missileStock ?? 0;
+  const torpedoesLeft = stats?.torpedoStock ?? 0;
+  const evasion = stats?.evasion ?? 0.1;
+  const pdStrength = stats?.pdStrength ?? 0;
+  const damage = stats?.damage ?? 10;
+  const missileDamage = stats?.missileDamage ?? 0;
+  const torpedoDamage = stats?.torpedoDamage ?? 0;
 
   return {
     shipId: ship.id,
@@ -47,14 +41,17 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     faction,
     type: ship.type,
     currentHp: ship.hp,
-    maxHp: stats.maxHp,
-    missilesLeft: stats.missileStock,
-    torpedoesLeft: stats.torpedoStock,
+    maxHp,
+    missilesLeft,
+    torpedoesLeft,
     fireControlLock: 0,
-    maneuverBudget: 0.5, 
+    maneuverBudget: 0.5,
     targetId: null,
-    evasion: stats.evasion,
-    pdStrength: stats.pdStrength
+    evasion,
+    pdStrength,
+    damage,
+    missileDamage,
+    torpedoDamage
   };
 };
 
@@ -195,7 +192,7 @@ export const resolveBattle = (
             sourceFaction: ship.faction,
             targetId: ship.targetId,
             eta: ETA_TORPEDO,
-            damage: SHIP_STATS[ship.type].torpedoDamage,
+            damage: ship.torpedoDamage,
             hp: TORPEDO_HP
           });
         }
@@ -212,7 +209,7 @@ export const resolveBattle = (
             sourceFaction: ship.faction,
             targetId: ship.targetId,
             eta: ETA_MISSILE,
-            damage: SHIP_STATS[ship.type].missileDamage,
+            damage: ship.missileDamage,
             hp: MISSILE_HP
           });
         }
@@ -330,7 +327,7 @@ export const resolveBattle = (
 
         const hitChance = BASE_ACCURACY * Math.max(0.1, attacker.fireControlLock) * (1 - target.evasion);
         if (rng.next() < hitChance) {
-            const dmg = SHIP_STATS[attacker.type].damage;
+            const dmg = attacker.damage;
             target.currentHp -= dmg;
             logs.push(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
         }
