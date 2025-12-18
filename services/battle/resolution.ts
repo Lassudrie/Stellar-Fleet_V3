@@ -409,7 +409,7 @@ export const resolveBattle = (
   logs.push(...attritionLogs);
 
   const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
-  const winnerFactionId = aliveFactions.size === 1
+  const winnerFactionId: FactionId | 'draw' = aliveFactions.size === 1
     ? (Array.from(aliveFactions)[0] as FactionId)
     : 'draw';
 
@@ -424,19 +424,13 @@ export const resolveBattle = (
       }
   });
 
-  // Ensure winnerFactionId is a valid type (FactionId | 'draw' | undefined)
-  const validWinnerFactionId: FactionId | 'draw' | undefined = 
-      winnerFactionId === 'blue' || winnerFactionId === 'red' || winnerFactionId === 'draw' 
-          ? winnerFactionId 
-          : undefined;
-
   const updatedBattle: Battle = {
       ...battle,
       turnResolved: turn,
       status: 'resolved',
       initialShips: initialShips,
       logs: [...battle.logs, ...logs],
-      winnerFactionId: validWinnerFactionId,
+      winnerFactionId,
       roundsPlayed,
       shipsLost,
       survivorShipIds, // Store survivor list

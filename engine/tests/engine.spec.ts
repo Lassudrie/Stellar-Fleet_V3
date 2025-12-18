@@ -120,6 +120,42 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
 
 const tests: TestCase[] = [
   {
+    name: 'Battle resolution preserves generic faction winners',
+    run: () => {
+      const alpha: FactionState = { id: 'alpha', name: 'Alpha', color: '#aaaaaa', isPlayable: true };
+      const beta: FactionState = { id: 'beta', name: 'Beta', color: '#bbbbbb', isPlayable: true };
+
+      const alphaFleet = createFleet('fleet-alpha', alpha.id, { ...baseVec }, [
+        { id: 'alpha-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null },
+        { id: 'alpha-2', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const betaFleet = createFleet('fleet-beta', beta.id, { ...baseVec }, [
+        { id: 'beta-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-alpha-beta',
+        systemId: 'sys-alpha-beta',
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [alphaFleet.id, betaFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        factions: [alpha, beta],
+        systems: [createSystem(battle.systemId, null)],
+        fleets: [alphaFleet, betaFleet],
+        seed: 42
+      });
+
+      const { updatedBattle } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(updatedBattle.winnerFactionId, 'alpha', 'Winner should match computed surviving faction id');
+    }
+  },
+  {
     name: 'Territory ignores neutral systems when evaluating influence',
     run: () => {
       const neutralSystem = { ...createSystem('neutral', null), position: { x: 0, y: 0, z: 0 } };
