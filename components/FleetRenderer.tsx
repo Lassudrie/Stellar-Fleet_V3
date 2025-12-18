@@ -1,9 +1,9 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight } from 'three';
-import { Fleet, FleetState, FactionId } from '../types';
-import { COLORS, ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color } from 'three';
+import { Fleet, FleetState } from '../types';
+import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
 import { Text, Billboard } from '@react-three/drei';
 import { fleetLabel } from '../engine/idUtils';
 
@@ -37,7 +37,20 @@ const EXTRUDE_SETTINGS = {
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
 
-const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected, onSelect, playerFactionId }) => {
+const deriveHighlightColor = (baseColor: string, lightnessBoost = 0.2) => {
+  try {
+    const color = new Color(baseColor);
+    const hsl = { h: 0, s: 0, l: 0 };
+    color.getHSL(hsl);
+    const boostedLightness = Math.min(1, hsl.l + lightnessBoost);
+    color.setHSL(hsl.h, hsl.s, boostedLightness);
+    return `#${color.getHexString()}`;
+  } catch (error) {
+    return baseColor;
+  }
+};
+
+const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected, onSelect, playerFactionId: _playerFactionId, color }) => {
   // We use a Group to handle the Position of the entire fleet entity (ship + label + selection ring)
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
@@ -50,8 +63,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
 
   // Constants for visual representation
-  const color = fleet.factionId === 'blue' ? COLORS.blue : COLORS.red;
-  const highlightColor = fleet.factionId === 'blue' ? COLORS.blueHighlight : COLORS.redHighlight;
+  const highlightColor = useMemo(() => deriveHighlightColor(color), [color]);
   const isOrbiting = fleet.state === FleetState.ORBIT;
 
   // Generate a stable random start angle based on fleet ID
@@ -204,7 +216,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         >
             <Text
                 fontSize={1.2}
-                color={fleet.factionId === 'blue' ? '#93c5fd' : '#fca5a5'} // blue-300 / red-300
+                color={highlightColor}
                 outlineWidth={0.1}
                 outlineColor="#000000"
                 fontWeight="bold"
