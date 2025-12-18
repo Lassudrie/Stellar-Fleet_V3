@@ -192,34 +192,40 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
 
         {/* STATS OVERVIEW */}
         <div className="grid grid-cols-2 gap-px bg-slate-800 shrink-0">
-            {[stats.player, stats.enemy].map((side, idx) => (
-                <div
-                    key={side?.factionId || `side-${idx}`}
-                    className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4"
-                    style={{ borderColor: side?.color || '#475569' }}
-                >
+            {[stats.player, stats.enemy].map((side, idx) => {
+                const sideLabelKey = idx === 0 ? 'battle.alliedForces' : 'battle.enemyForces';
+                return (
                     <div
-                        className="font-bold uppercase tracking-widest text-sm mb-1"
-                        style={{ color: side?.color || '#cbd5e1' }}
+                        key={side?.factionId || `side-${idx}`}
+                        className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4"
+                        style={{ borderColor: side?.color || '#475569' }}
                     >
-                        {side ? t('battle.factionForces', { faction: side.name }) : t('battle.none')}
-                    </div>
-                    <div className="flex gap-8 text-center mb-1">
-                        <div>
-                            <div className="text-3xl font-black text-white">{side?.survivors ?? 0}</div>
-                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+                        <div
+                            className="font-bold uppercase tracking-widest text-sm mb-1"
+                            style={{ color: side?.color || '#cbd5e1' }}
+                        >
+                            {side ? t(sideLabelKey) : t('battle.none')}
                         </div>
-                        <div>
-                            <div className="text-3xl font-black text-red-400">-{side?.lost ?? 0}</div>
-                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                        {side && (
+                            <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">{side.name}</div>
+                        )}
+                        <div className="flex gap-8 text-center mb-1">
+                            <div>
+                                <div className="text-3xl font-black text-white">{side?.survivors ?? 0}</div>
+                                <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+                            </div>
+                            <div>
+                                <div className="text-3xl font-black text-red-400">-{side?.lost ?? 0}</div>
+                                <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                            </div>
+                        </div>
+                        {side && renderComposition(side.composition, side.color)}
+                        <div className="mt-2 text-xs text-slate-500">
+                            {t('battle.fleets')} {side?.fleets.join(', ') || t('battle.none')}
                         </div>
                     </div>
-                    {side && renderComposition(side.composition, side.color)}
-                    <div className="mt-2 text-xs text-slate-500">
-                        {t('battle.fleets')} {side?.fleets.join(', ') || t('battle.none')}
-                    </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
 
         {/* COMBAT LOGS */}
