@@ -157,6 +157,39 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Battle resolution keeps victories for factions outside the core palette',
+    run: () => {
+      const greenFleet = createFleet('fleet-green-victory', 'green', { ...baseVec }, [
+        { id: 'green-1', type: ShipType.CRUISER, hp: 80, maxHp: 80, carriedArmyId: null }
+      ]);
+
+      const blueFleet = createFleet('fleet-blue-empty', 'blue', { ...baseVec }, []);
+
+      const battle: Battle = {
+        id: 'battle-green-win',
+        systemId: 'sys-green-win',
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [greenFleet.id, blueFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [createSystem(battle.systemId, null)],
+        fleets: [greenFleet, blueFleet],
+        seed: 7
+      });
+
+      const { updatedBattle } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(
+        updatedBattle.winnerFactionId,
+        'green',
+        'Non-blue/red factions should remain credited for their victories'
+      );
+    }
+  },
+  {
     name: 'Territory ignores neutral systems when evaluating influence',
     run: () => {
       const neutralSystem = { ...createSystem('neutral', null), position: { x: 0, y: 0, z: 0 } };

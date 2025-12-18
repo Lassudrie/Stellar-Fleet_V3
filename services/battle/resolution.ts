@@ -431,6 +431,7 @@ export const resolveBattle = (
       status: 'resolved',
       initialShips: initialShips,
       logs: [...battle.logs, ...logs],
+      // Preserve the computed winner, even for non-player factions
       winnerFactionId,
       roundsPlayed,
       shipsLost,
