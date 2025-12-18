@@ -20,12 +20,16 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
   const activeSystems = state.systems.filter(system => !activeBattleSystemIds.has(system.id));
   const activeSystemsById = new Map(activeSystems.map(system => [system.id, system]));
 
+  const engageableFleets = state.fleets.filter(fleet => {
+    if (fleet.state === FleetState.COMBAT) return false;
+    if (fleet.ships.length === 0) return false;
+    return true;
+  });
+  const engageableFleetsById = new Map(engageableFleets.map(fleet => [fleet.id, fleet]));
+
   const fleetAssignments = new Map<string, string>();
 
-  state.fleets.forEach(fleet => {
-    if (fleet.state === FleetState.COMBAT) return;
-    if (fleet.ships.length === 0) return;
-
+  engageableFleets.forEach(fleet => {
     let nearestSystemId: string | null = null;
     let nearestDistanceSq = Number.POSITIVE_INFINITY;
 
@@ -56,8 +60,9 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
     if (!system) return;
 
     const fleetsInSystem = fleetIds
-      .map(fleetId => state.fleets.find(f => f.id === fleetId))
-      .filter((fleet): fleet is NonNullable<typeof fleet> => Boolean(fleet));
+      .map(fleetId => engageableFleetsById.get(fleetId))
+      .filter((fleet): fleet is NonNullable<typeof fleet> => Boolean(fleet))
+      .filter(fleet => fleet.state !== FleetState.COMBAT && fleet.ships.length > 0);
 
     const presentFactionIds = new Set<string>();
     fleetsInSystem.forEach(fleet => presentFactionIds.add(fleet.factionId));
