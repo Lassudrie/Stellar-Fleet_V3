@@ -13,6 +13,8 @@ export interface LoadOpsParams extends ArmyOpsOptions {
     armies: Army[];
     day: number;
     rng: RNG;
+    allowedArmyIds?: Set<string>;
+    allowedShipIds?: Set<string>;
 }
 
 export interface UnloadOpsParams extends ArmyOpsOptions {
@@ -45,16 +47,21 @@ const getLoadLogText = (count: number, system: StarSystem, fleetLabel: string, o
 };
 
 export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
-    const { fleet, system, armies, day, rng, fleetLabel, logText } = params;
+    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds } = params;
     const label = fleetLabel ?? shortId(fleet.id);
 
     const availableArmies = armies.filter(army =>
         army.containerId === system.id &&
         army.factionId === fleet.factionId &&
-        army.state === ArmyState.DEPLOYED
+        army.state === ArmyState.DEPLOYED &&
+        (!allowedArmyIds || allowedArmyIds.has(army.id))
     );
 
-    const transports = fleet.ships.filter(ship => ship.type === ShipType.TROOP_TRANSPORT && !ship.carriedArmyId);
+    const transports = fleet.ships.filter(ship =>
+        ship.type === ShipType.TROOP_TRANSPORT &&
+        !ship.carriedArmyId &&
+        (!allowedShipIds || allowedShipIds.has(ship.id))
+    );
     const loadableArmies = Math.min(availableArmies.length, transports.length);
 
     if (loadableArmies === 0) {

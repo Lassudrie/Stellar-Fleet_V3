@@ -4,7 +4,7 @@ import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
-import { computeUnloadOps } from './armyOps';
+import { computeLoadOps, computeUnloadOps } from './armyOps';
 import { isOrbitContested } from './conquest';
 
 const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
@@ -54,6 +54,7 @@ export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
+  | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -214,6 +215,44 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     text: command.text,
                     type: command.logType
                 }]
+            };
+        }
+
+        case 'LOAD_ARMY': {
+            const system = getSystemById(state.systems, command.systemId);
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            const army = state.armies.find(a => a.id === command.armyId);
+
+            if (!system || !fleet || !army) return state;
+
+            const inOrbit = fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) < 0.0001;
+            if (!inOrbit) return state;
+
+            const ship = fleet.ships.find(s => s.id === command.shipId && !s.carriedArmyId);
+            if (!ship) return state;
+
+            const validArmy = army.state === ArmyState.DEPLOYED && army.containerId === system.id && army.factionId === fleet.factionId;
+            if (!validArmy) return state;
+
+            const loadResult = computeLoadOps({
+                fleet,
+                system,
+                armies: state.armies,
+                day: state.day,
+                rng,
+                fleetLabel: fleet.id,
+                allowedArmyIds: new Set([command.armyId]),
+                allowedShipIds: new Set([command.shipId]),
+                logText: `Fleet ${fleet.id} loaded army ${command.armyId} at ${system.name}.`
+            });
+
+            if (loadResult.count === 0) return state;
+
+            return {
+                ...state,
+                fleets: state.fleets.map(f => (f.id === fleet.id ? loadResult.fleet : f)),
+                armies: loadResult.armies,
+                logs: [...state.logs, ...loadResult.logs]
             };
         }
 
