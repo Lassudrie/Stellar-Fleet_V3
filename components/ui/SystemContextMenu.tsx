@@ -146,7 +146,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                       return (
                           <>
                               {playerEntry && renderFactionBlock(playerEntry)}
-                              {highlightedHostiles.map(renderFactionBlock)}
+                              {highlightedHostiles.map(entry => renderFactionBlock(entry))}
                               {coalition && renderFactionBlock(coalition)}
                           </>
                       );

@@ -1,4 +1,9 @@
-const isDev = typeof import.meta !== 'undefined' && Boolean(import.meta.env?.DEV);
+const envMeta =
+  typeof import.meta !== 'undefined'
+    ? (import.meta as ImportMeta & { env?: { DEV?: boolean } })
+    : undefined;
+
+const isDev = Boolean(envMeta?.env?.DEV);
 
 export const devLog = (...args: Parameters<typeof console.log>) => {
   if (isDev) {
