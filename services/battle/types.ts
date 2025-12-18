@@ -1,5 +1,5 @@
 
-import { FactionId, ShipType } from '../../types';
+import { FactionId, ShipKillRecord, ShipType } from '../../types';
 
 export type WeaponType = 'kinetic' | 'missile' | 'torpedo';
 
@@ -38,4 +38,6 @@ export interface BattleShipState {
   damage: number;
   missileDamage: number;
   torpedoDamage: number;
+
+  killHistory: ShipKillRecord[];
 }

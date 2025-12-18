@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
+import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId, ShipConsumables, ShipKillRecord } from '../types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
 import { computeFleetRadius } from './fleetDerived';
@@ -35,6 +35,44 @@ const deserializeVector3 = (v: Vector3DTO | undefined, context = 'vector'): Vec3
   });
 
   return vec3(v.x, v.y, v.z);
+};
+
+const normalizeConsumableValue = (value: unknown, fallback: number) => (
+  Number.isFinite(value) && (value as number) >= 0 ? (value as number) : fallback
+);
+
+const extractConsumables = (ship: any, type: ShipType): ShipConsumables => {
+  const stats = SHIP_STATS[type];
+
+  return {
+    offensiveMissiles: normalizeConsumableValue(
+      ship?.consumables?.offensiveMissiles ?? ship?.offensiveMissilesLeft,
+      stats?.offensiveMissileStock ?? 0
+    ),
+    torpedoes: normalizeConsumableValue(
+      ship?.consumables?.torpedoes ?? ship?.torpedoesLeft,
+      stats?.torpedoStock ?? 0
+    ),
+    interceptors: normalizeConsumableValue(
+      ship?.consumables?.interceptors ?? ship?.interceptorsLeft,
+      stats?.interceptorStock ?? 0
+    )
+  };
+};
+
+const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
+  if (!Array.isArray(entries)) return [];
+
+  return entries
+    .map((entry, index) => ({
+      id: typeof entry?.id === 'string' ? entry.id : `kill-${index}`,
+      day: Number.isFinite(entry?.day) ? entry.day : 0,
+      turn: Number.isFinite(entry?.turn) ? entry.turn : (Number.isFinite(entry?.day) ? entry.day : 0),
+      targetId: typeof entry?.targetId === 'string' ? entry.targetId : 'unknown',
+      targetType: entry?.targetType ?? ShipType.FRIGATE,
+      targetFactionId: entry?.targetFactionId ?? 'unknown'
+    }))
+    .filter((entry): entry is ShipKillRecord => Boolean(entry.targetId));
 };
 
 const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
@@ -153,9 +191,11 @@ export const serializeGameState = (state: GameState): string => {
           hp: s.hp,
           maxHp: s.maxHp,
           carriedArmyId: s.carriedArmyId || null,
-          offensiveMissilesLeft: s.offensiveMissilesLeft,
-          torpedoesLeft: s.torpedoesLeft,
-          interceptorsLeft: s.interceptorsLeft
+          consumables: extractConsumables(s, s.type),
+          offensiveMissilesLeft: s.offensiveMissilesLeft ?? s.consumables?.offensiveMissiles,
+          torpedoesLeft: s.torpedoesLeft ?? s.consumables?.torpedoes,
+          interceptorsLeft: s.interceptorsLeft ?? s.consumables?.interceptors,
+          killHistory: sanitizeKillHistory(s.killHistory)
       }))
     })),
     armies: state.armies.map(a => ({
@@ -286,15 +326,20 @@ export const deserializeGameState = (json: string): GameState => {
             const maxHp = Number.isFinite(s.maxHp) ? s.maxHp : fallbackMaxHp;
             const hp = Number.isFinite(s.hp) ? Math.min(Math.max(s.hp, 0), maxHp) : maxHp;
 
+            const consumables = extractConsumables(s, s.type);
+            const killHistory = sanitizeKillHistory(s.killHistory);
+
             return {
               id: s.id,
               type: s.type,
               hp,
               maxHp,
               carriedArmyId: s.carriedArmyId ?? null,
-              offensiveMissilesLeft: s.offensiveMissilesLeft ?? SHIP_STATS[s.type]?.offensiveMissileStock ?? 0,
-              torpedoesLeft: s.torpedoesLeft ?? SHIP_STATS[s.type]?.torpedoStock ?? 0,
-              interceptorsLeft: s.interceptorsLeft ?? SHIP_STATS[s.type]?.interceptorStock ?? 0
+              consumables,
+              offensiveMissilesLeft: s.offensiveMissilesLeft ?? consumables.offensiveMissiles,
+              torpedoesLeft: s.torpedoesLeft ?? consumables.torpedoes,
+              interceptorsLeft: s.interceptorsLeft ?? consumables.interceptors,
+              killHistory
             };
         })
       };

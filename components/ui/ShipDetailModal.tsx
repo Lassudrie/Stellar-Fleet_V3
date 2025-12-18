@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Army, FactionState, Fleet, LogEntry, ShipEntity } from '../../types';
+import React from 'react';
+import { Army, FactionState, Fleet, ShipEntity, ShipConsumables } from '../../types';
 import { SHIP_STATS } from '../../data/static';
 import { fleetLabel } from '../../engine/idUtils';
 
@@ -7,18 +7,26 @@ interface ShipDetailModalProps {
   fleet: Fleet;
   faction?: FactionState;
   armies: Army[];
-  logs: LogEntry[];
   onClose: () => void;
 }
 
-const formatAmmo = (value: number | undefined, fallback: number) => {
-  const stock = value ?? fallback;
-  return stock > 0 ? stock.toString() : '0';
-};
+const formatAmmo = (value: number | undefined) => (value && value > 0 ? value.toString() : '0');
+
+const getAmmoFromConsumables = (
+  ship: ShipEntity,
+  key: keyof ShipConsumables,
+  fallback: number,
+  legacy?: number
+) => ship.consumables?.[key] ?? legacy ?? fallback;
 
 const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies }) => {
   const stats = SHIP_STATS[ship.type];
   const carriedArmy = armies.find(a => a.id === ship.carriedArmyId);
+  const kills = [...(ship.killHistory ?? [])].sort((a, b) => a.turn - b.turn || a.day - b.day);
+
+  const missileCount = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
+  const torpedoCount = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
+  const interceptorCount = getAmmoFromConsumables(ship, 'interceptors', stats.interceptorStock, ship.interceptorsLeft);
 
   return (
     <div className="bg-slate-800/70 border border-slate-700 rounded-lg p-4 space-y-2">
@@ -38,15 +46,15 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
         </div>
         <div>
           <div className="text-slate-300">Missiles</div>
-          <div className="font-semibold">{formatAmmo(ship.offensiveMissilesLeft, stats.offensiveMissileStock)}</div>
+          <div className="font-semibold">{formatAmmo(missileCount)}</div>
         </div>
         <div>
           <div className="text-slate-300">Torpedoes</div>
-          <div className="font-semibold">{formatAmmo(ship.torpedoesLeft, stats.torpedoStock)}</div>
+          <div className="font-semibold">{formatAmmo(torpedoCount)}</div>
         </div>
         <div>
           <div className="text-slate-300">Interceptors</div>
-          <div className="font-semibold">{formatAmmo(ship.interceptorsLeft, stats.interceptorStock)}</div>
+          <div className="font-semibold">{formatAmmo(interceptorCount)}</div>
         </div>
         <div>
           <div className="text-slate-300">Point Defense</div>
@@ -62,18 +70,29 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
           <div className="text-slate-300">Morale: {(carriedArmy.morale * 100).toFixed(0)}%</div>
         </div>
       )}
+
+      <div className="bg-slate-900/60 border border-slate-700 rounded-md p-3 text-sm">
+        <div className="font-semibold mb-2">Kill log</div>
+        {kills.length === 0 ? (
+          <div className="text-slate-400">No confirmed kills.</div>
+        ) : (
+          <ul className="space-y-1">
+            {kills.map(entry => (
+              <li key={entry.id} className="flex justify-between gap-2">
+                <div className="text-slate-300">Day {entry.day} (Turn {entry.turn})</div>
+                <div className="font-semibold text-slate-100 text-right">
+                  {entry.targetType} — {entry.targetId}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };
 
-const ShipDetailModal: React.FC<ShipDetailModalProps> = ({ fleet, faction, armies, logs, onClose }) => {
-  const killEntries = useMemo(() => {
-    const fleetIdLower = fleet.id.toLowerCase();
-    return logs
-      .filter(entry => entry.type === 'combat' && entry.text.toLowerCase().includes(fleetIdLower))
-      .sort((a, b) => a.day - b.day);
-  }, [fleet.id, logs]);
-
+const ShipDetailModal: React.FC<ShipDetailModalProps> = ({ fleet, faction, armies, onClose }) => {
   return (
     <div className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
       <div className="bg-slate-900 text-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden border border-slate-700">
@@ -99,22 +118,6 @@ const ShipDetailModal: React.FC<ShipDetailModalProps> = ({ fleet, faction, armie
                 <ShipCard key={ship.id} ship={ship} armies={armies} />
               ))}
             </div>
-          </div>
-
-          <div>
-            <div className="text-lg font-semibold mb-3">Kills</div>
-            {killEntries.length === 0 ? (
-              <div className="text-slate-300">No confirmed kills yet.</div>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {killEntries.map(entry => (
-                  <li key={entry.id} className="bg-slate-800/60 border border-slate-700 rounded-md p-3">
-                    <div className="text-slate-400">Day {entry.day}</div>
-                    <div className="text-slate-100">{entry.text}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
         </div>
       </div>

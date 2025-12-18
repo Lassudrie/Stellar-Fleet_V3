@@ -52,15 +52,32 @@ export interface ShipStats {
   role: 'capital' | 'screen' | 'striker' | 'transport';
 }
 
+export interface ShipConsumables {
+  offensiveMissiles: number;
+  torpedoes: number;
+  interceptors: number;
+}
+
+export interface ShipKillRecord {
+  id: string;
+  day: number;
+  turn: number;
+  targetId: string;
+  targetType: ShipType;
+  targetFactionId: FactionId;
+}
+
 export interface ShipEntity {
   id: string;
   type: ShipType;
   hp: number;
   maxHp: number;
   carriedArmyId: string | null;
+  consumables?: ShipConsumables;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
   interceptorsLeft?: number;
+  killHistory?: ShipKillRecord[];
 }
 
 export interface Army {
