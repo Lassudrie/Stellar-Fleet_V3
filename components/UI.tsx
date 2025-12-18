@@ -4,7 +4,7 @@ import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, 
 import VictoryScreen from './ui/VictoryScreen';
 import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
-import SystemContextMenu from './ui/SystemContextMenu';
+import SystemContextMenu, { GroundForcesByFaction } from './ui/SystemContextMenu';
 import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
@@ -168,48 +168,72 @@ const UI: React.FC<UIProps> = ({
   }, [blueFleets, targetSystem]);
 
   // Compute Ground Forces Summary for Context Menu
-  const groundForcesSummary = useMemo(() => {
+  const groundForcesSummary = useMemo<GroundForcesByFaction | null>(() => {
       if (!targetSystem || !gameState.armies) return null;
 
-      const aggregates = {
-          blue: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 },
-          red: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 }
-      };
+      const factionIndex = new Map(gameState.factions.map(faction => [faction.id, faction]));
+
+      const aggregates: Record<FactionId, {
+          count: number;
+          currentStrength: number;
+          maxStrength: number;
+          moraleSum: number;
+          name: string;
+          color: string;
+          isPlayer: boolean;
+      }> = {};
 
       gameState.armies.forEach(army => {
-          if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
-              const bucket = army.factionId === playerFactionId ? aggregates.blue : aggregates.red;
-              bucket.count += 1;
-              bucket.currentStrength += army.strength;
-              bucket.maxStrength += army.maxStrength;
-              bucket.moraleSum += army.morale;
+          if (army.containerId !== targetSystem.id || army.state !== ArmyState.DEPLOYED) return;
+
+          if (!aggregates[army.factionId]) {
+              const faction = factionIndex.get(army.factionId);
+
+              aggregates[army.factionId] = {
+                  count: 0,
+                  currentStrength: 0,
+                  maxStrength: 0,
+                  moraleSum: 0,
+                  name: faction?.name || army.factionId,
+                  color: faction?.color || '#cbd5e1',
+                  isPlayer: army.factionId === playerFactionId,
+              };
           }
+
+          const bucket = aggregates[army.factionId];
+          bucket.count += 1;
+          bucket.currentStrength += army.strength;
+          bucket.maxStrength += army.maxStrength;
+          bucket.moraleSum += army.morale;
       });
 
-      const buildSummary = (bucket: { count: number, currentStrength: number, maxStrength: number, moraleSum: number }) => {
-          if (bucket.count === 0) return null;
+      const summaries: GroundForcesByFaction = {};
+
+      Object.entries(aggregates).forEach(([factionId, bucket]) => {
+          if (bucket.count === 0) return;
 
           const losses = bucket.maxStrength - bucket.currentStrength;
           const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
           const averageMorale = bucket.moraleSum / bucket.count;
 
-          return {
-              count: bucket.count,
-              currentStrength: bucket.currentStrength,
-              maxStrength: bucket.maxStrength,
-              losses,
-              lossPercent,
-              averageMorale,
+          summaries[factionId] = {
+              factionId: factionId as FactionId,
+              name: bucket.name,
+              color: bucket.color,
+              isPlayer: bucket.isPlayer,
+              stats: {
+                  count: bucket.count,
+                  currentStrength: bucket.currentStrength,
+                  maxStrength: bucket.maxStrength,
+                  losses,
+                  lossPercent,
+                  averageMorale,
+              },
           };
-      };
+      });
 
-      const blue = buildSummary(aggregates.blue);
-      const red = buildSummary(aggregates.red);
-
-      if (!blue && !red) return null;
-
-      return { blue, red };
-  }, [targetSystem, gameState.armies, playerFactionId]);
+      return Object.keys(summaries).length > 0 ? summaries : null;
+  }, [targetSystem, gameState.armies, gameState.factions, playerFactionId]);
 
   const handleSelectFleetAtSystem = () => {
       if (orbitingPlayerFleets.length === 0) return;

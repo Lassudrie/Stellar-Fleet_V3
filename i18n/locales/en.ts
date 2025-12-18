@@ -72,6 +72,7 @@ export const en = {
 
   // Context Menu
   'ctx.groundForces': 'Ground Forces',
+  'ctx.hostileCoalition': 'Hostile Coalition',
   'ctx.homeworld': 'Homeworld',
   'ctx.moveTo': 'Move To...',
   'ctx.selectFleet': 'Select fleet',

@@ -1,9 +1,9 @@
 
 import React from 'react';
-import { StarSystem } from '../../types';
+import { FactionId, StarSystem } from '../../types';
 import { useI18n } from '../../i18n';
 
-type GroundForceStats = {
+export type GroundForceStats = {
   count: number;
   currentStrength: number;
   maxStrength: number;
@@ -12,13 +12,18 @@ type GroundForceStats = {
   averageMorale: number;
 };
 
+export type GroundForcesByFaction = Record<FactionId, {
+  factionId: FactionId;
+  name: string;
+  color: string;
+  isPlayer: boolean;
+  stats: GroundForceStats;
+}>;
+
 interface SystemContextMenuProps {
   position: { x: number, y: number };
   system: StarSystem;
-  groundForces: {
-    blue: GroundForceStats | null;
-    red: GroundForceStats | null;
-  } | null;
+  groundForces: GroundForcesByFaction | null;
   showInvadeOption: boolean; // Computed by parent based on strict rules
   showAttackOption: boolean;
   showLoadOption: boolean;
@@ -42,28 +47,32 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
 
   const renderFactionBlock = (
       label: string,
-      stats: GroundForceStats | null,
-      colorClass: string,
-  ) => {
-      if (!stats) return null;
-
-      return (
-          <div className={`flex flex-col gap-0.5 ${colorClass}`}>
-              <div className="flex justify-between text-sm">
+      stats: GroundForceStats,
+      color: string,
+      subtitle?: string,
+  ) => (
+      <div className="flex flex-col gap-0.5" style={{ color }}>
+          <div className="flex justify-between text-sm">
+              <span className="flex flex-col leading-tight">
                   <span>{label} x{stats.count}</span>
-                  <span className="font-mono">{stats.currentStrength.toLocaleString()} / {stats.maxStrength.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-300">
-                  <span>{t('ctx.losses')}</span>
-                  <span className="font-mono">-{stats.losses.toLocaleString()} ({stats.lossPercent.toFixed(1)}%)</span>
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-300">
-                  <span>{t('ctx.morale')}</span>
-                  <span className="font-mono">{stats.averageMorale.toFixed(0)}%</span>
-              </div>
+                  {subtitle && (
+                      <span className="text-[10px] text-slate-300" style={{ color }}>
+                          {subtitle}
+                      </span>
+                  )}
+              </span>
+              <span className="font-mono">{stats.currentStrength.toLocaleString()} / {stats.maxStrength.toLocaleString()}</span>
           </div>
-      );
-  };
+          <div className="flex justify-between text-[10px] text-slate-300">
+              <span>{t('ctx.losses')}</span>
+              <span className="font-mono">-{stats.losses.toLocaleString()} ({stats.lossPercent.toFixed(1)}%)</span>
+          </div>
+          <div className="flex justify-between text-[10px] text-slate-300">
+              <span>{t('ctx.morale')}</span>
+              <span className="font-mono">{stats.averageMorale.toFixed(0)}%</span>
+          </div>
+      </div>
+  );
 
   return (
     <div
@@ -102,8 +111,61 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   {t('ctx.groundForces')}
               </div>
               <div className="flex flex-col gap-1">
-                  {renderFactionBlock('BLUE', groundForces.blue, 'text-blue-300')}
-                  {renderFactionBlock('RED', groundForces.red, 'text-red-400')}
+                  {(() => {
+                      const factions = Object.values(groundForces);
+                      if (factions.length === 0) return null;
+
+                      const playerFaction = factions.find(faction => faction.isPlayer);
+                      const hostiles = factions
+                          .filter(faction => !faction.isPlayer)
+                          .sort((a, b) => b.stats.currentStrength - a.stats.currentStrength);
+
+                      const primaryHostiles = hostiles.slice(0, 3);
+                      const coalitionRemainder = hostiles.slice(3);
+
+                      const coalitionStats = coalitionRemainder.reduce<GroundForceStats | null>((acc, faction) => {
+                          if (!acc) {
+                              return { ...faction.stats };
+                          }
+
+                          const moraleSum = acc.averageMorale * acc.count + faction.stats.averageMorale * faction.stats.count;
+                          const combinedCount = acc.count + faction.stats.count;
+
+                          const currentStrength = acc.currentStrength + faction.stats.currentStrength;
+                          const maxStrength = acc.maxStrength + faction.stats.maxStrength;
+                          const losses = maxStrength - currentStrength;
+                          const lossPercent = maxStrength > 0 ? (losses / maxStrength) * 100 : 0;
+                          const averageMorale = combinedCount > 0 ? moraleSum / combinedCount : 0;
+
+                          return {
+                              count: combinedCount,
+                              currentStrength,
+                              maxStrength,
+                              losses,
+                              lossPercent,
+                              averageMorale,
+                          };
+                      }, null);
+
+                      return (
+                          <>
+                              {playerFaction && renderFactionBlock(playerFaction.name, playerFaction.stats, playerFaction.color)}
+                              {primaryHostiles.map(faction => (
+                                  <React.Fragment key={faction.factionId}>
+                                      {renderFactionBlock(faction.name, faction.stats, faction.color)}
+                                  </React.Fragment>
+                              ))}
+                              {coalitionStats && (
+                                  renderFactionBlock(
+                                      t('ctx.hostileCoalition'),
+                                      coalitionStats,
+                                      '#f87171',
+                                      coalitionRemainder.map(faction => faction.name).join(', ')
+                                  )
+                              )}
+                          </>
+                      );
+                  })()}
               </div>
           </div>
       )}
