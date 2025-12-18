@@ -366,7 +366,19 @@ const App: React.FC = () => {
       if (fleet.state !== FleetState.ORBIT) return null;
 
       const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-      return viewGameState.systems.find(system => distSq(fleet.position, system.position) <= orbitThresholdSq) || null;
+
+      let closest: { system: StarSystem; distanceSq: number } | null = null;
+
+      viewGameState.systems.forEach(system => {
+          const distanceSq = distSq(fleet.position, system.position);
+          if (distanceSq > orbitThresholdSq) return;
+
+          if (!closest || distanceSq < closest.distanceSq) {
+              closest = { system, distanceSq };
+          }
+      });
+
+      return closest?.system ?? null;
   };
 
   const handleDeploySingle = (shipId: string) => {
