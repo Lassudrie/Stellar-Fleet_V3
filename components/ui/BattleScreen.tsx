@@ -56,12 +56,22 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
 
   // 2. Aggregate Data using Snapshot
   const stats = useMemo(() => {
-      if (!battle || !battle.initialShips || battle.initialShips.length === 0 || !battle.survivorShipIds) return null;
+      if (!battle) return null;
 
-      const survivorSet = new Set(battle.survivorShipIds);
-      const factions = Array.from(new Set(battle.initialShips.map(s => s.factionId)));
+      const initialShips = battle.initialShips || [];
+      const survivorSet = new Set(battle.survivorShipIds || []);
+
+      const factions = initialShips.length > 0
+          ? Array.from(new Set(initialShips.map(s => s.factionId)))
+          : Array.from(new Set(
+              (battle.involvedFleetIds || [])
+                  .map(id => gameState.fleets?.find(f => f.id === id))
+                  .filter((fleet): fleet is Fleet => Boolean(fleet))
+                  .map(fleet => fleet.factionId)
+          ));
+
       const factionCounts: Record<string, number> = {};
-      battle.initialShips.forEach(ship => {
+      initialShips.forEach(ship => {
           factionCounts[ship.factionId] = (factionCounts[ship.factionId] || 0) + 1;
       });
 
@@ -72,9 +82,14 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
           || null;
 
       const buildSide = (targetFactionId: string) => {
-          const snaps = battle.initialShips!.filter(s => s.factionId === targetFactionId);
+          const snaps = initialShips.filter(s => s.factionId === targetFactionId);
           const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
-          const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
+          const fleetsFromSnapshots = snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???');
+          const fleetsFromInvolved = (battle.involvedFleetIds || [])
+              .map(id => gameState.fleets?.find(f => f.id === id))
+              .filter((fleet): fleet is Fleet => fleet?.factionId === targetFactionId)
+              .map(fleet => fleet.id.split('_').pop()?.toUpperCase() || fleet.id.toUpperCase());
+          const fleets = Array.from(new Set([...fleetsFromSnapshots, ...fleetsFromInvolved]));
 
           const composition: Record<string, { engaged: number; lost: number }> = {};
           snaps.forEach(s => {
@@ -111,7 +126,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
           primaryEnemyId,
           sides
       };
-  }, [battle, factionRegistry, playerFactionId]);
+  }, [battle, factionRegistry, gameState.fleets, playerFactionId]);
 
   useEffect(() => {
       if (logContainerRef.current) {
