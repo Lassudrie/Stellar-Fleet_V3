@@ -191,7 +191,7 @@ const UI: React.FC<UIProps> = ({
 
           const losses = bucket.maxStrength - bucket.currentStrength;
           const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
-          const averageMorale = bucket.moraleSum / bucket.count;
+          const averageMoralePercent = (bucket.moraleSum / bucket.count) * 100;
 
           return {
               count: bucket.count,
@@ -199,7 +199,7 @@ const UI: React.FC<UIProps> = ({
               maxStrength: bucket.maxStrength,
               losses,
               lossPercent,
-              averageMorale,
+              averageMoralePercent,
           };
       };
 
