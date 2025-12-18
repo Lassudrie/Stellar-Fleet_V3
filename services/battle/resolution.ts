@@ -28,17 +28,18 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
   }
 
   const fallbackMaxHp = stats?.maxHp ?? 100;
-  const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
-  const clampedHp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
-  const offensiveMissilesLeft = Number.isFinite(ship.offensiveMissilesLeft)
-    ? ship.offensiveMissilesLeft
-    : stats?.offensiveMissileStock ?? 0;
-  const torpedoesLeft = Number.isFinite(ship.torpedoesLeft)
-    ? ship.torpedoesLeft
-    : stats?.torpedoStock ?? 0;
-  const interceptorsLeft = Number.isFinite(ship.interceptorsLeft)
-    ? ship.interceptorsLeft
-    : stats?.interceptorStock ?? 0;
+  const maxHp = Number.isFinite(ship.maxHp) && ship.maxHp > 0 ? ship.maxHp : fallbackMaxHp;
+  const clampedHp = Number.isFinite(ship.hp)
+    ? Math.min(Math.max(ship.hp, 0), maxHp)
+    : maxHp;
+
+  const normalizeStock = (value: number | undefined, fallback: number) => (
+    Number.isFinite(value) && (value as number) >= 0 ? value as number : fallback
+  );
+
+  const offensiveMissilesLeft = normalizeStock(ship.offensiveMissilesLeft, stats?.offensiveMissileStock ?? 0);
+  const torpedoesLeft = normalizeStock(ship.torpedoesLeft, stats?.torpedoStock ?? 0);
+  const interceptorsLeft = normalizeStock(ship.interceptorsLeft, stats?.interceptorStock ?? 0);
   const evasion = stats?.evasion ?? 0.1;
   const pdStrength = stats?.pdStrength ?? 0;
   const damage = stats?.damage ?? 10;
