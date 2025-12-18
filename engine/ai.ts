@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType } from '../types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState } from '../types';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
@@ -58,6 +58,15 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
     ...overrides.taskTargets,
   },
 });
+
+export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
+  factions
+    .filter(faction => faction.aiProfile)
+    .map(faction => faction.id)
+    .sort((a, b) => a.localeCompare(b));
+
+export const getLegacyAiFactionId = (factions: FactionState[]): FactionId | undefined =>
+  getAiFactionIds(factions)[0];
 
 const AI_PROFILE_CONFIGS: Record<AiProfile, AiConfig> = {
   aggressive: withOverrides({

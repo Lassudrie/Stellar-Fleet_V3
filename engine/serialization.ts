@@ -1,6 +1,7 @@
 
 import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
 import { Vec3, vec3 } from './math/vec3';
+import { getAiFactionIds, getLegacyAiFactionId } from './ai';
 import {
   SAVE_VERSION,
   SaveFile,
@@ -71,7 +72,11 @@ const DEFAULT_FACTIONS: FactionState[] = [
 ];
 
 export const serializeGameState = (state: GameState): string => {
-  const aiStateDto = serializeAiState(state.aiState);
+  const legacyAiFactionId = getLegacyAiFactionId(state.factions);
+  const legacyAiState = legacyAiFactionId
+    ? state.aiStates?.[legacyAiFactionId] ?? state.aiState
+    : state.aiState;
+  const aiStateDto = serializeAiState(legacyAiState);
   let aiStatesDto: Record<string, AIStateDTO> | undefined;
   if (state.aiStates) {
     aiStatesDto = {};
@@ -259,15 +264,21 @@ export const deserializeGameState = (json: string): GameState => {
       : undefined;
 
     const legacyAiState = deserializeAiState(dto.aiState);
-    const DEFAULT_AI_FACTION_ID: FactionId = 'red';
+    const aiFactionIds = getAiFactionIds(factions);
+    const legacyAiFactionId = getLegacyAiFactionId(factions);
 
     const migratedAiStates = aiStates && Object.keys(aiStates).length > 0
       ? aiStates
-      : legacyAiState
-        ? { [DEFAULT_AI_FACTION_ID]: legacyAiState }
+      : legacyAiState && legacyAiFactionId
+        ? { [legacyAiFactionId]: legacyAiState }
         : undefined;
 
-    const primaryAiState = migratedAiStates?.[DEFAULT_AI_FACTION_ID] || legacyAiState;
+    const primaryAiOwnerId = legacyAiFactionId
+      ?? aiFactionIds[0]
+      ?? (migratedAiStates ? Object.keys(migratedAiStates)[0] : undefined);
+    const primaryAiState = primaryAiOwnerId
+      ? migratedAiStates?.[primaryAiOwnerId] || legacyAiState
+      : legacyAiState;
 
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
