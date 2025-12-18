@@ -136,23 +136,37 @@ export const resolveFleetMovement = (
           if (fleet.invasionTargetSystemId === arrivedSystemId) {
               let deployedCount = 0;
 
+              const shipIdByArmyId = currentFleet.ships.reduce<Record<string, string>>((map, ship) => {
+                  if (ship.carriedArmyId) {
+                      map[ship.carriedArmyId] = ship.id;
+                  }
+                  return map;
+              }, {});
+
+              const shipIndexById = currentFleet.ships.reduce<Record<string, number>>((map, ship, index) => {
+                  map[ship.id] = index;
+                  return map;
+              }, {});
+
+              let updatedShips: ShipEntity[] = currentFleet.ships.map(ship => ship as ShipEntity);
+
               const updatedArmies = armiesAfterOps.map(army => {
                   if (army.containerId !== fleet.id) return army;
                   if (army.state !== ArmyState.EMBARKED) return army;
-                  const carrierShipIndex = currentFleet.ships.findIndex(s => s.carriedArmyId === army.id);
-                  if (carrierShipIndex === -1) return army;
 
-                  currentFleet = {
-                      ...currentFleet,
-                      ships: currentFleet.ships.map((ship, index) => {
-                          if (index !== carrierShipIndex) return ship as ShipEntity;
-                          if (ship.carriedArmyId !== army.id) return ship as ShipEntity;
-                          shipsChanged = true;
-                          return { ...ship, carriedArmyId: null } as ShipEntity;
-                      })
-                  };
+                  const carrierShipId = shipIdByArmyId[army.id];
+                  if (!carrierShipId) return army;
 
+                  const carrierIndex = shipIndexById[carrierShipId];
+                  if (carrierIndex === undefined) return army;
+
+                  const carrierShip = updatedShips[carrierIndex];
+                  if (!carrierShip || carrierShip.carriedArmyId !== army.id) return army;
+
+                  updatedShips[carrierIndex] = { ...carrierShip, carriedArmyId: null } as ShipEntity;
+                  shipsChanged = true;
                   deployedCount++;
+
                   return {
                       ...army,
                       state: ArmyState.DEPLOYED,
@@ -161,6 +175,7 @@ export const resolveFleetMovement = (
               });
 
               armiesAfterOps = updatedArmies;
+              currentFleet = { ...currentFleet, ships: updatedShips };
 
               if (deployedCount > 0) {
                   generatedLogs.push({
