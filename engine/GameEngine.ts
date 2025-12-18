@@ -3,8 +3,10 @@ import { ArmyState, FactionId, Fleet, GameState, StarSystem } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
-import { distSq } from './math/vec3';
+import { clone, distSq } from './math/vec3';
 import { computeLoadOps, computeUnloadOps } from './armyOps';
+import { withUpdatedFleetDerived } from './fleetDerived';
+import { clone } from './math/vec3';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -228,13 +230,67 @@ export class GameEngine {
         }
 
         if (command.type === 'SPLIT_FLEET') {
-            // Placeholder logic
+            const fleet = this.state.fleets.find(f => f.id === command.originalFleetId);
+            if (!fleet) return { ok: false, error: 'Fleet not found' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating and cannot split.' };
+
+            const shipIdSet = new Set(command.shipIds);
+            const splitShips = fleet.ships.filter(ship => shipIdSet.has(ship.id));
+
+            if (splitShips.length === 0) return { ok: false, error: 'No ships selected' };
+            if (splitShips.length !== shipIdSet.size) return { ok: false, error: 'Some ships not found in fleet' };
+            if (splitShips.length === fleet.ships.length) return { ok: false, error: 'Cannot split entire fleet' };
+
+            const remainingShips = fleet.ships.filter(ship => !shipIdSet.has(ship.id));
+
+            const newFleet: Fleet = withUpdatedFleetDerived({
+                ...fleet,
+                id: this.rng.id('fleet'),
+                ships: splitShips,
+                position: clone(fleet.position),
+                targetPosition: fleet.targetPosition ? clone(fleet.targetPosition) : null,
+                invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+                loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+                unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
+            });
+
+            const updatedOriginalFleet = withUpdatedFleetDerived({
+                ...fleet,
+                ships: remainingShips
+            });
+
+            const updatedArmies = this.state.armies.map(army => {
+                if (army.containerId !== fleet.id) return army;
+                const carriedByMovedShip = splitShips.some(ship => ship.carriedArmyId === army.id);
+                if (!carriedByMovedShip) return army;
+                return { ...army, containerId: newFleet.id };
+            });
+
+            const splitLog = {
+                id: this.rng.id('log'),
+                day: this.state.day,
+                text: `Fleet ${fleet.id} split into ${updatedOriginalFleet.id} and ${newFleet.id}. ${newFleet.id} received ${splitShips.length} ships.`,
+                type: 'info' as const
+            };
+
+            this.state = {
+                ...this.state,
+                fleets: this.state.fleets
+                    .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
+                    .concat(newFleet),
+                armies: updatedArmies,
+                logs: [...this.state.logs, splitLog],
+                selectedFleetId: newFleet.id
+            };
+
+            this.syncRngState();
+            this.notify();
             return { ok: true };
         }
 
         if (command.type === 'MERGE_FLEETS') {
-            // Placeholder logic
-            return { ok: true };
+            return { ok: false, error: 'Not implemented' };
         }
 
         return { ok: false, error: 'Unknown command' };
