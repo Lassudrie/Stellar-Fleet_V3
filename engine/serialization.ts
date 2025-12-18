@@ -27,6 +27,7 @@ const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   Object.entries(aiState.sightings).forEach(([key, s]) => {
     sightings[key] = {
       ...s,
+      factionId: s.factionId,
       lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
       position: serializeVector3(s.position)
     };
@@ -48,6 +49,7 @@ const deserializeAiState = (aiStateDto?: AIStateDTO): AIState | undefined => {
   Object.entries(aiStateDto.sightings || {}).forEach(([key, s]: [string, any]) => {
     sightings[key] = {
       ...s,
+      factionId: s.factionId || 'unknown',
       lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
       position: deserializeVector3(s.position)
     };

@@ -1,12 +1,11 @@
 import React, { useMemo } from 'react';
 import { EnemySighting } from '../types';
-import { COLORS } from '../data/static';
-import { Color } from 'three';
 
 interface IntelGhostsProps {
   sightings: Record<string, EnemySighting>;
   currentDay: number;
   visibleFleetIds: Set<string>;
+  getFactionColor: (factionId: string) => string;
 }
 
 /**
@@ -18,7 +17,7 @@ interface IntelGhostsProps {
  * - Markers fade out over time based on the age of the sighting.
  * - Purely visual, non-interactive.
  */
-const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, currentDay, visibleFleetIds }) => {
+const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, currentDay, visibleFleetIds, getFactionColor }) => {
   
   const ghosts = useMemo(() => {
     const list: React.ReactElement[] = [];
@@ -42,18 +41,20 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
 
         if (opacity < 0.05) return;
 
+        const color = getFactionColor(sighting.factionId);
+
         list.push(
-            <mesh 
+            <mesh
                 key={sighting.fleetId}
                 position={[sighting.position.x, sighting.position.y, sighting.position.z]}
                 raycast={() => null} // Ignore raycasting (non-clickable)
             >
                 {/* Tetrahedron = Diamond shape, classic radar blip look */}
                 <tetrahedronGeometry args={[0.8, 0]} />
-                <meshBasicMaterial 
-                    color={COLORS.redHighlight} 
-                    transparent 
-                    opacity={opacity} 
+                <meshBasicMaterial
+                    color={color}
+                    transparent
+                    opacity={opacity}
                     wireframe={true} // Wireframe looks more "tech/holographic"
                 />
             </mesh>
@@ -61,7 +62,7 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
     });
 
     return list;
-  }, [sightings, currentDay, visibleFleetIds]);
+  }, [sightings, currentDay, visibleFleetIds, getFactionColor]);
 
   return <group>{ghosts}</group>;
 });

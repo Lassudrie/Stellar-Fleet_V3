@@ -1,5 +1,5 @@
 
-import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -149,7 +149,7 @@ const GameScene: React.FC<GameSceneProps> = ({
   }, [gameState.fleets]);
 
   // Color Helper
-  const getFactionColor = (id: string) => gameState.factions.find(f => f.id === id)?.color || '#999';
+  const getFactionColor = useCallback((id: string) => gameState.factions.find(f => f.id === id)?.color || '#999', [gameState.factions]);
 
   return (
     <div className="absolute inset-0 z-0 bg-black">
@@ -191,10 +191,11 @@ const GameScene: React.FC<GameSceneProps> = ({
                 
                 <TrajectoryRenderer fleets={gameState.fleets} day={gameState.day} playerFactionId={gameState.playerFactionId} />
 
-                <IntelGhosts 
-                    sightings={enemySightings} 
-                    currentDay={gameState.day} 
-                    visibleFleetIds={visibleFleetIds} 
+                <IntelGhosts
+                    sightings={enemySightings}
+                    currentDay={gameState.day}
+                    visibleFleetIds={visibleFleetIds}
+                    getFactionColor={getFactionColor}
                 />
 
                 {gameState.fleets.map(fleet => (
