@@ -19,6 +19,14 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   const logContainerRef = useRef<HTMLDivElement>(null);
   const playerFactionId = gameState.playerFactionId;
 
+  const factionRegistry = useMemo(() => {
+      const registry: Record<string, { name: string; color: string }> = {};
+      gameState.factions?.forEach(faction => {
+          registry[faction.id] = { name: faction.name, color: faction.color };
+      });
+      return registry;
+  }, [gameState.factions]);
+
   // 1. Retrieve the Authoritative Battle Object OR Construct Mock
   const battle = useMemo(() => {
       const realBattle = gameState.battles?.find(b => b.id === battleId);
@@ -50,50 +58,65 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   const stats = useMemo(() => {
       if (!battle) return null;
 
-      // Identify Opponent (The first faction involved that isn't the player)
-      let enemyFactionId = 'red'; // Fallback
+      // Determine sides from battle data
+      let playerSideFactionId = playerFactionId;
+      let enemyFactionId: string | null = null;
+
       if (battle.initialShips && battle.initialShips.length > 0) {
-          const distinctFactions = Array.from(new Set(battle.initialShips.map(s => s.factionId)));
-          const enemy = distinctFactions.find(f => f !== playerFactionId);
-          if (enemy) enemyFactionId = enemy;
+          const factionCounts: Record<string, number> = {};
+          battle.initialShips.forEach(ship => {
+              factionCounts[ship.factionId] = (factionCounts[ship.factionId] || 0) + 1;
+          });
+
+          const playerPresent = battle.initialShips.some(ship => ship.factionId === playerFactionId);
+          playerSideFactionId = playerPresent
+              ? playerFactionId
+              : battle.initialShips[0]?.factionId || playerFactionId;
+
+          const enemyCandidates = Object.entries(factionCounts)
+              .filter(([factionId]) => factionId !== playerSideFactionId)
+              .sort((a, b) => b[1] - a[1]);
+
+          enemyFactionId = enemyCandidates[0]?.[0] || null;
       }
 
       // Prepare result object
-      const result = {
-          blue: { initial: 0, lost: 0, survivors: 0, fleets: [] as string[], composition: {} as any },
-          red: { initial: 0, lost: 0, survivors: 0, fleets: [] as string[], composition: {} as any }
+      const buildSide = (targetFactionId: string | null) => {
+          if (!targetFactionId || !battle.initialShips || !battle.survivorShipIds) {
+              return null;
+          }
+
+          const survivorSet = new Set(battle.survivorShipIds);
+          const snaps = battle.initialShips.filter(s => s.factionId === targetFactionId);
+          const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
+          const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
+
+          const composition: Record<string, { engaged: number; lost: number }> = {};
+          snaps.forEach(s => {
+              if (!composition[s.type]) composition[s.type] = { engaged: 0, lost: 0 };
+              composition[s.type].engaged++;
+              if (!survivorSet.has(s.shipId)) composition[s.type].lost++;
+          });
+
+          const factionMeta = factionRegistry[targetFactionId];
+
+          return {
+              factionId: targetFactionId,
+              name: factionMeta?.name || targetFactionId.toUpperCase(),
+              color: factionMeta?.color || '#94a3b8',
+              initial: snaps.length,
+              lost,
+              survivors: snaps.length - lost,
+              fleets,
+              composition
+          };
       };
 
-      if (battle.initialShips && battle.survivorShipIds) {
-          const survivorSet = new Set(battle.survivorShipIds);
-
-          const processSide = (side: 'blue' | 'red', targetFactionId: string) => {
-              const snaps = battle.initialShips!.filter(s => s.factionId === targetFactionId);
-              const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
-              const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
-              
-              const comp: any = {};
-              snaps.forEach(s => {
-                  if (!comp[s.type]) comp[s.type] = { engaged: 0, lost: 0 };
-                  comp[s.type].engaged++;
-                  if (!survivorSet.has(s.shipId)) comp[s.type].lost++;
-              });
-
-              result[side] = {
-                  initial: snaps.length,
-                  lost,
-                  survivors: snaps.length - lost,
-                  fleets,
-                  composition: comp
-              };
-          };
-
-          processSide('blue', playerFactionId);
-          processSide('red', enemyFactionId);
-      }
-
-      return result;
-  }, [battle, gameState.fleets, playerFactionId]);
+      return {
+          player: buildSide(playerSideFactionId),
+          enemy: buildSide(enemyFactionId)
+      };
+  }, [battle, factionRegistry, playerFactionId]);
 
   useEffect(() => {
       if (logContainerRef.current) {
@@ -120,7 +143,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
         ? (battle.roundsPlayed === 1 ? t('battle.rounds_one') : t('battle.rounds_other', { count: battle.roundsPlayed }))
         : t('battle.finished');
 
-  const renderComposition = (comp: Record<string, { engaged: number, lost: number }>, colorClass: string) => {
+  const renderComposition = (comp: Record<string, { engaged: number, lost: number }>, color: string) => {
       const types = Object.keys(comp).sort();
       if (types.length === 0) return null;
 
@@ -131,7 +154,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
                   return (
                       <React.Fragment key={type}>
                           <div className="text-slate-400 capitalize text-right">{type}</div>
-                          <div className={`${colorClass} font-bold`}>
+                          <div className="font-bold" style={{ color }}>
                              {data.engaged - data.lost} <span className="text-slate-600">/ {data.engaged}</span>
                           </div>
                       </React.Fragment>
@@ -169,43 +192,34 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
 
         {/* STATS OVERVIEW */}
         <div className="grid grid-cols-2 gap-px bg-slate-800 shrink-0">
-            {/* BLUE SIDE (PLAYER) */}
-            <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-blue-600">
-                <div className="text-blue-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.blueForces')}</div>
-                <div className="flex gap-8 text-center mb-1">
-                    <div>
-                        <div className="text-3xl font-black text-white">{stats.blue.survivors}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+            {[stats.player, stats.enemy].map((side, idx) => (
+                <div
+                    key={side?.factionId || `side-${idx}`}
+                    className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4"
+                    style={{ borderColor: side?.color || '#475569' }}
+                >
+                    <div
+                        className="font-bold uppercase tracking-widest text-sm mb-1"
+                        style={{ color: side?.color || '#cbd5e1' }}
+                    >
+                        {side ? t('battle.factionForces', { faction: side.name }) : t('battle.none')}
                     </div>
-                    <div>
-                        <div className="text-3xl font-black text-red-400">-{stats.blue.lost}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                    <div className="flex gap-8 text-center mb-1">
+                        <div>
+                            <div className="text-3xl font-black text-white">{side?.survivors ?? 0}</div>
+                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+                        </div>
+                        <div>
+                            <div className="text-3xl font-black text-red-400">-{side?.lost ?? 0}</div>
+                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                        </div>
                     </div>
-                </div>
-                {renderComposition(stats.blue.composition, 'text-blue-300')}
-                <div className="mt-2 text-xs text-slate-500">
-                    {t('battle.fleets')} {stats.blue.fleets.join(', ') || t('battle.none')}
-                </div>
-            </div>
-
-            {/* RED SIDE (ENEMY) */}
-            <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-red-600">
-                <div className="text-red-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.redForces')}</div>
-                <div className="flex gap-8 text-center mb-1">
-                    <div>
-                        <div className="text-3xl font-black text-white">{stats.red.survivors}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
-                    </div>
-                    <div>
-                        <div className="text-3xl font-black text-red-400">-{stats.red.lost}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                    {side && renderComposition(side.composition, side.color)}
+                    <div className="mt-2 text-xs text-slate-500">
+                        {t('battle.fleets')} {side?.fleets.join(', ') || t('battle.none')}
                     </div>
                 </div>
-                {renderComposition(stats.red.composition, 'text-red-300')}
-                <div className="mt-2 text-xs text-slate-500">
-                     {t('battle.fleets')} {stats.red.fleets.join(', ') || t('battle.none')}
-                </div>
-            </div>
+            ))}
         </div>
 
         {/* COMBAT LOGS */}
