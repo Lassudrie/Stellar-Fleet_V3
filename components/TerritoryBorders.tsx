@@ -111,21 +111,27 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
         return acc;
     }, {});
 
-    const groups = systems.reduce<Record<FactionId, StarSystem[]>>((acc, system) => {
+    type FactionGroup = { id: FactionId; color: string; systems: StarSystem[] };
+
+    const groups = systems.reduce<Map<FactionId, FactionGroup>>((acc, system) => {
         if (!system.ownerFactionId) return acc;
-        const list = acc[system.ownerFactionId] || [];
-        list.push(system);
-        acc[system.ownerFactionId] = list;
+
+        const factionId = system.ownerFactionId;
+        if (!acc.has(factionId)) {
+            const color = factionColors[factionId] || DEFAULT_TERRITORY_COLOR;
+            acc.set(factionId, { id: factionId, color, systems: [] });
+        }
+
+        acc.get(factionId)!.systems.push(system);
         return acc;
-    }, {});
+    }, new Map<FactionId, FactionGroup>());
 
     const resultMeshes: any[] = [];
 
-    Object.entries(groups).forEach(([factionStr, mySystems]) => {
+    groups.forEach(({ id: factionStr, color: factionColor, systems: mySystems }) => {
         if (mySystems.length === 0) return;
 
-        const baseColorHex = factionColors[factionStr] || DEFAULT_TERRITORY_COLOR;
-        const baseColor = new Color(baseColorHex);
+        const baseColor = new Color(factionColor);
         const borderColor = baseColor.clone().lerp(new Color('#ffffff'), 0.25).getStyle();
 
         // Glassy fill color
