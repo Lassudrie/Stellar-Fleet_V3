@@ -195,7 +195,12 @@ export const deserializeGameState = (json: string): GameState => {
     }));
 
     // Fleets
-    const fleets: Fleet[] = dto.fleets.map((f: any) => {
+    const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];
+    if (dto.fleets !== undefined && !Array.isArray(dto.fleets)) {
+      throw new Error("Field 'fleets' must be an array.");
+    }
+
+    const fleets: Fleet[] = fleetsDto.map((f: any) => {
       const ships = f.ships || [];
       const radius = Number.isFinite(f.radius) ? f.radius : computeFleetRadius(ships.length);
 
