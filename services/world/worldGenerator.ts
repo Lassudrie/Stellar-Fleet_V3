@@ -1,7 +1,7 @@
 import { GameState, StarSystem, Fleet, FactionId, ShipType, Army, ArmyState, FleetState, FactionState } from '../../types';
 import { RNG } from '../../engine/rng';
 import { GameScenario } from '../../scenarios/types';
-import { createArmy } from '../../engine/army';
+import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../../engine/army';
 import { createShip } from '../../engine/world';
 import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
@@ -139,6 +139,13 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       // 3. Map Clusters (distinct blobs)
       if (topology === 'cluster') {
           const center = rng.pick(mapClusterCenters);
+          // Safety guard: if no cluster centers exist, fall back to scattered
+          if (!center) {
+              console.warn('[WorldGen] No cluster centers available, falling back to scattered position');
+              const r = Math.sqrt(rng.next()) * radius;
+              const theta = rng.next() * Math.PI * 2;
+              return vec3(Math.cos(theta) * r, rng.range(-5, 5), Math.sin(theta) * r);
+          }
           // Gaussian distribution around center
           const spread = radius * 0.15;
           return vec3(
@@ -283,7 +290,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               // First faction: Pick random non-static system preferably
               const candidates = systems.map((s, i) => ({s, i})).filter(x => !staticNames.has(x.s.name));
               if (candidates.length > 0) {
-                  bestIdx = rng.pick(candidates).i;
+                  const picked = rng.pick(candidates);
+                  bestIdx = picked ? picked.i : rng.int(0, systems.length - 1);
               } else {
                   bestIdx = rng.int(0, systems.length - 1);
               }
@@ -465,13 +473,31 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           } else {
               // Fallback
               const randomSys = rng.pick(systems);
-              position = clone(randomSys.position);
-              sysId = randomSys.id;
+              if (randomSys) {
+                  position = clone(randomSys.position);
+                  sysId = randomSys.id;
+              } else {
+                  console.warn(`[WorldGen] No systems available for fleet spawn, using origin`);
+                  position = vec3(0, 0, 0);
+              }
           }
       } else if (def.spawnLocation === 'random') {
-          const randomSys = rng.pick(systems);
-          position = clone(randomSys.position);
-          sysId = randomSys.id;
+          const ownedSystems = systems.filter(s => s.ownerFactionId === factionId);
+          const neutralSystems = systems.filter(s => !s.ownerFactionId);
+          const candidatePool = ownedSystems.length > 0
+              ? ownedSystems
+              : neutralSystems.length > 0
+              ? neutralSystems
+              : systems;
+
+          const randomSys = rng.pick(candidatePool);
+          if (randomSys) {
+              position = clone(randomSys.position);
+              sysId = randomSys.id;
+          } else {
+              console.warn(`[WorldGen] No systems available for random fleet spawn, using origin`);
+              position = vec3(0, 0, 0);
+          }
       } else {
           // Deep Space Spawn ({x,y,z})
           position = vec3(def.spawnLocation.x, def.spawnLocation.y, def.spawnLocation.z);
@@ -502,7 +528,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               if (ship.type === ShipType.TROOP_TRANSPORT) {
                   const army = createArmy(
                       factionId,
-                      10000,
+                      MIN_ARMY_CREATION_STRENGTH,
                       fleet.id,
                       ArmyState.EMBARKED,
                       rng
@@ -529,7 +555,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           for (let i = 0; i < garrisonCount; i++) {
               const army = createArmy(
                   sys.ownerFactionId,
-                  10000,
+                  MIN_ARMY_CREATION_STRENGTH,
                   sys.id, // Container is System ID
                   ArmyState.DEPLOYED,
                   rng

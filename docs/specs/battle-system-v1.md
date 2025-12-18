@@ -10,18 +10,18 @@ Le Battle System V1 remplace la résolution instantanée par une simulation dét
 
 ## 2. Cycle de Vie d'une Bataille
 
-### Phase A : Détection (Fin du Tour N)
+### Phase A : Détection (Tour N)
 1.  Après tous les mouvements, le moteur scanne chaque système.
 2.  Si des flottes **BLUE** et **RED** sont présentes dans le rayon de capture (`CAPTURE_RANGE`).
-3.  Une entité `Battle` est créée avec le statut `scheduled`.
+3.  Une entité `Battle` est créée avec le statut `scheduled` et `turnCreated = turn`.
 4.  Les flottes concernées passent en état `COMBAT`.
 5.  **Note Importante** : Si un système contient déjà une bataille *active* (statut `scheduled` ou `resolving`), aucune nouvelle bataille n'est créée. Cependant, si une bataille passée est `resolved`, elle ne bloque pas la détection d'un nouveau conflit si des ennemis sont toujours présents au tour suivant.
 
-### Phase B : Résolution (Début du Tour N+1)
-1.  Avant toute action joueur/IA, les batailles `scheduled` sont résolues.
+### Phase B : Résolution (Tour N)
+1.  Les batailles `scheduled` sont résolues immédiatement dans le même tour.
 2.  La résolution est atomique (instantanée du point de vue CPU) mais simule plusieurs "Rounds" tactiques.
 3.  Une `seed` spécifique est générée pour chaque bataille (`hash(battleId + turn)`) pour garantir l'isolation RNG.
-4.  À la fin de la résolution, `turnResolved` est défini à `state.day`.
+4.  À la fin de la résolution, `turnResolved` est défini au tour courant (`turn`).
 
 ### Phase C : Application & Nettoyage
 1.  Les dégâts sont appliqués aux flottes persistantes.
@@ -32,7 +32,7 @@ Le Battle System V1 remplace la résolution instantanée par une simulation dét
 
 ## 3. Algorithme de Résolution (Par Round)
 
-La bataille dure **4 Rounds** fixes (sauf si un camp est anéanti avant).
+La bataille dure **6 Rounds** fixes (sauf si un camp est anéanti avant).
 
 ### 3.1. Phase de Ciblage (Targeting)
 Chaque vaisseau sélectionne une cible ennemie.
@@ -41,14 +41,14 @@ Chaque vaisseau sélectionne une cible ennemie.
 
 ### 3.2. Phase de Manœuvre
 *   Ajustement du `FireControlLock` (Bonus de précision).
-*   Si le vaisseau a une cible : +25% de Lock/round.
+*   Si le vaisseau a une cible : +35% de Lock/round.
 *   Si pas de cible : Dégradation du Lock.
 
 ### 3.3. Phase de Lancement (Launch)
 Les vaisseaux tirent leurs munitions limitées.
 *   **Torpilles** : Dégâts élevés, lents (`ETA = 3 rounds`). Prioritaire.
 *   **Missiles** : Dégâts moyens, rapides (`ETA = 2 rounds`). Saturation.
-*   **Limite** : Max 2 projectiles par vaisseau par round (Burst).
+*   **Limite** : Max 3 projectiles par vaisseau par round (Burst).
 
 ### 3.4. Phase d'Interception (Soft Kill)
 Les missiles en vol (ETA 0 ou 1) peuvent être interceptés par des contre-mesures.

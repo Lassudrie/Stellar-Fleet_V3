@@ -51,19 +51,24 @@ Pour capturer ou défendre un système :
 2.  L'ordre `UNLOAD_ARMY` doit être donné pour débarquer l'armée sur la planète (`ArmyState.DEPLOYED`).
 3.  Conditions de débarquement :
     *   Pas de bataille spatiale active dans le système.
-    *   Pas de flotte ennemie en orbite immédiate (Suprématie orbitale locale requise pour le drop).
+    *   Le débarquement est autorisé même en orbite contestée : les transports risquent alors d'être détruits avant de pouvoir déposer les troupes.
+    *   La supériorité orbitale réduit ce risque sans la supprimer.
 
 ### 6.2. Résolution du Conflit Terrestre
-À la fin du tour, si des armées de factions opposées sont présentes au sol (State `DEPLOYED`) :
-1.  **Comparaison de Puissance** : Somme des effectifs (`strength`) de chaque camp.
-2.  **Vainqueur** : Le camp avec la puissance la plus élevée gagne.
-3.  **Anéantissement** : Le camp perdant est totalement détruit.
-4.  **Attrition** : Le vainqueur subit des pertes proportionnelles à la force ennemie vaincue (Logic: 1 armée perdue pour chaque 20k effectifs ennemis).
+À la fin du tour, si des armées de factions opposées sont présentes au sol (`ArmyState.DEPLOYED`) :
+1.  **Puissance pondérée par la morale** : chaque armée contribue `puissance = strength × facteur_morale`, où le facteur de morale est borné (clamp) pour rester dans des bornes stables, sans pouvoir descendre sous le plancher ni dépasser le plafond.
+2.  **Attrition proportionnelle** : chaque camp subit des pertes proportionnelles à la pression adverse avec un plafond de pourcentage de pertes par tour. Les pertes s'appliquent à toutes les armées du camp ; la morale est également réduite en fonction de la fraction de pertes.
+3.  **Seuil de destruction** : toute armée dont la `strength` tombe sous `ARMY_DESTROY_THRESHOLD(maxStrength)` est supprimée. Les armées restantes doivent aussi rester au‑dessus du minimum de création (`MIN_ARMY_CREATION_STRENGTH`) pour être considérées comme survivantes.
+4.  **Issues possibles** :
+    *   Victoire d'un camp (l'autre n'a plus d'armées au‑dessus du seuil).
+    *   `draw` si les deux camps conservent des armées encore valides.
+    *   Destruction mutuelle si plus aucune armée ne dépasse le seuil.
+5.  **Logs et effet réel** : les journaux indiquent la puissance engagée, les pertes appliquées et le nombre d'unités détruites, reflétant exactement l'attrition calculée en jeu.
 
 ### 6.3. Changement de Propriétaire
 Le système change de couleur et d'owner si :
-1.  Une faction a gagné le combat au sol (ou est seule présente).
-2.  **Règle de Contestation Orbitale** : Si des flottes ennemies sont toujours présentes en orbite (même sans troupes), le drapeau ne change pas ("Contested"). Il faut nettoyer l'orbite ET le sol pour sécuriser la conquête.
+1.  Une faction a gagné le combat au sol (ou est seule présente) et conserve au moins une armée au‑dessus des seuils de destruction.
+2.  **Règle de Contestation Orbitale** : la capture est bloquée s'il existe une orbite contestée (`isOrbitContested`) dans la portée de capture, même après une victoire terrestre. Il faut nettoyer l'orbite ET le sol pour sécuriser la conquête.
 
 ## 7. Conditions de Victoire
 La partie s'arrête si :

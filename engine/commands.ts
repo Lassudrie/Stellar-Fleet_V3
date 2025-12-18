@@ -1,9 +1,54 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState } from '../types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry } from '../types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
+import { computeUnloadOps } from './armyOps';
+import { isOrbitContested } from './conquest';
+
+const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
+const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
+
+const applyContestedUnloadRisk = (
+    armies: Army[],
+    targetArmyId: string,
+    systemName: string,
+    day: number,
+    rng: RNG
+): { armies: Army[]; logs: LogEntry[] } => {
+    const roll = rng.next();
+    const success = roll >= CONTESTED_UNLOAD_FAILURE_THRESHOLD;
+    const logs: LogEntry[] = [];
+
+    if (!success) {
+        let appliedLoss = 0;
+        const updatedArmies = armies.map(army => {
+            if (army.id !== targetArmyId) return army;
+            const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION));
+            appliedLoss = strengthLoss;
+            return { ...army, strength: Math.max(0, army.strength - strengthLoss) };
+        });
+
+        logs.push({
+            id: rng.id('log'),
+            day,
+            text: `Dropships took fire while unloading army ${targetArmyId} at ${systemName}, losing ${appliedLoss} strength.`,
+            type: 'combat'
+        });
+
+        return { armies: updatedArmies, logs };
+    }
+
+    logs.push({
+        id: rng.id('log'),
+        day,
+        text: `Army ${targetArmyId} dodged enemy fire while unloading at ${systemName}.`,
+        type: 'combat'
+    });
+
+    return { armies, logs };
+};
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string }
@@ -176,37 +221,37 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const validArmy = army.state === ArmyState.EMBARKED && army.containerId === fleet.id && army.factionId === fleet.factionId;
             if (!validArmy) return state;
 
-            const updatedFleet = {
-                ...fleet,
-                ships: fleet.ships.map(s => {
-                    if (s.id !== command.shipId) return s;
-                    if (s.carriedArmyId !== command.armyId) return s;
-                    return { ...s, carriedArmyId: null };
-                })
-            };
+            const contested = isOrbitContested(system, state);
 
-            const updatedArmies = state.armies.map(a => {
-                if (a.id !== command.armyId) return a;
-
-                return {
-                    ...a,
-                    state: ArmyState.DEPLOYED,
-                    containerId: system.id
-                };
+            const unloadResult = computeUnloadOps({
+                fleet,
+                system,
+                armies: state.armies,
+                day: state.day,
+                rng,
+                fleetLabel: fleet.id,
+                allowedArmyIds: new Set([command.armyId]),
+                allowedShipIds: new Set([command.shipId]),
+                logText: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`
             });
 
-            const newLog = {
-                id: rng.id('log'),
-                day: state.day,
-                text: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`,
-                type: 'move' as const
-            };
+            if (unloadResult.count === 0) return state;
+
+            const riskOutcome = contested
+                ? applyContestedUnloadRisk(
+                      unloadResult.armies,
+                      command.armyId,
+                      system.name,
+                      state.day,
+                      rng
+                  )
+                : { armies: unloadResult.armies, logs: [] };
 
             return {
                 ...state,
-                fleets: state.fleets.map(f => (f.id === fleet.id ? updatedFleet : f)),
-                armies: updatedArmies,
-                logs: [...state.logs, newLog]
+                fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
+                armies: riskOutcome.armies,
+                logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
             };
         }
 

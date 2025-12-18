@@ -23,6 +23,8 @@ export const fr = {
   'scenario.back': 'Retour Menu',
   'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
   'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
+  'scenario.spiral_convergence.title': 'Convergence Spiralée',
+  'scenario.spiral_convergence.desc': 'Des coalitions rivales se dirigent vers le noyau galactique le long d\'un bras spiral, en combinant expansion et invasions au sol.',
 
   // New Game Screen
   'newgame.title': 'Nouvelle Simulation',
@@ -77,6 +79,8 @@ export const fr = {
   'ctx.attack': 'Attaquer',
   'ctx.load': 'Charger les armées',
   'ctx.unload': 'Décharger les armées',
+  'ctx.losses': 'Pertes',
+  'ctx.morale': 'Moral',
   'ctx.cancel': 'Annuler',
 
   // Fleet Picker
@@ -130,6 +134,7 @@ export const fr = {
   'battle.rounds_other': '{{count}} ROUNDS',
   'battle.finished': 'TERMINE',
   'battle.victory': 'VICTOIRE {{winner}}',
+  'battle.defeat': 'DEFAITE',
   'battle.draw': 'EGALITE',
   'battle.unknown': 'RESULTAT INCONNU',
   'battle.close': 'Fermer Rapport',

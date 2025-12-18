@@ -23,6 +23,8 @@ export const en = {
   'scenario.back': 'Back to Menu',
   'scenario.conquest_sandbox.title': 'Conquest Sandbox',
   'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
+  'scenario.spiral_convergence.title': 'Spiral Convergence',
+  'scenario.spiral_convergence.desc': 'Opposing coalitions push toward the galactic core along a spiral arm, balancing expansion with ground invasions.',
 
   // New Game Screen
   'newgame.title': 'New Simulation',
@@ -77,6 +79,8 @@ export const en = {
   'ctx.attack': 'Attack',
   'ctx.load': 'Load armies',
   'ctx.unload': 'Unload armies',
+  'ctx.losses': 'Losses',
+  'ctx.morale': 'Morale',
   'ctx.cancel': 'Cancel',
 
   // Fleet Picker
@@ -130,6 +134,7 @@ export const en = {
   'battle.rounds_other': '{{count}} ROUNDS',
   'battle.finished': 'FINISHED',
   'battle.victory': '{{winner}} VICTORY',
+  'battle.defeat': 'DEFEAT',
   'battle.draw': 'DRAW',
   'battle.unknown': 'RESULT UNKNOWN',
   'battle.close': 'Close Report',

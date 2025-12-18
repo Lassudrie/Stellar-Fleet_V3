@@ -4,21 +4,26 @@ import { RNG } from '../../engine/rng';
 import { SHIP_STATS } from '../../data/static';
 import { BattleShipState, Projectile } from './types';
 import { selectTarget } from './targeting';
-import { 
-  MAX_ROUNDS, ETA_MISSILE, ETA_TORPEDO, 
+import {
+  MAX_ROUNDS, ETA_MISSILE, ETA_TORPEDO,
   BASE_ACCURACY, LOCK_GAIN_PER_ROUND, MAX_LAUNCH_PER_ROUND,
-  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP 
+  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
 
+const SURVIVOR_ATTRITION_RATIO = 0.1;
+const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
+
 // --- HELPERS ---
 
-const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId): BattleShipState => {
+const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId): BattleShipState | null => {
   if (!ship || !ship.type) {
-      throw new Error(`Invalid ship passed to createBattleShip: ${JSON.stringify(ship)}`);
+      console.error(`[Battle] Invalid ship passed to createBattleShip: ${JSON.stringify(ship)}. Skipping.`);
+      return null;
   }
   const stats = SHIP_STATS[ship.type];
   if (!stats) {
+       console.warn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
        return {
             shipId: ship.id,
             fleetId,
@@ -58,7 +63,11 @@ const short = (id: string) => id.split('_').pop()?.toUpperCase() || '???';
 // --- RESOLVER ---
 
 // Optimization: Removed unused masterRng param. The battle creates its own isolated RNG.
-export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
+export const resolveBattle = (
+  battle: Battle,
+  state: GameState,
+  turn: number
+): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
@@ -81,7 +90,13 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
   involvedFleets.forEach(f => {
     f.ships.forEach(s => {
       if (s && s.type) {
-        // Snapshot
+        // State - create battle ship first to validate
+        const bs = createBattleShip(s, f.id, f.factionId);
+        if (!bs) {
+          // Skip invalid ships - already logged in createBattleShip
+          return;
+        }
+        // Snapshot (only if ship is valid)
         initialShips.push({
             shipId: s.id,
             fleetId: f.id,
@@ -90,8 +105,6 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
             maxHp: s.maxHp,
             startingHp: s.hp
         });
-        // State
-        const bs = createBattleShip(s, f.id, f.factionId);
         battleShips.push(bs);
         shipMap.set(s.id, bs);
       }
@@ -101,6 +114,27 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
   // Deterministic Sort of snapshot and logic array
   initialShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
   battleShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
+
+  // Safety guard: if no valid ships, return early with a draw
+  if (battleShips.length === 0) {
+    console.warn(`[Battle] No valid ships in battle ${battle.id}. Resolving as draw.`);
+    return {
+      updatedBattle: {
+        ...battle,
+        turnResolved: turn,
+        status: 'resolved',
+        initialShips: [],
+        logs: [...battle.logs, 'Battle resolved as draw - no valid combatants.'],
+        winnerFactionId: 'draw',
+        roundsPlayed: 0,
+        shipsLost: {},
+        survivorShipIds: [],
+        missilesIntercepted: 0,
+        projectilesDestroyedByPd: 0
+      },
+      survivingFleets: involvedFleets // Return fleets unchanged
+    };
+  }
 
   const projectiles: Projectile[] = [];
   const logs: string[] = [];
@@ -337,23 +371,74 @@ export const resolveBattle = (battle: Battle, state: GameState): { updatedBattle
             ...oldFleet,
             ships: newShips,
             state: FleetState.ORBIT,
-            stateStartTurn: state.day // Correctly update state timestamp to current turn
+            stateStartTurn: turn // Correctly update state timestamp to current turn
         });
         survivingFleets.push(updatedFleet);
     }
   });
+
+  // Apply post-battle attrition so survivors need repairs before returning to duty
+  const attritionLogs: string[] = [];
+  const adjustedSurvivorIds: string[] = [];
+  const attritionAdjustedFleets: Fleet[] = [];
+
+  survivingFleets.forEach(fleet => {
+    const penalizedShips: ShipEntity[] = [];
+
+    fleet.ships.forEach(ship => {
+      const attritionDamage = Math.max(
+        Math.floor(ship.maxHp * SURVIVOR_ATTRITION_RATIO),
+        SURVIVOR_MIN_POST_BATTLE_DAMAGE
+      );
+      const remainingHp = Math.max(0, ship.hp - attritionDamage);
+      const battleState = shipMap.get(ship.id);
+
+      if (battleState) {
+        battleState.currentHp = remainingHp;
+      }
+
+      if (remainingHp > 0) {
+        penalizedShips.push({ ...ship, hp: remainingHp });
+        adjustedSurvivorIds.push(ship.id);
+        attritionLogs.push(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`);
+      } else {
+        attritionLogs.push(`xx ${short(ship.id)} was lost to post-battle failures.`);
+      }
+    });
+
+    if (penalizedShips.length > 0) {
+      attritionAdjustedFleets.push(
+        withUpdatedFleetDerived({ ...fleet, ships: penalizedShips, stateStartTurn: turn })
+      );
+    }
+  });
+
+  survivorShipIds.length = 0;
+  survivorShipIds.push(...adjustedSurvivorIds);
+
+  survivingFleets.length = 0;
+  survivingFleets.push(...attritionAdjustedFleets);
+
+  logs.push(...attritionLogs);
 
   const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
   battleShips.forEach(s => {
       if (s.currentHp <= 0) shipsLost[s.faction]++;
   });
 
+  // Ensure winnerFactionId is a valid type (FactionId | 'draw' | undefined)
+  const validWinnerFactionId: FactionId | 'draw' | undefined = 
+      winnerFactionId === 'blue' || winnerFactionId === 'red' || winnerFactionId === 'draw' 
+          ? winnerFactionId 
+          : undefined;
+
   const updatedBattle: Battle = {
       ...battle,
+      turnResolved: turn,
       status: 'resolved',
       initialShips: initialShips,
-      logs: logs,
-      winnerFactionId: winnerFactionId as any,
+      logs: [...battle.logs, ...logs],
+      winnerFactionId: validWinnerFactionId,
       roundsPlayed,
       shipsLost,
       survivorShipIds, // Store survivor list

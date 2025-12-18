@@ -1,14 +1,30 @@
 
-import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity, ShipType } from '../../types';
+import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity } from '../../types';
 import { RNG } from '../../engine/rng';
 import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../../engine/idUtils';
 import { sub, len, normalize, scale, add, clone } from '../../engine/math/vec3';
+import { computeLoadOps, computeUnloadOps } from '../../engine/armyOps';
 
 export interface ArmyUpdate {
     id: string;
     changes: Partial<Army>;
 }
+
+const computeArmyUpdates = (previous: Army[], next: Army[]): ArmyUpdate[] => {
+    return next.reduce<ArmyUpdate[]>((updates, army, index) => {
+        const before = previous[index];
+        if (before === army) return updates;
+
+        const changes: Partial<Army> = {};
+        if (before.state !== army.state) changes.state = army.state;
+        if (before.containerId !== army.containerId) changes.containerId = army.containerId;
+
+        if (Object.keys(changes).length === 0) return updates;
+        updates.push({ id: army.id, changes });
+        return updates;
+    }, []);
+};
 
 export interface FleetMovementResult {
     nextFleet: Fleet;
@@ -24,13 +40,14 @@ export const resolveFleetMovement = (
   day: number,
   rng: RNG
 ): FleetMovementResult => {
-  
+
   const generatedLogs: LogEntry[] = [];
-  const armyUpdates: ArmyUpdate[] = [];
-  
+  let armiesAfterOps: Army[] = allArmies;
+
   // Default: Next fleet is current fleet (reference)
   // If we modify it, we will clone it.
   let nextFleet: Fleet = fleet;
+  let currentFleet: Fleet = fleet;
 
   // 1. Handle MOVING state
   if (fleet.state === FleetState.MOVING && fleet.targetPosition) {
@@ -56,6 +73,7 @@ export const resolveFleetMovement = (
           loadTargetSystemId: null,
           unloadTargetSystemId: null
       };
+      currentFleet = nextFleet;
 
       const arrivedSystemId = fleet.targetSystemId;
 
@@ -69,82 +87,43 @@ export const resolveFleetMovement = (
             type: 'move'
           });
 
-          let nextShips = [...nextFleet.ships];
           let shipsChanged = false;
-          const embarkedArmies = allArmies.filter(a =>
-              a.containerId === fleet.id &&
-              a.state === ArmyState.EMBARKED
-          );
 
           // --- AUTO UNLOAD (ALLIED SYSTEMS) ---
           if (fleet.unloadTargetSystemId === arrivedSystemId && sys.ownerFactionId === fleet.factionId) {
-              let unloadedCount = 0;
-
-              embarkedArmies.forEach(army => {
-                  const shipIndex = nextShips.findIndex(s => s.carriedArmyId === army.id);
-                  if (shipIndex !== -1) {
-                      nextShips[shipIndex] = { ...nextShips[shipIndex], carriedArmyId: null } as ShipEntity;
-                      shipsChanged = true;
-                      unloadedCount++;
-
-                      armyUpdates.push({
-                          id: army.id,
-                          changes: {
-                              state: ArmyState.DEPLOYED,
-                              containerId: sys.id
-                          }
-                      });
-                  }
+              const unloadResult = computeUnloadOps({
+                  fleet: currentFleet,
+                  system: sys,
+                  armies: armiesAfterOps,
+                  day,
+                  rng,
+                  fleetLabel: shortId(fleet.id)
               });
 
-              if (unloadedCount > 0) {
-                  generatedLogs.push({
-                      id: rng.id('log'),
-                      day,
-                      text: `Fleet ${shortId(fleet.id)} unloaded ${unloadedCount} armies at ${sys.name}.`,
-                      type: 'move'
-                  });
+              if (unloadResult.count > 0) {
+                  generatedLogs.push(...unloadResult.logs);
+                  currentFleet = unloadResult.fleet;
+                  armiesAfterOps = unloadResult.armies;
+                  shipsChanged = true;
               }
           }
 
           // --- AUTO LOAD (ALLY ARMIES) ---
           if (fleet.loadTargetSystemId === arrivedSystemId) {
-              const availableArmies = allArmies.filter(a =>
-                  a.containerId === sys.id &&
-                  a.factionId === fleet.factionId &&
-                  a.state === ArmyState.DEPLOYED
-              );
+              const loadResult = computeLoadOps({
+                  fleet: currentFleet,
+                  system: sys,
+                  armies: armiesAfterOps,
+                  day,
+                  rng,
+                  fleetLabel: shortId(fleet.id)
+              });
 
-              let loadedCount = 0;
-
-              for (const army of availableArmies) {
-                  const shipIndex = nextShips.findIndex(s =>
-                      s.type === ShipType.TROOP_TRANSPORT &&
-                      !s.carriedArmyId
-                  );
-
-                  if (shipIndex === -1) break;
-
-                  nextShips[shipIndex] = { ...nextShips[shipIndex], carriedArmyId: army.id } as ShipEntity;
+              if (loadResult.count > 0) {
+                  generatedLogs.push(...loadResult.logs);
+                  currentFleet = loadResult.fleet;
+                  armiesAfterOps = loadResult.armies;
                   shipsChanged = true;
-                  loadedCount++;
-
-                  armyUpdates.push({
-                      id: army.id,
-                      changes: {
-                          state: ArmyState.EMBARKED,
-                          containerId: fleet.id
-                      }
-                  });
-              }
-
-              if (loadedCount > 0) {
-                  generatedLogs.push({
-                      id: rng.id('log'),
-                      day,
-                      text: `Fleet ${shortId(fleet.id)} loaded ${loadedCount} armies at ${sys.name}.`,
-                      type: 'move'
-                  });
               }
           }
 
@@ -152,31 +131,31 @@ export const resolveFleetMovement = (
           if (fleet.invasionTargetSystemId === arrivedSystemId) {
               let deployedCount = 0;
 
-              embarkedArmies.forEach(army => {
-                  // Find the ship carrying this army in the NEW ships array
-                  const carrierShipIndex = nextShips.findIndex(s => s.carriedArmyId === army.id);
-                  
-                  if (carrierShipIndex !== -1) {
-                      // EXECUTE DEPLOYMENT
-                      
-                      // 1. Update Army
-                      armyUpdates.push({
-                          id: army.id,
-                          changes: {
-                              state: ArmyState.DEPLOYED,
-                              containerId: sys.id
-                          }
-                      });
+              const updatedArmies = armiesAfterOps.map(army => {
+                  if (army.containerId !== fleet.id) return army;
+                  if (army.state !== ArmyState.EMBARKED) return army;
+                  const carrierShipIndex = currentFleet.ships.findIndex(s => s.carriedArmyId === army.id);
+                  if (carrierShipIndex === -1) return army;
 
-                      // 2. Update Ship (Unload)
-                      nextShips[carrierShipIndex] = {
-                          ...nextShips[carrierShipIndex],
-                          carriedArmyId: null
-                      };
-                      shipsChanged = true;
-                      deployedCount++;
-                  }
+                  currentFleet = {
+                      ...currentFleet,
+                      ships: currentFleet.ships.map((ship, index) => {
+                          if (index !== carrierShipIndex) return ship as ShipEntity;
+                          if (ship.carriedArmyId !== army.id) return ship as ShipEntity;
+                          shipsChanged = true;
+                          return { ...ship, carriedArmyId: null } as ShipEntity;
+                      })
+                  };
+
+                  deployedCount++;
+                  return {
+                      ...army,
+                      state: ArmyState.DEPLOYED,
+                      containerId: sys.id
+                  };
               });
+
+              armiesAfterOps = updatedArmies;
 
               if (deployedCount > 0) {
                   generatedLogs.push({
@@ -189,7 +168,7 @@ export const resolveFleetMovement = (
           }
 
           if (shipsChanged) {
-              nextFleet = { ...nextFleet, ships: nextShips };
+              nextFleet = currentFleet;
           }
         }
       }
@@ -207,5 +186,5 @@ export const resolveFleetMovement = (
     }
   }
   
-  return { nextFleet, logs: generatedLogs, armyUpdates };
+  return { nextFleet, logs: generatedLogs, armyUpdates: computeArmyUpdates(allArmies, armiesAfterOps) };
 };

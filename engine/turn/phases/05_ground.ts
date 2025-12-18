@@ -1,5 +1,5 @@
 
-import { GameState, FactionId, AIState } from '../../../types';
+import { GameState, FactionId, AIState, Army } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
@@ -20,25 +20,33 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     const holdUpdates: Record<FactionId, string[]> = {};
-    
+
     // Track armies to remove (destroyed)
     const armiesToDestroyIds = new Set<string>();
+
+    // Track strength/morale updates for surviving armies
+    const armyUpdatesMap = new Map<string, { strength: number; morale: number }>();
     
     // 1. Resolve Conflict per System
     nextSystems = nextSystems.map(system => {
         // Pure calculation based on current state
         const result = resolveGroundConflict(system, state);
-        
+
         if (!result) return system;
-        
+
         // Queue destroyed armies
         result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+
+        // Queue army stat updates
+        result.armyUpdates.forEach(update => {
+            armyUpdatesMap.set(update.armyId, { strength: update.strength, morale: update.morale });
+        });
         
         // Add Logs
         result.logs.forEach(txt => {
             nextLogs.push({
                 id: ctx.rng.id('log'),
-                day: state.day,
+                day: ctx.turn,
                 text: txt,
                 type: 'combat'
             });
@@ -53,21 +61,28 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 holdUpdates[result.winnerFactionId].push(system.id);
             }
 
+            const winnerColor = state.factions.find(faction => faction.id === result.winnerFactionId)?.color ?? system.color ?? COLORS.star;
+
             return {
                 ...system,
                 ownerFactionId: result.winnerFactionId,
-                color: result.winnerFactionId === 'blue' ? COLORS.blue : COLORS.red
+                color: winnerColor
             };
         }
         
         return system;
     });
 
-    // 2. Filter Destroyed Armies
-    let nextArmies = state.armies;
-    if (armiesToDestroyIds.size > 0) {
-        nextArmies = state.armies.filter(a => !armiesToDestroyIds.has(a.id));
-    }
+    // 2. Apply accumulated updates then filter destroyed armies
+    const patchedArmies = state.armies.map(army => {
+        const pending = armyUpdatesMap.get(army.id);
+
+        if (!pending) return army;
+
+        return { ...army, strength: pending.strength, morale: pending.morale };
+    });
+
+    const nextArmies: Army[] = patchedArmies.filter(army => !armiesToDestroyIds.has(army.id));
 
     if (Object.keys(holdUpdates).length > 0) {
         nextAiStates = { ...nextAiStates };
@@ -80,7 +95,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 holdUntilTurnBySystemId: {
                     ...existingState.holdUntilTurnBySystemId,
                     ...systemIds.reduce<Record<string, number>>((acc, systemId) => {
-                        acc[systemId] = state.day + AI_HOLD_TURNS;
+                        acc[systemId] = ctx.turn + AI_HOLD_TURNS;
                         return acc;
                     }, {})
                 }

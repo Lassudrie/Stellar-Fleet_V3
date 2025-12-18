@@ -2,7 +2,8 @@
 import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
 import { RNG } from './rng';
 
-export const MIN_ARMY_STRENGTH = 10000;
+export const MIN_ARMY_CREATION_STRENGTH = 10000;
+export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
 
 /**
  * Creates a new Army entity.
@@ -24,8 +25,8 @@ export const createArmy = (
 ): Army | null => {
   
   // Rule Check: Minimum Strength
-  if (strength < MIN_ARMY_STRENGTH) {
-    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_STRENGTH}.`);
+  if (strength < MIN_ARMY_CREATION_STRENGTH) {
+    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
     return null;
   }
 
@@ -39,6 +40,8 @@ export const createArmy = (
     id: rng.id('army'),
     factionId,
     strength: Math.floor(strength), // Ensure integer
+    maxStrength: Math.floor(strength),
+    morale: 1,
     state: initialState,
     containerId
   };
@@ -53,7 +56,7 @@ export const createArmy = (
  */
 export const validateArmyState = (army: Army, state: GameState): boolean => {
   // 1. Strength Integrity
-  if (army.strength < MIN_ARMY_STRENGTH) {
+  if (army.maxStrength < MIN_ARMY_CREATION_STRENGTH) {
     // console.warn(`[Army] Invalid Strength: Army ${army.id} has ${army.strength} soldiers.`);
     return false;
   }
@@ -137,12 +140,117 @@ export const sanitizeArmies = (state: GameState): { armies: Army[], logs: string
             }
         }
 
+        // Check C: Destruction threshold
+        if (isValid) {
+            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+            if (army.strength <= destructionThreshold) {
+                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
+                isValid = false;
+            }
+        }
+
         if (isValid) {
             validArmies.push(army);
         }
     }
 
     return { armies: validArmies, logs };
+};
+
+export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: string[] } => {
+    const logs: string[] = [];
+
+    const fleets: Fleet[] = state.fleets.map(fleet => ({
+        ...fleet,
+        ships: fleet.ships.map(ship => ({ ...ship }))
+    }));
+
+    const armies: Army[] = state.armies.map(army => ({ ...army }));
+    const armiesById = new Map(armies.map(army => [army.id, army]));
+
+    fleets.forEach(fleet => {
+        fleet.ships.forEach(ship => {
+            const armyId = ship.carriedArmyId;
+            if (!armyId) return;
+
+            if (!armiesById.has(armyId)) {
+                logs.push(`Ship ${ship.id} (${fleet.id}) cleared reference to missing army ${armyId}.`);
+                ship.carriedArmyId = null;
+            }
+        });
+    });
+
+    const carrierMap = new Map<string, { ship: ShipEntity; fleetId: string }[]>();
+
+    fleets.forEach(fleet => {
+        fleet.ships.forEach(ship => {
+            if (!ship.carriedArmyId) return;
+            const carriers = carrierMap.get(ship.carriedArmyId) || [];
+            carriers.push({ ship, fleetId: fleet.id });
+            carrierMap.set(ship.carriedArmyId, carriers);
+        });
+    });
+
+    carrierMap.forEach((carriers, armyId) => {
+        if (carriers.length <= 1) return;
+
+        carriers.sort((a, b) => a.ship.id.localeCompare(b.ship.id));
+        const [canonical, ...duplicates] = carriers;
+        duplicates.forEach(({ ship, fleetId }) => {
+            ship.carriedArmyId = null;
+            logs.push(`Ship ${ship.id} (${fleetId}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.ship.id} (${canonical.fleetId}).`);
+        });
+        carrierMap.set(armyId, [canonical]);
+    });
+
+    const sanitizedArmies: Army[] = [];
+    const validationState: GameState = { ...state, fleets, armies };
+
+    for (const army of armies) {
+        let isValid = true;
+
+        if (!validateArmyState(army, validationState)) {
+            logs.push(`Army ${army.id} failed validation (missing container or location). Removed.`);
+            isValid = false;
+        }
+
+        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
+            const carriers = carrierMap.get(army.id);
+            if (!carriers || carriers.length === 0) {
+                logs.push(`Army ${army.id} had no transport ship. Removed to restore consistency.`);
+                isValid = false;
+            }
+        }
+
+        if (isValid) {
+            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+            if (army.strength <= destructionThreshold) {
+                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            const carriers = carrierMap.get(army.id) || [];
+            carriers.forEach(({ ship }) => {
+                if (ship.carriedArmyId === army.id) {
+                    ship.carriedArmyId = null;
+                }
+            });
+            continue;
+        }
+
+        sanitizedArmies.push(army);
+    }
+
+    return {
+        state: {
+            ...state,
+            fleets,
+            armies: sanitizedArmies
+        },
+        logs
+    };
 };
 
 // --- TRANSPORT LOGIC ---
