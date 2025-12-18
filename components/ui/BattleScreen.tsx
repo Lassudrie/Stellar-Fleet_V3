@@ -54,49 +54,78 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   }, [gameState.factions]);
 
   const stats = useMemo(() => {
-      if (!battle || !battle.initialShips) return null;
+      if (!battle) return null;
 
-      const survivorSet = new Set(battle.survivorShipIds || []);
-      const grouped = new Map<FactionId, BattleShipSnapshot[]>();
+      if (battle.initialShips && battle.initialShips.length > 0) {
+          const survivorSet = new Set(battle.survivorShipIds || []);
+          const grouped = new Map<FactionId, BattleShipSnapshot[]>();
 
-      battle.initialShips.forEach(snap => {
-          if (!grouped.has(snap.factionId)) grouped.set(snap.factionId, []);
-          grouped.get(snap.factionId)!.push(snap);
-      });
-
-      const factionStats = Array.from(grouped.entries()).map(([factionId, snaps]) => {
-          const faction = factionLookup.get(factionId);
-          const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
-          const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
-
-          const composition: Record<string, { engaged: number; lost: number }> = {};
-          snaps.forEach(s => {
-              if (!composition[s.type]) composition[s.type] = { engaged: 0, lost: 0 };
-              composition[s.type].engaged++;
-              if (!survivorSet.has(s.shipId)) composition[s.type].lost++;
+          battle.initialShips.forEach(snap => {
+              if (!grouped.has(snap.factionId)) grouped.set(snap.factionId, []);
+              grouped.get(snap.factionId)!.push(snap);
           });
 
+          const factionStats = Array.from(grouped.entries()).map(([factionId, snaps]) => {
+              const faction = factionLookup.get(factionId);
+              const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
+              const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
+
+              const composition: Record<string, { engaged: number; lost: number }> = {};
+              snaps.forEach(s => {
+                  if (!composition[s.type]) composition[s.type] = { engaged: 0, lost: 0 };
+                  composition[s.type].engaged++;
+                  if (!survivorSet.has(s.shipId)) composition[s.type].lost++;
+              });
+
+              return {
+                  factionId,
+                  factionName: faction?.name || factionId.toUpperCase(),
+                  color: faction?.color || '#38bdf8',
+                  initial: snaps.length,
+                  lost,
+                  survivors: snaps.length - lost,
+                  fleets,
+                  composition,
+              };
+          });
+
+          const ordered = factionStats.sort((a, b) => b.initial - a.initial);
+          const playerEntry = ordered.find(s => s.factionId === playerFactionId);
+          const enemyEntry = ordered.find(s => s.factionId !== playerFactionId);
+          const rest = ordered.filter(s => s !== playerEntry && s !== enemyEntry);
+
+          return playerEntry || enemyEntry
+              ? [playerEntry, enemyEntry, ...rest].filter(Boolean) as typeof factionStats
+              : ordered;
+      }
+
+      const groupedByFaction = new Map<FactionId, { fleets: string[] }>();
+      (battle.involvedFleetIds || []).forEach(fleetId => {
+          const fleet = gameState.fleets.find(f => f.id === fleetId);
+          const factionId = fleet?.factionId || 'unknown';
+          const fleetLabel = fleetId.split('_').pop()?.toUpperCase() || fleetId.toUpperCase();
+
+          if (!groupedByFaction.has(factionId)) groupedByFaction.set(factionId, { fleets: [] });
+          groupedByFaction.get(factionId)!.fleets.push(fleetLabel);
+      });
+
+      const factionStats = Array.from(groupedByFaction.entries()).map(([factionId, data]) => {
+          const faction = factionLookup.get(factionId);
           return {
               factionId,
               factionName: faction?.name || factionId.toUpperCase(),
               color: faction?.color || '#38bdf8',
-              initial: snaps.length,
-              lost,
-              survivors: snaps.length - lost,
-              fleets,
-              composition,
+              initial: 0,
+              lost: 0,
+              survivors: 0,
+              fleets: Array.from(new Set(data.fleets)),
+              composition: {},
           };
       });
 
-      const ordered = factionStats.sort((a, b) => b.initial - a.initial);
-      const playerEntry = ordered.find(s => s.factionId === playerFactionId);
-      const enemyEntry = ordered.find(s => s.factionId !== playerFactionId);
-      const rest = ordered.filter(s => s !== playerEntry && s !== enemyEntry);
-
-      return playerEntry || enemyEntry
-          ? [playerEntry, enemyEntry, ...rest].filter(Boolean) as typeof factionStats
-          : ordered;
-  }, [battle, factionLookup, playerFactionId]);
+      const ordered = factionStats.sort((a, b) => a.factionId === playerFactionId ? -1 : b.factionId === playerFactionId ? 1 : 0);
+      return ordered;
+  }, [battle, factionLookup, playerFactionId, gameState.fleets]);
 
   useEffect(() => {
       if (logContainerRef.current) {
