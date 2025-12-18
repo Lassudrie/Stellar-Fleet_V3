@@ -30,8 +30,11 @@ export interface BattleShipState {
   fireControlLock: number; // 0.0 to 1.0 (Target Lock)
   maneuverBudget: number; // Used for evasion calculation
   targetId: string | null;
-  
+
   // Stats Cache
   evasion: number;
   pdStrength: number;
+  damage: number;
+  missileDamage: number;
+  torpedoDamage: number;
 }
