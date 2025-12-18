@@ -59,7 +59,8 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       if (!battle) return null;
 
       const initialShips = battle.initialShips || [];
-      const survivorSet = new Set(battle.survivorShipIds || []);
+      if (!battle.survivorShipIds) return null;
+      const survivorSet = new Set(battle.survivorShipIds);
 
       const factions = initialShips.length > 0
           ? Array.from(new Set(initialShips.map(s => s.factionId)))
