@@ -840,7 +840,8 @@ const generateCommands = (
   commands.push({
       type: 'AI_UPDATE_STATE',
       factionId,
-      newState: memory
+      newState: memory,
+      primaryAi: factionId === state.playerFactionId
   });
 
   return commands;
