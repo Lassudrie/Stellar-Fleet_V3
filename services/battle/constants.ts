@@ -16,9 +16,9 @@ export const LOCK_GAIN_PER_ROUND = 0.35;
 export const MAX_LAUNCH_PER_ROUND = 3;
 
 // Interception
-export const INTERCEPTION_BASE_CHANCE = 0.5; // Base chance for an interceptor missile to kill an incoming missile
+export const INTERCEPTION_BASE_CHANCE = 0.35; // Lowered base chance so more salvos slip through
 
 // PD
-export const PD_DAMAGE_PER_POINT = 10; // "HP" damage to incoming missiles per PD point
+export const PD_DAMAGE_PER_POINT = 7; // "HP" damage to incoming missiles per PD point (reduced to allow more hits)
 export const MISSILE_HP = 50;  // Scaled up to require ~5 PD strength to kill
 export const TORPEDO_HP = 150; // Scaled up to require ~15 PD strength to kill

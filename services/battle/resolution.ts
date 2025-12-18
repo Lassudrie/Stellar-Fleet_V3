@@ -4,12 +4,15 @@ import { RNG } from '../../engine/rng';
 import { SHIP_STATS } from '../../data/static';
 import { BattleShipState, Projectile } from './types';
 import { selectTarget } from './targeting';
-import { 
-  MAX_ROUNDS, ETA_MISSILE, ETA_TORPEDO, 
+import {
+  MAX_ROUNDS, ETA_MISSILE, ETA_TORPEDO,
   BASE_ACCURACY, LOCK_GAIN_PER_ROUND, MAX_LAUNCH_PER_ROUND,
-  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP 
+  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
+
+const SURVIVOR_ATTRITION_RATIO = 0.1;
+const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
 
 // --- HELPERS ---
 
@@ -373,6 +376,50 @@ export const resolveBattle = (
         survivingFleets.push(updatedFleet);
     }
   });
+
+  // Apply post-battle attrition so survivors need repairs before returning to duty
+  const attritionLogs: string[] = [];
+  const adjustedSurvivorIds: string[] = [];
+  const attritionAdjustedFleets: Fleet[] = [];
+
+  survivingFleets.forEach(fleet => {
+    const penalizedShips: ShipEntity[] = [];
+
+    fleet.ships.forEach(ship => {
+      const attritionDamage = Math.max(
+        Math.floor(ship.maxHp * SURVIVOR_ATTRITION_RATIO),
+        SURVIVOR_MIN_POST_BATTLE_DAMAGE
+      );
+      const remainingHp = Math.max(0, ship.hp - attritionDamage);
+      const battleState = shipMap.get(ship.id);
+
+      if (battleState) {
+        battleState.currentHp = remainingHp;
+      }
+
+      if (remainingHp > 0) {
+        penalizedShips.push({ ...ship, hp: remainingHp });
+        adjustedSurvivorIds.push(ship.id);
+        attritionLogs.push(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`);
+      } else {
+        attritionLogs.push(`xx ${short(ship.id)} was lost to post-battle failures.`);
+      }
+    });
+
+    if (penalizedShips.length > 0) {
+      attritionAdjustedFleets.push(
+        withUpdatedFleetDerived({ ...fleet, ships: penalizedShips, stateStartTurn: turn })
+      );
+    }
+  });
+
+  survivorShipIds.length = 0;
+  survivorShipIds.push(...adjustedSurvivorIds);
+
+  survivingFleets.length = 0;
+  survivingFleets.push(...attritionAdjustedFleets);
+
+  logs.push(...attritionLogs);
 
   const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
   battleShips.forEach(s => {
