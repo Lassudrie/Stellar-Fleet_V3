@@ -75,13 +75,13 @@ const moveFleet = (
         return { fleet: { ...fleet, position: newPos }, logs: [] };
     }
 
-    const arrivedSystemId = fleet.targetSystemId ?? undefined;
-    const arrivedSystem = arrivedSystemId ? systems.find(s => s.id === arrivedSystemId) : undefined;
-    const arrivalLog = arrivedSystem
+    const arrivalSystemId = fleet.targetSystemId ?? undefined;
+    const arrivalSystem = arrivalSystemId ? systems.find(s => s.id === arrivalSystemId) : undefined;
+    const arrivalLog: LogEntry[] = arrivalSystem
         ? [{
               id: rng.id('log'),
               day,
-              text: `Fleet ${shortId(fleet.id)} (${fleet.factionId}) arrived at ${arrivedSystem.name}.`,
+              text: `Fleet ${shortId(fleet.id)} (${fleet.factionId}) arrived at ${arrivalSystem.name}.`,
               type: 'move'
           }]
         : [];
