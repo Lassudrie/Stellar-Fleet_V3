@@ -17,15 +17,27 @@ const TERRITORY_RADIUS_SQ = TERRITORY_RADIUS * TERRITORY_RADIUS;
  * @returns The Faction owning the territory, or null if neutral/contested space.
  */
 export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): FactionId | null => {
+  // Only systems with an owner can exert influence
+  const ownedSystems = systems.filter(system => system.ownerFactionId !== null);
+
+  if (ownedSystems.length === 0) return null;
+
+  // Sort to guarantee deterministic processing when distances tie
+  const sortedSystems = [...ownedSystems].sort((a, b) => a.id.localeCompare(b.id));
+
   let closestSystem: StarSystem | null = null;
   let minDistSq = Infinity;
+  let contested = false;
 
-  // 1. Find the dominant system (Closest one)
-  for (const sys of systems) {
+  // 1. Find the dominant system (closest one), while detecting contested ties
+  for (const sys of sortedSystems) {
     const d = distSq(position, sys.position);
     if (d < minDistSq) {
       minDistSq = d;
       closestSystem = sys;
+      contested = false;
+    } else if (d === minDistSq && closestSystem && sys.ownerFactionId !== closestSystem.ownerFactionId) {
+      contested = true;
     }
   }
 
@@ -34,16 +46,13 @@ export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): Factio
 
   // Check Range Condition
   if (minDistSq > TERRITORY_RADIUS_SQ) {
-      return null; // Too far from any system (Deep Space)
+    return null; // Too far from any system (Deep Space)
   }
 
-  // If closest system has no owner, it's neutral territory
-  if (!closestSystem.ownerFactionId) {
-      return null;
+  if (contested) {
+    return null; // Equal influence from different factions
   }
 
   // 3. Return Owner
-  // Since we found the STRICTLY closest system, we satisfy the Voronoi condition automatically.
-  // (If point P is closer to System A than System B, P is in A's Voronoi cell).
   return closestSystem.ownerFactionId;
 };

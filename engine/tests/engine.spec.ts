@@ -28,6 +28,7 @@ import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
+import { getTerritoryOwner } from '../territory';
 
 interface TestCase {
   name: string;
@@ -118,6 +119,28 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'Territory ignores neutral systems when evaluating influence',
+    run: () => {
+      const neutralSystem = { ...createSystem('neutral', null), position: { x: 0, y: 0, z: 0 } };
+      const ownedSystem = { ...createSystem('owned', 'blue'), position: { x: 20, y: 0, z: 0 } };
+
+      const owner = getTerritoryOwner([neutralSystem, ownedSystem], { x: 1, y: 0, z: 0 });
+
+      assert.strictEqual(owner, 'blue', 'Owned systems should be considered even if neutral space is closer');
+    }
+  },
+  {
+    name: 'Equidistant factions contest territory deterministically',
+    run: () => {
+      const blueSystem = { ...createSystem('blue-core', 'blue'), position: { x: 10, y: 0, z: 0 } };
+      const redSystem = { ...createSystem('red-core', 'red'), position: { x: -10, y: 0, z: 0 } };
+
+      const owner = getTerritoryOwner([blueSystem, redSystem], { x: 0, y: 0, z: 0 });
+
+      assert.strictEqual(owner, null, 'Equal influence from different factions should contest the territory');
+    }
+  },
   {
     name: 'Unopposed conquest is blocked by contested orbit',
     run: () => {
