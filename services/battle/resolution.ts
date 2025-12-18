@@ -335,13 +335,6 @@ export const resolveBattle = (
 
   // 4. FINALIZE & APPLY RESULTS
   
-  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
-  const winnerFactionId = aliveFactions.size === 1
-    ? (Array.from(aliveFactions)[0] as FactionId)
-    : 'draw';
-
-  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
-
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
 
@@ -414,6 +407,13 @@ export const resolveBattle = (
   survivingFleets.push(...attritionAdjustedFleets);
 
   logs.push(...attritionLogs);
+
+  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+  const winnerFactionId = aliveFactions.size === 1
+    ? (Array.from(aliveFactions)[0] as FactionId)
+    : 'draw';
+
+  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
   const shipsLost: Record<FactionId, number> = {};
   battleShips.forEach(s => {
