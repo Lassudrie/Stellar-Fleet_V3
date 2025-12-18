@@ -3,6 +3,7 @@ import { GameState, StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '.
 import { SENSOR_RANGE, SHIP_STATS } from '../data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
+import { devWarn } from '../tools/devLogger';
 
 // --- QUERIES ---
 
@@ -82,7 +83,7 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
       throw new Error('[World] Missing fallback ship stats for frigate');
     }
 
-    console.warn(`[World] Unknown ship type '${type}', falling back to '${fallbackType}'.`);
+    devWarn(`[World] Unknown ship type '${type}', falling back to '${fallbackType}'.`);
 
     return {
       id: rng.id('ship'),
