@@ -140,7 +140,7 @@ export interface GameStateDTO {
   battles?: BattleDTO[];
   logs?: LogEntry[];
   selectedFleetId: string | null;
-  winnerFactionId: string | null; // Renamed
+  winnerFactionId: string | 'draw' | null; // Renamed
 
   objectives?: GameObjectivesDTO;
   rules?: GameplayRules;

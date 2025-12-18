@@ -39,7 +39,7 @@ interface UIProps {
   onMerge: (targetFleetId: string) => void;
   onDeploy: (shipId: string) => void;
   onEmbark: (shipId: string, armyId: string) => void;
-  winner: FactionId | null; // Changed type
+  winner: FactionId | 'draw' | null; // Changed type
   onRestart: () => void;
   onNextTurn: () => void;
   onMoveCommand: (fleetId: string) => void;
