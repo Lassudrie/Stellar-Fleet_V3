@@ -21,12 +21,15 @@ export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameSt
     const nextFleets = state.fleets.map(f => {
         if (involvedFleetIds.has(f.id)) {
             // Force stop movement
-            return { 
+            return {
                 ...f,
                 state: FleetState.COMBAT,
                 stateStartTurn: ctx.turn, // Mark conflict start
                 targetSystemId: null,
-                targetPosition: null
+                targetPosition: null,
+                invasionTargetSystemId: null,
+                loadTargetSystemId: null,
+                unloadTargetSystemId: null
             };
         }
         return f;
