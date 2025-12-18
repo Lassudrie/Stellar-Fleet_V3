@@ -16,6 +16,7 @@ import {
   EnemySightingDTO,
   ArmyDTO
 } from './saveFormat';
+import { SHIP_STATS } from '../data/static';
 
 // --- HELPERS ---
 
@@ -137,7 +138,10 @@ export const serializeGameState = (state: GameState): string => {
           type: s.type,
           hp: s.hp,
           maxHp: s.maxHp,
-          carriedArmyId: s.carriedArmyId || null
+          carriedArmyId: s.carriedArmyId || null,
+          offensiveMissilesLeft: s.offensiveMissilesLeft,
+          torpedoesLeft: s.torpedoesLeft,
+          interceptorsLeft: s.interceptorsLeft
       }))
     })),
     armies: state.armies.map(a => ({
@@ -244,7 +248,10 @@ export const deserializeGameState = (json: string): GameState => {
             type: s.type,
             hp: s.hp,
             maxHp: s.maxHp,
-            carriedArmyId: s.carriedArmyId ?? null
+            carriedArmyId: s.carriedArmyId ?? null,
+            offensiveMissilesLeft: s.offensiveMissilesLeft ?? SHIP_STATS[s.type]?.offensiveMissileStock ?? 0,
+            torpedoesLeft: s.torpedoesLeft ?? SHIP_STATS[s.type]?.torpedoStock ?? 0,
+            interceptorsLeft: s.interceptorsLeft ?? SHIP_STATS[s.type]?.interceptorStock ?? 0
         }))
       };
     });

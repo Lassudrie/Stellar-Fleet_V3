@@ -18,6 +18,9 @@ export interface ShipDTO {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null;
+  offensiveMissilesLeft?: number;
+  torpedoesLeft?: number;
+  interceptorsLeft?: number;
 }
 
 export interface FleetDTO {
