@@ -297,6 +297,17 @@ export const deserializeGameState = (json: string): GameState => {
       ? migratedAiStates?.[primaryAiOwnerId] || legacyAiState
       : legacyAiState;
 
+    const normalizedSeed = Number(dto.seed);
+    if (!Number.isFinite(normalizedSeed)) {
+      throw new Error("Field 'seed' must be a finite number.");
+    }
+
+    const normalizedRngStateSource = dto.rngState ?? dto.seed;
+    const normalizedRngState = Number(normalizedRngStateSource);
+    if (!Number.isFinite(normalizedRngState)) {
+      throw new Error("Field 'rngState' must be a finite number or derive from a valid 'seed'.");
+    }
+
     const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
     const day = Number.isFinite(dto.day) ? dto.day : 0;
 
@@ -305,8 +316,8 @@ export const deserializeGameState = (json: string): GameState => {
       scenarioTitle: dto.scenarioTitle,
       playerFactionId,
       factions,
-      seed: dto.seed,
-      rngState: dto.rngState ?? dto.seed,
+      seed: normalizedSeed,
+      rngState: normalizedRngState,
       startYear,
       day,
       systems,
