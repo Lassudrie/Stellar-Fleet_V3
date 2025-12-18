@@ -218,6 +218,8 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                             const isTransport = ship.type === ShipType.TROOP_TRANSPORT;
                             const canDeploy = isPlayer && isTransport && hasArmy && currentSystem;
                             const canEmbark = isPlayer && isTransport && !hasArmy && currentSystem && availableArmies.length > 0;
+                            const carriedArmyLabel = ship.carriedArmyId ? shortId(ship.carriedArmyId) : '?';
+                            const deployDisabled = !ship.carriedArmyId;
 
                             return (
                                 <div 
@@ -255,8 +257,9 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                                 <button
                                                     onClick={() => onDeploy(ship.id)}
                                                     className="w-full bg-green-600/80 hover:bg-green-500 text-white text-[9px] py-1 rounded font-bold uppercase tracking-wider"
+                                                    disabled={deployDisabled}
                                                 >
-                                                    {t('fleet.deploy', { army: shortId(ship.carriedArmyId!) })}
+                                                    {t('fleet.deploy', { army: carriedArmyLabel })}
                                                 </button>
                                             )}
                                             {canEmbark && (
