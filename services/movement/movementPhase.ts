@@ -272,6 +272,9 @@ export const resolveFleetMovement = (
   rng: RNG,
   fleets: Fleet[]
 ): FleetMovementResult => {
+  const invasionTargetSystemId = fleet.invasionTargetSystemId;
+  const loadTargetSystemId = fleet.loadTargetSystemId;
+  const unloadTargetSystemId = fleet.unloadTargetSystemId;
 
   const moveResult = moveFleet(fleet, systems, day, rng);
   let armiesAfterOps: Army[] = allArmies;
@@ -282,9 +285,21 @@ export const resolveFleetMovement = (
   if (moveResult.arrivalSystemId) {
       const system = systems.find(s => s.id === moveResult.arrivalSystemId);
       if (system) {
-          const arrivalOutcome = executeArrivalOperations(moveResult.fleet, system, armiesAfterOps, fleetContext, rng, day);
+          const arrivalFleet: Fleet = {
+              ...moveResult.fleet,
+              invasionTargetSystemId,
+              loadTargetSystemId,
+              unloadTargetSystemId
+          };
+
+          const arrivalOutcome = executeArrivalOperations(arrivalFleet, system, armiesAfterOps, fleetContext, rng, day);
           armiesAfterOps = arrivalOutcome.armies;
-          nextFleet = arrivalOutcome.fleet;
+          nextFleet = {
+              ...arrivalOutcome.fleet,
+              invasionTargetSystemId: null,
+              loadTargetSystemId: null,
+              unloadTargetSystemId: null
+          };
           generatedLogs.push(...arrivalOutcome.logs);
       }
   }
