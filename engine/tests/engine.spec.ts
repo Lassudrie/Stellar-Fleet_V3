@@ -26,6 +26,7 @@ import { Vec3 } from '../math/vec3';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
+import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 
 interface TestCase {
@@ -405,6 +406,48 @@ const tests: TestCase[] = [
 
       const followUp = resolveGroundConflict(system, updatedState);
       assert.strictEqual(followUp, null, 'Once the attacker is destroyed, the ground battle should not loop');
+    }
+  },
+  {
+    name: 'Fleet orders are cleared when battle detection locks combat',
+    run: () => {
+      const system = createSystem('sys-combat-lock', 'red');
+
+      const blueFleet = {
+        ...createFleet('fleet-blue-lock', 'blue', { ...baseVec }, [
+          { id: 'blue-lock', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+        ]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...baseVec },
+        invasionTargetSystemId: 'pending-invasion',
+        loadTargetSystemId: 'load-target',
+        unloadTargetSystemId: 'unload-target'
+      };
+
+      const redFleet = {
+        ...createFleet('fleet-red-lock', 'red', { ...baseVec }, [
+          { id: 'red-lock', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+        ])
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet] });
+      const ctx = { turn: 3, rng: new RNG(5) };
+
+      const nextState = phaseBattleDetection(state, ctx);
+
+      const lockedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      assert.ok(lockedFleet, 'Fleet should still exist after detection');
+      assert.strictEqual(lockedFleet?.state, FleetState.COMBAT, 'Fleet must be set to COMBAT state');
+      assert.strictEqual(lockedFleet?.targetSystemId, null, 'Movement target is cleared when combat locks the fleet');
+      assert.strictEqual(lockedFleet?.targetPosition, null, 'Target position is cleared when combat locks the fleet');
+      assert.strictEqual(
+        lockedFleet?.invasionTargetSystemId,
+        null,
+        'Pending invasion order is cleared when combat locks the fleet'
+      );
+      assert.strictEqual(lockedFleet?.loadTargetSystemId, null, 'Load order is cleared when combat locks the fleet');
+      assert.strictEqual(lockedFleet?.unloadTargetSystemId, null, 'Unload order is cleared when combat locks the fleet');
     }
   },
   {
