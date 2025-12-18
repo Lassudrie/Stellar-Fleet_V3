@@ -12,9 +12,14 @@ export interface ArmyUpdate {
 }
 
 const computeArmyUpdates = (previous: Army[], next: Army[]): ArmyUpdate[] => {
-    return next.reduce<ArmyUpdate[]>((updates, army, index) => {
-        const before = previous[index];
-        if (before === army) return updates;
+    const beforeById = previous.reduce<Record<string, Army>>((map, army) => {
+        map[army.id] = army;
+        return map;
+    }, {});
+
+    return next.reduce<ArmyUpdate[]>((updates, army) => {
+        const before = beforeById[army.id];
+        if (!before || before === army) return updates;
 
         const changes: Partial<Army> = {};
         if (before.state !== army.state) changes.state = army.state;
