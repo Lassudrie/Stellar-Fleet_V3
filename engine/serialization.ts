@@ -175,7 +175,12 @@ export const deserializeGameState = (json: string): GameState => {
 
   try {
     // Systems
-    const systems: StarSystem[] = dto.systems.map((s: any) => ({
+    const systemsDto = dto.systems === undefined ? [] : dto.systems;
+    if (!Array.isArray(systemsDto)) {
+      throw new Error("Field 'systems' must be an array.");
+    }
+
+    const systems: StarSystem[] = systemsDto.map((s: any) => ({
       id: s.id,
       name: s.name,
       position: deserializeVector3(s.position),
