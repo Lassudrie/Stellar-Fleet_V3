@@ -1,7 +1,7 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color } from 'three';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
 import { Fleet, FleetState } from '../types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
 import { Text, Billboard } from '@react-three/drei';
@@ -65,6 +65,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   // Constants for visual representation
   const highlightColor = useMemo(() => deriveHighlightColor(color), [color]);
   const isOrbiting = fleet.state === FleetState.ORBIT;
+  const tiltQuaternion = useMemo(() => new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0)), []);
 
   // Generate a stable random start angle based on fleet ID
   const angleOffset = useMemo(() => {
@@ -148,7 +149,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         const lookAtZ = fleet.position.z + Math.sin(futureTime) * ORBIT_RADIUS;
         
         meshRef.current.lookAt(lookAtX, fleet.position.y, lookAtZ);
-        meshRef.current.rotateX(-Math.PI / 2);
+        meshRef.current.quaternion.multiply(tiltQuaternion);
 
     } else {
         // Convert Vec3 to Three.Vector3 on the fly for Lerp target
@@ -156,7 +157,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         groupRef.current.position.lerp(_vec3, 0.5);
         if (fleet.targetPosition) {
             meshRef.current.lookAt(fleet.targetPosition.x, fleet.targetPosition.y, fleet.targetPosition.z);
-            meshRef.current.rotateX(-Math.PI / 2);
+            meshRef.current.quaternion.multiply(tiltQuaternion);
         }
     }
   });
