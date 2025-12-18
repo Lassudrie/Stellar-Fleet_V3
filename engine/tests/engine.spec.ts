@@ -3,6 +3,8 @@ import path from 'node:path';
 import { isOrbitContested, resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
+import { resolveBattle } from '../../services/battle/resolution';
+import { SHIP_STATS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
 import { applyCommand } from '../commands';
 import {
@@ -448,6 +450,44 @@ const tests: TestCase[] = [
 
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
       assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Defenders should retain control when orbit is contested and transport dies');
+    }
+  },
+  {
+    name: 'Space battle survivors exit combat needing repairs and updated metrics',
+    run: () => {
+      const system = createSystem('sys-repair', 'blue');
+      const cruiserStats = SHIP_STATS[ShipType.CRUISER];
+      const blueFleet = createFleet('fleet-repair', 'blue', { ...baseVec }, [
+        { id: 'blue-cruiser-repair', type: ShipType.CRUISER, hp: cruiserStats.maxHp, maxHp: cruiserStats.maxHp, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-repair',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet], battles: [battle] });
+
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(survivingFleets.length, 1, 'Fleet without opponents should persist after attrition');
+      const survivingShip = survivingFleets[0].ships.find(ship => ship.id === blueFleet.ships[0].id);
+
+      assert.ok(survivingShip, 'Original ship should survive minimal attrition');
+      assert.ok(
+        survivingShip.hp < blueFleet.ships[0].hp,
+        'Survivors must leave combat needing repairs instead of staying at full strength'
+      );
+      assert.deepStrictEqual(
+        updatedBattle.survivorShipIds,
+        [blueFleet.ships[0].id],
+        'Survivor metrics should list ships that remain operational after attrition'
+      );
+      assert.strictEqual(updatedBattle.shipsLost?.blue, 0, 'No additional blue losses should be counted when attrition is non-lethal');
     }
   },
   {
