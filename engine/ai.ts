@@ -156,6 +156,7 @@ const updateMemory = (
     const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
     memory.sightings[fleet.id] = {
       fleetId: fleet.id,
+      factionId: fleet.factionId,
       systemId: systemInRange ? systemInRange.id : null,
       position: { ...fleet.position },
       daySeen: state.day,
