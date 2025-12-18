@@ -126,7 +126,7 @@ export class GameEngine {
         return true;
     }
 
-    dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
+    dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string; deployedArmies?: number } {
         const playerFactionId = this.state.playerFactionId;
 
         if (command.type === 'MOVE_FLEET') {
@@ -155,6 +155,11 @@ export class GameEngine {
             if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
             if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
 
+            const embarkedArmies = this.state.armies.filter(army =>
+                army.containerId === fleet.id &&
+                army.state === ArmyState.EMBARKED
+            ).length;
+
             this.state = applyCommand(this.state, {
                 type: 'ORDER_INVASION_MOVE',
                 fleetId: command.fleetId,
@@ -163,7 +168,7 @@ export class GameEngine {
 
             this.syncRngState();
             this.notify();
-            return { ok: true };
+            return { ok: true, deployedArmies: embarkedArmies };
         }
 
         if (command.type === 'ORDER_LOAD') {

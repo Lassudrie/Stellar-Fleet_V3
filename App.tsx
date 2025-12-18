@@ -314,9 +314,11 @@ const App: React.FC = () => {
       });
 
       if (result.ok) {
+          const deployedArmies = result.deployedArmies ?? 0;
+
           engine.dispatchCommand({
               type: 'ADD_LOG',
-              text: t('msg.invasionLog', { system: targetSystem.name, count: 1 }),
+              text: t('msg.invasionLog', { system: targetSystem.name, count: deployedArmies }),
               logType: 'move'
           });
       } else {
