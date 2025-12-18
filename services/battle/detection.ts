@@ -1,5 +1,5 @@
 
-import { GameState, Battle, FactionId } from '../../types';
+import { GameState, Battle, FleetState } from '../../types';
 import { RNG } from '../../engine/rng';
 import { CAPTURE_RANGE } from '../../data/static';
 import { distSq } from '../../engine/math/vec3';
@@ -10,7 +10,12 @@ import { distSq } from '../../engine/math/vec3';
  */
 export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Battle[] => {
   const newBattles: Battle[] = [];
-  
+
+  const engageableFleets = state.fleets.filter(f =>
+    f.state !== FleetState.COMBAT &&
+    f.ships.length > 0
+  );
+
   const activeBattleSystemIds = new Set(
     state.battles
       .filter(b => b.status !== 'resolved')
@@ -21,8 +26,7 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
     if (activeBattleSystemIds.has(system.id)) return;
 
     // Find fleets in this system
-    const fleetsInSystem = state.fleets.filter(f => 
-      f.ships.length > 0 &&
+    const fleetsInSystem = engageableFleets.filter(f =>
       distSq(f.position, system.position) <= CAPTURE_RANGE * CAPTURE_RANGE
     );
 
