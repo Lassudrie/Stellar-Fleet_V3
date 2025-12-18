@@ -113,7 +113,21 @@ const GameScene: React.FC<GameSceneProps> = ({
 }) => {
 
   const playerHomeworld = useMemo(() => {
-    return gameState.systems.find(system => system.ownerFactionId === gameState.playerFactionId)?.position || { x: 0, y: 0, z: 0 };
+    const ownedHomeworld = gameState.systems.find(
+      (system) => system.isHomeworld && system.ownerFactionId === gameState.playerFactionId
+    );
+
+    if (ownedHomeworld) {
+      return ownedHomeworld.position;
+    }
+
+    const ownedSystem = gameState.systems.find((system) => system.ownerFactionId === gameState.playerFactionId);
+
+    if (ownedSystem) {
+      return ownedSystem.position;
+    }
+
+    return { x: 0, y: 0, z: 0 };
   }, [gameState.playerFactionId, gameState.systems]);
 
   const isScenarioReady = gameState.systems.length > 0;
