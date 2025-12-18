@@ -285,6 +285,9 @@ export const deserializeGameState = (json: string): GameState => {
       ? migratedAiStates?.[primaryAiOwnerId] || legacyAiState
       : legacyAiState;
 
+    const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
+    const day = Number.isFinite(dto.day) ? dto.day : 0;
+
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
@@ -292,8 +295,8 @@ export const deserializeGameState = (json: string): GameState => {
       factions,
       seed: dto.seed,
       rngState: dto.rngState ?? dto.seed,
-      startYear: dto.startYear,
-      day: dto.day,
+      startYear,
+      day,
       systems,
       fleets,
       armies,
