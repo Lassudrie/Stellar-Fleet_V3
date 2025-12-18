@@ -67,6 +67,9 @@ interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null; // ID de l'armée transportée (si Transport)
+  offensiveMissilesLeft?: number; // Stocks résiduels de missiles offensifs
+  torpedoesLeft?: number; // Stocks résiduels de torpilles
+  interceptorsLeft?: number; // Stocks résiduels de missiles intercepteurs
 }
 ```
 
