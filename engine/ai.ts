@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState } from '../types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting } from '../types';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
