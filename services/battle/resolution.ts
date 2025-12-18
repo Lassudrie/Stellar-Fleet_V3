@@ -147,11 +147,10 @@ export const resolveBattle = (
   // 3. ROUND LOOP
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     roundsPlayed = round;
-    
+
     // Check for combat viability at start of round
-    const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-    const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-    if (blueAlive.length === 0 || redAlive.length === 0) break;
+    const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+    if (aliveFactions.size <= 1) break;
 
     logs.push(`--- ROUND ${round} ---`);
     
@@ -163,12 +162,12 @@ export const resolveBattle = (
 
     // Identify active participants (Array iteration is fine here as we need to process all)
     const activeShips = battleShips.filter(s => s.currentHp > 0);
-    const blueShips = activeShips.filter(s => s.faction === 'blue');
-    const redShips = activeShips.filter(s => s.faction === 'red');
 
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
-      const enemies = ship.faction === 'blue' ? redShips : blueShips;
+      const enemies = battleShips.filter(
+        s => s.currentHp > 0 && s.faction !== ship.faction
+      );
       ship.targetId = selectTarget(ship, enemies, rng.next());
     }
 
@@ -339,12 +338,10 @@ export const resolveBattle = (
 
   // 4. FINALIZE & APPLY RESULTS
   
-  const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-  const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-  
-  const winnerFactionId = blueAlive.length > 0 && redAlive.length === 0 ? 'blue' 
-               : redAlive.length > 0 && blueAlive.length === 0 ? 'red' 
-               : 'draw';
+  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+  const winnerFactionId = aliveFactions.size === 1
+    ? (Array.from(aliveFactions)[0] as FactionId)
+    : 'draw';
 
   logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
