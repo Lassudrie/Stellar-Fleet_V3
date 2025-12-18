@@ -22,6 +22,9 @@ import { ORBIT_PROXIMITY_RANGE_SQ } from './data/static';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
 
+const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
+const ENEMY_SIGHTING_LIMIT = 200;
+
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
@@ -93,14 +96,15 @@ const App: React.FC = () => {
       setViewGameState(nextView);
 
       // --- INTEL UPDATE LOGIC ---
-      // Update sightings for any enemy fleet that is currently visible in the view state.
+      // Update sightings for any enemy fleet that is currently visible in the view state
+      // and clean up outdated entries.
       const visibleEnemies = nextView.fleets.filter(f => f.factionId !== playerFactionId);
-      
-      if (visibleEnemies.length > 0) {
-          setEnemySightings(prev => {
-              const next = { ...prev };
-              let changed = false;
-              
+
+      setEnemySightings(prev => {
+          const next = { ...prev };
+          let changed = false;
+
+          if (visibleEnemies.length > 0) {
               visibleEnemies.forEach(f => {
                   const existing = next[f.id];
                   if (!existing || existing.daySeen < baseState.day || !equals(existing.position, f.position)) {
@@ -116,10 +120,33 @@ const App: React.FC = () => {
                        changed = true;
                   }
               });
+          }
 
-              return changed ? next : prev;
+          const cutoffDay = baseState.day - ENEMY_SIGHTING_MAX_AGE_DAYS;
+          Object.keys(next).forEach(id => {
+              if (next[id].daySeen < cutoffDay) {
+                  delete next[id];
+                  changed = true;
+              }
           });
-      }
+
+          const entries = Object.values(next);
+          if (entries.length > ENEMY_SIGHTING_LIMIT) {
+              const keepIds = new Set(entries
+                  .sort((a, b) => b.daySeen - a.daySeen)
+                  .slice(0, ENEMY_SIGHTING_LIMIT)
+                  .map(s => s.fleetId));
+
+              Object.keys(next).forEach(id => {
+                  if (!keepIds.has(id)) {
+                      delete next[id];
+                      changed = true;
+                  }
+              });
+          }
+
+          return changed ? next : prev;
+      });
 
       // Edge Case: If the currently selected fleet was hidden by Fog of War, deselect it
       const currentSelectedFleetId = selectedFleetIdRef.current;
