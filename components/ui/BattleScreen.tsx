@@ -12,15 +12,57 @@ interface BattleScreenProps {
   redFleetOverride?: Fleet;
 }
 
-const BattleScreen: React.FC<BattleScreenProps> = ({ 
-    battleId, gameState, onClose, blueFleetOverride, redFleetOverride 
+export type FactionRegistry = Record<string, { name: string; color: string }>;
+
+export interface BattleOutcome {
+  label: string;
+  color: string;
+  winnerName: string | null;
+  status: 'victory' | 'defeat' | 'draw' | 'unknown';
+}
+
+const fallbackFactionMeta = (factionId: string | undefined, registry: FactionRegistry) => {
+  if (!factionId) {
+    return { name: 'UNKNOWN', color: '#94a3b8' };
+  }
+
+  return registry[factionId] || { name: factionId.toUpperCase(), color: '#94a3b8' };
+};
+
+export const resolveBattleOutcome = (
+  battle: Battle,
+  playerFactionId: FactionId,
+  registry: FactionRegistry,
+  translate: ReturnType<typeof useI18n>['t']
+): BattleOutcome => {
+  if (!battle.winnerFactionId) {
+    return { label: translate('battle.unknown'), color: '#cbd5e1', winnerName: null, status: 'unknown' };
+  }
+
+  if (battle.winnerFactionId === 'draw') {
+    return { label: translate('battle.draw'), color: '#94a3b8', winnerName: null, status: 'draw' };
+  }
+
+  const winnerMeta = fallbackFactionMeta(battle.winnerFactionId, registry);
+  const isPlayerVictory = battle.winnerFactionId === playerFactionId;
+
+  return {
+    label: translate('battle.victory', { winner: winnerMeta.name }),
+    color: winnerMeta.color,
+    winnerName: winnerMeta.name,
+    status: isPlayerVictory ? 'victory' : 'defeat'
+  };
+};
+
+const BattleScreen: React.FC<BattleScreenProps> = ({
+    battleId, gameState, onClose, blueFleetOverride, redFleetOverride
 }) => {
   const { t } = useI18n();
   const logContainerRef = useRef<HTMLDivElement>(null);
   const playerFactionId = gameState.playerFactionId;
 
-  const factionRegistry = useMemo(() => {
-      const registry: Record<string, { name: string; color: string }> = {};
+  const factionRegistry: FactionRegistry = useMemo(() => {
+      const registry: FactionRegistry = {};
       gameState.factions?.forEach(faction => {
           registry[faction.id] = { name: faction.name, color: faction.color };
       });
@@ -140,16 +182,12 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       ? 'SIMULATION' 
       : (gameState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown System');
   
-  const winnerText = battle.winnerFactionId === 'draw' ? t('battle.draw')
-                     : battle.winnerFactionId === playerFactionId ? t('battle.victory', { winner: 'FLEET' })
-                     : battle.winnerFactionId ? t('battle.defeat')
-                     : t('battle.unknown');
-                     
-  const winnerColor = battle.winnerFactionId === playerFactionId ? 'text-blue-500' 
-                    : battle.winnerFactionId === 'draw' ? 'text-slate-400' 
-                    : 'text-red-500';
+  const outcome = useMemo(
+      () => resolveBattleOutcome(battle, playerFactionId, factionRegistry, t),
+      [battle, factionRegistry, playerFactionId, t]
+  );
 
-  const roundsText = battle.roundsPlayed 
+  const roundsText = battle.roundsPlayed
         ? (battle.roundsPlayed === 1 ? t('battle.rounds_one') : t('battle.rounds_other', { count: battle.roundsPlayed }))
         : t('battle.finished');
 
@@ -188,7 +226,12 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
                 </div>
                 <div className="flex items-baseline gap-3">
                     <h1 className="text-white text-2xl font-bold uppercase tracking-tight">{systemName}</h1>
-                    <span className={`text-xl font-black ${winnerColor} uppercase`}>{winnerText}</span>
+                    <span
+                        className="text-xl font-black uppercase"
+                        style={{ color: outcome.color }}
+                    >
+                        {outcome.label}
+                    </span>
                 </div>
             </div>
             

@@ -29,6 +29,7 @@ import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
+import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
 
 interface TestCase {
   name: string;
@@ -164,6 +165,64 @@ const tests: TestCase[] = [
       const owner = getTerritoryOwner([neutralSystem, ownedSystem], { x: 1, y: 0, z: 0 });
 
       assert.strictEqual(owner, 'blue', 'Owned systems should be considered even if neutral space is closer');
+    }
+  },
+  {
+    name: 'Battle outcome reports non-player faction victories by name',
+    run: () => {
+      const translate = (key: string, params?: Record<string, string>) => {
+        if (key === 'battle.victory') return `${params?.winner} VICTORY`;
+        if (key === 'battle.draw') return 'DRAW';
+        return 'RESULT UNKNOWN';
+      };
+
+      const registry: FactionRegistry = {
+        blue: { name: 'Alliance Navy', color: '#3b82f6' },
+        yellow: { name: 'Nomad League', color: '#facc15' }
+      };
+
+      const battle: Battle = {
+        id: 'battle-outcome-1',
+        systemId: 'sys-x',
+        turnCreated: 1,
+        status: 'resolved',
+        involvedFleetIds: [],
+        logs: [],
+        winnerFactionId: 'yellow'
+      };
+
+      const outcome = resolveBattleOutcome(battle, 'blue', registry, translate);
+
+      assert.strictEqual(outcome.status, 'defeat');
+      assert.strictEqual(outcome.label, 'Nomad League VICTORY');
+      assert.strictEqual(outcome.color, '#facc15');
+      assert.strictEqual(outcome.winnerName, 'Nomad League');
+    }
+  },
+  {
+    name: 'Battle outcome handles draws without faction assumptions',
+    run: () => {
+      const translate = (key: string) => (key === 'battle.draw' ? 'DRAW' : 'RESULT UNKNOWN');
+
+      const registry: FactionRegistry = {
+        blue: { name: 'Alliance Navy', color: '#3b82f6' }
+      };
+
+      const battle: Battle = {
+        id: 'battle-outcome-2',
+        systemId: 'sys-y',
+        turnCreated: 2,
+        status: 'resolved',
+        involvedFleetIds: [],
+        logs: [],
+        winnerFactionId: 'draw'
+      };
+
+      const outcome = resolveBattleOutcome(battle, 'blue', registry, translate);
+
+      assert.strictEqual(outcome.status, 'draw');
+      assert.strictEqual(outcome.label, 'DRAW');
+      assert.strictEqual(outcome.winnerName, null);
     }
   },
   {
