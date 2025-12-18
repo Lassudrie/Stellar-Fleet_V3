@@ -5,6 +5,7 @@ import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../../engine/army';
 import { createShip } from '../../engine/world';
 import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
+import { SHIP_STATS } from '../../data/static';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -504,9 +505,18 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           state = FleetState.MOVING; 
       }
 
-      // Create Ships
+      // Create Ships with validation and fallback
       const ships = def.ships.map(typeStr => {
-          const type = typeStr as ShipType; 
+          const type = typeStr as ShipType;
+          if (!SHIP_STATS[type]) {
+              const fallbackType = ShipType.FRIGATE;
+              console.warn(
+                  `[WorldGen] Unknown ship type '${typeStr}' for faction '${factionId}'. ` +
+                  `Replacing with '${fallbackType}'.`
+              );
+              return createShip(fallbackType, rng);
+          }
+
           return createShip(type, rng);
       });
 
