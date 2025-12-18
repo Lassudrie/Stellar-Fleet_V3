@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Color, DoubleSide, BufferGeometry, BufferAttribute } from 'three';
-import { StarSystem, FactionId } from '../types';
+import { StarSystem, FactionId, FactionState } from '../types';
 import { COLORS, TERRITORY_RADIUS } from '../data/static';
 
 // --- CONFIGURATION ---
@@ -96,27 +96,35 @@ const clipPolygon = (
 interface TerritoryBordersProps {
     systems: StarSystem[];
     signature: string; // Used to trigger re-renders only when ownership changes
-    factions: any[]; // Used for coloring
+    factions: FactionState[]; // Used for coloring
 }
 
-const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems, signature }) => {
+const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems, signature, factions }) => {
 
   const meshes = useMemo(() => {
     if (!systems || systems.length === 0) return [];
 
-    const groups: Record<string, StarSystem[]> = {
-        'blue': systems.filter(s => s.ownerFactionId === 'blue'),
-        'red': systems.filter(s => s.ownerFactionId === 'red'),
-    };
+    const factionColors = factions.reduce<Record<FactionId, string>>((acc, faction) => {
+        acc[faction.id] = faction.color;
+        return acc;
+    }, {});
+
+    const groups = systems.reduce<Record<FactionId, StarSystem[]>>((acc, system) => {
+        if (!system.ownerFactionId) return acc;
+        const list = acc[system.ownerFactionId] || [];
+        list.push(system);
+        acc[system.ownerFactionId] = list;
+        return acc;
+    }, {});
 
     const resultMeshes: any[] = [];
 
     Object.entries(groups).forEach(([factionStr, mySystems]) => {
         if (mySystems.length === 0) return;
 
-        const baseColor = new Color(factionStr === 'blue' ? COLORS.blue : COLORS.red);
-        const borderColor = factionStr === 'blue' ? COLORS.blueHighlight : COLORS.redHighlight;
-        
+        const baseColor = new Color(factionColors[factionStr] || COLORS.star);
+        const borderColor = baseColor.clone().lerp(new Color('#ffffff'), 0.25).getStyle();
+
         // Glassy fill color
         const fillColor = baseColor.clone().lerp(new Color('#0f172a'), 0.5);
 
@@ -303,7 +311,7 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
     // CRITICAL OPTIMIZATION:
     // Only recalculate when the ownership signature changes (capture event), or the number of systems changes (init).
     // Positional updates (which don't happen for systems) are irrelevant.
-  }, [signature, systems.length]);
+  }, [factions, signature, systems.length]);
 
   if (meshes.length === 0) return null;
 
