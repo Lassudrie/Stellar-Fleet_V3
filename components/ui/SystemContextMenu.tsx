@@ -9,7 +9,7 @@ type GroundForceStats = {
   maxStrength: number;
   losses: number;
   lossPercent: number;
-  averageMorale: number;
+  averageMoralePercent: number;
 };
 
 interface SystemContextMenuProps {
@@ -59,7 +59,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
               </div>
               <div className="flex justify-between text-[10px] text-slate-300">
                   <span>{t('ctx.morale')}</span>
-                  <span className="font-mono">{stats.averageMorale.toFixed(0)}%</span>
+                  <span className="font-mono">{stats.averageMoralePercent.toFixed(1)}%</span>
               </div>
           </div>
       );
