@@ -23,6 +23,7 @@ import {
   StarSystem
 } from '../../types';
 import { Vec3 } from '../math/vec3';
+import { GameEngine } from '../GameEngine';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
@@ -811,6 +812,31 @@ const tests: TestCase[] = [
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'Player commands are blocked when fleet is in combat',
+    run: () => {
+      const fleet = { ...createFleet('combat-fleet', 'blue', baseVec, []), state: FleetState.COMBAT };
+      const system = createSystem('alpha', 'blue');
+
+      const engine = new GameEngine(
+        createBaseState({
+          systems: [system],
+          fleets: [fleet]
+        })
+      );
+
+      const result = engine.dispatchPlayerCommand({
+        type: 'MOVE_FLEET',
+        fleetId: fleet.id,
+        targetSystemId: system.id
+      });
+
+      assert.deepStrictEqual(result, {
+        ok: false,
+        error: 'Fleet is in combat and cannot receive commands.'
+      });
     }
   }
 ];
