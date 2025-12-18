@@ -16,7 +16,7 @@ import {
   EnemySightingDTO,
   ArmyDTO
 } from './saveFormat';
-import { SHIP_STATS } from '../data/static';
+import { COLORS, SHIP_STATS } from '../data/static';
 
 // --- HELPERS ---
 
@@ -207,17 +207,31 @@ export const deserializeGameState = (json: string): GameState => {
       throw new Error("Field 'systems' must be an array.");
     }
 
-    const systems: StarSystem[] = systemsDto.map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      position: deserializeVector3(s.position),
-      color: s.color,
-      size: s.size,
-      resourceType: s.resourceType,
-      isHomeworld: s.isHomeworld ?? false,
-      // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
-      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null)
-    }));
+    const systems: StarSystem[] = systemsDto.map((s: any) => {
+      const ownerFactionId = s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null);
+      const ownerColor = ownerFactionId
+        ? factions.find(faction => faction.id === ownerFactionId)?.color
+        : undefined;
+      const color = s.color || ownerColor || COLORS.star;
+
+      if (!s.color) {
+        // Preserve serialization contract by normalizing falsy colors
+        // while keeping legacy saves functional.
+        console.warn(`System '${s.id ?? 'unknown'}' had an invalid color; applying fallback.`);
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        position: deserializeVector3(s.position),
+        color,
+        size: s.size,
+        resourceType: s.resourceType,
+        isHomeworld: s.isHomeworld ?? false,
+        // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
+        ownerFactionId
+      };
+    });
 
     // Fleets
     const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];
