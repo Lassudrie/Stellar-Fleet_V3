@@ -184,39 +184,48 @@ export const resolveBattle = (
     for (const ship of activeShips) {
       if (!ship.targetId) continue;
 
-      if (ship.torpedoesLeft > 0) {
-        const count = Math.min(ship.torpedoesLeft, MAX_LAUNCH_PER_ROUND);
-        for (let k = 0; k < count; k++) {
-          projectiles.push({
-            id: rng.id('torp'),
-            type: 'torpedo',
-            sourceId: ship.shipId,
-            sourceFaction: ship.faction,
-            targetId: ship.targetId,
-            eta: ETA_TORPEDO,
-            damage: ship.torpedoDamage,
-            hp: TORPEDO_HP
-          });
-        }
-        ship.torpedoesLeft -= count;
-        if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} torpedoes [ETA:${ETA_TORPEDO}].`);
+      const torpedoCount = Math.min(ship.torpedoesLeft, MAX_LAUNCH_PER_ROUND);
+      const remainingCapacity = Math.max(0, MAX_LAUNCH_PER_ROUND - torpedoCount);
+      const missileCount = Math.min(ship.offensiveMissilesLeft, remainingCapacity);
+
+      for (let k = 0; k < torpedoCount; k++) {
+        projectiles.push({
+          id: rng.id('torp'),
+          type: 'torpedo',
+          sourceId: ship.shipId,
+          sourceFaction: ship.faction,
+          targetId: ship.targetId,
+          eta: ETA_TORPEDO,
+          damage: ship.torpedoDamage,
+          hp: TORPEDO_HP
+        });
       }
-      else if (ship.offensiveMissilesLeft > 0) {
-        const count = Math.min(ship.offensiveMissilesLeft, MAX_LAUNCH_PER_ROUND);
-        for (let k = 0; k < count; k++) {
-          projectiles.push({
-            id: rng.id('msl'),
-            type: 'missile',
-            sourceId: ship.shipId,
-            sourceFaction: ship.faction,
-            targetId: ship.targetId,
-            eta: ETA_MISSILE,
-            damage: ship.missileDamage,
-            hp: MISSILE_HP
-          });
+
+      for (let k = 0; k < missileCount; k++) {
+        projectiles.push({
+          id: rng.id('msl'),
+          type: 'missile',
+          sourceId: ship.shipId,
+          sourceFaction: ship.faction,
+          targetId: ship.targetId,
+          eta: ETA_MISSILE,
+          damage: ship.missileDamage,
+          hp: MISSILE_HP
+        });
+      }
+
+      ship.torpedoesLeft -= torpedoCount;
+      ship.offensiveMissilesLeft -= missileCount;
+
+      if (torpedoCount > 0 || missileCount > 0) {
+        const firedParts = [] as string[];
+        if (torpedoCount > 0) {
+          firedParts.push(`${torpedoCount} torpedoes [ETA:${ETA_TORPEDO}]`);
         }
-        ship.offensiveMissilesLeft -= count;
-        if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} missiles [ETA:${ETA_MISSILE}].`);
+        if (missileCount > 0) {
+          firedParts.push(`${missileCount} missiles [ETA:${ETA_MISSILE}]`);
+        }
+        logs.push(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
       }
     }
 
