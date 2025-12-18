@@ -37,16 +37,24 @@ const EXTRUDE_SETTINGS = {
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
 
-const deriveHighlightColor = (baseColor: string, lightnessBoost = 0.2) => {
+const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
   try {
     const color = new Color(baseColor);
     const hsl = { h: 0, s: 0, l: 0 };
     color.getHSL(hsl);
-    const boostedLightness = Math.min(1, hsl.l + lightnessBoost);
-    color.setHSL(hsl.h, hsl.s, boostedLightness);
-    return `#${color.getHexString()}`;
+
+    const lightHighlight = new Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + lightnessDelta));
+    const darkHighlight = new Color().setHSL(hsl.h, hsl.s, Math.max(0, hsl.l - lightnessDelta));
+
+    return {
+      light: `#${lightHighlight.getHexString()}`,
+      dark: `#${darkHighlight.getHexString()}`
+    };
   } catch (error) {
-    return baseColor;
+    return {
+      light: baseColor,
+      dark: baseColor
+    };
   }
 };
 
@@ -63,7 +71,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
 
   // Constants for visual representation
-  const highlightColor = useMemo(() => deriveHighlightColor(color), [color]);
+  const highlightPalette = useMemo(() => deriveHighlightPalette(color), [color]);
+  const emissiveColor = isSelected ? highlightPalette.light : highlightPalette.dark;
   const isOrbiting = fleet.state === FleetState.ORBIT;
 
   // Generate a stable random start angle based on fleet ID
@@ -189,9 +198,9 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             scale={[0.6, 0.6, 0.6]} 
         >
             <extrudeGeometry args={[CHEVRON_SHAPE, EXTRUDE_SETTINGS]} />
-            <meshStandardMaterial 
-                color={isSelected ? highlightColor : color} 
-                emissive={isSelected ? highlightColor : color}
+            <meshStandardMaterial
+                color={color}
+                emissive={emissiveColor}
                 emissiveIntensity={isSelected ? 0.6 : 0.4}
                 roughness={0.4}
                 metalness={0.6}
@@ -202,7 +211,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         {isSelected && (
             <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]}>
                 <ringGeometry args={[1, 1.2, 32]} />
-                <meshBasicMaterial color={highlightColor} transparent opacity={0.6} />
+                <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} />
             </mesh>
         )}
 
@@ -216,7 +225,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         >
             <Text
                 fontSize={1.2}
-                color={highlightColor}
+                color={highlightPalette.light}
                 outlineWidth={0.1}
                 outlineColor="#000000"
                 fontWeight="bold"
