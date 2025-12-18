@@ -1,6 +1,6 @@
 
 import { GameState, FactionId, Fleet } from '../types';
-import { CAPTURE_RANGE, SENSOR_RANGE } from '../data/static';
+import { CAPTURE_RANGE, COLORS, SENSOR_RANGE } from '../data/static';
 import { getTerritoryOwner } from './territory';
 import { Vec3, distSq } from './math/vec3';
 
@@ -135,11 +135,22 @@ export const applyFogOfWar = (state: GameState, viewerFactionId: FactionId): Gam
       }
   }
 
+  // 3b. Sanitize unobserved systems to avoid leaking ownership through UI cues
+  const maskedSystems = state.systems.map(sys => {
+    if (observedIds.has(sys.id)) return sys;
+    return {
+      ...sys,
+      ownerFactionId: null,
+      color: COLORS.star,
+    };
+  });
+
   // 4. Filter Fleets (O(N_total * (F_view + S_observed)))
   // The logic is now heavily optimized for the batch operation.
   return {
     ...state,
-    fleets: state.fleets.filter(f => 
+    systems: maskedSystems,
+    fleets: state.fleets.filter(f =>
       checkVisibility(f, state, viewerFactionId, viewerFleets, observedPositions)
     )
   };
