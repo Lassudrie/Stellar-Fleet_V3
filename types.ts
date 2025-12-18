@@ -196,7 +196,7 @@ export interface GameState {
   battles: Battle[];
   logs: LogEntry[];
   selectedFleetId: string | null;
-  winnerFactionId: FactionId | null; // Renamed from winner
+  winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;
   aiState?: AIState; // Legacy single-AI state kept for transition
   objectives: GameObjectives;

@@ -5,7 +5,7 @@ import { GameState, FactionId, VictoryCondition, Fleet } from '../types';
  * Checks all active victory conditions to determine if a faction has won.
  * Returns the winning Faction, or null if the game continues.
  */
-export const checkVictoryConditions = (state: GameState): FactionId | null => {
+export const checkVictoryConditions = (state: GameState): FactionId | 'draw' | null => {
   const factionIds = state.factions.map(f => f.id);
 
   // 1. Check Max Turns (Draw/Timeout)
@@ -14,14 +14,7 @@ export const checkVictoryConditions = (state: GameState): FactionId | null => {
   // For now, if 'survival' is a condition and turns are reached, Blue wins. Otherwise null/draw.
   // Turn limit is inclusive: reaching the specified day should immediately trigger end-of-game logic.
   if (state.objectives.maxTurns && state.day >= state.objectives.maxTurns) {
-    const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
-    if (survivalCondition) {
-      const survivingFactionId = state.playerFactionId;
-      const playerAlive = hasActivePresence(state, survivingFactionId);
-      if (playerAlive) return survivingFactionId;
-    }
-    // Simple timeout without explicit survival objective -> Draw or just end
-    return null;
+    return resolveTurnLimitOutcome(state);
   }
 
   // 2. Check each Faction against Global Conditions
@@ -114,4 +107,26 @@ const checkKingOfTheHill = (factionId: FactionId, state: GameState, value?: numb
 
 const hasActivePresence = (state: GameState, factionId: FactionId): boolean => {
   return state.fleets.some(f => f.factionId === factionId && f.ships.length > 0);
+};
+
+const resolveTurnLimitOutcome = (state: GameState): FactionId | 'draw' => {
+  const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
+  if (survivalCondition) {
+    const playerAlive = hasActivePresence(state, state.playerFactionId);
+    return playerAlive ? state.playerFactionId : 'draw';
+  }
+
+  const ownershipByFaction: Record<FactionId, number> = state.factions.reduce((acc, faction) => {
+    acc[faction.id] = state.systems.filter(system => system.ownerFactionId === faction.id).length;
+    return acc;
+  }, {} as Record<FactionId, number>);
+
+  const maxOwned = Math.max(...Object.values(ownershipByFaction));
+  if (maxOwned === 0) return 'draw';
+
+  const leaders = Object.entries(ownershipByFaction)
+    .filter(([, owned]) => owned === maxOwned)
+    .map(([factionId]) => factionId as FactionId);
+
+  return leaders.length === 1 ? leaders[0] : 'draw';
 };

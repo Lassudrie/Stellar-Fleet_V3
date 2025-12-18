@@ -157,6 +157,7 @@ export const fr = {
   // Victory
   'victory.victory': 'VICTOIRE',
   'victory.defeat': 'DEFAITE',
+  'victory.draw': 'EGALITE',
   'victory.totalTurns': 'Tours Totaux : {{day}}',
   'victory.replay': 'REJOUER',
 

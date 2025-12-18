@@ -157,6 +157,7 @@ export const en = {
   // Victory
   'victory.victory': 'VICTORY',
   'victory.defeat': 'DEFEAT',
+  'victory.draw': 'DRAW',
   'victory.totalTurns': 'Total Turns: {{day}}',
   'victory.replay': 'REPLAY',
 
