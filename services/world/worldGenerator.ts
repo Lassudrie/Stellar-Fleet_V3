@@ -335,7 +335,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
 
               // Find N nearest unowned neighbors
               const neighbors = systems
-                  .filter(s => !s.ownerFactionId && s.id !== home.id)
+                  .filter(s => !s.ownerFactionId && s.id !== home.id && !staticSystemIds.has(s.id))
                   .map(s => ({ sys: s, dist: distSq(s.position, home.position) }))
                   .sort((a, b) => a.dist - b.dist)
                   .slice(0, CLUSTER_NEIGHBOR_COUNT);
