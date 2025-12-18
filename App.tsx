@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
 import GameScene from './components/GameScene';
@@ -69,8 +69,19 @@ const App: React.FC = () => {
       aiDebugger.clear();
   };
 
+  const selectedFleetIdRef = useRef<string | null>(selectedFleetId);
+  const uiModeRef = useRef<UiMode>(uiMode);
+
+  useEffect(() => {
+      selectedFleetIdRef.current = selectedFleetId;
+  }, [selectedFleetId]);
+
+  useEffect(() => {
+      uiModeRef.current = uiMode;
+  }, [uiMode]);
+
   // Function to compute the view state with optional Fog of War logic
-  const updateViewState = (baseState: GameState) => {
+  const updateViewState = useCallback((baseState: GameState) => {
       let nextView = { ...baseState };
       const playerFactionId = baseState.playerFactionId;
       
@@ -111,17 +122,18 @@ const App: React.FC = () => {
       }
 
       // Edge Case: If the currently selected fleet was hidden by Fog of War, deselect it
-      if (selectedFleetId) {
-          const fleetExists = nextView.fleets.find(f => f.id === selectedFleetId);
+      const currentSelectedFleetId = selectedFleetIdRef.current;
+      if (currentSelectedFleetId) {
+          const fleetExists = nextView.fleets.find(f => f.id === currentSelectedFleetId);
           if (!fleetExists) {
               setSelectedFleetId(null);
-              if (uiMode !== 'SYSTEM_MENU') {
+              if (uiModeRef.current !== 'SYSTEM_MENU') {
                   setFleetPickerMode(null);
                   setUiMode('NONE');
               }
           }
       }
-  };
+  }, [godEyes]);
 
     useEffect(() => {
       if (engine) {
@@ -134,7 +146,7 @@ const App: React.FC = () => {
             unsub();
         };
       }
-    }, [engine, godEyes]);
+    }, [engine, updateViewState]);
 
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
