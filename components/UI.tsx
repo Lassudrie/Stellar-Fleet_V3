@@ -14,6 +14,12 @@ import { hasInvadingForce } from '../engine/army';
 import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
 
+const ORBIT_MATCH_RADIUS_SQ = (ORBIT_RADIUS * 3) ** 2;
+
+const findOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
+  return systems.find(system => distSq(fleet.position, system.position) <= ORBIT_MATCH_RADIUS_SQ) ?? null;
+};
+
 interface UIProps {
   startYear: number;
   day: number;
@@ -88,16 +94,20 @@ const UI: React.FC<UIProps> = ({
   const mergeCandidates = useMemo(() => {
     if (!selectedFleet) return [];
     if (selectedFleet.state !== FleetState.ORBIT) return [];
-    
+
     // Only merge own fleets
     if (selectedFleet.factionId !== playerFactionId) return [];
 
-    return blueFleets.filter(f => 
+    const selectedOrbitingSystem = findOrbitingSystem(selectedFleet, systems);
+    if (!selectedOrbitingSystem) return [];
+
+    return blueFleets.filter(f =>
         f.id !== selectedFleet.id &&
         f.state === FleetState.ORBIT &&
-        dist(f.position, selectedFleet.position) < 8.0 
+        dist(f.position, selectedFleet.position) < 8.0 &&
+        findOrbitingSystem(f, systems)?.id === selectedOrbitingSystem.id
     );
-  }, [selectedFleet, blueFleets, playerFactionId]);
+  }, [selectedFleet, blueFleets, playerFactionId, systems]);
 
   // Compute Ground Context for FleetPanel
   const { orbitingSystem, availableArmies } = useMemo(() => {
@@ -105,9 +115,8 @@ const UI: React.FC<UIProps> = ({
           return { orbitingSystem: null, availableArmies: [] };
       }
 
-      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-      const sys = systems.find(s => distSq(selectedFleet.position, s.position) <= orbitThresholdSq);
-      
+      const sys = findOrbitingSystem(selectedFleet, systems);
+
       if (!sys) return { orbitingSystem: null, availableArmies: [] };
 
       // Get armies at this system belonging to Player
