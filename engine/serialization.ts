@@ -102,11 +102,17 @@ export const serializeGameState = (state: GameState): string => {
     rngState: state.rngState,
     startYear: state.startYear,
     day: state.day,
-    systems: state.systems.map(s => ({
-      ...s,
-      ownerFactionId: s.ownerFactionId,
-      position: serializeVector3(s.position)
-    })),
+    systems: state.systems.map(s => {
+      const ownerColor = state.factions.find(f => f.id === s.ownerFactionId)?.color;
+      const color = s.color || ownerColor || '#ffffff';
+
+      return {
+        ...s,
+        color,
+        ownerFactionId: s.ownerFactionId,
+        position: serializeVector3(s.position)
+      };
+    }),
     fleets: state.fleets.map(f => ({
       ...f,
       factionId: f.factionId,
@@ -182,17 +188,27 @@ export const deserializeGameState = (json: string): GameState => {
       throw new Error("Field 'systems' must be an array.");
     }
 
-    const systems: StarSystem[] = systemsDto.map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      position: deserializeVector3(s.position),
-      color: s.color,
-      size: s.size,
-      resourceType: s.resourceType,
-      isHomeworld: s.isHomeworld ?? false,
-      // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
-      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null)
-    }));
+    const factionColorById = factions.reduce<Record<string, string>>((acc, faction) => {
+      acc[faction.id] = faction.color;
+      return acc;
+    }, {});
+
+    const systems: StarSystem[] = systemsDto.map((s: any) => {
+      const ownerFactionId = s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null);
+      const ownerColor = ownerFactionId ? factionColorById[ownerFactionId] : undefined;
+
+      return {
+        id: s.id,
+        name: s.name,
+        position: deserializeVector3(s.position),
+        color: s.color || ownerColor || '#ffffff',
+        size: s.size,
+        resourceType: s.resourceType,
+        isHomeworld: s.isHomeworld ?? false,
+        // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
+        ownerFactionId
+      };
+    });
 
     // Fleets
     const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];

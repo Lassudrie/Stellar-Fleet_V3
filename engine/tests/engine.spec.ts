@@ -30,6 +30,7 @@ import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
+import { deserializeGameState, serializeGameState } from '../serialization';
 
 interface TestCase {
   name: string;
@@ -789,6 +790,22 @@ const tests: TestCase[] = [
 
       assert.strictEqual(cleanedShip.carriedArmyId, null, 'Transport should drop orphaned army reference');
       assert.ok(logs.some(entry => entry.includes('missing army missing-army')), 'Cleanup should log the fix');
+    }
+  },
+  {
+    name: 'System colors fall back during save round-trip',
+    run: () => {
+      const systemWithOwnerColor: StarSystem = { ...createSystem('owned-fallback', 'blue'), color: undefined as any };
+      const systemWithNeutralColor: StarSystem = { ...createSystem('neutral-fallback', null), color: '' as any };
+
+      const state = createBaseState({ systems: [systemWithOwnerColor, systemWithNeutralColor] });
+
+      const serialized = serializeGameState(state);
+      const deserialized = deserializeGameState(serialized);
+
+      const [owned, neutral] = deserialized.systems;
+      assert.strictEqual(owned.color, COLORS.blue, 'Owned systems should inherit their faction color');
+      assert.strictEqual(neutral.color, '#ffffff', 'Neutral systems should fall back to white');
     }
   },
   {
