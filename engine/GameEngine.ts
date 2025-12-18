@@ -6,7 +6,7 @@ import { runTurn } from './runTurn';
 import { clone, distSq } from './math/vec3';
 import { computeLoadOps, computeUnloadOps } from './armyOps';
 import { withUpdatedFleetDerived } from './fleetDerived';
-import { clone } from './math/vec3';
+import { ORBIT_RADIUS } from '../data/static';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -290,7 +290,52 @@ export class GameEngine {
         }
 
         if (command.type === 'MERGE_FLEETS') {
-            return { ok: false, error: 'Not implemented' };
+            const sourceFleet = this.state.fleets.find(f => f.id === command.sourceFleetId);
+            const targetFleet = this.state.fleets.find(f => f.id === command.targetFleetId);
+
+            if (!sourceFleet || !targetFleet) return { ok: false, error: 'Fleet not found' };
+            if (sourceFleet.id === targetFleet.id) return { ok: false, error: 'Cannot merge a fleet into itself' };
+            if (sourceFleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            if (targetFleet.factionId !== playerFactionId) return { ok: false, error: 'Target fleet not controlled by player' };
+            if (sourceFleet.factionId !== targetFleet.factionId) return { ok: false, error: 'Fleets belong to different factions' };
+            if (sourceFleet.retreating || targetFleet.retreating) return { ok: false, error: 'Retreating fleets cannot merge' };
+            if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT)
+                return { ok: false, error: 'Fleets must be in orbit to merge' };
+
+            const mergeRangeSq = (ORBIT_RADIUS * 3) ** 2;
+            if (distSq(sourceFleet.position, targetFleet.position) > mergeRangeSq)
+                return { ok: false, error: 'Fleets are too far apart to merge' };
+
+            const mergedTarget = withUpdatedFleetDerived({
+                ...targetFleet,
+                ships: [...targetFleet.ships, ...sourceFleet.ships]
+            });
+
+            const updatedArmies = this.state.armies.map(army => {
+                if (army.containerId !== sourceFleet.id) return army;
+                return { ...army, containerId: targetFleet.id };
+            });
+
+            const mergeLog = {
+                id: this.rng.id('log'),
+                day: this.state.day,
+                text: `Fleet ${sourceFleet.id} merged into ${targetFleet.id}, transferring ${sourceFleet.ships.length} ships.`,
+                type: 'info' as const
+            };
+
+            this.state = {
+                ...this.state,
+                fleets: this.state.fleets
+                    .filter(f => f.id !== sourceFleet.id)
+                    .map(f => (f.id === targetFleet.id ? mergedTarget : f)),
+                armies: updatedArmies,
+                logs: [...this.state.logs, mergeLog],
+                selectedFleetId: mergedTarget.id
+            };
+
+            this.syncRngState();
+            this.notify();
+            return { ok: true };
         }
 
         return { ok: false, error: 'Unknown command' };
