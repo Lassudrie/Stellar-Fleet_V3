@@ -94,8 +94,9 @@ const App: React.FC = () => {
                   if (!existing || existing.daySeen < baseState.day || !equals(existing.position, f.position)) {
                        next[f.id] = {
                            fleetId: f.id,
-                           systemId: null, 
-                           position: clone(f.position), 
+                           factionId: f.factionId,
+                           systemId: null,
+                           position: clone(f.position),
                            daySeen: baseState.day,
                            estimatedPower: calculateFleetPower(f),
                            confidence: 1.0

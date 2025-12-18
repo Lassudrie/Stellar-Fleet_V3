@@ -90,6 +90,7 @@ export interface BattleDTO {
 
 export interface EnemySightingDTO {
   fleetId: string;
+  factionId: string;
   systemId: string | null;
   position: Vector3DTO;
   daySeen: number;

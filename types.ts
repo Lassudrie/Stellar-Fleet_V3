@@ -141,6 +141,7 @@ export interface Battle {
 
 export interface EnemySighting {
   fleetId: string;
+  factionId: FactionId;
   systemId: string | null;
   position: Vec3;
   daySeen: number;
