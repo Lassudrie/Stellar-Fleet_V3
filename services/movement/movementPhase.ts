@@ -51,13 +51,13 @@ export const isOrbitContested = (system: StarSystem, fleets: Fleet[]): boolean =
     return factionsInRange.size >= 2;
 };
 
-interface MovementStepResult {
+export interface MovementStepResult {
     fleet: Fleet;
     arrivalSystemId?: string;
     logs: LogEntry[];
 }
 
-const moveFleet = (
+export const moveFleet = (
     fleet: Fleet,
     systems: StarSystem[],
     day: number,
@@ -178,7 +178,7 @@ const applyContestedDeploymentRisk = (
     return { fleet: fleetAfterDrop, armies: updatedArmies, deployed: deployedCount, failed: failedCount, logs };
 };
 
-const executeArrivalOperations = (
+export const executeArrivalOperations = (
     fleet: Fleet,
     system: StarSystem,
     armies: Army[],
