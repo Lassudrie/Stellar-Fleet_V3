@@ -4,9 +4,10 @@ import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
 import { clone, distSq } from './math/vec3';
-import { computeLoadOps, computeUnloadOps } from './armyOps';
+import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { isOrbitContested } from './conquest';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -114,6 +115,7 @@ export class GameEngine {
     private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
         if (!this.isFleetAtSystem(fleet, system)) return false;
 
+        const contestedOrbit = isOrbitContested(system, this.state);
         const unloadResult = computeUnloadOps({
             fleet,
             system,
@@ -125,11 +127,26 @@ export class GameEngine {
 
         if (unloadResult.count === 0) return false;
 
+        let updatedArmies = unloadResult.armies;
+        let updatedLogs = unloadResult.logs;
+
+        if (contestedOrbit && unloadResult.unloadedArmyIds && unloadResult.unloadedArmyIds.length > 0) {
+            const riskOutcome = applyContestedUnloadRisk(
+                updatedArmies,
+                unloadResult.unloadedArmyIds,
+                system.name,
+                this.state.day,
+                this.rng
+            );
+            updatedArmies = riskOutcome.armies;
+            updatedLogs = [...updatedLogs, ...riskOutcome.logs];
+        }
+
         this.state = {
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
-            armies: unloadResult.armies,
-            logs: [...this.state.logs, ...unloadResult.logs]
+            armies: updatedArmies,
+            logs: [...this.state.logs, ...updatedLogs]
         };
 
         return true;
