@@ -175,7 +175,7 @@ const updateMemory = (
       }
     });
 
-    memory.sightings[fleet.id] = {
+    const updatedSighting: EnemySighting = {
       fleetId: fleet.id,
       factionId: fleet.factionId,
       systemId: closestSystemId,
@@ -185,6 +185,8 @@ const updateMemory = (
       confidence: 1.0,
       lastUpdateDay: state.day
     };
+
+    memory.sightings[fleet.id] = updatedSighting;
     refreshedSightings.add(fleet.id);
   });
 
