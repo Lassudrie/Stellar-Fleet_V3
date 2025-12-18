@@ -10,6 +10,7 @@ import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
+import ShipDetailModal from './ui/ShipDetailModal';
 import { hasInvadingForce } from '../engine/army';
 import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
@@ -35,9 +36,10 @@ interface UIProps {
   startYear: number;
   day: number;
   selectedFleet: Fleet | null;
+  inspectedFleet: Fleet | null;
   logs: LogEntry[];
-  
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
+
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -62,6 +64,7 @@ interface UIProps {
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
+  onCloseShipDetail: () => void;
 
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
@@ -76,15 +79,15 @@ interface UIProps {
   onSetUiSettings: (settings: { devMode: boolean, godEyes: boolean, aiDebug?: boolean }) => void;
 }
 
-const UI: React.FC<UIProps> = ({ 
-    startYear, day, selectedFleet, onSplit, onMerge, onDeploy, onEmbark, winner, logs,
-    onRestart, onNextTurn, 
+const UI: React.FC<UIProps> = ({
+    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, winner, logs,
+    onRestart, onNextTurn,
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
-    onSave, onExportAiLogs, onClearAiLogs,
+    onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
     devMode, godEyes, onSetUiSettings
 }) => {
   
@@ -343,8 +346,18 @@ const UI: React.FC<UIProps> = ({
         />
       )}
 
+      {uiMode === 'SHIP_DETAIL_MODAL' && inspectedFleet && (
+        <ShipDetailModal
+            fleet={inspectedFleet}
+            faction={factionLookup[inspectedFleet.factionId]}
+            armies={gameState.armies}
+            logs={logs}
+            onClose={onCloseShipDetail}
+        />
+      )}
+
       {selectedFleet && uiMode === 'NONE' && (
-        <FleetPanel 
+        <FleetPanel
             fleet={selectedFleet}
             otherFleetsInSystem={mergeCandidates}
             onSplit={onSplit}

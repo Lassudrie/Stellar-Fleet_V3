@@ -20,7 +20,7 @@ import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { ORBIT_PROXIMITY_RANGE_SQ } from './data/static';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
@@ -36,6 +36,7 @@ const App: React.FC = () => {
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
   const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
+  const [inspectedFleetId, setInspectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
@@ -74,6 +75,7 @@ const App: React.FC = () => {
 
   const selectedFleetIdRef = useRef<string | null>(selectedFleetId);
   const uiModeRef = useRef<UiMode>(uiMode);
+  const inspectedFleetIdRef = useRef<string | null>(inspectedFleetId);
 
   useEffect(() => {
       selectedFleetIdRef.current = selectedFleetId;
@@ -82,6 +84,10 @@ const App: React.FC = () => {
   useEffect(() => {
       uiModeRef.current = uiMode;
   }, [uiMode]);
+
+  useEffect(() => {
+      inspectedFleetIdRef.current = inspectedFleetId;
+  }, [inspectedFleetId]);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -154,6 +160,7 @@ const App: React.FC = () => {
           const fleetExists = nextView.fleets.find(f => f.id === currentSelectedFleetId);
           if (!fleetExists) {
               setSelectedFleetId(null);
+              setInspectedFleetId(null);
               if (uiModeRef.current !== 'SYSTEM_MENU') {
                   setFleetPickerMode(null);
                   setUiMode('NONE');
@@ -252,11 +259,21 @@ const App: React.FC = () => {
       setTargetSystem(sys);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setFleetPickerMode(null);
+      setInspectedFleetId(null);
       setUiMode('SYSTEM_MENU');
   };
 
   const handleFleetSelect = (id: string | null) => {
       setSelectedFleetId(id);
+      if (!id) {
+          setInspectedFleetId(null);
+      }
+  };
+
+  const handleFleetInspect = (id: string) => {
+      setSelectedFleetId(id);
+      setInspectedFleetId(id);
+      setUiMode('SHIP_DETAIL_MODAL');
   };
 
   const handleNextTurn = () => {
@@ -333,6 +350,7 @@ const App: React.FC = () => {
   const handleCloseMenu = () => {
       setFleetPickerMode(null);
       setUiMode('NONE');
+      setInspectedFleetId(null);
   };
 
   const handleInvade = (systemId: string) => {
@@ -453,6 +471,7 @@ const App: React.FC = () => {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
+      const inspectedFleet = viewGameState.fleets.find(f => f.id === inspectedFleetId) || null;
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
@@ -461,16 +480,18 @@ const App: React.FC = () => {
                 enemySightings={enemySightings}
                 selectedFleetId={selectedFleetId}
                 onFleetSelect={handleFleetSelect}
+                onFleetInspect={handleFleetInspect}
                 onSystemClick={handleSystemClick}
                 onBackgroundClick={() => {
                     handleCloseMenu();
                     setSelectedFleetId(null);
                 }}
             />
-            <UI 
+            <UI
                 startYear={viewGameState.startYear}
                 day={viewGameState.day}
                 selectedFleet={selectedFleet}
+                inspectedFleet={inspectedFleet}
                 logs={viewGameState.logs}
                 
                 uiMode={uiMode}
@@ -498,6 +519,7 @@ const App: React.FC = () => {
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
                 onSelectFleet={setSelectedFleetId}
+                onCloseShipDetail={() => handleCloseMenu()}
 
                 onOpenBattle={(id) => {
                     setSelectedBattleId(id);

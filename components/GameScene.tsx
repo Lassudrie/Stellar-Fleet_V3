@@ -18,6 +18,7 @@ interface GameSceneProps {
   enemySightings: Record<string, EnemySighting>;
   selectedFleetId: string | null;
   onFleetSelect: (id: string | null) => void;
+  onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
   onBackgroundClick: () => void;
 }
@@ -108,6 +109,7 @@ const GameScene: React.FC<GameSceneProps> = ({
   enemySightings,
   selectedFleetId,
   onFleetSelect,
+  onFleetInspect,
   onSystemClick,
   onBackgroundClick
 }) => {
@@ -173,6 +175,22 @@ const GameScene: React.FC<GameSceneProps> = ({
       return new Set(gameState.fleets.map(f => f.id));
   }, [gameState.fleets]);
 
+  const lastTapRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
+  const DOUBLE_TAP_THRESHOLD_MS = 350;
+
+  const handleFleetInteraction = (fleetId: string) => {
+    const now = performance.now();
+
+    if (lastTapRef.current.id === fleetId && now - lastTapRef.current.time < DOUBLE_TAP_THRESHOLD_MS) {
+      lastTapRef.current = { id: null, time: 0 };
+      onFleetInspect(fleetId);
+      return;
+    }
+
+    lastTapRef.current = { id: fleetId, time: now };
+    onFleetSelect(fleetId);
+  };
+
   // Color Helper
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
@@ -236,7 +254,7 @@ const GameScene: React.FC<GameSceneProps> = ({
                         isSelected={selectedFleetId === fleet.id}
                         onSelect={(e) => {
                             e.stopPropagation();
-                            onFleetSelect(fleet.id);
+                            handleFleetInteraction(fleet.id);
                         }}
                         playerFactionId={gameState.playerFactionId}
                         color={getFactionColor(fleet.factionId)}
