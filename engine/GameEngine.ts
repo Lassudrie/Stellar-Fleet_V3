@@ -6,7 +6,7 @@ import { runTurn } from './runTurn';
 import { clone, distSq } from './math/vec3';
 import { computeLoadOps, computeUnloadOps } from './armyOps';
 import { withUpdatedFleetDerived } from './fleetDerived';
-import { ORBIT_RADIUS } from '../data/static';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -84,8 +84,7 @@ export class GameEngine {
     }
 
     private isFleetAtSystem(fleet: Fleet, system: StarSystem): boolean {
-        // Allow a small epsilon to guard against floating point drift
-        return distSq(fleet.position, system.position) < 0.0001;
+        return distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
     }
 
     private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
@@ -325,8 +324,7 @@ export class GameEngine {
             if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT)
                 return { ok: false, error: 'Fleets must be in orbit to merge' };
 
-            const mergeRangeSq = (ORBIT_RADIUS * 3) ** 2;
-            if (distSq(sourceFleet.position, targetFleet.position) > mergeRangeSq)
+            if (distSq(sourceFleet.position, targetFleet.position) > ORBIT_PROXIMITY_RANGE_SQ)
                 return { ok: false, error: 'Fleets are too far apart to merge' };
 
             const mergedTarget = withUpdatedFleetDerived({

@@ -6,6 +6,7 @@ import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 import { computeLoadOps, computeUnloadOps } from './armyOps';
 import { isOrbitContested } from './conquest';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 
 const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
 const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
@@ -225,7 +226,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!system || !fleet || !army) return state;
 
-            const inOrbit = fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) < 0.0001;
+            const inOrbit =
+                fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
             if (!inOrbit) return state;
 
             const ship = fleet.ships.find(s => s.id === command.shipId && !s.carriedArmyId);
@@ -263,7 +265,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!system || !fleet || !army) return state;
 
-            const inOrbit = fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) < 0.0001;
+            const inOrbit =
+                fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
             if (!inOrbit) return state;
 
             const ship = fleet.ships.find(s => s.id === command.shipId && s.carriedArmyId === command.armyId);
