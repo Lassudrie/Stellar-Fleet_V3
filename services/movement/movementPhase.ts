@@ -51,10 +51,17 @@ export const isOrbitContested = (system: StarSystem, fleets: Fleet[]): boolean =
     return factionsInRange.size >= 2;
 };
 
+export interface MovementOrdersSnapshot {
+    invasionTargetSystemId: string | null;
+    loadTargetSystemId: string | null;
+    unloadTargetSystemId: string | null;
+}
+
 export interface MovementStepResult {
     fleet: Fleet;
     arrivalSystemId?: string;
     logs: LogEntry[];
+    orders?: MovementOrdersSnapshot;
 }
 
 export const moveFleet = (

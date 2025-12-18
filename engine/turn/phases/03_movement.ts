@@ -1,7 +1,12 @@
 
 import { GameState, Fleet } from '../../../types';
 import { TurnContext } from '../types';
-import { moveFleet, executeArrivalOperations, MovementStepResult } from '../../../services/movement/movementPhase';
+import {
+    moveFleet,
+    executeArrivalOperations,
+    MovementOrdersSnapshot,
+    MovementStepResult
+} from '../../../services/movement/movementPhase';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
     const nextDay = ctx.turn; // Movement projects to current turn positions
@@ -16,8 +21,14 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
 
     // First pass: compute final positions for all fleets without arrival operations
     fleetsToProcess.forEach(fleet => {
+        const ordersSnapshot: MovementOrdersSnapshot = {
+            invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+            loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+            unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
+        };
+
         const moveResult = moveFleet(fleet, state.systems, nextDay, ctx.rng);
-        movementResults.push(moveResult);
+        movementResults.push({ ...moveResult, orders: ordersSnapshot });
         workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? moveResult.fleet : existing));
         newLogs.push(...moveResult.logs);
     });
@@ -32,10 +43,32 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         const fleet = workingFleets.find(f => f.id === result.fleet.id);
         if (!fleet) return;
 
-        const arrivalOutcome = executeArrivalOperations(fleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
+        const arrivalOrders = result.orders ?? {
+            invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+            loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+            unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
+        };
+
+        const arrivalFleet = {
+            ...fleet,
+            invasionTargetSystemId: arrivalOrders.invasionTargetSystemId,
+            loadTargetSystemId: arrivalOrders.loadTargetSystemId,
+            unloadTargetSystemId: arrivalOrders.unloadTargetSystemId
+        };
+
+        const arrivalOutcome = executeArrivalOperations(arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
 
         workingArmies = arrivalOutcome.armies;
-        workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? arrivalOutcome.fleet : existing));
+        workingFleets = workingFleets.map(existing =>
+            existing.id === fleet.id
+                ? {
+                      ...arrivalOutcome.fleet,
+                      invasionTargetSystemId: null,
+                      loadTargetSystemId: null,
+                      unloadTargetSystemId: null
+                  }
+                : existing
+        );
         newLogs.push(...arrivalOutcome.logs);
     });
 

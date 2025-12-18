@@ -502,6 +502,51 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'ORDER_INVASION_MOVE déclenche le débarquement après un tour complet',
+    run: () => {
+      const targetSystem = createSystem('sys-invasion-move', 'red');
+      const transport: ShipEntity = {
+        id: 'blue-transport-invasion',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: 'army-blue-invasion'
+      };
+
+      const invadingFleet = createFleet('fleet-blue-invasion', 'blue', { ...baseVec }, [transport]);
+      const embarkedArmy = createArmy(transport.carriedArmyId!, 'blue', 12000, ArmyState.EMBARKED, invadingFleet.id);
+
+      const baseState = createBaseState({ systems: [targetSystem], fleets: [invadingFleet], armies: [embarkedArmy] });
+      const orderedState = applyCommand(
+        baseState,
+        { type: 'ORDER_INVASION_MOVE', fleetId: invadingFleet.id, targetSystemId: targetSystem.id },
+        new RNG(13)
+      );
+
+      const resolvedState = runTurn(orderedState, new RNG(13));
+
+      const deployedArmy = resolvedState.armies.find(army => army.id === embarkedArmy.id);
+      const updatedFleet = resolvedState.fleets.find(fleet => fleet.id === invadingFleet.id);
+      const updatedTransport = updatedFleet?.ships.find(ship => ship.id === transport.id);
+
+      assert.strictEqual(
+        deployedArmy?.state,
+        ArmyState.DEPLOYED,
+        'L’armée embarquée doit se déployer sur la planète après l’ordre d’invasion'
+      );
+      assert.strictEqual(
+        deployedArmy?.containerId,
+        targetSystem.id,
+        'Le conteneur de l’armée doit devenir le système envahi après le tour'
+      );
+      assert.strictEqual(
+        updatedTransport?.carriedArmyId,
+        null,
+        'Le transport ne doit plus transporter l’armée après le débarquement'
+      );
+    }
+  },
+  {
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
