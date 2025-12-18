@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Color, DoubleSide, BufferGeometry, BufferAttribute } from 'three';
 import { StarSystem, FactionId, FactionState } from '../types';
-import { COLORS, TERRITORY_RADIUS } from '../data/static';
+import { TERRITORY_RADIUS } from '../data/static';
 
 // --- CONFIGURATION ---
 const CIRCLE_SEGMENTS = 64;  
@@ -99,6 +99,8 @@ interface TerritoryBordersProps {
     factions: FactionState[]; // Used for coloring
 }
 
+const DEFAULT_TERRITORY_COLOR = '#3b82f6';
+
 const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems, signature, factions }) => {
 
   const meshes = useMemo(() => {
@@ -122,7 +124,8 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
     Object.entries(groups).forEach(([factionStr, mySystems]) => {
         if (mySystems.length === 0) return;
 
-        const baseColor = new Color(factionColors[factionStr] || COLORS.star);
+        const baseColorHex = factionColors[factionStr] || DEFAULT_TERRITORY_COLOR;
+        const baseColor = new Color(baseColorHex);
         const borderColor = baseColor.clone().lerp(new Color('#ffffff'), 0.25).getStyle();
 
         // Glassy fill color
