@@ -31,6 +31,7 @@ import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
+import { checkVictoryConditions } from '../objectives';
 
 interface TestCase {
   name: string;
@@ -231,6 +232,40 @@ const tests: TestCase[] = [
       assert.strictEqual(outcome.label, 'Nomad League VICTORY');
       assert.strictEqual(outcome.color, '#facc15');
       assert.strictEqual(outcome.winnerName, 'Nomad League');
+    }
+  },
+  {
+    name: 'Elimination requires destroying fleets and removing system ownership',
+    run: () => {
+      const redFleet = createFleet('fleet-red', 'red', baseVec, [
+        { id: 'red-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateWithSystemsAndFleet = createBaseState({
+        systems: [createSystem('sys-blue', 'blue'), createSystem('sys-red', 'red')],
+        fleets: [redFleet]
+      });
+
+      const initialWinner = checkVictoryConditions(stateWithSystemsAndFleet);
+      assert.strictEqual(initialWinner, null, 'Enemy systems should block elimination even without battles');
+
+      const stateWithoutSystem = {
+        ...stateWithSystemsAndFleet,
+        systems: stateWithSystemsAndFleet.systems.map(system =>
+          system.id === 'sys-red' ? { ...system, ownerFactionId: null } : system
+        )
+      };
+
+      const winnerWithoutSystem = checkVictoryConditions(stateWithoutSystem);
+      assert.strictEqual(winnerWithoutSystem, null, 'Enemy fleets should block elimination even after losing systems');
+
+      const stateWithoutFleet = {
+        ...stateWithoutSystem,
+        fleets: stateWithoutSystem.fleets.filter(fleet => fleet.factionId !== 'red')
+      };
+
+      const finalWinner = checkVictoryConditions(stateWithoutFleet);
+      assert.strictEqual(finalWinner, 'blue', 'Elimination should require destroying fleets and owning no systems');
     }
   },
   {

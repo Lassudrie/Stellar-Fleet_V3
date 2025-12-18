@@ -66,19 +66,16 @@ const checkFactionVictory = (factionId: FactionId, state: GameState): boolean =>
 // --- CONDITION EVALUATORS ---
 
 /**
- * Elimination: A faction wins if ALL opposing factions have 0 active fleets and 0 systems.
+ * Elimination: A faction wins if all opposing factions have no active fleets and no owned systems.
  */
 const checkElimination = (factionId: FactionId, state: GameState): boolean => {
   const enemies = state.factions.map(f => f.id).filter(f => f !== factionId);
-  
+
   // Are all enemies wiped out?
   const allEnemiesDestroyed = enemies.every(enemyFactionId => {
     const hasFleets = state.fleets.some(f => f.factionId === enemyFactionId && f.ships.length > 0);
-    // Note: We currently don't count systems as "being alive" for elimination in standard 4X,
-    // usually destroying all fleets is enough to trigger a "Functional Kill".
-    // But strict elimination might require systems too.
-    // Let's stick to Fleets for V1 as per original hardcoded logic.
-    return !hasFleets;
+    const hasSystems = state.systems.some(s => s.ownerFactionId === enemyFactionId);
+    return !hasFleets && !hasSystems;
   });
 
   return allEnemiesDestroyed;
