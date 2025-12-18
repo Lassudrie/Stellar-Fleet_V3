@@ -463,6 +463,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       let position = vec3(0, 0, 0);
       let sysId: string | null = null;
       let state = FleetState.ORBIT;
+      let targetPosition: Vec3 | null = null;
+      let targetSystemId: string | null = null;
       
       // Determine Spawn Location
       if (def.spawnLocation === 'home_system') {
@@ -501,7 +503,23 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       } else {
           // Deep Space Spawn ({x,y,z})
           position = vec3(def.spawnLocation.x, def.spawnLocation.y, def.spawnLocation.z);
-          state = FleetState.MOVING; 
+          const nearestSystem = systems.reduce<{ system: StarSystem; distanceSq: number } | null>((nearest, system) => {
+              const distanceSq = distSq(position, system.position);
+
+              if (!nearest || distanceSq < nearest.distanceSq) {
+                  return { system, distanceSq };
+              }
+
+              return nearest;
+          }, null);
+
+          if (nearestSystem) {
+              state = FleetState.MOVING;
+              targetSystemId = nearestSystem.system.id;
+              targetPosition = clone(nearestSystem.system.position);
+          } else {
+              state = FleetState.ORBIT;
+          }
       }
 
       // Create Ships
@@ -516,8 +534,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           ships: ships,
           position: position,
           state: state,
-          targetSystemId: null,
-          targetPosition: null,
+          targetSystemId: targetSystemId,
+          targetPosition: targetPosition,
           radius: computeFleetRadius(ships.length),
           stateStartTurn: 0
       };
