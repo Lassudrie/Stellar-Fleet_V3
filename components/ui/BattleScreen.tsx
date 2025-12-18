@@ -1,6 +1,6 @@
 
 import React, { useMemo, useEffect, useRef } from 'react';
-import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../types';
+import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot, FactionState } from '../../types';
 import { useI18n } from '../../i18n';
 
 interface BattleScreenProps {
@@ -47,53 +47,56 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   }, [battleId, gameState.battles, blueFleetOverride, redFleetOverride, gameState.day]);
 
   // 2. Aggregate Data using Snapshot
+  const factionLookup = useMemo(() => {
+      const map = new Map<FactionId, FactionState>();
+      gameState.factions.forEach(f => map.set(f.id, f));
+      return map;
+  }, [gameState.factions]);
+
   const stats = useMemo(() => {
-      if (!battle) return null;
+      if (!battle || !battle.initialShips) return null;
 
-      // Identify Opponent (The first faction involved that isn't the player)
-      let enemyFactionId = 'red'; // Fallback
-      if (battle.initialShips && battle.initialShips.length > 0) {
-          const distinctFactions = Array.from(new Set(battle.initialShips.map(s => s.factionId)));
-          const enemy = distinctFactions.find(f => f !== playerFactionId);
-          if (enemy) enemyFactionId = enemy;
-      }
+      const survivorSet = new Set(battle.survivorShipIds || []);
+      const grouped = new Map<FactionId, BattleShipSnapshot[]>();
 
-      // Prepare result object
-      const result = {
-          blue: { initial: 0, lost: 0, survivors: 0, fleets: [] as string[], composition: {} as any },
-          red: { initial: 0, lost: 0, survivors: 0, fleets: [] as string[], composition: {} as any }
-      };
+      battle.initialShips.forEach(snap => {
+          if (!grouped.has(snap.factionId)) grouped.set(snap.factionId, []);
+          grouped.get(snap.factionId)!.push(snap);
+      });
 
-      if (battle.initialShips && battle.survivorShipIds) {
-          const survivorSet = new Set(battle.survivorShipIds);
+      const factionStats = Array.from(grouped.entries()).map(([factionId, snaps]) => {
+          const faction = factionLookup.get(factionId);
+          const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
+          const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
 
-          const processSide = (side: 'blue' | 'red', targetFactionId: string) => {
-              const snaps = battle.initialShips!.filter(s => s.factionId === targetFactionId);
-              const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
-              const fleets = Array.from(new Set(snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???')));
-              
-              const comp: any = {};
-              snaps.forEach(s => {
-                  if (!comp[s.type]) comp[s.type] = { engaged: 0, lost: 0 };
-                  comp[s.type].engaged++;
-                  if (!survivorSet.has(s.shipId)) comp[s.type].lost++;
-              });
+          const composition: Record<string, { engaged: number; lost: number }> = {};
+          snaps.forEach(s => {
+              if (!composition[s.type]) composition[s.type] = { engaged: 0, lost: 0 };
+              composition[s.type].engaged++;
+              if (!survivorSet.has(s.shipId)) composition[s.type].lost++;
+          });
 
-              result[side] = {
-                  initial: snaps.length,
-                  lost,
-                  survivors: snaps.length - lost,
-                  fleets,
-                  composition: comp
-              };
+          return {
+              factionId,
+              factionName: faction?.name || factionId.toUpperCase(),
+              color: faction?.color || '#38bdf8',
+              initial: snaps.length,
+              lost,
+              survivors: snaps.length - lost,
+              fleets,
+              composition,
           };
+      });
 
-          processSide('blue', playerFactionId);
-          processSide('red', enemyFactionId);
-      }
+      const ordered = factionStats.sort((a, b) => b.initial - a.initial);
+      const playerEntry = ordered.find(s => s.factionId === playerFactionId);
+      const enemyEntry = ordered.find(s => s.factionId !== playerFactionId);
+      const rest = ordered.filter(s => s !== playerEntry && s !== enemyEntry);
 
-      return result;
-  }, [battle, gameState.fleets, playerFactionId]);
+      return playerEntry || enemyEntry
+          ? [playerEntry, enemyEntry, ...rest].filter(Boolean) as typeof factionStats
+          : ordered;
+  }, [battle, factionLookup, playerFactionId]);
 
   useEffect(() => {
       if (logContainerRef.current) {
@@ -120,7 +123,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
         ? (battle.roundsPlayed === 1 ? t('battle.rounds_one') : t('battle.rounds_other', { count: battle.roundsPlayed }))
         : t('battle.finished');
 
-  const renderComposition = (comp: Record<string, { engaged: number, lost: number }>, colorClass: string) => {
+  const renderComposition = (comp: Record<string, { engaged: number, lost: number }>, color: string) => {
       const types = Object.keys(comp).sort();
       if (types.length === 0) return null;
 
@@ -131,7 +134,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
                   return (
                       <React.Fragment key={type}>
                           <div className="text-slate-400 capitalize text-right">{type}</div>
-                          <div className={`${colorClass} font-bold`}>
+                          <div className="font-bold" style={{ color }}>
                              {data.engaged - data.lost} <span className="text-slate-600">/ {data.engaged}</span>
                           </div>
                       </React.Fragment>
@@ -169,43 +172,34 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
 
         {/* STATS OVERVIEW */}
         <div className="grid grid-cols-2 gap-px bg-slate-800 shrink-0">
-            {/* BLUE SIDE (PLAYER) */}
-            <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-blue-600">
-                <div className="text-blue-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.blueForces')}</div>
-                <div className="flex gap-8 text-center mb-1">
-                    <div>
-                        <div className="text-3xl font-black text-white">{stats.blue.survivors}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+            {stats.map(stat => (
+                <div
+                    key={stat.factionId}
+                    className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4"
+                    style={{ borderBottomColor: stat.color }}
+                >
+                    <div
+                        className="font-bold uppercase tracking-widest text-sm mb-1"
+                        style={{ color: stat.color }}
+                    >
+                        {t('battle.factionForces', { faction: stat.factionName })}
                     </div>
-                    <div>
-                        <div className="text-3xl font-black text-red-400">-{stats.blue.lost}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                    <div className="flex gap-8 text-center mb-1">
+                        <div>
+                            <div className="text-3xl font-black text-white">{stat.survivors}</div>
+                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
+                        </div>
+                        <div>
+                            <div className="text-3xl font-black text-red-400">-{stat.lost}</div>
+                            <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                        </div>
                     </div>
-                </div>
-                {renderComposition(stats.blue.composition, 'text-blue-300')}
-                <div className="mt-2 text-xs text-slate-500">
-                    {t('battle.fleets')} {stats.blue.fleets.join(', ') || t('battle.none')}
-                </div>
-            </div>
-
-            {/* RED SIDE (ENEMY) */}
-            <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-red-600">
-                <div className="text-red-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.redForces')}</div>
-                <div className="flex gap-8 text-center mb-1">
-                    <div>
-                        <div className="text-3xl font-black text-white">{stats.red.survivors}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.survivors')}</div>
-                    </div>
-                    <div>
-                        <div className="text-3xl font-black text-red-400">-{stats.red.lost}</div>
-                        <div className="text-[10px] text-slate-400 uppercase">{t('battle.lost')}</div>
+                    {renderComposition(stat.composition, stat.color)}
+                    <div className="mt-2 text-xs text-slate-500">
+                        {t('battle.fleets')} {stat.fleets.join(', ') || t('battle.none')}
                     </div>
                 </div>
-                {renderComposition(stats.red.composition, 'text-red-300')}
-                <div className="mt-2 text-xs text-slate-500">
-                     {t('battle.fleets')} {stats.red.fleets.join(', ') || t('battle.none')}
-                </div>
-            </div>
+            ))}
         </div>
 
         {/* COMBAT LOGS */}
