@@ -482,7 +482,15 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               }
           }
       } else if (def.spawnLocation === 'random') {
-          const randomSys = rng.pick(systems);
+          const ownedSystems = systems.filter(s => s.ownerFactionId === factionId);
+          const neutralSystems = systems.filter(s => !s.ownerFactionId);
+          const candidatePool = ownedSystems.length > 0
+              ? ownedSystems
+              : neutralSystems.length > 0
+              ? neutralSystems
+              : systems;
+
+          const randomSys = rng.pick(candidatePool);
           if (randomSys) {
               position = clone(randomSys.position);
               sysId = randomSys.id;
