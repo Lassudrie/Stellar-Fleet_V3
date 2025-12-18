@@ -30,10 +30,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 30,
     evasion: 0.05,
     maneuverability: 0.1,
-    missileStock: 0,
+    offensiveMissileStock: 0,
     missileDamage: 0,
     torpedoStock: 0,
     torpedoDamage: 0,
+    interceptorStock: 0,
     role: 'capital'
   },
   [ShipType.CRUISER]: {
@@ -44,10 +45,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 15,
     evasion: 0.15,
     maneuverability: 0.3,
-    missileStock: 12,
+    offensiveMissileStock: 12,
     missileDamage: 30,
     torpedoStock: 4,
     torpedoDamage: 150,
+    interceptorStock: 12,
     role: 'capital'
   },
   [ShipType.DESTROYER]: {
@@ -58,10 +60,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 40, // PD Specialist
     evasion: 0.25,
     maneuverability: 0.5,
-    missileStock: 8,
+    offensiveMissileStock: 8,
     missileDamage: 25,
     torpedoStock: 0,
     torpedoDamage: 0,
+    interceptorStock: 8,
     role: 'screen'
   },
   [ShipType.FRIGATE]: {
@@ -72,10 +75,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 5,
     evasion: 0.50, // Hard to hit
     maneuverability: 0.7,
-    missileStock: 4,
+    offensiveMissileStock: 4,
     missileDamage: 20,
     torpedoStock: 2,
     torpedoDamage: 100,
+    interceptorStock: 4,
     role: 'screen'
   },
   [ShipType.FIGHTER]: {
@@ -86,10 +90,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 0,
     evasion: 0.80,
     maneuverability: 0.9,
-    missileStock: 2,
+    offensiveMissileStock: 2,
     missileDamage: 15,
     torpedoStock: 0,
     torpedoDamage: 0,
+    interceptorStock: 2,
     role: 'striker'
   },
   [ShipType.BOMBER]: {
@@ -100,10 +105,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 0,
     evasion: 0.60,
     maneuverability: 0.6,
-    missileStock: 0,
+    offensiveMissileStock: 0,
     missileDamage: 0,
     torpedoStock: 4, // Torpedo specialist
     torpedoDamage: 120,
+    interceptorStock: 0,
     role: 'striker'
   },
   [ShipType.TROOP_TRANSPORT]: {
@@ -114,10 +120,11 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     pdStrength: 10, // Minimal self-defense CIWS
     evasion: 0.05,  // Heavy / Low maneuverability
     maneuverability: 0.1,
-    missileStock: 0,
+    offensiveMissileStock: 0,
     missileDamage: 0,
     torpedoStock: 0,
     torpedoDamage: 0,
+    interceptorStock: 0,
     role: 'transport'
   },
 };
