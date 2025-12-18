@@ -33,6 +33,7 @@ import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
 import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
+import { resolveFleetMovement } from '../../services/movement/movementPhase';
 
 interface TestCase {
   name: string;
@@ -451,6 +452,53 @@ const tests: TestCase[] = [
 
       assert.strictEqual(allowedShip?.carriedArmyId, blueArmy.id, 'Allowed transport should carry the army');
       assert.strictEqual(blockedShip?.carriedArmyId, null, 'Blocked transport must remain empty');
+    }
+  },
+  {
+    name: 'ORDER_LOAD_MOVE charge une armée alliée à l’arrivée',
+    run: () => {
+      const system = createSystem('sys-load-move-arrival', 'blue');
+      const transport: ShipEntity = {
+        id: 'blue-transport-move-load',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: null
+      };
+
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-blue-move-load', 'blue', { ...baseVec }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        loadTargetSystemId: system.id,
+        invasionTargetSystemId: null,
+        unloadTargetSystemId: null
+      };
+
+      const groundArmy = createArmy('army-blue-ground', 'blue', 6000, ArmyState.DEPLOYED, system.id);
+      const rng = new RNG(11);
+
+      const result = resolveFleetMovement(movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
+
+      const updatedFleet = result.nextFleet;
+      const loadedShip = updatedFleet.ships.find(ship => ship.id === transport.id);
+      const loadUpdate = result.armyUpdates.find(update => update.id === groundArmy.id);
+
+      assert.strictEqual(loadedShip?.carriedArmyId, groundArmy.id, 'Le transport doit embarquer l’armée après le mouvement');
+      assert.strictEqual(
+        loadUpdate?.changes.state,
+        ArmyState.EMBARKED,
+        'L’armée doit passer à l’état EMBARKED lors de la séquence de mouvement'
+      );
+      assert.strictEqual(
+        loadUpdate?.changes.containerId,
+        movingFleet.id,
+        'L’armée doit être rattachée à la flotte ayant exécuté l’ordre de chargement'
+      );
+      assert.strictEqual(updatedFleet.loadTargetSystemId, null, 'L’ordre de chargement doit être consommé après l’arrivée');
+      assert.strictEqual(updatedFleet.unloadTargetSystemId, null, 'Aucun ordre de déchargement ne doit rester actif');
+      assert.strictEqual(updatedFleet.invasionTargetSystemId, null, 'Aucun ordre d’invasion ne doit persister');
     }
   },
   {
