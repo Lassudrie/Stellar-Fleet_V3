@@ -29,6 +29,7 @@ import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
+import { buildFactionLabel, resolveFactionColor } from '../../components/ui/fleetPanelUtils';
 
 interface TestCase {
   name: string;
@@ -694,6 +695,30 @@ const tests: TestCase[] = [
 
       assert.strictEqual(cleanedShip.carriedArmyId, null, 'Transport should drop orphaned army reference');
       assert.ok(logs.some(entry => entry.includes('missing army missing-army')), 'Cleanup should log the fix');
+    }
+  },
+  {
+    name: 'Fleet panel helpers expose distinct faction colors and labels',
+    run: () => {
+      const factionPalette: FactionState[] = [
+        { id: 'alpha', name: 'Alpha League', color: '#123456', isPlayable: true },
+        { id: 'beta', name: 'Beta Union', color: '#654321', isPlayable: false }
+      ];
+
+      const fleetAlpha = createFleet('fleet-alpha_aaa', 'alpha', baseVec, []);
+      const fleetBeta = createFleet('fleet-beta_bbb', 'beta', baseVec, []);
+
+      const colorAlpha = resolveFactionColor(factionPalette, fleetAlpha.factionId);
+      const colorBeta = resolveFactionColor(factionPalette, fleetBeta.factionId);
+
+      assert.notStrictEqual(colorAlpha, colorBeta, 'Distinct factions should retain distinct palette entries');
+
+      const labelAlpha = buildFactionLabel(fleetAlpha, factionPalette, 'alpha');
+      const labelBeta = buildFactionLabel(fleetBeta, factionPalette, 'alpha');
+
+      assert.ok(labelAlpha.startsWith('FLEET'), 'Player fleets keep standardized labels');
+      assert.ok(labelBeta.includes('Beta Union'), 'Enemy fleets show their faction name');
+      assert.ok(labelBeta.includes('BBB'), 'Enemy fleet labels retain the short identifier');
     }
   },
   {

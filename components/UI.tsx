@@ -324,13 +324,14 @@ const UI: React.FC<UIProps> = ({
       )}
 
       {selectedFleet && uiMode === 'NONE' && (
-        <FleetPanel 
+        <FleetPanel
             fleet={selectedFleet}
             otherFleetsInSystem={mergeCandidates}
             onSplit={onSplit}
             onMerge={onMerge}
             currentSystem={orbitingSystem}
             availableArmies={availableArmies}
+            factions={gameState.factions}
             onDeploy={onDeploy}
             onEmbark={onEmbark}
             playerFactionId={playerFactionId}
