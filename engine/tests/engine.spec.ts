@@ -28,6 +28,7 @@ import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
+import { resolveFleetMovement } from '../../services/movement/movementPhase';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
@@ -497,6 +498,48 @@ const tests: TestCase[] = [
         combatLog?.text.includes('took fire'),
         'Combat log should record the contested drop losses'
       );
+    }
+  },
+  {
+    name: 'Contested invasion drop losses propagate to army updates',
+    run: () => {
+      const system = createSystem('sys-contested-drop', null);
+
+      const transport: ShipEntity = {
+        id: 'blue-transport-invasion',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: 'army-blue-contested'
+      };
+
+      const blueArmy = createArmy(transport.carriedArmyId!, 'blue', 6000, ArmyState.EMBARKED, 'fleet-blue-contested');
+
+      const blueFleet: Fleet = {
+        ...createFleet('fleet-blue-contested', 'blue', { ...baseVec }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...baseVec },
+        invasionTargetSystemId: system.id
+      };
+
+      const redFleet = createFleet('fleet-red-contested', 'red', { ...baseVec }, [
+        { id: 'red-escort-contested', type: ShipType.FIGHTER, hp: 40, maxHp: 40, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], armies: [blueArmy] });
+
+      const rng = new RNG(7); // Deterministic roll below contested threshold
+      const result = resolveFleetMovement(blueFleet, state.systems, state.armies, state.day, rng, state.fleets);
+
+      const update = result.armyUpdates.find(entry => entry.id === blueArmy.id);
+      assert.ok(update, 'Army updates must include contested drop strength changes');
+      const updatedArmy = { ...blueArmy, ...(update?.changes ?? {}) };
+      assert.ok(
+        updatedArmy.strength < blueArmy.strength,
+        'Strength loss during contested drop should persist into the final state'
+      );
+      assert.strictEqual(updatedArmy.state, ArmyState.EMBARKED, 'Failed deployment should leave the army embarked');
     }
   },
   {

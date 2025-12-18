@@ -25,6 +25,8 @@ const computeArmyUpdates = (previous: Army[], next: Army[]): ArmyUpdate[] => {
         const changes: Partial<Army> = {};
         if (before.state !== army.state) changes.state = army.state;
         if (before.containerId !== army.containerId) changes.containerId = army.containerId;
+        if (before.strength !== army.strength) changes.strength = army.strength;
+        if (before.morale !== army.morale) changes.morale = army.morale;
 
         if (Object.keys(changes).length === 0) return updates;
         updates.push({ id: army.id, changes });
@@ -75,8 +77,8 @@ const moveFleet = (
         return { fleet: { ...fleet, position: newPos }, logs: [] };
     }
 
-    const arrivedSystemId = fleet.targetSystemId ?? undefined;
-    const arrivedSystem = arrivedSystemId ? systems.find(s => s.id === arrivedSystemId) : undefined;
+    const arrivalSystemId = fleet.targetSystemId ?? undefined;
+    const arrivedSystem = arrivalSystemId ? systems.find(s => s.id === arrivalSystemId) : undefined;
     const arrivalLog = arrivedSystem
         ? [{
               id: rng.id('log'),
@@ -95,9 +97,9 @@ const moveFleet = (
             targetPosition: null,
             targetSystemId: null,
             retreating: false,
-            invasionTargetSystemId: null,
-            loadTargetSystemId: null,
-            unloadTargetSystemId: null
+            invasionTargetSystemId: fleet.invasionTargetSystemId,
+            loadTargetSystemId: fleet.loadTargetSystemId,
+            unloadTargetSystemId: fleet.unloadTargetSystemId
         },
         arrivalSystemId,
         logs: arrivalLog
