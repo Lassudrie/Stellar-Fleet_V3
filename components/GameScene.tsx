@@ -5,7 +5,6 @@ import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { BufferGeometry, BufferAttribute } from 'three';
 import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../types';
-import { COLORS } from '../data/static';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
 import TerritoryBorders from './TerritoryBorders';
@@ -21,6 +20,9 @@ interface GameSceneProps {
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
   onBackgroundClick: () => void;
 }
+
+const resolveFactionColor = (factions: GameState['factions'], id: string) =>
+  factions.find(faction => faction.id === id)?.color || '#999';
 
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
   const lineRef = useRef<any>(null);
@@ -71,21 +73,26 @@ const LaserRenderer: React.FC<{ lasers: LaserShot[] }> = React.memo(({ lasers })
 });
 
 // TrajectoryRenderer - Now uses playerFactionId check for coloring
-const TrajectoryRenderer: React.FC<{ fleets: GameState['fleets']; day: number; playerFactionId: string }> = React.memo(({ fleets, day, playerFactionId }) => {
+const TrajectoryRenderer: React.FC<{
+  fleets: GameState['fleets'];
+  factions: GameState['factions'];
+  day: number;
+  playerFactionId: string;
+}> = React.memo(({ fleets, factions, day, playerFactionId }) => {
     return (
         <group>
             {fleets.map(fleet => {
                 if (fleet.state === FleetState.MOVING && fleet.targetPosition) {
                     const isPlayer = fleet.factionId === playerFactionId;
-                    const color = isPlayer ? COLORS.blueHighlight : COLORS.redHighlight;
-                    
+                    const color = resolveFactionColor(factions, fleet.factionId);
+
                     return (
                         <SimpleLine
                             key={`traj-${fleet.id}`}
                             start={fleet.position}
                             end={fleet.targetPosition}
                             color={color}
-                            dashed={!isPlayer} 
+                            dashed={!isPlayer}
                         />
                     );
                 }
@@ -149,7 +156,7 @@ const GameScene: React.FC<GameSceneProps> = ({
   }, [gameState.fleets]);
 
   // Color Helper
-  const getFactionColor = (id: string) => gameState.factions.find(f => f.id === id)?.color || '#999';
+  const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   return (
     <div className="absolute inset-0 z-0 bg-black">
@@ -189,7 +196,12 @@ const GameScene: React.FC<GameSceneProps> = ({
                   playerFactionId={gameState.playerFactionId}
                 />
                 
-                <TrajectoryRenderer fleets={gameState.fleets} day={gameState.day} playerFactionId={gameState.playerFactionId} />
+                <TrajectoryRenderer
+                  fleets={gameState.fleets}
+                  factions={gameState.factions}
+                  day={gameState.day}
+                  playerFactionId={gameState.playerFactionId}
+                />
 
                 <IntelGhosts 
                     sightings={enemySightings} 
