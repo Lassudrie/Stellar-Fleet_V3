@@ -161,6 +161,51 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'ORDER_LOAD_MOVE applique le chargement après un runTurn',
+    run: () => {
+      const system = createSystem('sys-load-runturn', 'blue');
+      const transport: ShipEntity = {
+        id: 'blue-transport-runturn',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: null
+      };
+
+      const fleet = createFleet('fleet-blue-runturn', 'blue', { ...baseVec }, [transport]);
+      const army = createArmy('army-blue-runturn', 'blue', 12000, ArmyState.DEPLOYED, system.id);
+
+      const initialState = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
+      const withOrder = applyCommand(
+        initialState,
+        { type: 'ORDER_LOAD_MOVE', fleetId: fleet.id, targetSystemId: system.id },
+        new RNG(3)
+      );
+
+      const result = runTurn(withOrder, new RNG(3));
+      const updatedArmy = result.armies.find(a => a.id === army.id);
+      const updatedFleet = result.fleets.find(f => f.id === fleet.id);
+      const updatedTransport = updatedFleet?.ships.find(ship => ship.id === transport.id);
+
+      assert.strictEqual(updatedArmy?.state, ArmyState.EMBARKED, 'L’armée doit être embarquée après la phase de mouvement');
+      assert.strictEqual(
+        updatedArmy?.containerId,
+        fleet.id,
+        'Le conteneur de l’armée doit être la flotte qui a exécuté l’ordre'
+      );
+      assert.strictEqual(
+        updatedTransport?.carriedArmyId,
+        army.id,
+        'Le transport doit porter l’armée après le runTurn'
+      );
+      assert.strictEqual(
+        updatedFleet?.loadTargetSystemId,
+        null,
+        'L’ordre de chargement doit être consommé pendant le runTurn'
+      );
+    }
+  },
+  {
     name: 'Battle resolution keeps victories for factions outside the core palette',
     run: () => {
       const greenFleet = createFleet('fleet-green-victory', 'green', { ...baseVec }, [
