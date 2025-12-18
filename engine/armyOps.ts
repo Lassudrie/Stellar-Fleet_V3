@@ -2,6 +2,9 @@ import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../types
 import { shortId } from './idUtils';
 import { RNG } from './rng';
 
+const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
+const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
+
 export interface ArmyOpsOptions {
     fleetLabel?: string;
     logText?: string | ((count: number) => string);
@@ -32,6 +35,7 @@ export interface ArmyOpsResult {
     armies: Army[];
     logs: LogEntry[];
     count: number;
+    unloadedArmyIds?: string[];
 }
 
 const getLogText = (count: number, system: StarSystem, fleetLabel: string, override?: string | ((count: number) => string)) => {
@@ -137,7 +141,7 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
     };
 
     if (unloadedArmyIds.size === 0) {
-        return { fleet, armies, logs: [], count: 0 };
+        return { fleet, armies, logs: [], count: 0, unloadedArmyIds: [] };
     }
 
     const updatedArmies = armies.map(army => {
@@ -158,5 +162,50 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
         }
     ];
 
-    return { fleet: updatedFleet, armies: updatedArmies, logs, count: unloadedArmyIds.size };
+    return { fleet: updatedFleet, armies: updatedArmies, logs, count: unloadedArmyIds.size, unloadedArmyIds: [...unloadedArmyIds] };
+};
+
+export const applyContestedUnloadRisk = (
+    armies: Army[],
+    targetArmyIds: string[],
+    systemName: string,
+    day: number,
+    rng: RNG
+): { armies: Army[]; logs: LogEntry[] } => {
+    return targetArmyIds.reduce<{
+        armies: Army[];
+        logs: LogEntry[];
+    }>((outcome, targetArmyId) => {
+        const roll = rng.next();
+        const success = roll >= CONTESTED_UNLOAD_FAILURE_THRESHOLD;
+        const logs: LogEntry[] = [];
+
+        if (!success) {
+            let appliedLoss = 0;
+            const updatedArmies = outcome.armies.map(army => {
+                if (army.id !== targetArmyId) return army;
+                const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION));
+                appliedLoss = strengthLoss;
+                return { ...army, strength: Math.max(0, army.strength - strengthLoss) };
+            });
+
+            logs.push({
+                id: rng.id('log'),
+                day,
+                text: `Dropships took fire while unloading army ${targetArmyId} at ${systemName}, losing ${appliedLoss} strength.`,
+                type: 'combat'
+            });
+
+            return { armies: updatedArmies, logs: [...outcome.logs, ...logs] };
+        }
+
+        logs.push({
+            id: rng.id('log'),
+            day,
+            text: `Army ${targetArmyId} dodged enemy fire while unloading at ${systemName}.`,
+            type: 'combat'
+        });
+
+        return { armies: outcome.armies, logs: [...outcome.logs, ...logs] };
+    }, { armies, logs: [] });
 };
