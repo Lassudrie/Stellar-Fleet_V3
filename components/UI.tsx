@@ -17,7 +17,18 @@ import { distSq, dist } from '../engine/math/vec3';
 const ORBIT_MATCH_RADIUS_SQ = (ORBIT_RADIUS * 3) ** 2;
 
 const findOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
-  return systems.find(system => distSq(fleet.position, system.position) <= ORBIT_MATCH_RADIUS_SQ) ?? null;
+  let closest: { system: StarSystem; distanceSq: number } | null = null;
+
+  systems.forEach(system => {
+      const distanceSq = distSq(fleet.position, system.position);
+      if (distanceSq > ORBIT_MATCH_RADIUS_SQ) return;
+
+      if (!closest || distanceSq < closest.distanceSq) {
+          closest = { system, distanceSq };
+      }
+  });
+
+  return closest?.system ?? null;
 };
 
 interface UIProps {
