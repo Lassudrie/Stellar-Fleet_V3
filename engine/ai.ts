@@ -151,12 +151,24 @@ const updateMemory = (
 
   const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
   const refreshedSightings = new Set<string>();
+  const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
 
   visibleEnemyFleets.forEach(fleet => {
-    const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+    let closestSystemId: string | null = null;
+    let closestDistanceSq = Infinity;
+
+    state.systems.forEach(sys => {
+      const distanceSq = distSq(sys.position, fleet.position);
+
+      if (distanceSq <= captureSq && distanceSq < closestDistanceSq) {
+        closestSystemId = sys.id;
+        closestDistanceSq = distanceSq;
+      }
+    });
+
     memory.sightings[fleet.id] = {
       fleetId: fleet.id,
-      systemId: systemInRange ? systemInRange.id : null,
+      systemId: closestSystemId,
       position: { ...fleet.position },
       daySeen: state.day,
       estimatedPower: calculateFleetPower(fleet),
