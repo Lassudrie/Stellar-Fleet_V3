@@ -1,10 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
-import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId } from '../types';
+import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState } from '../types';
 import VictoryScreen from './ui/VictoryScreen';
 import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
-import SystemContextMenu from './ui/SystemContextMenu';
+import SystemContextMenu, { GroundForceSummaryEntry } from './ui/SystemContextMenu';
 import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
@@ -76,6 +76,13 @@ const UI: React.FC<UIProps> = ({
 
   // Helper to check ownership against current player
   const playerFactionId = gameState.playerFactionId;
+
+  const factionLookup = useMemo(() => {
+      return gameState.factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
+          acc[faction.id] = faction;
+          return acc;
+      }, {});
+  }, [gameState.factions]);
 
   // Compute nearby fleets suitable for merging
   const mergeCandidates = useMemo(() => {
@@ -168,17 +175,17 @@ const UI: React.FC<UIProps> = ({
   }, [blueFleets, targetSystem]);
 
   // Compute Ground Forces Summary for Context Menu
-  const groundForcesSummary = useMemo(() => {
+  const groundForcesSummary = useMemo<Record<FactionId, GroundForceSummaryEntry> | null>(() => {
       if (!targetSystem || !gameState.armies) return null;
 
-      const aggregates = {
-          blue: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 },
-          red: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 }
-      };
+      const aggregates: Record<FactionId, { count: number, currentStrength: number, maxStrength: number, moraleSum: number }> = {};
 
       gameState.armies.forEach(army => {
           if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
-              const bucket = army.factionId === playerFactionId ? aggregates.blue : aggregates.red;
+              if (!aggregates[army.factionId]) {
+                  aggregates[army.factionId] = { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 };
+              }
+              const bucket = aggregates[army.factionId];
               bucket.count += 1;
               bucket.currentStrength += army.strength;
               bucket.maxStrength += army.maxStrength;
@@ -186,14 +193,21 @@ const UI: React.FC<UIProps> = ({
           }
       });
 
-      const buildSummary = (bucket: { count: number, currentStrength: number, maxStrength: number, moraleSum: number }) => {
-          if (bucket.count === 0) return null;
+      const summaries = Object.entries(aggregates).reduce<Record<FactionId, GroundForceSummaryEntry>>((acc, [factionId, bucket]) => {
+          if (bucket.count === 0) return acc;
 
           const losses = bucket.maxStrength - bucket.currentStrength;
           const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
           const averageMoralePercent = (bucket.moraleSum / bucket.count) * 100;
 
-          return {
+          const faction = factionLookup[factionId];
+          const fallbackColor = factionId === playerFactionId ? '#93c5fd' : '#f87171';
+
+          acc[factionId] = {
+              factionId,
+              factionName: faction?.name ?? factionId,
+              color: faction?.color ?? fallbackColor,
+              isPlayer: factionId === playerFactionId,
               count: bucket.count,
               currentStrength: bucket.currentStrength,
               maxStrength: bucket.maxStrength,
@@ -201,15 +215,14 @@ const UI: React.FC<UIProps> = ({
               lossPercent,
               averageMoralePercent,
           };
-      };
 
-      const blue = buildSummary(aggregates.blue);
-      const red = buildSummary(aggregates.red);
+          return acc;
+      }, {});
 
-      if (!blue && !red) return null;
+      if (Object.keys(summaries).length === 0) return null;
 
-      return { blue, red };
-  }, [targetSystem, gameState.armies, playerFactionId]);
+      return summaries;
+  }, [targetSystem, gameState.armies, playerFactionId, factionLookup]);
 
   const handleSelectFleetAtSystem = () => {
       if (orbitingPlayerFleets.length === 0) return;
