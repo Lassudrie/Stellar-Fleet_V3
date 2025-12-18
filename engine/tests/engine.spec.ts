@@ -311,6 +311,42 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Fleet movement commands stamp stateStartTurn using provided turn or current day',
+    run: () => {
+      const system = createSystem('sys-move-time', null);
+      const fleet = createFleet('fleet-move-time', 'blue', { ...baseVec }, []);
+      const rng = new RNG(3);
+
+      const stateAtDay = createBaseState({ day: 5, systems: [system], fleets: [fleet] });
+      const moved = applyCommand(
+        stateAtDay,
+        { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: system.id },
+        rng
+      );
+
+      const movedFleet = moved.fleets.find(f => f.id === fleet.id);
+      assert.strictEqual(
+        movedFleet?.stateStartTurn,
+        stateAtDay.day,
+        'Movement without an explicit turn should use the current day'
+      );
+
+      const customTurn = 12;
+      const movedWithTurn = applyCommand(
+        stateAtDay,
+        { type: 'ORDER_INVASION_MOVE', fleetId: fleet.id, targetSystemId: system.id, turn: customTurn },
+        rng
+      );
+
+      const invasionFleet = movedWithTurn.fleets.find(f => f.id === fleet.id);
+      assert.strictEqual(
+        invasionFleet?.stateStartTurn,
+        customTurn,
+        'Movement commands should respect an explicit turn override'
+      );
+    }
+  },
+  {
     name: 'Multi-faction ground battle with a defender uses the attacker coalition rule',
     run: () => {
       const system = createSystem('sys-coalition-hold', 'red');
