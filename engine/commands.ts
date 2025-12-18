@@ -51,13 +51,13 @@ const applyContestedUnloadRisk = (
 };
 
 export type GameCommand =
-  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string }
+  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
-  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
-  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string };
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
 
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): GameState => {
     // Enforce Immutability in Dev
@@ -66,7 +66,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
     switch (command.type) {
         case 'MOVE_FLEET': {
             const system = getSystemById(state.systems, command.targetSystemId);
-            
+
+            const stateStartTurn = command.turn ?? state.day;
+
             // Validation
             if (!system) return state;
             const fleetExists = state.fleets.some(f => f.id === command.fleetId);
@@ -88,6 +90,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
+                        stateStartTurn,
                         invasionTargetSystemId: null, // Clear previous orders
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
@@ -98,7 +101,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
         case 'ORDER_INVASION_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
-            
+
+            const stateStartTurn = command.turn ?? state.day;
+
             if (!system) return state;
             const fleetExists = state.fleets.some(f => f.id === command.fleetId);
             if (!fleetExists) return state;
@@ -116,6 +121,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
+                        stateStartTurn,
                         invasionTargetSystemId: system.id, // Set invasion order
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
@@ -127,6 +133,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
         case 'ORDER_LOAD_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
+            const stateStartTurn = command.turn ?? state.day;
+
             if (!system) return state;
             const fleetExists = state.fleets.some(f => f.id === command.fleetId);
             if (!fleetExists) return state;
@@ -144,6 +152,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
+                        stateStartTurn,
                         invasionTargetSystemId: null,
                         loadTargetSystemId: system.id,
                         unloadTargetSystemId: null
@@ -155,6 +164,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
         case 'ORDER_UNLOAD_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
+            const stateStartTurn = command.turn ?? state.day;
+
             if (!system) return state;
             const fleetExists = state.fleets.some(f => f.id === command.fleetId);
             if (!fleetExists) return state;
@@ -172,6 +183,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
+                        stateStartTurn,
                         invasionTargetSystemId: null,
                         loadTargetSystemId: null,
                         unloadTargetSystemId: system.id
