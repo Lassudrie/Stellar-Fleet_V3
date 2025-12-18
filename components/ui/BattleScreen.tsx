@@ -169,9 +169,9 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
 
         {/* STATS OVERVIEW */}
         <div className="grid grid-cols-2 gap-px bg-slate-800 shrink-0">
-            {/* BLUE SIDE (PLAYER) */}
+            {/* ALLIED SIDE (PLAYER) */}
             <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-blue-600">
-                <div className="text-blue-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.blueForces')}</div>
+                <div className="text-blue-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.alliedForces')}</div>
                 <div className="flex gap-8 text-center mb-1">
                     <div>
                         <div className="text-3xl font-black text-white">{stats.blue.survivors}</div>
@@ -188,9 +188,9 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
                 </div>
             </div>
 
-            {/* RED SIDE (ENEMY) */}
+            {/* ENEMY SIDE (OPPONENT) */}
             <div className="bg-slate-900/50 p-4 flex flex-col items-center border-b-4 border-red-600">
-                <div className="text-red-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.redForces')}</div>
+                <div className="text-red-500 font-bold uppercase tracking-widest text-sm mb-1">{t('battle.enemyForces')}</div>
                 <div className="flex gap-8 text-center mb-1">
                     <div>
                         <div className="text-3xl font-black text-white">{stats.red.survivors}</div>
