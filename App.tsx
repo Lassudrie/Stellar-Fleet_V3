@@ -18,7 +18,7 @@ import { clone, distSq, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
-import { ORBIT_RADIUS } from './data/static';
+import { ORBIT_PROXIMITY_RANGE_SQ } from './data/static';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
 
@@ -365,7 +365,7 @@ const App: React.FC = () => {
       if (!fleet || !viewGameState) return null;
       if (fleet.state !== FleetState.ORBIT) return null;
 
-      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
+      const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
 
       let closest: { system: StarSystem; distanceSq: number } | null = null;
 
