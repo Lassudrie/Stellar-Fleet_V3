@@ -2,6 +2,7 @@
 import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
+import { computeFleetRadius } from './fleetDerived';
 import {
   SAVE_VERSION,
   SaveFile,
@@ -193,26 +194,31 @@ export const deserializeGameState = (json: string): GameState => {
     }));
 
     // Fleets
-    const fleets: Fleet[] = dto.fleets.map((f: any) => ({
-      id: f.id,
-      // Map Legacy 'faction' to 'factionId'
-      factionId: f.factionId || f.faction, 
-      position: deserializeVector3(f.position),
-      state: f.state,
-      targetSystemId: f.targetSystemId,
-      targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
-      radius: f.radius,
-      stateStartTurn: f.stateStartTurn ?? 0,
-      retreating: f.retreating,
-      invasionTargetSystemId: f.invasionTargetSystemId,
-      ships: f.ships.map((s: any) => ({
-          id: s.id,
-          type: s.type,
-          hp: s.hp,
-          maxHp: s.maxHp,
-          carriedArmyId: s.carriedArmyId ?? null
-      }))
-    }));
+    const fleets: Fleet[] = dto.fleets.map((f: any) => {
+      const ships = f.ships || [];
+      const radius = Number.isFinite(f.radius) ? f.radius : computeFleetRadius(ships.length);
+
+      return {
+        id: f.id,
+        // Map Legacy 'faction' to 'factionId'
+        factionId: f.factionId || f.faction,
+        position: deserializeVector3(f.position),
+        state: f.state,
+        targetSystemId: f.targetSystemId,
+        targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
+        radius,
+        stateStartTurn: f.stateStartTurn ?? 0,
+        retreating: f.retreating,
+        invasionTargetSystemId: f.invasionTargetSystemId,
+        ships: ships.map((s: any) => ({
+            id: s.id,
+            type: s.type,
+            hp: s.hp,
+            maxHp: s.maxHp,
+            carriedArmyId: s.carriedArmyId ?? null
+        }))
+      };
+    });
 
     // Armies
     const armies: Army[] = (dto.armies || []).map((a: any) => ({
