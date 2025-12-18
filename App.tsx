@@ -327,13 +327,13 @@ const App: React.FC = () => {
       });
 
       if (result.ok) {
-          const deployedArmies = result.deployedArmies ?? 0;
-
-          engine.dispatchCommand({
-              type: 'ADD_LOG',
-              text: t('msg.invasionLog', { system: targetSystem.name, count: deployedArmies }),
-              logType: 'move'
-          });
+          if (typeof result.deployedArmies === 'number') {
+              engine.dispatchCommand({
+                  type: 'ADD_LOG',
+                  text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
+                  logType: 'move'
+              });
+          }
       } else {
           alert(t('msg.commandFailed', { error: result.error }));
       }
