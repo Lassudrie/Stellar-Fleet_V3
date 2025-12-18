@@ -32,6 +32,7 @@ import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
 import { checkVictoryConditions } from '../objectives';
+import { deserializeGameState, serializeGameState } from '../serialization';
 
 interface TestCase {
   name: string;
@@ -841,6 +842,30 @@ const tests: TestCase[] = [
       if (orphans.length > 0) {
         throw new Error(`Orphan exports in engine/conquest.ts: ${orphans.join(', ')}`);
       }
+    }
+  },
+  {
+    name: 'System colors fallback to faction or default during save round-trip',
+    run: () => {
+      const redSystem: StarSystem = { ...createSystem('sys-red-fallback', 'red'), color: '' };
+      const neutralSystem: StarSystem = { ...createSystem('sys-neutral-fallback', null), color: '' };
+
+      const state = createBaseState({ systems: [redSystem, neutralSystem] });
+
+      const saved = serializeGameState(state);
+      const restored = deserializeGameState(saved);
+
+      const reloadedRed = restored.systems.find(system => system.id === redSystem.id);
+      const reloadedNeutral = restored.systems.find(system => system.id === neutralSystem.id);
+
+      const redColor = factions.find(faction => faction.id === 'red')?.color;
+
+      assert.strictEqual(reloadedRed?.color, redColor, 'Owned systems should inherit their faction color when unset');
+      assert.strictEqual(
+        reloadedNeutral?.color,
+        '#ffffff',
+        'Neutral systems should default to white when missing an explicit color'
+      );
     }
   },
   {

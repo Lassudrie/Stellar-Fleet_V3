@@ -87,6 +87,8 @@ const DEFAULT_FACTIONS: FactionState[] = [
 ];
 
 export const serializeGameState = (state: GameState): string => {
+  const factionColorById = new Map(state.factions.map(faction => [faction.id, faction.color]));
+
   const legacyAiFactionId = getLegacyAiFactionId(state.factions);
   const legacyAiState = legacyAiFactionId
     ? state.aiStates?.[legacyAiFactionId] ?? state.aiState
@@ -117,6 +119,7 @@ export const serializeGameState = (state: GameState): string => {
     day: state.day,
     systems: state.systems.map(s => ({
       ...s,
+      color: s.color || factionColorById.get(s.ownerFactionId ?? '') || '#ffffff',
       ownerFactionId: s.ownerFactionId,
       position: serializeVector3(s.position)
     })),
