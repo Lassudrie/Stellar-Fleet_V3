@@ -138,7 +138,7 @@ export const fr = {
   'battle.draw': 'EGALITE',
   'battle.unknown': 'RESULTAT INCONNU',
   'battle.close': 'Fermer Rapport',
-  'battle.factionForces': 'Forces {{faction}}',
+  'battle.factionForces': 'Forces {{faction}} · {{color}}',
   'battle.survivors': 'Survivants',
   'battle.lost': 'Pertes',
   'battle.fleets': 'Flottes :',

@@ -138,7 +138,7 @@ export const en = {
   'battle.draw': 'DRAW',
   'battle.unknown': 'RESULT UNKNOWN',
   'battle.close': 'Close Report',
-  'battle.factionForces': '{{faction}} Forces',
+  'battle.factionForces': '{{faction}} Forces · {{color}}',
   'battle.survivors': 'Survivors',
   'battle.lost': 'Lost',
   'battle.fleets': 'Fleets:',
