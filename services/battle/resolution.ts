@@ -339,15 +339,6 @@ export const resolveBattle = (
 
   // 4. FINALIZE & APPLY RESULTS
   
-  const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-  const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-  
-  const winnerFactionId = blueAlive.length > 0 && redAlive.length === 0 ? 'blue' 
-               : redAlive.length > 0 && blueAlive.length === 0 ? 'red' 
-               : 'draw';
-
-  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
-
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
 
@@ -421,16 +412,24 @@ export const resolveBattle = (
 
   logs.push(...attritionLogs);
 
-  const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
-  battleShips.forEach(s => {
-      if (s.currentHp <= 0) shipsLost[s.faction]++;
-  });
+  const aliveFactions = battleShips.reduce((factions, ship) => {
+      if (ship.currentHp > 0) factions.add(ship.faction);
+      return factions;
+  }, new Set<FactionId>());
 
-  // Ensure winnerFactionId is a valid type (FactionId | 'draw' | undefined)
-  const validWinnerFactionId: FactionId | 'draw' | undefined = 
-      winnerFactionId === 'blue' || winnerFactionId === 'red' || winnerFactionId === 'draw' 
-          ? winnerFactionId 
-          : undefined;
+  const winnerFactionId: FactionId | 'draw' = aliveFactions.size === 1
+      ? [...aliveFactions][0]
+      : 'draw';
+
+  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId === 'draw' ? 'DRAW' : winnerFactionId.toUpperCase()}`);
+
+  const shipsLost: Record<FactionId, number> = {};
+  battleShips.forEach(s => {
+      shipsLost[s.faction] = shipsLost[s.faction] ?? 0;
+      if (s.currentHp <= 0) {
+          shipsLost[s.faction] = (shipsLost[s.faction] ?? 0) + 1;
+      }
+  });
 
   const updatedBattle: Battle = {
       ...battle,
@@ -438,7 +437,7 @@ export const resolveBattle = (
       status: 'resolved',
       initialShips: initialShips,
       logs: [...battle.logs, ...logs],
-      winnerFactionId: validWinnerFactionId,
+      winnerFactionId,
       roundsPlayed,
       shipsLost,
       survivorShipIds, // Store survivor list
