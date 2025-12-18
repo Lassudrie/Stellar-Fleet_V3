@@ -625,6 +625,60 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Invasion movement deploys embarked armies and logs the landing on arrival',
+    run: () => {
+      const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
+
+      const transport: ShipEntity = {
+        id: 'transport-invasion',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 2000,
+        maxHp: 2000,
+        carriedArmyId: 'army-invasion'
+      };
+
+      const army = createArmy(transport.carriedArmyId!, 'blue', 8000, ArmyState.EMBARKED, 'fleet-invasion');
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-invasion', 'blue', { x: -30, y: 0, z: 0 }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        invasionTargetSystemId: system.id
+      };
+
+      const rng = new RNG(9);
+
+      const initialStep = resolveFleetMovement(movingFleet, [system], [army], 0, rng, [movingFleet]);
+      const fleetsAfterFirstStep = [initialStep.nextFleet];
+      const armiesAfterFirstStep = [army];
+
+      const arrivalStep = resolveFleetMovement(
+        initialStep.nextFleet,
+        [system],
+        armiesAfterFirstStep,
+        1,
+        rng,
+        fleetsAfterFirstStep
+      );
+
+      const armiesAfterArrival = armiesAfterFirstStep.map(currentArmy => {
+        const update = arrivalStep.armyUpdates.find(change => change.id === currentArmy.id);
+        return update ? { ...currentArmy, ...update.changes } : currentArmy;
+      });
+
+      const landedArmy = armiesAfterArrival.find(updatedArmy => updatedArmy.id === army.id);
+      assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Army should be deployed upon invasion arrival');
+      assert.strictEqual(
+        landedArmy?.containerId,
+        system.id,
+        'Deployed army must be placed on the invaded system after landing'
+      );
+
+      const invasionLog = arrivalStep.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
+      assert.ok(invasionLog, 'Arrival should generate an invasion log entry');
+    }
+  },
+  {
     name: 'Multi-faction ground battle with a defender uses the attacker coalition rule',
     run: () => {
       const system = createSystem('sys-coalition-hold', 'red');
