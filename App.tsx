@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { GameState, StarSystem, Fleet, EnemySighting } from './types';
+import { GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
@@ -14,10 +14,11 @@ import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from './engine/fogOfWar';
 import { calculateFleetPower } from './engine/world';
-import { clone, equals } from './engine/math/vec3';
+import { clone, distSq, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
+import { ORBIT_RADIUS } from './data/static';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
 
@@ -346,9 +347,48 @@ const App: React.FC = () => {
       }
   };
 
-  // Placeholders
-  const handleDeploySingle = () => {};
-  const handleEmbarkArmy = () => {};
+  const findOrbitingSystem = (fleet: Fleet | null): StarSystem | null => {
+      if (!fleet || !viewGameState) return null;
+      if (fleet.state !== FleetState.ORBIT) return null;
+
+      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
+      return viewGameState.systems.find(system => distSq(fleet.position, system.position) <= orbitThresholdSq) || null;
+  };
+
+  const handleDeploySingle = (shipId: string) => {
+      if (!engine || !selectedFleetId) return;
+
+      const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
+      const system = findOrbitingSystem(fleet);
+      if (!fleet || !system) return;
+
+      const ship = fleet.ships.find(s => s.id === shipId);
+      if (!ship || !ship.carriedArmyId) return;
+
+      engine.dispatchCommand({
+          type: 'UNLOAD_ARMY',
+          fleetId: fleet.id,
+          shipId: ship.id,
+          armyId: ship.carriedArmyId,
+          systemId: system.id
+      });
+  };
+
+  const handleEmbarkArmy = (shipId: string, armyId: string) => {
+      if (!engine || !selectedFleetId) return;
+
+      const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
+      const system = findOrbitingSystem(fleet);
+      if (!fleet || !system) return;
+
+      engine.dispatchCommand({
+          type: 'LOAD_ARMY',
+          fleetId: fleet.id,
+          shipId,
+          armyId,
+          systemId: system.id
+      });
+  };
 
   if (loading) return <LoadingScreen />;
 
