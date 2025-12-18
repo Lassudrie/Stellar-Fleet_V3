@@ -4,7 +4,7 @@ import { RNG } from '../../engine/rng';
 import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../../engine/idUtils';
 import { sub, len, normalize, scale, add, clone, distSq } from '../../engine/math/vec3';
-import { computeLoadOps, computeUnloadOps } from '../../engine/armyOps';
+import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from '../../engine/armyOps';
 import { CAPTURE_RANGE } from '../../data/static';
 
 export interface ArmyUpdate {
@@ -190,6 +190,7 @@ const executeArrivalOperations = (
     let currentFleet = fleet;
     let armiesAfterOps = armies;
     let shipsChanged = false;
+    const contestedOrbit = isOrbitContested(system, fleets);
 
     // --- AUTO UNLOAD (ALLIED SYSTEMS) ---
     if (fleet.unloadTargetSystemId === system.id && system.ownerFactionId === fleet.factionId) {
@@ -207,6 +208,18 @@ const executeArrivalOperations = (
             currentFleet = unloadResult.fleet;
             armiesAfterOps = unloadResult.armies;
             shipsChanged = true;
+
+            if (contestedOrbit && unloadResult.unloadedArmyIds && unloadResult.unloadedArmyIds.length > 0) {
+                const riskOutcome = applyContestedUnloadRisk(
+                    armiesAfterOps,
+                    unloadResult.unloadedArmyIds,
+                    system.name,
+                    day,
+                    rng
+                );
+                armiesAfterOps = riskOutcome.armies;
+                generatedLogs.push(...riskOutcome.logs);
+            }
         }
     }
 
@@ -231,8 +244,14 @@ const executeArrivalOperations = (
 
     // --- AUTO INVASION LOGIC ---
     if (fleet.invasionTargetSystemId === system.id) {
-        const contested = isOrbitContested(system, fleets);
-        const deploymentOutcome = applyContestedDeploymentRisk(currentFleet, system, armiesAfterOps, rng, day, contested);
+        const deploymentOutcome = applyContestedDeploymentRisk(
+            currentFleet,
+            system,
+            armiesAfterOps,
+            rng,
+            day,
+            contestedOrbit
+        );
 
         armiesAfterOps = deploymentOutcome.armies;
         currentFleet = deploymentOutcome.fleet;
@@ -241,7 +260,7 @@ const executeArrivalOperations = (
 
         if (deploymentOutcome.deployed > 0) {
             const baseText = `INVASION STARTED: Fleet ${shortId(fleet.id)} deployed ${deploymentOutcome.deployed} armies onto ${system.name}.`;
-            const suffix = contested && deploymentOutcome.failed > 0 ? ' Orbit is contested, expect resistance.' : '';
+            const suffix = contestedOrbit && deploymentOutcome.failed > 0 ? ' Orbit is contested, expect resistance.' : '';
 
             generatedLogs.push({
                 id: rng.id('log'),
