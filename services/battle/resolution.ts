@@ -37,9 +37,18 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     Number.isFinite(value) && (value as number) >= 0 ? value as number : fallback
   );
 
-  const offensiveMissilesLeft = normalizeStock(ship.offensiveMissilesLeft, stats?.offensiveMissileStock ?? 0);
-  const torpedoesLeft = normalizeStock(ship.torpedoesLeft, stats?.torpedoStock ?? 0);
-  const interceptorsLeft = normalizeStock(ship.interceptorsLeft, stats?.interceptorStock ?? 0);
+  const offensiveMissilesLeft = normalizeStock(
+    ship.consumables?.offensiveMissiles ?? ship.offensiveMissilesLeft,
+    stats?.offensiveMissileStock ?? 0
+  );
+  const torpedoesLeft = normalizeStock(
+    ship.consumables?.torpedoes ?? ship.torpedoesLeft,
+    stats?.torpedoStock ?? 0
+  );
+  const interceptorsLeft = normalizeStock(
+    ship.consumables?.interceptors ?? ship.interceptorsLeft,
+    stats?.interceptorStock ?? 0
+  );
   const evasion = stats?.evasion ?? 0.1;
   const pdStrength = stats?.pdStrength ?? 0;
   const damage = stats?.damage ?? 10;
@@ -63,7 +72,8 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     pdStrength,
     damage,
     missileDamage,
-    torpedoDamage
+    torpedoDamage,
+    killHistory: [...(ship.killHistory ?? [])]
   };
 };
 
@@ -148,10 +158,28 @@ export const resolveBattle = (
   const projectiles: Projectile[] = [];
   const logs: string[] = [];
   let roundsPlayed = 0;
-  
+
   // Stats
   let totalMissilesIntercepted = 0;
   let totalProjectilesDestroyedByPd = 0;
+
+  const recordKill = (attackerId: string | undefined, target: BattleShipState | undefined, method: string) => {
+    if (!attackerId || !target) return;
+
+    const attacker = shipMap.get(attackerId);
+    if (!attacker) return;
+
+    attacker.killHistory.push({
+      id: rng.id('kill'),
+      day: state.day,
+      turn,
+      targetId: target.shipId,
+      targetType: target.type,
+      targetFactionId: target.faction
+    });
+
+    logs.push(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
+  };
 
   // 3. ROUND LOOP
   for (let round = 1; round <= MAX_ROUNDS; round++) {
@@ -329,8 +357,13 @@ export const resolveBattle = (
             if (p.hp > 0) {
                 const target = shipMap.get(p.targetId);
                 if (target && target.currentHp > 0) {
+                    const previousHp = target.currentHp;
                     target.currentHp -= p.damage;
                     logs.push(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
+
+                    if (previousHp > 0 && target.currentHp <= 0) {
+                      recordKill(p.sourceId, target, p.type);
+                    }
                 }
             }
             // Remove from simulation (Hit or Killed by PD)
@@ -348,8 +381,13 @@ export const resolveBattle = (
         const hitChance = BASE_ACCURACY * Math.max(0.1, attacker.fireControlLock) * (1 - target.evasion);
         if (rng.next() < hitChance) {
             const dmg = attacker.damage;
+            const previousHp = target.currentHp;
             target.currentHp -= dmg;
             logs.push(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
+
+            if (previousHp > 0 && target.currentHp <= 0) {
+              recordKill(attacker.shipId, target, 'kinetic');
+            }
         }
     }
   }
@@ -365,12 +403,19 @@ export const resolveBattle = (
         // Optimized O(1) Lookup
         const battleState = shipMap.get(oldShip.id);
         if (battleState && battleState.currentHp > 0) {
+            const consumables = {
+              offensiveMissiles: battleState.offensiveMissilesLeft,
+              torpedoes: battleState.torpedoesLeft,
+              interceptors: battleState.interceptorsLeft
+            };
             newShips.push({
                 ...oldShip,
                 hp: battleState.currentHp,
+                consumables,
                 offensiveMissilesLeft: battleState.offensiveMissilesLeft,
                 torpedoesLeft: battleState.torpedoesLeft,
-                interceptorsLeft: battleState.interceptorsLeft
+                interceptorsLeft: battleState.interceptorsLeft,
+                killHistory: battleState.killHistory
             });
             survivorShipIds.push(oldShip.id); // Collect survivor ID
         }

@@ -67,9 +67,19 @@ interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null; // ID de l'armée transportée (si Transport)
-  offensiveMissilesLeft?: number; // Stocks résiduels de missiles offensifs
-  torpedoesLeft?: number; // Stocks résiduels de torpilles
-  interceptorsLeft?: number; // Stocks résiduels de missiles intercepteurs
+  consumables?: {
+    offensiveMissiles: number;
+    torpedoes: number;
+    interceptors: number;
+  }; // Stocks consommables courants
+  killHistory?: Array<{
+    id: string;
+    day: number;
+    turn: number;
+    targetId: string;
+    targetType: ShipType;
+    targetFactionId: string;
+  }>; // Historique des destructions confirmées par ce vaisseau
 }
 ```
 

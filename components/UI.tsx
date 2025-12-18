@@ -351,7 +351,6 @@ const UI: React.FC<UIProps> = ({
             fleet={inspectedFleet}
             faction={factionLookup[inspectedFleet.factionId]}
             armies={gameState.armies}
-            logs={logs}
             onClose={onCloseShipDetail}
         />
       )}

@@ -90,7 +90,13 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
       type: fallbackType,
       hp: fallbackStats.maxHp,
       maxHp: fallbackStats.maxHp,
-      carriedArmyId: null
+      carriedArmyId: null,
+      consumables: {
+        offensiveMissiles: fallbackStats.offensiveMissileStock,
+        torpedoes: fallbackStats.torpedoStock,
+        interceptors: fallbackStats.interceptorStock
+      },
+      killHistory: []
     };
   }
 
@@ -100,8 +106,14 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
     hp: stats.maxHp,
     maxHp: stats.maxHp,
     carriedArmyId: null, // Default: No army loaded
+    consumables: {
+      offensiveMissiles: stats.offensiveMissileStock,
+      torpedoes: stats.torpedoStock,
+      interceptors: stats.interceptorStock
+    },
     offensiveMissilesLeft: stats.offensiveMissileStock,
     torpedoesLeft: stats.torpedoStock,
-    interceptorsLeft: stats.interceptorStock
+    interceptorsLeft: stats.interceptorStock,
+    killHistory: []
   };
 };

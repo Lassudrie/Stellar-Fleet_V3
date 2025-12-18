@@ -12,15 +12,32 @@ export interface Vector3DTO {
   z: number;
 }
 
+export interface ShipConsumablesDTO {
+  offensiveMissiles: number;
+  torpedoes: number;
+  interceptors: number;
+}
+
+export interface ShipKillRecordDTO {
+  id: string;
+  day: number;
+  turn: number;
+  targetId: string;
+  targetType: ShipType;
+  targetFactionId: string;
+}
+
 export interface ShipDTO {
   id: string;
   type: ShipType;
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null;
+  consumables?: ShipConsumablesDTO;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
   interceptorsLeft?: number;
+  killHistory?: ShipKillRecordDTO[];
 }
 
 export interface FleetDTO {
