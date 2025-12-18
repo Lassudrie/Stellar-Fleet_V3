@@ -421,9 +421,13 @@ export const resolveBattle = (
 
   logs.push(...attritionLogs);
 
-  const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
+  const shipsLost: Record<FactionId, number> = {};
   battleShips.forEach(s => {
-      if (s.currentHp <= 0) shipsLost[s.faction]++;
+      if (s.currentHp <= 0) {
+          shipsLost[s.faction] = (shipsLost[s.faction] ?? 0) + 1;
+      } else {
+          shipsLost[s.faction] = shipsLost[s.faction] ?? 0;
+      }
   });
 
   // Ensure winnerFactionId is a valid type (FactionId | 'draw' | undefined)
