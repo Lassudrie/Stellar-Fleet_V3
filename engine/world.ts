@@ -61,7 +61,7 @@ export const calculateFleetPower = (fleet: Fleet): number => {
     if (!ship || !ship.type || !SHIP_STATS[ship.type]) return sum;
     const s = SHIP_STATS[ship.type];
     // Heuristic: Sustainability (HP) + DPS + Burst Potential (Missiles/Torps)
-    return sum + (s.maxHp / 10) + (s.damage * 2) + (s.missileStock * 10) + (s.torpedoStock * 20);
+    return sum + (s.maxHp / 10) + (s.damage * 2) + (s.offensiveMissileStock * 10) + (s.torpedoStock * 20);
   }, 0);
 };
 
@@ -98,6 +98,9 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
     type,
     hp: stats.maxHp,
     maxHp: stats.maxHp,
-    carriedArmyId: null // Default: No army loaded
+    carriedArmyId: null, // Default: No army loaded
+    offensiveMissilesLeft: stats.offensiveMissileStock,
+    torpedoesLeft: stats.torpedoStock,
+    interceptorsLeft: stats.interceptorStock
   };
 };

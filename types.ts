@@ -44,10 +44,11 @@ export interface ShipStats {
   pdStrength: number;
   evasion: number;
   maneuverability: number;
-  missileStock: number;
+  offensiveMissileStock: number;
   missileDamage: number;
   torpedoStock: number;
   torpedoDamage: number;
+  interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
 }
 
@@ -57,6 +58,9 @@ export interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId: string | null;
+  offensiveMissilesLeft?: number;
+  torpedoesLeft?: number;
+  interceptorsLeft?: number;
 }
 
 export interface Army {

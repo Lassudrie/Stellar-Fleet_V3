@@ -28,8 +28,9 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
 
   const maxHp = ship.maxHp ?? stats?.maxHp ?? 100;
   const currentHp = Math.min(ship.hp, maxHp);
-  const missilesLeft = stats?.missileStock ?? 0;
-  const torpedoesLeft = stats?.torpedoStock ?? 0;
+  const offensiveMissilesLeft = ship.offensiveMissilesLeft ?? stats?.offensiveMissileStock ?? 0;
+  const torpedoesLeft = ship.torpedoesLeft ?? stats?.torpedoStock ?? 0;
+  const interceptorsLeft = ship.interceptorsLeft ?? stats?.interceptorStock ?? 0;
   const evasion = stats?.evasion ?? 0.1;
   const pdStrength = stats?.pdStrength ?? 0;
   const damage = stats?.damage ?? 10;
@@ -43,8 +44,9 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     type: ship.type,
     currentHp,
     maxHp,
-    missilesLeft,
+    offensiveMissilesLeft,
     torpedoesLeft,
+    interceptorsLeft,
     fireControlLock: 0,
     maneuverBudget: 0.5,
     targetId: null,
@@ -198,9 +200,9 @@ export const resolveBattle = (
         }
         ship.torpedoesLeft -= count;
         if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} torpedoes [ETA:${ETA_TORPEDO}].`);
-      } 
-      else if (ship.missilesLeft > 0) {
-        const count = Math.min(ship.missilesLeft, MAX_LAUNCH_PER_ROUND);
+      }
+      else if (ship.offensiveMissilesLeft > 0) {
+        const count = Math.min(ship.offensiveMissilesLeft, MAX_LAUNCH_PER_ROUND);
         for (let k = 0; k < count; k++) {
           projectiles.push({
             id: rng.id('msl'),
@@ -213,7 +215,7 @@ export const resolveBattle = (
             hp: MISSILE_HP
           });
         }
-        ship.missilesLeft -= count;
+        ship.offensiveMissilesLeft -= count;
         if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} missiles [ETA:${ETA_MISSILE}].`);
       }
     }
@@ -238,16 +240,16 @@ export const resolveBattle = (
         if (!defender || defender.currentHp <= 0) continue;
 
         const incoming = interceptionThreats.get(targetId)!;
-        
+
         // Try to intercept each incoming missile
         for (const p of incoming) {
             if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
 
-            if (defender.missilesLeft > 0 && rng.next() > 0.5) {
-                defender.missilesLeft--;
+            if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
+                defender.interceptorsLeft--;
                 if (rng.next() < INTERCEPTION_BASE_CHANCE) {
-                    p.hp = 0; 
-                    logs.push(`>> ${short(defender.shipId)} intercepted incoming ${p.type}.`);
+                    p.hp = 0;
+                    logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
                     totalMissilesIntercepted++;
                 }
             }
@@ -347,7 +349,10 @@ export const resolveBattle = (
         if (battleState && battleState.currentHp > 0) {
             newShips.push({
                 ...oldShip,
-                hp: battleState.currentHp
+                hp: battleState.currentHp,
+                offensiveMissilesLeft: battleState.offensiveMissilesLeft,
+                torpedoesLeft: battleState.torpedoesLeft,
+                interceptorsLeft: battleState.interceptorsLeft
             });
             survivorShipIds.push(oldShip.id); // Collect survivor ID
         }

@@ -21,10 +21,11 @@ export interface BattleShipState {
   type: ShipType;
   currentHp: number;
   maxHp: number;
-  
+
   // Consumables
-  missilesLeft: number;
+  offensiveMissilesLeft: number;
   torpedoesLeft: number;
+  interceptorsLeft: number;
   
   // Tactical State (Reset or updated each round)
   fireControlLock: number; // 0.0 to 1.0 (Target Lock)

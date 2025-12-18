@@ -108,10 +108,11 @@ interface ShipStats {
   speed: number;        // Modificateur de vitesse de flotte
   pdStrength: number;   // Capacité anti-missile
   evasion: number;      // 0.0 - 1.0
-  missileStock: number;
+  offensiveMissileStock: number;
   missileDamage: number;
   torpedoStock: number;
   torpedoDamage: number;
+  interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
 }
 ```
