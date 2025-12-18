@@ -106,16 +106,25 @@ const UI: React.FC<UIProps> = ({
       }
 
       const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-      const sys = systems.find(s => distSq(selectedFleet.position, s.position) <= orbitThresholdSq);
-      
-      if (!sys) return { orbitingSystem: null, availableArmies: [] };
+      let closestSystem: StarSystem | null = null;
+      let closestDistanceSq = Number.POSITIVE_INFINITY;
+
+      for (const system of systems) {
+          const distanceSq = distSq(selectedFleet.position, system.position);
+          if (distanceSq <= orbitThresholdSq && distanceSq < closestDistanceSq) {
+              closestSystem = system;
+              closestDistanceSq = distanceSq;
+          }
+      }
+
+      if (!closestSystem) return { orbitingSystem: null, availableArmies: [] };
 
       // Get armies at this system belonging to Player
       const armies = gameState.armies
-          .filter(a => a.containerId === sys.id && a.factionId === playerFactionId && a.state === ArmyState.DEPLOYED)
+          .filter(a => a.containerId === closestSystem.id && a.factionId === playerFactionId && a.state === ArmyState.DEPLOYED)
           .sort((a, b) => a.id.localeCompare(b.id));
 
-      return { orbitingSystem: sys, availableArmies: armies };
+      return { orbitingSystem: closestSystem, availableArmies: armies };
   }, [selectedFleet, systems, gameState.armies, playerFactionId]);
 
   // Compute INVASION Visibility
