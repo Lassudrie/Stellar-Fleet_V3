@@ -12,12 +12,21 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
     let workingArmies = state.armies;
     let workingFleets = fleetsToProcess;
 
-    const movementResults: MovementStepResult[] = [];
+    const movementResults: Array<MovementStepResult & {
+        invasionTargetSystemId: string | null;
+        loadTargetSystemId: string | null;
+        unloadTargetSystemId: string | null;
+    }> = [];
 
     // First pass: compute final positions for all fleets without arrival operations
     fleetsToProcess.forEach(fleet => {
         const moveResult = moveFleet(fleet, state.systems, nextDay, ctx.rng);
-        movementResults.push(moveResult);
+        movementResults.push({
+            ...moveResult,
+            invasionTargetSystemId: fleet.invasionTargetSystemId,
+            loadTargetSystemId: fleet.loadTargetSystemId,
+            unloadTargetSystemId: fleet.unloadTargetSystemId
+        });
         workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? moveResult.fleet : existing));
         newLogs.push(...moveResult.logs);
     });
@@ -32,10 +41,26 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         const fleet = workingFleets.find(f => f.id === result.fleet.id);
         if (!fleet) return;
 
-        const arrivalOutcome = executeArrivalOperations(fleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
+        const arrivalFleet: Fleet = {
+            ...fleet,
+            invasionTargetSystemId: result.invasionTargetSystemId,
+            loadTargetSystemId: result.loadTargetSystemId,
+            unloadTargetSystemId: result.unloadTargetSystemId
+        };
+
+        const arrivalOutcome = executeArrivalOperations(arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
 
         workingArmies = arrivalOutcome.armies;
-        workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? arrivalOutcome.fleet : existing));
+        workingFleets = workingFleets.map(existing =>
+            existing.id === fleet.id
+                ? {
+                      ...arrivalOutcome.fleet,
+                      invasionTargetSystemId: null,
+                      loadTargetSystemId: null,
+                      unloadTargetSystemId: null
+                  }
+                : existing
+        );
         newLogs.push(...arrivalOutcome.logs);
     });
 
