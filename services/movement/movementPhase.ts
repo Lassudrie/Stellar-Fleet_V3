@@ -96,10 +96,7 @@ const moveFleet = (
             stateStartTurn: day,
             targetPosition: null,
             targetSystemId: null,
-            retreating: false,
-            invasionTargetSystemId: null,
-            loadTargetSystemId: null,
-            unloadTargetSystemId: null
+            retreating: false
         },
         arrivalSystemId,
         logs: arrivalLog
@@ -284,7 +281,12 @@ export const resolveFleetMovement = (
       if (system) {
           const arrivalOutcome = executeArrivalOperations(moveResult.fleet, system, armiesAfterOps, fleetContext, rng, day);
           armiesAfterOps = arrivalOutcome.armies;
-          nextFleet = arrivalOutcome.fleet;
+          nextFleet = {
+              ...arrivalOutcome.fleet,
+              invasionTargetSystemId: null,
+              loadTargetSystemId: null,
+              unloadTargetSystemId: null
+          };
           generatedLogs.push(...arrivalOutcome.logs);
       }
   }

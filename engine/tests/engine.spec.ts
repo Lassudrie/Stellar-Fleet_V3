@@ -33,6 +33,7 @@ import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
 import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
+import { phaseMovement } from '../turn/phases/03_movement';
 
 interface TestCase {
   name: string;
@@ -574,6 +575,35 @@ const tests: TestCase[] = [
         customTurn,
         'Movement commands should respect an explicit turn override'
       );
+    }
+  },
+  {
+    name: 'Embarked armies deploy and log invasion when fleets reach their target',
+    run: () => {
+      const system = createSystem('sys-invasion-target', 'red');
+
+      const army = createArmy('army-invasion', 'blue', 14000, ArmyState.EMBARKED, 'fleet-invasion');
+      const fleet = {
+        ...createFleet('fleet-invasion', 'blue', { ...baseVec }, [
+          { id: 'ship-transport', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: army.id }
+        ]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...baseVec },
+        invasionTargetSystemId: system.id
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
+      const ctx = { rng: new RNG(9), turn: state.day + 1 };
+
+      const nextState = phaseMovement(state, ctx);
+
+      const deployedArmy = nextState.armies.find(entry => entry.id === army.id);
+      assert.strictEqual(deployedArmy?.state, ArmyState.DEPLOYED, 'Embarked armies should deploy upon arrival');
+      assert.strictEqual(deployedArmy?.containerId, system.id, 'Deployed armies should occupy the invaded system');
+
+      const invasionLog = nextState.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
+      assert.ok(invasionLog, 'Invasion arrival should emit combat logs describing the deployment');
     }
   },
   {
