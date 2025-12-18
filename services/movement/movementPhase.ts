@@ -25,6 +25,8 @@ const computeArmyUpdates = (previous: Army[], next: Army[]): ArmyUpdate[] => {
         const changes: Partial<Army> = {};
         if (before.state !== army.state) changes.state = army.state;
         if (before.containerId !== army.containerId) changes.containerId = army.containerId;
+        if (before.strength !== army.strength) changes.strength = army.strength;
+        if (before.morale !== army.morale) changes.morale = army.morale;
 
         if (Object.keys(changes).length === 0) return updates;
         updates.push({ id: army.id, changes });
