@@ -27,11 +27,18 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
        devWarn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
   }
 
-  const maxHp = ship.maxHp ?? stats?.maxHp ?? 100;
-  const currentHp = Math.min(ship.hp, maxHp);
-  const offensiveMissilesLeft = ship.offensiveMissilesLeft ?? stats?.offensiveMissileStock ?? 0;
-  const torpedoesLeft = ship.torpedoesLeft ?? stats?.torpedoStock ?? 0;
-  const interceptorsLeft = ship.interceptorsLeft ?? stats?.interceptorStock ?? 0;
+  const fallbackMaxHp = stats?.maxHp ?? 100;
+  const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
+  const clampedHp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
+  const offensiveMissilesLeft = Number.isFinite(ship.offensiveMissilesLeft)
+    ? ship.offensiveMissilesLeft
+    : stats?.offensiveMissileStock ?? 0;
+  const torpedoesLeft = Number.isFinite(ship.torpedoesLeft)
+    ? ship.torpedoesLeft
+    : stats?.torpedoStock ?? 0;
+  const interceptorsLeft = Number.isFinite(ship.interceptorsLeft)
+    ? ship.interceptorsLeft
+    : stats?.interceptorStock ?? 0;
   const evasion = stats?.evasion ?? 0.1;
   const pdStrength = stats?.pdStrength ?? 0;
   const damage = stats?.damage ?? 10;
@@ -43,7 +50,7 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     fleetId,
     faction,
     type: ship.type,
-    currentHp,
+    currentHp: clampedHp,
     maxHp,
     offensiveMissilesLeft,
     torpedoesLeft,

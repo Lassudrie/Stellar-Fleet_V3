@@ -265,16 +265,22 @@ export const deserializeGameState = (json: string): GameState => {
         invasionTargetSystemId: f.invasionTargetSystemId ?? null,
         loadTargetSystemId: f.loadTargetSystemId ?? null,
         unloadTargetSystemId: f.unloadTargetSystemId ?? null,
-        ships: ships.map((s: any) => ({
-            id: s.id,
-            type: s.type,
-            hp: s.hp,
-            maxHp: s.maxHp,
-            carriedArmyId: s.carriedArmyId ?? null,
-            offensiveMissilesLeft: s.offensiveMissilesLeft ?? SHIP_STATS[s.type]?.offensiveMissileStock ?? 0,
-            torpedoesLeft: s.torpedoesLeft ?? SHIP_STATS[s.type]?.torpedoStock ?? 0,
-            interceptorsLeft: s.interceptorsLeft ?? SHIP_STATS[s.type]?.interceptorStock ?? 0
-        }))
+        ships: ships.map((s: any) => {
+            const fallbackMaxHp = SHIP_STATS[s.type]?.maxHp ?? 100;
+            const maxHp = Number.isFinite(s.maxHp) ? s.maxHp : fallbackMaxHp;
+            const hp = Number.isFinite(s.hp) ? Math.min(Math.max(s.hp, 0), maxHp) : maxHp;
+
+            return {
+              id: s.id,
+              type: s.type,
+              hp,
+              maxHp,
+              carriedArmyId: s.carriedArmyId ?? null,
+              offensiveMissilesLeft: s.offensiveMissilesLeft ?? SHIP_STATS[s.type]?.offensiveMissileStock ?? 0,
+              torpedoesLeft: s.torpedoesLeft ?? SHIP_STATS[s.type]?.torpedoStock ?? 0,
+              interceptorsLeft: s.interceptorsLeft ?? SHIP_STATS[s.type]?.interceptorStock ?? 0
+            };
+        })
       };
     });
 
