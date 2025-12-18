@@ -69,9 +69,30 @@ export const calculateFleetPower = (fleet: Fleet): number => {
 
 /**
  * Creates a ship using the provided RNG for ID generation.
+ * Falls back to a safe default if the requested type is not recognized.
  */
 export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
   const stats = SHIP_STATS[type];
+
+  if (!stats) {
+    const fallbackType = ShipType.FRIGATE;
+    const fallbackStats = SHIP_STATS[fallbackType];
+
+    if (!fallbackStats) {
+      throw new Error('[World] Missing fallback ship stats for frigate');
+    }
+
+    console.warn(`[World] Unknown ship type '${type}', falling back to '${fallbackType}'.`);
+
+    return {
+      id: rng.id('ship'),
+      type: fallbackType,
+      hp: fallbackStats.maxHp,
+      maxHp: fallbackStats.maxHp,
+      carriedArmyId: null
+    };
+  }
+
   return {
     id: rng.id('ship'),
     type,
