@@ -1,6 +1,5 @@
 
-import { Vector3 } from 'three';
-import { FactionId, Fleet } from '../types';
+import { FactionId } from '../types';
 
 // --- TYPES ---
 
