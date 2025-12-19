@@ -34,6 +34,7 @@ import {
   ArmyDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../data/static';
+import { generateStellarSystem } from '../services/world/stellar';
 
 // --- HELPERS ---
 
@@ -75,6 +76,19 @@ const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined =>
   if (!Array.isArray(a.planets)) return undefined;
 
   return a as StarSystemAstro;
+};
+
+const restoreAstro = (
+  astro: unknown,
+  worldSeed: number | undefined,
+  systemId: string | undefined
+): StarSystemAstro | undefined => {
+  const sanitized = sanitizeStarSystemAstro(astro);
+  if (sanitized) return sanitized;
+  if (isFiniteNumber(worldSeed) && typeof systemId === 'string' && systemId.length > 0) {
+    return generateStellarSystem({ worldSeed, systemId });
+  }
+  return undefined;
 };
 
 const normalizeConsumableValue = (value: unknown, fallback: number) => (
@@ -293,6 +307,7 @@ export const deserializeGameState = (json: string): GameState => {
   const factions: FactionState[] = dto.factions || DEFAULT_FACTIONS;
   const validFactionIds = new Set(factions.map(f => f.id));
   const rawPlayerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+  const worldSeed: number | undefined = Number.isFinite(dto.seed) ? dto.seed : undefined;
 
   const playerFactionId = validFactionIds.has(rawPlayerFactionId)
     ? rawPlayerFactionId
@@ -330,7 +345,7 @@ export const deserializeGameState = (json: string): GameState => {
         size: s.size,
         resourceType: s.resourceType,
         isHomeworld: s.isHomeworld ?? false,
-        astro: sanitizeStarSystemAstro(s.astro),
+        astro: restoreAstro(s.astro, worldSeed, s.id),
         // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
         ownerFactionId
       };

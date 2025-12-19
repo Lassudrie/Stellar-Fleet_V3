@@ -281,6 +281,10 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   // WHY: Strict determinism requirement. This must not consume the global world RNG.
   for (const sys of systems) {
     sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
+    if (!sys.astro) {
+      devWarn(`[WorldGen] Generated system '${sys.id}' is missing astro payload; regenerating with deterministic seed.`);
+      sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
+    }
   }
 
   // --- 2. FACTIONS & TERRITORIES ---
@@ -639,4 +643,3 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
 
   return { state, rng };
 };
-
