@@ -1,5 +1,22 @@
 
-import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId, ShipConsumables, ShipKillRecord } from '../types';
+import {
+  GameState,
+  Fleet,
+  StarSystem,
+  LaserShot,
+  Battle,
+  AIState,
+  EnemySighting,
+  Army,
+  GameObjectives,
+  ShipType,
+  GameplayRules,
+  FactionState,
+  FactionId,
+  ShipConsumables,
+  ShipKillRecord,
+  StarSystemAstro
+} from '../types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
 import { computeFleetRadius } from './fleetDerived';
@@ -35,6 +52,29 @@ const deserializeVector3 = (v: Vector3DTO | undefined, context = 'vector'): Vec3
   });
 
   return vec3(v.x, v.y, v.z);
+};
+
+const isFiniteNumber = (value: unknown): value is number => (
+  typeof value === 'number' && Number.isFinite(value)
+);
+
+const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined => {
+  if (!astro || typeof astro !== 'object') return undefined;
+  const a: any = astro;
+
+  if (!isFiniteNumber(a.seed)) return undefined;
+  if (typeof a.primarySpectralType !== 'string') return undefined;
+  if (!isFiniteNumber(a.starCount)) return undefined;
+  if (!isFiniteNumber(a.metallicityFeH)) return undefined;
+  if (!a.derived || typeof a.derived !== 'object') return undefined;
+  if (!isFiniteNumber(a.derived.luminosityTotalLSun)) return undefined;
+  if (!isFiniteNumber(a.derived.snowLineAu)) return undefined;
+  if (!isFiniteNumber(a.derived.hzInnerAu)) return undefined;
+  if (!isFiniteNumber(a.derived.hzOuterAu)) return undefined;
+  if (!Array.isArray(a.stars)) return undefined;
+  if (!Array.isArray(a.planets)) return undefined;
+
+  return a as StarSystemAstro;
 };
 
 const normalizeConsumableValue = (value: unknown, fallback: number) => (
@@ -290,6 +330,7 @@ export const deserializeGameState = (json: string): GameState => {
         size: s.size,
         resourceType: s.resourceType,
         isHomeworld: s.isHomeworld ?? false,
+        astro: sanitizeStarSystemAstro(s.astro),
         // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
         ownerFactionId
       };

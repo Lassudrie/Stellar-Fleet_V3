@@ -7,6 +7,7 @@ import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
 import { SHIP_STATS } from '../../data/static';
 import { devLog, devWarn } from '../../tools/devLogger';
+import { generateStellarSystem } from './stellar';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -274,6 +275,12 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       resourceType: rng.next() > 0.75 ? 'gas' : 'none',
       isHomeworld: false
     });
+  }
+
+  // 1c. Procedural astro payload (isolated per system by derived seed).
+  // WHY: Strict determinism requirement. This must not consume the global world RNG.
+  for (const sys of systems) {
+    sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
   }
 
   // --- 2. FACTIONS & TERRITORIES ---
