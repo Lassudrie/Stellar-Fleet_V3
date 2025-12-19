@@ -3,9 +3,9 @@ import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity } 
 import { RNG } from '../../engine/rng';
 import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../../engine/idUtils';
-import { sub, len, normalize, scale, add, clone, distSq } from '../../engine/math/vec3';
+import { sub, len, normalize, scale, add, clone } from '../../engine/math/vec3';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from '../../engine/armyOps';
-import { CAPTURE_RANGE } from '../../data/static';
+import { isOrbitContested } from '../../engine/orbit';
 
 export interface ArmyUpdate {
     id: string;
@@ -39,17 +39,6 @@ export interface FleetMovementResult {
     logs: LogEntry[];
     armyUpdates: ArmyUpdate[];
 }
-
-export const isOrbitContested = (system: StarSystem, fleets: Fleet[]): boolean => {
-    const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-    const factionsInRange = new Set(
-        fleets
-            .filter(fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= captureSq)
-            .map(fleet => fleet.factionId)
-    );
-
-    return factionsInRange.size >= 2;
-};
 
 export interface MovementStepResult {
     fleet: Fleet;

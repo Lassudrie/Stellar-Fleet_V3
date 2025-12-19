@@ -1,5 +1,5 @@
 
-import { GameState, Fleet } from '../../../types';
+import { GameState, Fleet, LogEntry } from '../../../types';
 import { TurnContext } from '../types';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from '../../../services/movement/movementPhase';
 
@@ -7,7 +7,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
     const nextDay = ctx.turn; // Movement projects to current turn positions
 
     const fleetsToProcess = [...state.fleets].sort((a, b) => a.id.localeCompare(b.id));
-    const newLogs = [];
+    const newLogs: LogEntry[] = [];
 
     let workingArmies = state.armies;
     let workingFleets = fleetsToProcess;

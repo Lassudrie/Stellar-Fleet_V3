@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import path from 'node:path';
-import { isOrbitContested, resolveGroundConflict } from '../conquest';
+import { resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
@@ -30,10 +30,11 @@ import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
-import { resolveBattleOutcome, FactionRegistry } from '../../components/ui/BattleScreen.tsx';
+import { resolveBattleOutcome, FactionRegistry } from '../battle/outcome';
 import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../../services/movement/movementPhase';
+import { isOrbitContested } from '../orbit';
 
 interface TestCase {
   name: string;
@@ -279,6 +280,30 @@ const tests: TestCase[] = [
       assert.strictEqual(outcome.label, 'Nomad League VICTORY');
       assert.strictEqual(outcome.color, '#facc15');
       assert.strictEqual(outcome.winnerName, 'Nomad League');
+    }
+  },
+  {
+    name: 'Max turns victory triggers on the exact turn limit',
+    run: () => {
+      const playerFleet = createFleet('fleet-blue-turncap', 'blue', baseVec, [
+        { id: 'blue-ship-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateAtTurnLimit = createBaseState({
+        day: 4,
+        fleets: [playerFleet],
+        systems: [createSystem('sys-home', 'blue')],
+        objectives: { maxTurns: 5, conditions: [{ type: 'survival' }] }
+      });
+
+      const nextState = runTurn(stateAtTurnLimit, new RNG(9));
+
+      assert.strictEqual(nextState.day, 5, 'The turn counter should advance to the limit');
+      assert.strictEqual(
+        nextState.winnerFactionId,
+        'blue',
+        'Survival objectives should resolve as soon as the max turn is reached'
+      );
     }
   },
   {
