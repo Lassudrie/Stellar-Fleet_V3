@@ -205,11 +205,7 @@ const GameScene: React.FC<GameSceneProps> = ({
       <Canvas
         gl={{ antialias: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
-        onClick={(e) => {
-            if (e.target === e.currentTarget) {
-                onBackgroundClick();
-            }
-        }}
+        onPointerMissed={() => onBackgroundClick()}
       >
         <Suspense fallback={null}>
             <GameCamera
@@ -273,11 +269,6 @@ const GameScene: React.FC<GameSceneProps> = ({
             <EffectComposer enableNormalPass={false}>
                 <Bloom luminanceThreshold={0.2} mipmapBlur intensity={1.2} radius={0.4} />
             </EffectComposer>
-
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -5, 0]} onClick={(e) => { e.stopPropagation(); onBackgroundClick(); }}>
-                <planeGeometry args={[500, 500]} />
-                <meshBasicMaterial visible={false} />
-            </mesh>
         </Suspense>
       </Canvas>
     </div>
