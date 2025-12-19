@@ -20,7 +20,7 @@ import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'SYSTEM_INSPECTOR_MODAL';
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
@@ -353,6 +353,13 @@ const App: React.FC = () => {
       setInspectedFleetId(null);
   };
 
+  const handleInspectSystem = () => {
+      if (!targetSystem) return;
+      setFleetPickerMode(null);
+      setInspectedFleetId(null);
+      setUiMode('SYSTEM_INSPECTOR_MODAL');
+  };
+
   const handleInvade = (systemId: string) => {
       const system = viewGameState?.systems.find(s => s.id === systemId);
       if (!system) return;
@@ -496,6 +503,7 @@ const App: React.FC = () => {
                 onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
                 onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
+                onInspectSystem={handleInspectSystem}
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
                 onSelectFleet={setSelectedFleetId}

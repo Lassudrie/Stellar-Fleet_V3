@@ -113,6 +113,10 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
     planets.push(planet);
   }
 
+  // Defensive invariant: ensure planets are returned in increasing semi-major axis order.
+  // NOTE: snapOrbitToType() may adjust aAu non-monotonically; tests and UI assume sorted orbits.
+  planets.sort((a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu);
+
   return {
     seed,
     primarySpectralType,

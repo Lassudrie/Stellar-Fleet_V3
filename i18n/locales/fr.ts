@@ -73,6 +73,7 @@ export const fr = {
   // Context Menu
   'ctx.groundForces': 'Forces au Sol',
   'ctx.homeworld': 'Monde natal',
+  'ctx.inspect': 'Inspecter',
   'ctx.moveTo': 'Aller vers...',
   'ctx.selectFleet': 'Sélectionner flotte',
   'ctx.invade': 'Envahir',
@@ -83,6 +84,20 @@ export const fr = {
   'ctx.morale': 'Moral',
   'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
+
+  // Astro
+  'astro.title': 'Astro',
+  'astro.primary': 'Primaire',
+  'astro.planets': 'Planètes',
+  'astro.habitable': 'Habitable',
+  'astro.yes': 'Oui',
+  'astro.no': 'Non',
+  'astro.inspectorTitle': 'Analyse du système',
+  'astro.noData': 'Aucune donnée astro disponible pour ce système.',
+  'astro.stars': 'Étoiles',
+  'astro.planetsSection': 'Planètes',
+  'astro.moons': 'Lunes',
+  'astro.close': 'Fermer',
 
   // Fleet Picker
   'picker.title': 'Choisir Flotte',
