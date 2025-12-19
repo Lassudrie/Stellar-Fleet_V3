@@ -113,6 +113,8 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
     planets.push(planet);
   }
 
+  planets.sort((a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu);
+
   return {
     seed,
     primarySpectralType,

@@ -35,6 +35,7 @@ import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../../services/movement/movementPhase';
 import { isOrbitContested } from '../orbit';
+import { generateStellarSystem } from '../../services/world/stellar';
 
 interface TestCase {
   name: string;
@@ -159,6 +160,29 @@ const tests: TestCase[] = [
       const { updatedBattle } = resolveBattle(battle, state, 0);
 
       assert.strictEqual(updatedBattle.winnerFactionId, 'alpha', 'Winner should match computed surviving faction id');
+    }
+  },
+  {
+    name: 'Astro payload survives save/load and regenerates when absent',
+    run: () => {
+      const systemWithAstro = { ...createSystem('sys-astro', null), astro: generateStellarSystem({ worldSeed: 7, systemId: 'sys-astro' }) };
+      const expectedAstro = generateStellarSystem({ worldSeed: 99, systemId: 'sys-regen' });
+
+      const withAstroState = createBaseState({
+        systems: [systemWithAstro],
+        factions,
+        seed: 7
+      });
+      const roundTrip = deserializeGameState(serializeGameState(withAstroState));
+      assert.deepStrictEqual(roundTrip.systems[0].astro, systemWithAstro.astro, 'Astro data must persist through serialization');
+
+      const missingAstroState = createBaseState({
+        systems: [createSystem('sys-regen', null)],
+        factions,
+        seed: 99
+      });
+      const restored = deserializeGameState(serializeGameState(missingAstroState));
+      assert.deepStrictEqual(restored.systems[0].astro, expectedAstro, 'Astro data must be regenerated when missing');
     }
   },
   {
