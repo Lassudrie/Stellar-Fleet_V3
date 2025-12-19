@@ -50,8 +50,8 @@ export const en = {
   // UI SideMenu
   'sidemenu.command': 'Command',
   'sidemenu.com_logs': 'Com Logs',
-  'sidemenu.registry': 'Fleet Registry',
-  'sidemenu.territory': 'Territory',
+  'sidemenu.registry': 'Fleet',
+  'sidemenu.territory': 'System',
   'sidemenu.settings': 'Settings',
   'sidemenu.recentEvents': 'Recent Events: {{count}}',
   'sidemenu.activeUnits': 'Active Units: {{count}}',
