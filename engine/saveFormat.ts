@@ -1,5 +1,16 @@
 
-import { FleetState, ResourceType, ShipType, LogEntry, BattleStatus, ArmyState, VictoryType, GameplayRules, FactionState } from '../types';
+import {
+  FleetState,
+  ResourceType,
+  ShipType,
+  LogEntry,
+  BattleStatus,
+  ArmyState,
+  VictoryType,
+  GameplayRules,
+  FactionState,
+  StarSystemAstro
+} from '../types';
 
 export const SAVE_VERSION = 3 as const;
 export type SaveVersion = typeof SAVE_VERSION;
@@ -75,6 +86,7 @@ export interface StarSystemDTO {
   ownerFactionId: string | null; // Renamed
   resourceType: ResourceType;
   isHomeworld?: boolean;
+  astro?: StarSystemAstro;
 }
 
 export interface LaserShotDTO {

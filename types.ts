@@ -36,6 +36,106 @@ export enum ShipType {
 
 export type ResourceType = 'none' | 'gas';
 
+// --- Procedural Stellar System Generation (Astro data) ---
+// NOTE: This is intentionally JSON-serializable (numbers/strings/arrays only) to support save files.
+
+export type SpectralType = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
+export type PlanetType = 'Terrestrial' | 'SubNeptune' | 'IceGiant' | 'GasGiant' | 'Dwarf';
+export type MoonType = 'Regular' | 'Icy' | 'Volcanic' | 'Eden' | 'Irregular';
+export type AtmosphereType = 'None' | 'Thin' | 'Earthlike' | 'CO2' | 'H2He';
+
+export interface WeightedSpectralType {
+  type: SpectralType;
+  weight: number;
+}
+
+export interface StellarClassBounds {
+  massSun: [number, number];
+  teffK: [number, number];
+}
+
+export type StellarMultiplicityByPrimaryType = Record<SpectralType, number>;
+
+export interface StellarSystemGenParams {
+  maxPlanets: number;
+  maxSemiMajorAxisAu: number;
+  minSemiMajorAxisAu: number;
+  innerSlotRatio: number;
+  hotGiantChance: number;
+  snowLineMatchRange: [number, number];
+  spacingLogMean: number;
+  spacingLogStd: number;
+  firstOrbitLogRange: [number, number];
+}
+
+export type PlanetTypePlan = PlanetType[];
+export type PlanetTypeProbs = Record<PlanetType, number>;
+
+export interface StarData {
+  role: 'primary' | 'companion';
+  spectralType: SpectralType;
+  massSun: number;
+  radiusSun: number;
+  luminositySun: number;
+  teffK: number;
+}
+
+export interface MoonData {
+  type: MoonType;
+  orbitDistanceRp: number;
+  massEarth: number;
+  radiusEarth: number;
+  gravityG: number;
+  albedo: number;
+  teqK: number;
+  tidalBonusK?: number;
+  atmosphere: Exclude<AtmosphereType, 'H2He'>;
+  temperatureK: number;
+}
+
+export interface PlanetData {
+  type: PlanetType;
+  semiMajorAxisAu: number;
+  eccentricity: number;
+  massEarth: number;
+  radiusEarth: number;
+  gravityG: number;
+  albedo: number;
+  teqK: number;
+  atmosphere: AtmosphereType;
+  pressureBar?: number;
+  temperatureK: number;
+  climateTag?: string;
+  moons: MoonData[];
+}
+
+// Helper to pass a few derived orbit/HZ values into planet logic
+export interface StellarDerived {
+  semiMajorAxisAu: number;
+  hzInnerAu: number;
+  hzOuterAu: number;
+}
+
+export interface StarSystemAstro {
+  seed: number; // Derived per-system seed for debug / reproducibility
+  primarySpectralType: SpectralType;
+  starCount: number;
+  metallicityFeH: number;
+  derived: {
+    luminosityTotalLSun: number;
+    snowLineAu: number;
+    hzInnerAu: number;
+    hzOuterAu: number;
+  };
+  stars: StarData[];
+  planets: PlanetData[];
+}
+
+export interface StellarSystemPlan {
+  planetTypes: PlanetTypePlan;
+  moons: MoonType[][];
+}
+
 export interface ShipStats {
   maxHp: number;
   damage: number;
@@ -99,6 +199,7 @@ export interface StarSystem {
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
   isHomeworld: boolean;
+  astro?: StarSystemAstro; // Optional procedural astro data (stars/planets/moons)
 }
 
 export interface Fleet {
