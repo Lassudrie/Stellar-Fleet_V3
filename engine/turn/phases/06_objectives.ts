@@ -6,7 +6,7 @@ import { checkVictoryConditions } from '../../objectives';
 export const phaseObjectives = (state: GameState, ctx: TurnContext): GameState => {
     if (state.winnerFactionId) return state; // Already decided
 
-    const winnerFactionId = checkVictoryConditions(state);
+    const winnerFactionId = checkVictoryConditions({ ...state, day: ctx.turn });
     
     if (winnerFactionId) {
         return { ...state, winnerFactionId };

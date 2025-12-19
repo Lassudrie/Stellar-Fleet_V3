@@ -46,22 +46,28 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 6. Check Victory Objectives
   nextState = phaseObjectives(nextState, ctx);
 
-  // 7. Cleanup & Maintenance
-  nextState = phaseCleanup(nextState, ctx);
-
+  // SAFETY: Ensure all battles are resolved before cleanup so turnResolved is always set
   const remainingBattles = nextState.battles.filter(b => b.status === 'scheduled');
   if (remainingBattles.length > 0) {
-    // Log critical error but don't crash - force resolve remaining battles
     console.error(`[RunTurn] CRITICAL: Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}. Force-resolving.`);
     nextState = {
       ...nextState,
-      battles: nextState.battles.map(b => 
-        b.status === 'scheduled' 
-          ? { ...b, status: 'resolved' as const, winnerFactionId: 'draw' as const, logs: [...b.logs, 'Battle force-resolved due to turn processing error.'] }
+      battles: nextState.battles.map(b =>
+        b.status === 'scheduled'
+          ? {
+              ...b,
+              turnResolved: ctx.turn,
+              status: 'resolved' as const,
+              winnerFactionId: 'draw' as const,
+              logs: [...b.logs, 'Battle force-resolved due to turn processing error.']
+            }
           : b
       )
     };
   }
+
+  // 7. Cleanup & Maintenance
+  nextState = phaseCleanup(nextState, ctx);
 
   // 8. Canonicalize output & Time Advance
   nextState = canonicalizeState(nextState);

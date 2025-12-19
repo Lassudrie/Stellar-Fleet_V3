@@ -2,7 +2,8 @@
 import { GameState, StarSystem, FactionId, ArmyState, Army } from '../types';
 import { COLORS, CAPTURE_RANGE } from '../data/static';
 import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
-import { Vec3, distSq } from './math/vec3';
+import { Vec3 } from './math/vec3';
+import { isOrbitContested } from './orbit';
 
 export interface GroundBattleResult {
     systemId: string;
@@ -40,17 +41,6 @@ const casualtyFraction = (ownPower: number, enemyPower: number): number => {
     if (ownPower <= 0) return 0;
     const pressure = enemyPower / Math.max(ownPower + enemyPower, 1);
     return Math.min(MAX_CASUALTY_FRACTION_PER_TURN, pressure);
-};
-
-export const isOrbitContested = (system: StarSystem, state: GameState): boolean => {
-    const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
-    const factionsInRange = new Set(
-        state.fleets
-            .filter(fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= captureSq)
-            .map(fleet => fleet.factionId)
-    );
-
-    return factionsInRange.size >= 2;
 };
 
 interface LossOutcome {

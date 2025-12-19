@@ -1,26 +1,29 @@
 
 import React, { useState, useMemo } from 'react';
-import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId } from '../types';
+import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState } from '../types';
 import VictoryScreen from './ui/VictoryScreen';
 import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
-import SystemContextMenu from './ui/SystemContextMenu';
+import SystemContextMenu, { GroundForceSummaryEntry } from './ui/SystemContextMenu';
 import FleetPicker from './ui/FleetPicker';
 import FleetPanel from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
+import ShipDetailModal from './ui/ShipDetailModal';
 import { hasInvadingForce } from '../engine/army';
-import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
+import { findOrbitingSystem } from './ui/orbiting';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 
 interface UIProps {
   startYear: number;
   day: number;
   selectedFleet: Fleet | null;
+  inspectedFleet: Fleet | null;
   logs: LogEntry[];
-  
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
+
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -33,7 +36,7 @@ interface UIProps {
   onMerge: (targetFleetId: string) => void;
   onDeploy: (shipId: string) => void;
   onEmbark: (shipId: string, armyId: string) => void;
-  winner: FactionId | null; // Changed type
+  winner: FactionId | 'draw' | null; // Changed type
   onRestart: () => void;
   onNextTurn: () => void;
   onMoveCommand: (fleetId: string) => void;
@@ -45,6 +48,7 @@ interface UIProps {
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
+  onCloseShipDetail: () => void;
 
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
@@ -59,15 +63,15 @@ interface UIProps {
   onSetUiSettings: (settings: { devMode: boolean, godEyes: boolean, aiDebug?: boolean }) => void;
 }
 
-const UI: React.FC<UIProps> = ({ 
-    startYear, day, selectedFleet, onSplit, onMerge, onDeploy, onEmbark, winner, logs,
-    onRestart, onNextTurn, 
+const UI: React.FC<UIProps> = ({
+    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, winner, logs,
+    onRestart, onNextTurn,
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
-    onSave, onExportAiLogs, onClearAiLogs,
+    onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
     devMode, godEyes, onSetUiSettings
 }) => {
   
@@ -77,20 +81,31 @@ const UI: React.FC<UIProps> = ({
   // Helper to check ownership against current player
   const playerFactionId = gameState.playerFactionId;
 
+  const factionLookup = useMemo(() => {
+      return gameState.factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
+          acc[faction.id] = faction;
+          return acc;
+      }, {});
+  }, [gameState.factions]);
+
   // Compute nearby fleets suitable for merging
   const mergeCandidates = useMemo(() => {
     if (!selectedFleet) return [];
     if (selectedFleet.state !== FleetState.ORBIT) return [];
-    
+
     // Only merge own fleets
     if (selectedFleet.factionId !== playerFactionId) return [];
 
-    return blueFleets.filter(f => 
+    const selectedOrbitingSystem = findOrbitingSystem(selectedFleet, systems);
+    if (!selectedOrbitingSystem) return [];
+
+    return blueFleets.filter(f =>
         f.id !== selectedFleet.id &&
         f.state === FleetState.ORBIT &&
-        dist(f.position, selectedFleet.position) < 8.0 
+        dist(f.position, selectedFleet.position) < 8.0 &&
+        findOrbitingSystem(f, systems)?.id === selectedOrbitingSystem.id
     );
-  }, [selectedFleet, blueFleets, playerFactionId]);
+  }, [selectedFleet, blueFleets, playerFactionId, systems]);
 
   // Compute Ground Context for FleetPanel
   const { orbitingSystem, availableArmies } = useMemo(() => {
@@ -98,9 +113,8 @@ const UI: React.FC<UIProps> = ({
           return { orbitingSystem: null, availableArmies: [] };
       }
 
-      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
-      const sys = systems.find(s => distSq(selectedFleet.position, s.position) <= orbitThresholdSq);
-      
+      const sys = findOrbitingSystem(selectedFleet, systems);
+
       if (!sys) return { orbitingSystem: null, availableArmies: [] };
 
       // Get armies at this system belonging to Player
@@ -153,7 +167,7 @@ const UI: React.FC<UIProps> = ({
   const orbitingPlayerFleets = useMemo(() => {
       if (!targetSystem) return [];
 
-      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
+      const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
 
       return blueFleets
           .filter(fleet => (
@@ -168,17 +182,17 @@ const UI: React.FC<UIProps> = ({
   }, [blueFleets, targetSystem]);
 
   // Compute Ground Forces Summary for Context Menu
-  const groundForcesSummary = useMemo(() => {
+  const groundForcesSummary = useMemo<Record<FactionId, GroundForceSummaryEntry> | null>(() => {
       if (!targetSystem || !gameState.armies) return null;
 
-      const aggregates = {
-          blue: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 },
-          red: { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 }
-      };
+      const aggregates: Record<FactionId, { count: number, currentStrength: number, maxStrength: number, moraleSum: number }> = {};
 
       gameState.armies.forEach(army => {
           if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
-              const bucket = army.factionId === playerFactionId ? aggregates.blue : aggregates.red;
+              if (!aggregates[army.factionId]) {
+                  aggregates[army.factionId] = { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 };
+              }
+              const bucket = aggregates[army.factionId];
               bucket.count += 1;
               bucket.currentStrength += army.strength;
               bucket.maxStrength += army.maxStrength;
@@ -186,30 +200,36 @@ const UI: React.FC<UIProps> = ({
           }
       });
 
-      const buildSummary = (bucket: { count: number, currentStrength: number, maxStrength: number, moraleSum: number }) => {
-          if (bucket.count === 0) return null;
+      const summaries = Object.entries(aggregates).reduce<Record<FactionId, GroundForceSummaryEntry>>((acc, [factionId, bucket]) => {
+          if (bucket.count === 0) return acc;
 
           const losses = bucket.maxStrength - bucket.currentStrength;
           const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
-          const averageMorale = bucket.moraleSum / bucket.count;
+          const averageMoralePercent = (bucket.moraleSum / bucket.count) * 100;
 
-          return {
+          const faction = factionLookup[factionId];
+          const fallbackColor = factionId === playerFactionId ? '#93c5fd' : '#f87171';
+
+          acc[factionId] = {
+              factionId,
+              factionName: faction?.name ?? factionId,
+              color: faction?.color ?? fallbackColor,
+              isPlayer: factionId === playerFactionId,
               count: bucket.count,
               currentStrength: bucket.currentStrength,
               maxStrength: bucket.maxStrength,
               losses,
               lossPercent,
-              averageMorale,
+              averageMoralePercent,
           };
-      };
 
-      const blue = buildSummary(aggregates.blue);
-      const red = buildSummary(aggregates.red);
+          return acc;
+      }, {});
 
-      if (!blue && !red) return null;
+      if (Object.keys(summaries).length === 0) return null;
 
-      return { blue, red };
-  }, [targetSystem, gameState.armies, playerFactionId]);
+      return summaries;
+  }, [targetSystem, gameState.armies, playerFactionId, factionLookup]);
 
   const handleSelectFleetAtSystem = () => {
       if (orbitingPlayerFleets.length === 0) return;
@@ -310,8 +330,17 @@ const UI: React.FC<UIProps> = ({
         />
       )}
 
+      {uiMode === 'SHIP_DETAIL_MODAL' && inspectedFleet && (
+        <ShipDetailModal
+            fleet={inspectedFleet}
+            faction={factionLookup[inspectedFleet.factionId]}
+            armies={gameState.armies}
+            onClose={onCloseShipDetail}
+        />
+      )}
+
       {selectedFleet && uiMode === 'NONE' && (
-        <FleetPanel 
+        <FleetPanel
             fleet={selectedFleet}
             otherFleetsInSystem={mergeCandidates}
             onSplit={onSplit}

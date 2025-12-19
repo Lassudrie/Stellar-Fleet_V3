@@ -1,39 +1,73 @@
 
-import { GameState, Fleet, Army } from '../../../types';
+import { GameState, Fleet, LogEntry } from '../../../types';
 import { TurnContext } from '../types';
-import { resolveFleetMovement } from '../../../services/movement/movementPhase';
+import { moveFleet, executeArrivalOperations, MovementStepResult } from '../../../services/movement/movementPhase';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
     const nextDay = ctx.turn; // Movement projects to current turn positions
-    
-    const nextFleets: Fleet[] = [];
-    const newLogs = [];
-    const armyUpdates = new Map<string, Partial<Army>>();
 
-    // 1. Process each fleet
-    state.fleets.forEach(fleet => {
-        // resolveFleetMovement is pure, returns nextFleet + effects
-        const res = resolveFleetMovement(fleet, state.systems, state.armies, nextDay, ctx.rng);
-        nextFleets.push(res.nextFleet);
-        newLogs.push(...res.logs);
-        res.armyUpdates.forEach(u => armyUpdates.set(u.id, u.changes));
+    const fleetsToProcess = [...state.fleets].sort((a, b) => a.id.localeCompare(b.id));
+    const newLogs: LogEntry[] = [];
+
+    let workingArmies = state.armies;
+    let workingFleets = fleetsToProcess;
+
+    const movementResults: Array<MovementStepResult & {
+        invasionTargetSystemId: string | null;
+        loadTargetSystemId: string | null;
+        unloadTargetSystemId: string | null;
+    }> = [];
+
+    // First pass: compute final positions for all fleets without arrival operations
+    fleetsToProcess.forEach(fleet => {
+        const moveResult = moveFleet(fleet, state.systems, nextDay, ctx.rng);
+        movementResults.push({
+            ...moveResult,
+            invasionTargetSystemId: fleet.invasionTargetSystemId,
+            loadTargetSystemId: fleet.loadTargetSystemId,
+            unloadTargetSystemId: fleet.unloadTargetSystemId
+        });
+        workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? moveResult.fleet : existing));
+        newLogs.push(...moveResult.logs);
     });
 
-    // 2. Apply Army Updates (Embark/Deploy)
-    let nextArmies = state.armies;
-    if (armyUpdates.size > 0) {
-        nextArmies = state.armies.map(a => {
-            if (armyUpdates.has(a.id)) {
-                return { ...a, ...armyUpdates.get(a.id) };
-            }
-            return a;
-        });
-    }
+    // Second pass: execute arrival operations using the fully updated fleet positions
+    movementResults.forEach(result => {
+        if (!result.arrivalSystemId) return;
+
+        const system = state.systems.find(s => s.id === result.arrivalSystemId);
+        if (!system) return;
+
+        const fleet = workingFleets.find(f => f.id === result.fleet.id);
+        if (!fleet) return;
+
+        const arrivalFleet: Fleet = {
+            ...fleet,
+            invasionTargetSystemId: result.invasionTargetSystemId,
+            loadTargetSystemId: result.loadTargetSystemId,
+            unloadTargetSystemId: result.unloadTargetSystemId
+        };
+
+        const arrivalOutcome = executeArrivalOperations(arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
+
+        workingArmies = arrivalOutcome.armies;
+        workingFleets = workingFleets.map(existing =>
+            existing.id === fleet.id
+                ? {
+                      ...arrivalOutcome.fleet,
+                      invasionTargetSystemId: null,
+                      loadTargetSystemId: null,
+                      unloadTargetSystemId: null
+                  }
+                : existing
+        );
+        newLogs.push(...arrivalOutcome.logs);
+    });
 
     return {
         ...state,
-        fleets: nextFleets,
-        armies: nextArmies,
+        fleets: workingFleets,
+        armies: workingArmies,
         logs: [...state.logs, ...newLogs]
     };
 };

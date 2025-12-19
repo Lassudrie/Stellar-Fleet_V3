@@ -5,6 +5,8 @@ import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../../engine/army';
 import { createShip } from '../../engine/world';
 import { computeFleetRadius } from '../../engine/fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
+import { SHIP_STATS } from '../../data/static';
+import { devLog, devWarn } from '../../tools/devLogger';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -74,7 +76,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               const d2 = distSq(systems[a].position, systems[b].position);
               if (d2 < minimumSystemSpacingSq) {
                   const d = Math.sqrt(d2);
-                  console.warn(
+                  devWarn(
                       `[WorldGen] Static systems '${systems[a].name}' and '${systems[b].name}' are only ${d.toFixed(2)} ly apart (< ${minimumSystemSpacingLy}). ` +
                       `Static positions are not auto-adjusted; consider updating scenario.generation.staticSystems.`
                   );
@@ -141,7 +143,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           const center = rng.pick(mapClusterCenters);
           // Safety guard: if no cluster centers exist, fall back to scattered
           if (!center) {
-              console.warn('[WorldGen] No cluster centers available, falling back to scattered position');
+              devWarn('[WorldGen] No cluster centers available, falling back to scattered position');
               const r = Math.sqrt(rng.next()) * radius;
               const theta = rng.next() * Math.PI * 2;
               return vec3(Math.cos(theta) * r, rng.range(-5, 5), Math.sin(theta) * r);
@@ -210,7 +212,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       for (let attempt = 0; attempt < FALLBACK_POSITION_ATTEMPTS; attempt++) {
           const p = getFallbackScatteredPosition();
           if (isPositionValidWithSpacing(p)) {
-              console.warn(
+              devWarn(
                   `[WorldGen] Minimum spacing fallback used for system #${index} ` +
                   `after ${PRIMARY_POSITION_ATTEMPTS} failed primary attempts (minSpacing=${minimumSystemSpacingLy}).`
               );
@@ -233,7 +235,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       }
 
       const bestDist = Math.sqrt(Math.max(0, bestMinDistSq));
-      console.warn(
+      devWarn(
           `[WorldGen] Failed to place a system with minimum spacing of ${minimumSystemSpacingLy} ly. ` +
           `Placing best-effort candidate with nearest distance=${bestDist.toFixed(2)} ly. ` +
           `If overlaps are unacceptable, increase radius, reduce systemCount, or set minimumSystemSpacingLy=0 to disable.`
@@ -335,7 +337,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
 
               // Find N nearest unowned neighbors
               const neighbors = systems
-                  .filter(s => !s.ownerFactionId && s.id !== home.id)
+                  .filter(s => !s.ownerFactionId && s.id !== home.id && !staticSystemIds.has(s.id))
                   .map(s => ({ sys: s, dist: distSq(s.position, home.position) }))
                   .sort((a, b) => a.dist - b.dist)
                   .slice(0, CLUSTER_NEIGHBOR_COUNT);
@@ -456,13 +458,15 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       // Ensure the fleet belongs to a valid faction
       const factionDef = factions.find(f => f.id === factionId);
       if (!factionDef) {
-          console.warn(`Scenario references unknown faction '${factionId}' in initialFleets. Skipping.`);
+          devWarn(`Scenario references unknown faction '${factionId}' in initialFleets. Skipping.`);
           return;
       }
 
       let position = vec3(0, 0, 0);
       let sysId: string | null = null;
       let state = FleetState.ORBIT;
+      let targetPosition: Vec3 | null = null;
+      let targetSystemId: string | null = null;
       
       // Determine Spawn Location
       if (def.spawnLocation === 'home_system') {
@@ -477,7 +481,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
                   position = clone(randomSys.position);
                   sysId = randomSys.id;
               } else {
-                  console.warn(`[WorldGen] No systems available for fleet spawn, using origin`);
+                  devWarn(`[WorldGen] No systems available for fleet spawn, using origin`);
                   position = vec3(0, 0, 0);
               }
           }
@@ -495,18 +499,43 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               position = clone(randomSys.position);
               sysId = randomSys.id;
           } else {
-              console.warn(`[WorldGen] No systems available for random fleet spawn, using origin`);
+              devWarn(`[WorldGen] No systems available for random fleet spawn, using origin`);
               position = vec3(0, 0, 0);
           }
       } else {
           // Deep Space Spawn ({x,y,z})
           position = vec3(def.spawnLocation.x, def.spawnLocation.y, def.spawnLocation.z);
-          state = FleetState.MOVING; 
+          const nearestSystem = systems.reduce<{ system: StarSystem; distanceSq: number } | null>((nearest, system) => {
+              const distanceSq = distSq(position, system.position);
+
+              if (!nearest || distanceSq < nearest.distanceSq) {
+                  return { system, distanceSq };
+              }
+
+              return nearest;
+          }, null);
+
+          if (nearestSystem) {
+              state = FleetState.MOVING;
+              targetSystemId = nearestSystem.system.id;
+              targetPosition = clone(nearestSystem.system.position);
+          } else {
+              state = FleetState.ORBIT;
+          }
       }
 
-      // Create Ships
+      // Create Ships with validation and fallback
       const ships = def.ships.map(typeStr => {
-          const type = typeStr as ShipType; 
+          const type = typeStr as ShipType;
+          if (!SHIP_STATS[type]) {
+              const fallbackType = ShipType.FRIGATE;
+              devWarn(
+                  `[WorldGen] Unknown ship type '${typeStr}' for faction '${factionId}'. ` +
+                  `Replacing with '${fallbackType}'.`
+              );
+              return createShip(fallbackType, rng);
+          }
+
           return createShip(type, rng);
       });
 
@@ -516,8 +545,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           ships: ships,
           position: position,
           state: state,
-          targetSystemId: null,
-          targetPosition: null,
+          targetSystemId: targetSystemId,
+          targetPosition: targetPosition,
           radius: computeFleetRadius(ships.length),
           stateStartTurn: 0
       };
@@ -568,7 +597,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   });
 
   const spacingLabel = enforceMinimumSystemSpacing ? `${minimumSystemSpacingLy}ly` : 'disabled';
-  console.log(`[WorldGen] Generated ${systems.length} systems (Topology: ${topology}, MinSpacing: ${spacingLabel}), ${fleets.length} fleets, ${armies.length} armies. Player: ${playerFactionId}`);
+  devLog(`[WorldGen] Generated ${systems.length} systems (Topology: ${topology}, MinSpacing: ${spacingLabel}), ${fleets.length} fleets, ${armies.length} armies. Player: ${playerFactionId}`);
 
   // --- 5. ASSEMBLE STATE ---
   const state: GameState = {

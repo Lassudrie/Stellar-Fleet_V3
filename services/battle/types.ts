@@ -1,5 +1,5 @@
 
-import { FactionId, ShipType } from '../../types';
+import { FactionId, ShipKillRecord, ShipType } from '../../types';
 
 export type WeaponType = 'kinetic' | 'missile' | 'torpedo';
 
@@ -21,17 +21,23 @@ export interface BattleShipState {
   type: ShipType;
   currentHp: number;
   maxHp: number;
-  
+
   // Consumables
-  missilesLeft: number;
+  offensiveMissilesLeft: number;
   torpedoesLeft: number;
+  interceptorsLeft: number;
   
   // Tactical State (Reset or updated each round)
   fireControlLock: number; // 0.0 to 1.0 (Target Lock)
   maneuverBudget: number; // Used for evasion calculation
   targetId: string | null;
-  
+
   // Stats Cache
   evasion: number;
   pdStrength: number;
+  damage: number;
+  missileDamage: number;
+  torpedoDamage: number;
+
+  killHistory: ShipKillRecord[];
 }

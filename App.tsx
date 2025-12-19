@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { GameState, StarSystem, Fleet, EnemySighting } from './types';
+import { GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
@@ -18,8 +18,12 @@ import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
+import { findOrbitingSystem } from './components/ui/orbiting';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
+
+const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
+const ENEMY_SIGHTING_LIMIT = 200;
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -32,6 +36,7 @@ const App: React.FC = () => {
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
   const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
+  const [inspectedFleetId, setInspectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
@@ -68,8 +73,24 @@ const App: React.FC = () => {
       aiDebugger.clear();
   };
 
+  const selectedFleetIdRef = useRef<string | null>(selectedFleetId);
+  const uiModeRef = useRef<UiMode>(uiMode);
+  const inspectedFleetIdRef = useRef<string | null>(inspectedFleetId);
+
+  useEffect(() => {
+      selectedFleetIdRef.current = selectedFleetId;
+  }, [selectedFleetId]);
+
+  useEffect(() => {
+      uiModeRef.current = uiMode;
+  }, [uiMode]);
+
+  useEffect(() => {
+      inspectedFleetIdRef.current = inspectedFleetId;
+  }, [inspectedFleetId]);
+
   // Function to compute the view state with optional Fog of War logic
-  const updateViewState = (baseState: GameState) => {
+  const updateViewState = useCallback((baseState: GameState) => {
       let nextView = { ...baseState };
       const playerFactionId = baseState.playerFactionId;
       
@@ -81,21 +102,23 @@ const App: React.FC = () => {
       setViewGameState(nextView);
 
       // --- INTEL UPDATE LOGIC ---
-      // Update sightings for any enemy fleet that is currently visible in the view state.
+      // Update sightings for any enemy fleet that is currently visible in the view state
+      // and clean up outdated entries.
       const visibleEnemies = nextView.fleets.filter(f => f.factionId !== playerFactionId);
-      
-      if (visibleEnemies.length > 0) {
-          setEnemySightings(prev => {
-              const next = { ...prev };
-              let changed = false;
-              
+
+      setEnemySightings(prev => {
+          const next = { ...prev };
+          let changed = false;
+
+          if (visibleEnemies.length > 0) {
               visibleEnemies.forEach(f => {
                   const existing = next[f.id];
                   if (!existing || existing.daySeen < baseState.day || !equals(existing.position, f.position)) {
                        next[f.id] = {
                            fleetId: f.id,
-                           systemId: null, 
-                           position: clone(f.position), 
+                           factionId: f.factionId,
+                           systemId: null,
+                           position: clone(f.position),
                            daySeen: baseState.day,
                            estimatedPower: calculateFleetPower(f),
                            confidence: 1.0
@@ -103,23 +126,48 @@ const App: React.FC = () => {
                        changed = true;
                   }
               });
+          }
 
-              return changed ? next : prev;
+          const cutoffDay = baseState.day - ENEMY_SIGHTING_MAX_AGE_DAYS;
+          Object.keys(next).forEach(id => {
+              if (next[id].daySeen < cutoffDay) {
+                  delete next[id];
+                  changed = true;
+              }
           });
-      }
+
+          const entries = Object.values(next);
+          if (entries.length > ENEMY_SIGHTING_LIMIT) {
+              const keepIds = new Set(entries
+                  .sort((a, b) => b.daySeen - a.daySeen)
+                  .slice(0, ENEMY_SIGHTING_LIMIT)
+                  .map(s => s.fleetId));
+
+              Object.keys(next).forEach(id => {
+                  if (!keepIds.has(id)) {
+                      delete next[id];
+                      changed = true;
+                  }
+              });
+          }
+
+          return changed ? next : prev;
+      });
 
       // Edge Case: If the currently selected fleet was hidden by Fog of War, deselect it
-      if (selectedFleetId) {
-          const fleetExists = nextView.fleets.find(f => f.id === selectedFleetId);
+      const currentSelectedFleetId = selectedFleetIdRef.current;
+      if (currentSelectedFleetId) {
+          const fleetExists = nextView.fleets.find(f => f.id === currentSelectedFleetId);
           if (!fleetExists) {
               setSelectedFleetId(null);
-              if (uiMode !== 'SYSTEM_MENU') {
+              setInspectedFleetId(null);
+              if (uiModeRef.current !== 'SYSTEM_MENU') {
                   setFleetPickerMode(null);
                   setUiMode('NONE');
               }
           }
       }
-  };
+  }, [godEyes]);
 
     useEffect(() => {
       if (engine) {
@@ -132,7 +180,7 @@ const App: React.FC = () => {
             unsub();
         };
       }
-    }, [engine, godEyes]);
+    }, [engine, updateViewState]);
 
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
@@ -211,11 +259,21 @@ const App: React.FC = () => {
       setTargetSystem(sys);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setFleetPickerMode(null);
+      setInspectedFleetId(null);
       setUiMode('SYSTEM_MENU');
   };
 
   const handleFleetSelect = (id: string | null) => {
       setSelectedFleetId(id);
+      if (!id) {
+          setInspectedFleetId(null);
+      }
+  };
+
+  const handleFleetInspect = (id: string) => {
+      setSelectedFleetId(id);
+      setInspectedFleetId(id);
+      setUiMode('SHIP_DETAIL_MODAL');
   };
 
   const handleNextTurn = () => {
@@ -292,6 +350,7 @@ const App: React.FC = () => {
   const handleCloseMenu = () => {
       setFleetPickerMode(null);
       setUiMode('NONE');
+      setInspectedFleetId(null);
   };
 
   const handleInvade = (systemId: string) => {
@@ -313,11 +372,13 @@ const App: React.FC = () => {
       });
 
       if (result.ok) {
-          engine.dispatchCommand({
-              type: 'ADD_LOG',
-              text: t('msg.invasionLog', { system: targetSystem.name, count: 1 }),
-              logType: 'move'
-          });
+          if (typeof result.deployedArmies === 'number') {
+              engine.dispatchCommand({
+                  type: 'ADD_LOG',
+                  text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
+                  logType: 'move'
+              });
+          }
       } else {
           alert(t('msg.commandFailed', { error: result.error }));
       }
@@ -345,9 +406,40 @@ const App: React.FC = () => {
       }
   };
 
-  // Placeholders
-  const handleDeploySingle = () => {};
-  const handleEmbarkArmy = () => {};
+  const handleDeploySingle = (shipId: string) => {
+      if (!engine || !selectedFleetId) return;
+
+      const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
+      const system = findOrbitingSystem(fleet, engine.state.systems);
+      if (!fleet || !system) return;
+
+      const ship = fleet.ships.find(s => s.id === shipId);
+      if (!ship || !ship.carriedArmyId) return;
+
+      engine.dispatchCommand({
+          type: 'UNLOAD_ARMY',
+          fleetId: fleet.id,
+          shipId: ship.id,
+          armyId: ship.carriedArmyId,
+          systemId: system.id
+      });
+  };
+
+  const handleEmbarkArmy = (shipId: string, armyId: string) => {
+      if (!engine || !selectedFleetId) return;
+
+      const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
+      const system = findOrbitingSystem(fleet, engine.state.systems);
+      if (!fleet || !system) return;
+
+      engine.dispatchCommand({
+          type: 'LOAD_ARMY',
+          fleetId: fleet.id,
+          shipId,
+          armyId,
+          systemId: system.id
+      });
+  };
 
   if (loading) return <LoadingScreen />;
 
@@ -359,23 +451,27 @@ const App: React.FC = () => {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
+      const inspectedFleet = viewGameState.fleets.find(f => f.id === inspectedFleetId) || null;
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
-            <GameScene 
+            <GameScene
                 gameState={viewGameState}
                 enemySightings={enemySightings}
+                selectedFleetId={selectedFleetId}
                 onFleetSelect={handleFleetSelect}
+                onFleetInspect={handleFleetInspect}
                 onSystemClick={handleSystemClick}
                 onBackgroundClick={() => {
                     handleCloseMenu();
                     setSelectedFleetId(null);
                 }}
             />
-            <UI 
+            <UI
                 startYear={viewGameState.startYear}
                 day={viewGameState.day}
                 selectedFleet={selectedFleet}
+                inspectedFleet={inspectedFleet}
                 logs={viewGameState.logs}
                 
                 uiMode={uiMode}
@@ -403,6 +499,7 @@ const App: React.FC = () => {
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
                 onSelectFleet={setSelectedFleetId}
+                onCloseShipDetail={() => handleCloseMenu()}
 
                 onOpenBattle={(id) => {
                     setSelectedBattleId(id);

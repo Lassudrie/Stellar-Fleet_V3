@@ -50,8 +50,8 @@ export const fr = {
   // UI SideMenu
   'sidemenu.command': 'Commandement',
   'sidemenu.com_logs': 'Journaux Com',
-  'sidemenu.registry': 'Registre Flotte',
-  'sidemenu.territory': 'Territoire',
+  'sidemenu.registry': 'Fleet',
+  'sidemenu.territory': 'System',
   'sidemenu.settings': 'Paramètres',
   'sidemenu.recentEvents': 'Événements Récents : {{count}}',
   'sidemenu.activeUnits': 'Unités Actives : {{count}}',
@@ -81,6 +81,7 @@ export const fr = {
   'ctx.unload': 'Décharger les armées',
   'ctx.losses': 'Pertes',
   'ctx.morale': 'Moral',
+  'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
 
   // Fleet Picker
@@ -138,8 +139,9 @@ export const fr = {
   'battle.draw': 'EGALITE',
   'battle.unknown': 'RESULTAT INCONNU',
   'battle.close': 'Fermer Rapport',
-  'battle.blueForces': 'Forces Bleues',
-  'battle.redForces': 'Forces Rouges',
+  'battle.playerForces': 'Forces {{name}}',
+  'battle.mainAdversary': 'Opposition {{name}}',
+  'battle.factionForces': 'Contingent {{name}}',
   'battle.survivors': 'Survivants',
   'battle.lost': 'Pertes',
   'battle.fleets': 'Flottes :',
@@ -155,6 +157,7 @@ export const fr = {
   // Victory
   'victory.victory': 'VICTOIRE',
   'victory.defeat': 'DEFAITE',
+  'victory.draw': 'EGALITE',
   'victory.totalTurns': 'Tours Totaux : {{day}}',
   'victory.replay': 'REJOUER',
 

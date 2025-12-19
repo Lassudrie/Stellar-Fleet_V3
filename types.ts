@@ -44,11 +44,27 @@ export interface ShipStats {
   pdStrength: number;
   evasion: number;
   maneuverability: number;
-  missileStock: number;
+  offensiveMissileStock: number;
   missileDamage: number;
   torpedoStock: number;
   torpedoDamage: number;
+  interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
+}
+
+export interface ShipConsumables {
+  offensiveMissiles: number;
+  torpedoes: number;
+  interceptors: number;
+}
+
+export interface ShipKillRecord {
+  id: string;
+  day: number;
+  turn: number;
+  targetId: string;
+  targetType: ShipType;
+  targetFactionId: FactionId;
 }
 
 export interface ShipEntity {
@@ -57,6 +73,11 @@ export interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId: string | null;
+  consumables?: ShipConsumables;
+  offensiveMissilesLeft?: number;
+  torpedoesLeft?: number;
+  interceptorsLeft?: number;
+  killHistory?: ShipKillRecord[];
 }
 
 export interface Army {
@@ -141,6 +162,7 @@ export interface Battle {
 
 export interface EnemySighting {
   fleetId: string;
+  factionId: FactionId;
   systemId: string | null;
   position: Vec3;
   daySeen: number;
@@ -195,7 +217,7 @@ export interface GameState {
   battles: Battle[];
   logs: LogEntry[];
   selectedFleetId: string | null;
-  winnerFactionId: FactionId | null; // Renamed from winner
+  winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;
   aiState?: AIState; // Legacy single-AI state kept for transition
   objectives: GameObjectives;

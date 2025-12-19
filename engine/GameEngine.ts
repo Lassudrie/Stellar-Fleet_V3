@@ -1,10 +1,13 @@
 
-import { ArmyState, FactionId, Fleet, GameState, StarSystem } from '../types';
+import { ArmyState, FactionId, Fleet, FleetState, GameState, StarSystem } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
-import { distSq } from './math/vec3';
-import { computeLoadOps, computeUnloadOps } from './armyOps';
+import { clone, distSq } from './math/vec3';
+import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
+import { withUpdatedFleetDerived } from './fleetDerived';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { isOrbitContested } from './orbit';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -71,9 +74,18 @@ export class GameEngine {
         this.notify();
     }
 
+    private getFleetCommandBlockReason(fleet: Fleet): string | null {
+        if (fleet.state === FleetState.COMBAT) {
+            return 'Fleet is in combat and cannot receive commands.';
+        }
+        if (fleet.retreating) {
+            return 'Fleet is retreating and cannot receive commands.';
+        }
+        return null;
+    }
+
     private isFleetAtSystem(fleet: Fleet, system: StarSystem): boolean {
-        // Allow a small epsilon to guard against floating point drift
-        return distSq(fleet.position, system.position) < 0.0001;
+        return distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
     }
 
     private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
@@ -103,6 +115,7 @@ export class GameEngine {
     private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
         if (!this.isFleetAtSystem(fleet, system)) return false;
 
+        const contestedOrbit = isOrbitContested(system, this.state);
         const unloadResult = computeUnloadOps({
             fleet,
             system,
@@ -114,24 +127,40 @@ export class GameEngine {
 
         if (unloadResult.count === 0) return false;
 
+        let updatedArmies = unloadResult.armies;
+        let updatedLogs = unloadResult.logs;
+
+        if (contestedOrbit && unloadResult.unloadedArmyIds && unloadResult.unloadedArmyIds.length > 0) {
+            const riskOutcome = applyContestedUnloadRisk(
+                updatedArmies,
+                unloadResult.unloadedArmyIds,
+                system.name,
+                this.state.day,
+                this.rng
+            );
+            updatedArmies = riskOutcome.armies;
+            updatedLogs = [...updatedLogs, ...riskOutcome.logs];
+        }
+
         this.state = {
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
-            armies: unloadResult.armies,
-            logs: [...this.state.logs, ...unloadResult.logs]
+            armies: updatedArmies,
+            logs: [...this.state.logs, ...updatedLogs]
         };
 
         return true;
     }
 
-    dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string } {
+    dispatchPlayerCommand(command: PlayerCommand): { ok: boolean; error?: string; deployedArmies?: number } {
         const playerFactionId = this.state.playerFactionId;
 
         if (command.type === 'MOVE_FLEET') {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
             if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating and cannot receive commands.' };
+            const blockReason = this.getFleetCommandBlockReason(fleet);
+            if (blockReason) return { ok: false, error: blockReason };
 
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
@@ -151,7 +180,13 @@ export class GameEngine {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
             if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+            const blockReason = this.getFleetCommandBlockReason(fleet);
+            if (blockReason) return { ok: false, error: blockReason };
+
+            const embarkedArmies = this.state.armies.filter(army =>
+                army.containerId === fleet.id &&
+                army.state === ArmyState.EMBARKED
+            ).length;
 
             this.state = applyCommand(this.state, {
                 type: 'ORDER_INVASION_MOVE',
@@ -161,14 +196,15 @@ export class GameEngine {
 
             this.syncRngState();
             this.notify();
-            return { ok: true };
+            return { ok: true, deployedArmies: embarkedArmies };
         }
 
         if (command.type === 'ORDER_LOAD') {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
             if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+            const blockReason = this.getFleetCommandBlockReason(fleet);
+            if (blockReason) return { ok: false, error: blockReason };
 
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
@@ -202,7 +238,8 @@ export class GameEngine {
             const fleet = this.state.fleets.find(f => f.id === command.fleetId);
             if (!fleet) return { ok: false, error: 'Fleet not found' };
             if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
-            if (fleet.retreating) return { ok: false, error: 'Fleet is retreating.' };
+            const blockReason = this.getFleetCommandBlockReason(fleet);
+            if (blockReason) return { ok: false, error: blockReason };
 
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
@@ -228,12 +265,114 @@ export class GameEngine {
         }
 
         if (command.type === 'SPLIT_FLEET') {
-            // Placeholder logic
+            const fleet = this.state.fleets.find(f => f.id === command.originalFleetId);
+            if (!fleet) return { ok: false, error: 'Fleet not found' };
+            if (fleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            const blockReason = this.getFleetCommandBlockReason(fleet);
+            if (blockReason) return { ok: false, error: blockReason };
+
+            const shipIdSet = new Set(command.shipIds);
+            const splitShips = fleet.ships.filter(ship => shipIdSet.has(ship.id));
+
+            if (splitShips.length === 0) return { ok: false, error: 'No ships selected' };
+            if (splitShips.length !== shipIdSet.size) return { ok: false, error: 'Some ships not found in fleet' };
+            if (splitShips.length === fleet.ships.length) return { ok: false, error: 'Cannot split entire fleet' };
+
+            const remainingShips = fleet.ships.filter(ship => !shipIdSet.has(ship.id));
+
+            const newFleet: Fleet = withUpdatedFleetDerived({
+                ...fleet,
+                id: this.rng.id('fleet'),
+                ships: splitShips,
+                position: clone(fleet.position),
+                targetPosition: fleet.targetPosition ? clone(fleet.targetPosition) : null,
+                invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+                loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+                unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
+            });
+
+            const updatedOriginalFleet = withUpdatedFleetDerived({
+                ...fleet,
+                ships: remainingShips
+            });
+
+            const updatedArmies = this.state.armies.map(army => {
+                if (army.containerId !== fleet.id) return army;
+                const carriedByMovedShip = splitShips.some(ship => ship.carriedArmyId === army.id);
+                if (!carriedByMovedShip) return army;
+                return { ...army, containerId: newFleet.id };
+            });
+
+            const splitLog = {
+                id: this.rng.id('log'),
+                day: this.state.day,
+                text: `Fleet ${fleet.id} split into ${updatedOriginalFleet.id} and ${newFleet.id}. ${newFleet.id} received ${splitShips.length} ships.`,
+                type: 'info' as const
+            };
+
+            this.state = {
+                ...this.state,
+                fleets: this.state.fleets
+                    .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
+                    .concat(newFleet),
+                armies: updatedArmies,
+                logs: [...this.state.logs, splitLog],
+                selectedFleetId: newFleet.id
+            };
+
+            this.syncRngState();
+            this.notify();
             return { ok: true };
         }
 
         if (command.type === 'MERGE_FLEETS') {
-            // Placeholder logic
+            const sourceFleet = this.state.fleets.find(f => f.id === command.sourceFleetId);
+            const targetFleet = this.state.fleets.find(f => f.id === command.targetFleetId);
+
+            if (!sourceFleet || !targetFleet) return { ok: false, error: 'Fleet not found' };
+            if (sourceFleet.id === targetFleet.id) return { ok: false, error: 'Cannot merge a fleet into itself' };
+            if (sourceFleet.factionId !== playerFactionId) return { ok: false, error: 'Not your fleet' };
+            if (targetFleet.factionId !== playerFactionId) return { ok: false, error: 'Target fleet not controlled by player' };
+            if (sourceFleet.factionId !== targetFleet.factionId) return { ok: false, error: 'Fleets belong to different factions' };
+            const sourceBlockReason = this.getFleetCommandBlockReason(sourceFleet);
+            if (sourceBlockReason) return { ok: false, error: sourceBlockReason };
+            const targetBlockReason = this.getFleetCommandBlockReason(targetFleet);
+            if (targetBlockReason) return { ok: false, error: targetBlockReason };
+            if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT)
+                return { ok: false, error: 'Fleets must be in orbit to merge' };
+
+            if (distSq(sourceFleet.position, targetFleet.position) > ORBIT_PROXIMITY_RANGE_SQ)
+                return { ok: false, error: 'Fleets are too far apart to merge' };
+
+            const mergedTarget = withUpdatedFleetDerived({
+                ...targetFleet,
+                ships: [...targetFleet.ships, ...sourceFleet.ships]
+            });
+
+            const updatedArmies = this.state.armies.map(army => {
+                if (army.containerId !== sourceFleet.id) return army;
+                return { ...army, containerId: targetFleet.id };
+            });
+
+            const mergeLog = {
+                id: this.rng.id('log'),
+                day: this.state.day,
+                text: `Fleet ${sourceFleet.id} merged into ${targetFleet.id}, transferring ${sourceFleet.ships.length} ships.`,
+                type: 'info' as const
+            };
+
+            this.state = {
+                ...this.state,
+                fleets: this.state.fleets
+                    .filter(f => f.id !== sourceFleet.id)
+                    .map(f => (f.id === targetFleet.id ? mergedTarget : f)),
+                armies: updatedArmies,
+                logs: [...this.state.logs, mergeLog],
+                selectedFleetId: mergedTarget.id
+            };
+
+            this.syncRngState();
+            this.notify();
             return { ok: true };
         }
 

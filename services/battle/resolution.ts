@@ -10,6 +10,7 @@ import {
   INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
+import { devWarn } from '../../tools/devLogger';
 
 const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
@@ -23,38 +24,56 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
   }
   const stats = SHIP_STATS[ship.type];
   if (!stats) {
-       console.warn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
-       return {
-            shipId: ship.id,
-            fleetId,
-            faction,
-            type: ship.type,
-            currentHp: ship.hp,
-            maxHp: 100,
-            missilesLeft: 0,
-            torpedoesLeft: 0,
-            fireControlLock: 0,
-            maneuverBudget: 0.5,
-            targetId: null,
-            evasion: 0.1,
-            pdStrength: 0
-       }
+       devWarn(`[Battle] Unknown ship type '${ship.type}' for ship ${ship.id}. Using fallback stats.`);
   }
+
+  const fallbackMaxHp = stats?.maxHp ?? 100;
+  const maxHp = Number.isFinite(ship.maxHp) && ship.maxHp > 0 ? ship.maxHp : fallbackMaxHp;
+  const clampedHp = Number.isFinite(ship.hp)
+    ? Math.min(Math.max(ship.hp, 0), maxHp)
+    : maxHp;
+
+  const normalizeStock = (value: number | undefined, fallback: number) => (
+    Number.isFinite(value) && (value as number) >= 0 ? value as number : fallback
+  );
+
+  const offensiveMissilesLeft = normalizeStock(
+    ship.consumables?.offensiveMissiles ?? ship.offensiveMissilesLeft,
+    stats?.offensiveMissileStock ?? 0
+  );
+  const torpedoesLeft = normalizeStock(
+    ship.consumables?.torpedoes ?? ship.torpedoesLeft,
+    stats?.torpedoStock ?? 0
+  );
+  const interceptorsLeft = normalizeStock(
+    ship.consumables?.interceptors ?? ship.interceptorsLeft,
+    stats?.interceptorStock ?? 0
+  );
+  const evasion = stats?.evasion ?? 0.1;
+  const pdStrength = stats?.pdStrength ?? 0;
+  const damage = stats?.damage ?? 10;
+  const missileDamage = stats?.missileDamage ?? 0;
+  const torpedoDamage = stats?.torpedoDamage ?? 0;
 
   return {
     shipId: ship.id,
     fleetId,
     faction,
     type: ship.type,
-    currentHp: ship.hp,
-    maxHp: stats.maxHp,
-    missilesLeft: stats.missileStock,
-    torpedoesLeft: stats.torpedoStock,
+    currentHp: clampedHp,
+    maxHp,
+    offensiveMissilesLeft,
+    torpedoesLeft,
+    interceptorsLeft,
     fireControlLock: 0,
-    maneuverBudget: 0.5, 
+    maneuverBudget: 0.5,
     targetId: null,
-    evasion: stats.evasion,
-    pdStrength: stats.pdStrength
+    evasion,
+    pdStrength,
+    damage,
+    missileDamage,
+    torpedoDamage,
+    killHistory: [...(ship.killHistory ?? [])]
   };
 };
 
@@ -117,7 +136,7 @@ export const resolveBattle = (
 
   // Safety guard: if no valid ships, return early with a draw
   if (battleShips.length === 0) {
-    console.warn(`[Battle] No valid ships in battle ${battle.id}. Resolving as draw.`);
+    devWarn(`[Battle] No valid ships in battle ${battle.id}. Resolving as draw.`);
     return {
       updatedBattle: {
         ...battle,
@@ -139,19 +158,36 @@ export const resolveBattle = (
   const projectiles: Projectile[] = [];
   const logs: string[] = [];
   let roundsPlayed = 0;
-  
+
   // Stats
   let totalMissilesIntercepted = 0;
   let totalProjectilesDestroyedByPd = 0;
 
+  const recordKill = (attackerId: string | undefined, target: BattleShipState | undefined, method: string) => {
+    if (!attackerId || !target) return;
+
+    const attacker = shipMap.get(attackerId);
+    if (!attacker) return;
+
+    attacker.killHistory.push({
+      id: rng.id('kill'),
+      day: state.day,
+      turn,
+      targetId: target.shipId,
+      targetType: target.type,
+      targetFactionId: target.faction
+    });
+
+    logs.push(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
+  };
+
   // 3. ROUND LOOP
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     roundsPlayed = round;
-    
+
     // Check for combat viability at start of round
-    const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-    const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-    if (blueAlive.length === 0 || redAlive.length === 0) break;
+    const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+    if (aliveFactions.size <= 1) break;
 
     logs.push(`--- ROUND ${round} ---`);
     
@@ -163,12 +199,12 @@ export const resolveBattle = (
 
     // Identify active participants (Array iteration is fine here as we need to process all)
     const activeShips = battleShips.filter(s => s.currentHp > 0);
-    const blueShips = activeShips.filter(s => s.faction === 'blue');
-    const redShips = activeShips.filter(s => s.faction === 'red');
 
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
-      const enemies = ship.faction === 'blue' ? redShips : blueShips;
+      const enemies = battleShips.filter(
+        s => s.currentHp > 0 && s.faction !== ship.faction
+      );
       ship.targetId = selectTarget(ship, enemies, rng.next());
     }
 
@@ -185,39 +221,48 @@ export const resolveBattle = (
     for (const ship of activeShips) {
       if (!ship.targetId) continue;
 
-      if (ship.torpedoesLeft > 0) {
-        const count = Math.min(ship.torpedoesLeft, MAX_LAUNCH_PER_ROUND);
-        for (let k = 0; k < count; k++) {
-          projectiles.push({
-            id: rng.id('torp'),
-            type: 'torpedo',
-            sourceId: ship.shipId,
-            sourceFaction: ship.faction,
-            targetId: ship.targetId,
-            eta: ETA_TORPEDO,
-            damage: SHIP_STATS[ship.type].torpedoDamage,
-            hp: TORPEDO_HP
-          });
+      const torpedoCount = Math.min(ship.torpedoesLeft, MAX_LAUNCH_PER_ROUND);
+      const remainingCapacity = Math.max(0, MAX_LAUNCH_PER_ROUND - torpedoCount);
+      const missileCount = Math.min(ship.offensiveMissilesLeft, remainingCapacity);
+
+      for (let k = 0; k < torpedoCount; k++) {
+        projectiles.push({
+          id: rng.id('torp'),
+          type: 'torpedo',
+          sourceId: ship.shipId,
+          sourceFaction: ship.faction,
+          targetId: ship.targetId,
+          eta: ETA_TORPEDO,
+          damage: ship.torpedoDamage,
+          hp: TORPEDO_HP
+        });
+      }
+
+      for (let k = 0; k < missileCount; k++) {
+        projectiles.push({
+          id: rng.id('msl'),
+          type: 'missile',
+          sourceId: ship.shipId,
+          sourceFaction: ship.faction,
+          targetId: ship.targetId,
+          eta: ETA_MISSILE,
+          damage: ship.missileDamage,
+          hp: MISSILE_HP
+        });
+      }
+
+      ship.torpedoesLeft -= torpedoCount;
+      ship.offensiveMissilesLeft -= missileCount;
+
+      if (torpedoCount > 0 || missileCount > 0) {
+        const firedParts = [] as string[];
+        if (torpedoCount > 0) {
+          firedParts.push(`${torpedoCount} torpedoes [ETA:${ETA_TORPEDO}]`);
         }
-        ship.torpedoesLeft -= count;
-        if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} torpedoes [ETA:${ETA_TORPEDO}].`);
-      } 
-      else if (ship.missilesLeft > 0) {
-        const count = Math.min(ship.missilesLeft, MAX_LAUNCH_PER_ROUND);
-        for (let k = 0; k < count; k++) {
-          projectiles.push({
-            id: rng.id('msl'),
-            type: 'missile',
-            sourceId: ship.shipId,
-            sourceFaction: ship.faction,
-            targetId: ship.targetId,
-            eta: ETA_MISSILE,
-            damage: SHIP_STATS[ship.type].missileDamage,
-            hp: MISSILE_HP
-          });
+        if (missileCount > 0) {
+          firedParts.push(`${missileCount} missiles [ETA:${ETA_MISSILE}]`);
         }
-        ship.missilesLeft -= count;
-        if (count > 0) logs.push(`${short(ship.shipId)} (${ship.type}) fired ${count} missiles [ETA:${ETA_MISSILE}].`);
+        logs.push(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
       }
     }
 
@@ -241,16 +286,16 @@ export const resolveBattle = (
         if (!defender || defender.currentHp <= 0) continue;
 
         const incoming = interceptionThreats.get(targetId)!;
-        
+
         // Try to intercept each incoming missile
         for (const p of incoming) {
             if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
 
-            if (defender.missilesLeft > 0 && rng.next() > 0.5) {
-                defender.missilesLeft--;
+            if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
+                defender.interceptorsLeft--;
                 if (rng.next() < INTERCEPTION_BASE_CHANCE) {
-                    p.hp = 0; 
-                    logs.push(`>> ${short(defender.shipId)} intercepted incoming ${p.type}.`);
+                    p.hp = 0;
+                    logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
                     totalMissilesIntercepted++;
                 }
             }
@@ -312,8 +357,13 @@ export const resolveBattle = (
             if (p.hp > 0) {
                 const target = shipMap.get(p.targetId);
                 if (target && target.currentHp > 0) {
+                    const previousHp = target.currentHp;
                     target.currentHp -= p.damage;
                     logs.push(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
+
+                    if (previousHp > 0 && target.currentHp <= 0) {
+                      recordKill(p.sourceId, target, p.type);
+                    }
                 }
             }
             // Remove from simulation (Hit or Killed by PD)
@@ -330,24 +380,20 @@ export const resolveBattle = (
 
         const hitChance = BASE_ACCURACY * Math.max(0.1, attacker.fireControlLock) * (1 - target.evasion);
         if (rng.next() < hitChance) {
-            const dmg = SHIP_STATS[attacker.type].damage;
+            const dmg = attacker.damage;
+            const previousHp = target.currentHp;
             target.currentHp -= dmg;
             logs.push(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
+
+            if (previousHp > 0 && target.currentHp <= 0) {
+              recordKill(attacker.shipId, target, 'kinetic');
+            }
         }
     }
   }
 
   // 4. FINALIZE & APPLY RESULTS
   
-  const blueAlive = battleShips.filter(s => s.faction === 'blue' && s.currentHp > 0);
-  const redAlive = battleShips.filter(s => s.faction === 'red' && s.currentHp > 0);
-  
-  const winnerFactionId = blueAlive.length > 0 && redAlive.length === 0 ? 'blue' 
-               : redAlive.length > 0 && blueAlive.length === 0 ? 'red' 
-               : 'draw';
-
-  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
-
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
 
@@ -357,9 +403,19 @@ export const resolveBattle = (
         // Optimized O(1) Lookup
         const battleState = shipMap.get(oldShip.id);
         if (battleState && battleState.currentHp > 0) {
+            const consumables = {
+              offensiveMissiles: battleState.offensiveMissilesLeft,
+              torpedoes: battleState.torpedoesLeft,
+              interceptors: battleState.interceptorsLeft
+            };
             newShips.push({
                 ...oldShip,
-                hp: battleState.currentHp
+                hp: battleState.currentHp,
+                consumables,
+                offensiveMissilesLeft: battleState.offensiveMissilesLeft,
+                torpedoesLeft: battleState.torpedoesLeft,
+                interceptorsLeft: battleState.interceptorsLeft,
+                killHistory: battleState.killHistory
             });
             survivorShipIds.push(oldShip.id); // Collect survivor ID
         }
@@ -421,16 +477,21 @@ export const resolveBattle = (
 
   logs.push(...attritionLogs);
 
-  const shipsLost: Record<FactionId, number> = { 'blue': 0, 'red': 0 };
-  battleShips.forEach(s => {
-      if (s.currentHp <= 0) shipsLost[s.faction]++;
-  });
+  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+  const winnerFactionId: FactionId | 'draw' = aliveFactions.size === 1
+    ? (Array.from(aliveFactions)[0] as FactionId)
+    : 'draw';
 
-  // Ensure winnerFactionId is a valid type (FactionId | 'draw' | undefined)
-  const validWinnerFactionId: FactionId | 'draw' | undefined = 
-      winnerFactionId === 'blue' || winnerFactionId === 'red' || winnerFactionId === 'draw' 
-          ? winnerFactionId 
-          : undefined;
+  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
+
+  const shipsLost: Record<FactionId, number> = {};
+  battleShips.forEach(s => {
+      if (s.currentHp <= 0) {
+          shipsLost[s.faction] = (shipsLost[s.faction] ?? 0) + 1;
+      } else {
+          shipsLost[s.faction] = shipsLost[s.faction] ?? 0;
+      }
+  });
 
   const updatedBattle: Battle = {
       ...battle,
@@ -438,7 +499,8 @@ export const resolveBattle = (
       status: 'resolved',
       initialShips: initialShips,
       logs: [...battle.logs, ...logs],
-      winnerFactionId: validWinnerFactionId,
+      // Preserve the computed winner, even for non-player factions
+      winnerFactionId,
       roundsPlayed,
       shipsLost,
       survivorShipIds, // Store survivor list

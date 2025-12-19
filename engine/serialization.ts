@@ -1,6 +1,8 @@
 
-import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId } from '../types';
+import { GameState, Fleet, StarSystem, LaserShot, Battle, AIState, EnemySighting, Army, GameObjectives, ShipType, GameplayRules, FactionState, FactionId, ShipConsumables, ShipKillRecord } from '../types';
 import { Vec3, vec3 } from './math/vec3';
+import { getAiFactionIds, getLegacyAiFactionId } from './ai';
+import { computeFleetRadius } from './fleetDerived';
 import {
   SAVE_VERSION,
   SaveFile,
@@ -14,11 +16,64 @@ import {
   EnemySightingDTO,
   ArmyDTO
 } from './saveFormat';
+import { COLORS, SHIP_STATS } from '../data/static';
 
 // --- HELPERS ---
 
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
-const deserializeVector3 = (v: Vector3DTO): Vec3 => vec3(v.x, v.y, v.z);
+const deserializeVector3 = (v: Vector3DTO | undefined, context = 'vector'): Vec3 => {
+  if (!v || typeof v !== 'object') {
+    throw new Error(`Invalid ${context}: expected an object with numeric x, y, z components.`);
+  }
+
+  const components: Array<keyof Vector3DTO> = ['x', 'y', 'z'];
+  components.forEach(component => {
+    const value = (v as any)[component];
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid ${context}: '${component}' must be a finite number (received ${value}).`);
+    }
+  });
+
+  return vec3(v.x, v.y, v.z);
+};
+
+const normalizeConsumableValue = (value: unknown, fallback: number) => (
+  Number.isFinite(value) && (value as number) >= 0 ? (value as number) : fallback
+);
+
+const extractConsumables = (ship: any, type: ShipType): ShipConsumables => {
+  const stats = SHIP_STATS[type];
+
+  return {
+    offensiveMissiles: normalizeConsumableValue(
+      ship?.consumables?.offensiveMissiles ?? ship?.offensiveMissilesLeft,
+      stats?.offensiveMissileStock ?? 0
+    ),
+    torpedoes: normalizeConsumableValue(
+      ship?.consumables?.torpedoes ?? ship?.torpedoesLeft,
+      stats?.torpedoStock ?? 0
+    ),
+    interceptors: normalizeConsumableValue(
+      ship?.consumables?.interceptors ?? ship?.interceptorsLeft,
+      stats?.interceptorStock ?? 0
+    )
+  };
+};
+
+const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
+  if (!Array.isArray(entries)) return [];
+
+  return entries
+    .map((entry, index) => ({
+      id: typeof entry?.id === 'string' ? entry.id : `kill-${index}`,
+      day: Number.isFinite(entry?.day) ? entry.day : 0,
+      turn: Number.isFinite(entry?.turn) ? entry.turn : (Number.isFinite(entry?.day) ? entry.day : 0),
+      targetId: typeof entry?.targetId === 'string' ? entry.targetId : 'unknown',
+      targetType: entry?.targetType ?? ShipType.FRIGATE,
+      targetFactionId: entry?.targetFactionId ?? 'unknown'
+    }))
+    .filter((entry): entry is ShipKillRecord => Boolean(entry.targetId));
+};
 
 const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   if (!aiState) return undefined;
@@ -41,15 +96,29 @@ const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   };
 };
 
-const deserializeAiState = (aiStateDto?: AIStateDTO): AIState | undefined => {
+const deserializeAiState = (
+  aiStateDto?: AIStateDTO,
+  validFactionIds?: Set<FactionId>
+): AIState | undefined => {
   if (!aiStateDto) return undefined;
 
   const sightings: Record<string, EnemySighting> = {};
   Object.entries(aiStateDto.sightings || {}).forEach(([key, s]: [string, any]) => {
+    const factionId: FactionId | undefined = s.factionId;
+
+    if (!factionId) {
+      return; // Drop malformed sightings lacking faction attribution
+    }
+
+    if (validFactionIds && !validFactionIds.has(factionId)) {
+      throw new Error(`AI sighting references unknown faction '${factionId}'.`);
+    }
+
     sightings[key] = {
       ...s,
+      factionId,
       lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
-      position: deserializeVector3(s.position)
+      position: deserializeVector3(s.position, `AI sighting '${key}' position`)
     };
   });
 
@@ -71,7 +140,13 @@ const DEFAULT_FACTIONS: FactionState[] = [
 ];
 
 export const serializeGameState = (state: GameState): string => {
-  const aiStateDto = serializeAiState(state.aiState);
+  const factionColorById = new Map(state.factions.map(faction => [faction.id, faction.color]));
+
+  const legacyAiFactionId = getLegacyAiFactionId(state.factions);
+  const legacyAiState = legacyAiFactionId
+    ? state.aiStates?.[legacyAiFactionId] ?? state.aiState
+    : state.aiState;
+  const aiStateDto = serializeAiState(legacyAiState);
   let aiStatesDto: Record<string, AIStateDTO> | undefined;
   if (state.aiStates) {
     aiStatesDto = {};
@@ -97,6 +172,7 @@ export const serializeGameState = (state: GameState): string => {
     day: state.day,
     systems: state.systems.map(s => ({
       ...s,
+      color: s.color || factionColorById.get(s.ownerFactionId ?? '') || '#ffffff',
       ownerFactionId: s.ownerFactionId,
       position: serializeVector3(s.position)
     })),
@@ -105,12 +181,21 @@ export const serializeGameState = (state: GameState): string => {
       factionId: f.factionId,
       position: serializeVector3(f.position),
       targetPosition: f.targetPosition ? serializeVector3(f.targetPosition) : null,
+      retreating: f.retreating ?? false,
+      invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+      loadTargetSystemId: f.loadTargetSystemId ?? null,
+      unloadTargetSystemId: f.unloadTargetSystemId ?? null,
       ships: f.ships.map(s => ({
           id: s.id,
           type: s.type,
           hp: s.hp,
           maxHp: s.maxHp,
-          carriedArmyId: s.carriedArmyId || null
+          carriedArmyId: s.carriedArmyId || null,
+          consumables: extractConsumables(s, s.type),
+          offensiveMissilesLeft: s.offensiveMissilesLeft ?? s.consumables?.offensiveMissiles,
+          torpedoesLeft: s.torpedoesLeft ?? s.consumables?.torpedoes,
+          interceptorsLeft: s.interceptorsLeft ?? s.consumables?.interceptors,
+          killHistory: sanitizeKillHistory(s.killHistory)
       }))
     })),
     armies: state.armies.map(a => ({
@@ -166,43 +251,99 @@ export const deserializeGameState = (json: string): GameState => {
   const isLegacy = !dto.playerFactionId || !dto.factions;
   
   const factions: FactionState[] = dto.factions || DEFAULT_FACTIONS;
-  const playerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+  const validFactionIds = new Set(factions.map(f => f.id));
+  const rawPlayerFactionId: string = dto.playerFactionId || 'blue'; // Default to Blue for legacy saves
+
+  const playerFactionId = validFactionIds.has(rawPlayerFactionId)
+    ? rawPlayerFactionId
+    : factions[0]?.id;
+
+  if (!playerFactionId) {
+    throw new Error("Unable to determine player faction: no factions provided in save file.");
+  }
 
   try {
     // Systems
-    const systems: StarSystem[] = dto.systems.map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      position: deserializeVector3(s.position),
-      color: s.color,
-      size: s.size,
-      resourceType: s.resourceType,
-      isHomeworld: s.isHomeworld ?? false,
-      // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
-      ownerFactionId: s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null)
-    }));
+    const systemsDto = dto.systems === undefined ? [] : dto.systems;
+    if (!Array.isArray(systemsDto)) {
+      throw new Error("Field 'systems' must be an array.");
+    }
+
+    const systems: StarSystem[] = systemsDto.map((s: any) => {
+      const ownerFactionId = s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null);
+      const ownerColor = ownerFactionId
+        ? factions.find(faction => faction.id === ownerFactionId)?.color
+        : undefined;
+      const color = s.color || ownerColor || COLORS.star;
+
+      if (!s.color) {
+        // Preserve serialization contract by normalizing falsy colors
+        // while keeping legacy saves functional.
+        console.warn(`System '${s.id ?? 'unknown'}' had an invalid color; applying fallback.`);
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        position: deserializeVector3(s.position, `system '${s.id ?? 'unknown'}' position`),
+        color,
+        size: s.size,
+        resourceType: s.resourceType,
+        isHomeworld: s.isHomeworld ?? false,
+        // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
+        ownerFactionId
+      };
+    });
 
     // Fleets
-    const fleets: Fleet[] = dto.fleets.map((f: any) => ({
-      id: f.id,
-      // Map Legacy 'faction' to 'factionId'
-      factionId: f.factionId || f.faction, 
-      position: deserializeVector3(f.position),
-      state: f.state,
-      targetSystemId: f.targetSystemId,
-      targetPosition: f.targetPosition ? deserializeVector3(f.targetPosition) : null,
-      radius: f.radius,
-      stateStartTurn: f.stateStartTurn ?? 0,
-      retreating: f.retreating,
-      invasionTargetSystemId: f.invasionTargetSystemId,
-      ships: f.ships.map((s: any) => ({
-          id: s.id,
-          type: s.type,
-          hp: s.hp,
-          maxHp: s.maxHp,
-          carriedArmyId: s.carriedArmyId ?? null
-      }))
-    }));
+    const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];
+    if (dto.fleets !== undefined && !Array.isArray(dto.fleets)) {
+      throw new Error("Field 'fleets' must be an array.");
+    }
+
+    const fleets: Fleet[] = fleetsDto.map((f: any) => {
+      const ships = f.ships || [];
+      const radius = Number.isFinite(f.radius) ? f.radius : computeFleetRadius(ships.length);
+
+      return {
+        id: f.id,
+        // Map Legacy 'faction' to 'factionId'
+        factionId: f.factionId || f.faction,
+        position: deserializeVector3(f.position, `fleet '${f.id ?? 'unknown'}' position`),
+        state: f.state,
+        targetSystemId: f.targetSystemId,
+        targetPosition: f.targetPosition
+          ? deserializeVector3(f.targetPosition, `fleet '${f.id ?? 'unknown'}' targetPosition`)
+          : null,
+        radius,
+        stateStartTurn: f.stateStartTurn ?? 0,
+        retreating: f.retreating ?? false,
+        invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+        loadTargetSystemId: f.loadTargetSystemId ?? null,
+        unloadTargetSystemId: f.unloadTargetSystemId ?? null,
+        ships: ships.map((s: any) => {
+            const fallbackMaxHp = SHIP_STATS[s.type]?.maxHp ?? 100;
+            const maxHp = Number.isFinite(s.maxHp) ? s.maxHp : fallbackMaxHp;
+            const hp = Number.isFinite(s.hp) ? Math.min(Math.max(s.hp, 0), maxHp) : maxHp;
+
+            const consumables = extractConsumables(s, s.type);
+            const killHistory = sanitizeKillHistory(s.killHistory);
+
+            return {
+              id: s.id,
+              type: s.type,
+              hp,
+              maxHp,
+              carriedArmyId: s.carriedArmyId ?? null,
+              consumables,
+              offensiveMissilesLeft: s.offensiveMissilesLeft ?? consumables.offensiveMissiles,
+              torpedoesLeft: s.torpedoesLeft ?? consumables.torpedoes,
+              interceptorsLeft: s.interceptorsLeft ?? consumables.interceptors,
+              killHistory
+            };
+        })
+      };
+    });
 
     // Armies
     const armies: Army[] = (dto.armies || []).map((a: any) => ({
@@ -219,8 +360,8 @@ export const deserializeGameState = (json: string): GameState => {
       id: l.id,
       color: l.color,
       life: l.life,
-      start: deserializeVector3(l.start),
-      end: deserializeVector3(l.end)
+      start: deserializeVector3(l.start, `laser '${l.id ?? 'unknown'}' start`),
+      end: deserializeVector3(l.end, `laser '${l.id ?? 'unknown'}' end`)
     }));
 
     // Battles
@@ -250,7 +391,7 @@ export const deserializeGameState = (json: string): GameState => {
     const aiStatesDto = dto.aiStates as Record<string, AIStateDTO> | undefined;
     const aiStates: Record<FactionId, AIState> | undefined = aiStatesDto
       ? Object.entries(aiStatesDto).reduce<Record<FactionId, AIState>>((acc, [factionId, aiStateDto]) => {
-          const parsed = deserializeAiState(aiStateDto);
+          const parsed = deserializeAiState(aiStateDto, validFactionIds);
           if (parsed) {
             acc[factionId] = parsed;
           }
@@ -258,26 +399,46 @@ export const deserializeGameState = (json: string): GameState => {
         }, {})
       : undefined;
 
-    const legacyAiState = deserializeAiState(dto.aiState);
-    const DEFAULT_AI_FACTION_ID: FactionId = 'red';
+    const legacyAiState = deserializeAiState(dto.aiState, validFactionIds);
+    const aiFactionIds = getAiFactionIds(factions);
+    const legacyAiFactionId = getLegacyAiFactionId(factions);
 
     const migratedAiStates = aiStates && Object.keys(aiStates).length > 0
       ? aiStates
-      : legacyAiState
-        ? { [DEFAULT_AI_FACTION_ID]: legacyAiState }
+      : legacyAiState && legacyAiFactionId
+        ? { [legacyAiFactionId]: legacyAiState }
         : undefined;
 
-    const primaryAiState = migratedAiStates?.[DEFAULT_AI_FACTION_ID] || legacyAiState;
+    const primaryAiOwnerId = legacyAiFactionId
+      ?? aiFactionIds[0]
+      ?? (migratedAiStates ? Object.keys(migratedAiStates)[0] : undefined);
+    const primaryAiState = primaryAiOwnerId
+      ? migratedAiStates?.[primaryAiOwnerId] || legacyAiState
+      : legacyAiState;
+
+    const normalizedSeed = Number(dto.seed);
+    if (!Number.isFinite(normalizedSeed)) {
+      throw new Error("Field 'seed' must be a finite number.");
+    }
+
+    const normalizedRngStateSource = dto.rngState ?? dto.seed;
+    const normalizedRngState = Number(normalizedRngStateSource);
+    if (!Number.isFinite(normalizedRngState)) {
+      throw new Error("Field 'rngState' must be a finite number or derive from a valid 'seed'.");
+    }
+
+    const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
+    const day = Number.isFinite(dto.day) ? dto.day : 0;
 
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
       playerFactionId,
       factions,
-      seed: dto.seed,
-      rngState: dto.rngState ?? dto.seed,
-      startYear: dto.startYear,
-      day: dto.day,
+      seed: normalizedSeed,
+      rngState: normalizedRngState,
+      startYear,
+      day,
       systems,
       fleets,
       armies,

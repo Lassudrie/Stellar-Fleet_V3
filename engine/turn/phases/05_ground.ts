@@ -3,7 +3,7 @@ import { GameState, FactionId, AIState, Army } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
-import { AI_HOLD_TURNS, createEmptyAIState } from '../../ai';
+import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextSystems = [...state.systems];
@@ -11,10 +11,11 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
 
     const aiFactionIds = new Set(state.factions.filter(faction => faction.aiProfile).map(faction => faction.id));
+    const legacyAiFactionId = getLegacyAiFactionId(state.factions);
 
     aiFactionIds.forEach(factionId => {
         if (!nextAiStates[factionId]) {
-            const legacyState = factionId === 'red' ? state.aiState : undefined;
+            const legacyState = factionId === legacyAiFactionId ? state.aiState : undefined;
             nextAiStates[factionId] = legacyState ?? createEmptyAIState();
         }
     });

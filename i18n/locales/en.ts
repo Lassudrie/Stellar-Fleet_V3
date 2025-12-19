@@ -50,8 +50,8 @@ export const en = {
   // UI SideMenu
   'sidemenu.command': 'Command',
   'sidemenu.com_logs': 'Com Logs',
-  'sidemenu.registry': 'Fleet Registry',
-  'sidemenu.territory': 'Territory',
+  'sidemenu.registry': 'Fleet',
+  'sidemenu.territory': 'System',
   'sidemenu.settings': 'Settings',
   'sidemenu.recentEvents': 'Recent Events: {{count}}',
   'sidemenu.activeUnits': 'Active Units: {{count}}',
@@ -81,6 +81,7 @@ export const en = {
   'ctx.unload': 'Unload armies',
   'ctx.losses': 'Losses',
   'ctx.morale': 'Morale',
+  'ctx.hostileCoalition': 'Hostile coalition',
   'ctx.cancel': 'Cancel',
 
   // Fleet Picker
@@ -138,8 +139,9 @@ export const en = {
   'battle.draw': 'DRAW',
   'battle.unknown': 'RESULT UNKNOWN',
   'battle.close': 'Close Report',
-  'battle.blueForces': 'Blue Forces',
-  'battle.redForces': 'Red Forces',
+  'battle.playerForces': '{{name}} Forces',
+  'battle.mainAdversary': 'Opposing {{name}}',
+  'battle.factionForces': '{{name}} Contingent',
   'battle.survivors': 'Survivors',
   'battle.lost': 'Lost',
   'battle.fleets': 'Fleets:',
@@ -155,6 +157,7 @@ export const en = {
   // Victory
   'victory.victory': 'VICTORY',
   'victory.defeat': 'DEFEAT',
+  'victory.draw': 'DRAW',
   'victory.totalTurns': 'Total Turns: {{day}}',
   'victory.replay': 'REPLAY',
 

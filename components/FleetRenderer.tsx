@@ -1,7 +1,7 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color } from 'three';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
 import { Fleet, FleetState } from '../types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
 import { Text, Billboard } from '@react-three/drei';
@@ -11,7 +11,7 @@ interface FleetMeshProps {
   fleet: Fleet;
   day: number;
   isSelected: boolean;
-  onSelect: (e: any) => void;
+  onSelect: (e: any, isDouble?: boolean) => void;
   playerFactionId: string;
   color: string;
 }
@@ -37,16 +37,24 @@ const EXTRUDE_SETTINGS = {
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
 
-const deriveHighlightColor = (baseColor: string, lightnessBoost = 0.2) => {
+const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
   try {
     const color = new Color(baseColor);
     const hsl = { h: 0, s: 0, l: 0 };
     color.getHSL(hsl);
-    const boostedLightness = Math.min(1, hsl.l + lightnessBoost);
-    color.setHSL(hsl.h, hsl.s, boostedLightness);
-    return `#${color.getHexString()}`;
+
+    const lightHighlight = new Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + lightnessDelta));
+    const darkHighlight = new Color().setHSL(hsl.h, hsl.s, Math.max(0, hsl.l - lightnessDelta));
+
+    return {
+      light: `#${lightHighlight.getHexString()}`,
+      dark: `#${darkHighlight.getHexString()}`
+    };
   } catch (error) {
-    return baseColor;
+    return {
+      light: baseColor,
+      dark: baseColor
+    };
   }
 };
 
@@ -55,6 +63,10 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
   const meshRef = useRef<Mesh>(null);
+
+  // Double interaction detection (touch)
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   
   // Flash Effect Refs
   const flashMeshRef = useRef<Mesh>(null);
@@ -63,8 +75,10 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
 
   // Constants for visual representation
-  const highlightColor = useMemo(() => deriveHighlightColor(color), [color]);
+  const highlightPalette = useMemo(() => deriveHighlightPalette(color), [color]);
+  const emissiveColor = isSelected ? highlightPalette.light : highlightPalette.dark;
   const isOrbiting = fleet.state === FleetState.ORBIT;
+  const tiltQuaternion = useMemo(() => new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0)), []);
 
   // Generate a stable random start angle based on fleet ID
   const angleOffset = useMemo(() => {
@@ -148,7 +162,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         const lookAtZ = fleet.position.z + Math.sin(futureTime) * ORBIT_RADIUS;
         
         meshRef.current.lookAt(lookAtX, fleet.position.y, lookAtZ);
-        meshRef.current.rotateX(-Math.PI / 2);
+        meshRef.current.quaternion.multiply(tiltQuaternion);
 
     } else {
         // Convert Vec3 to Three.Vector3 on the fly for Lerp target
@@ -156,7 +170,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         groupRef.current.position.lerp(_vec3, 0.5);
         if (fleet.targetPosition) {
             meshRef.current.lookAt(fleet.targetPosition.x, fleet.targetPosition.y, fleet.targetPosition.z);
-            meshRef.current.rotateX(-Math.PI / 2);
+            meshRef.current.quaternion.multiply(tiltQuaternion);
         }
     }
   });
@@ -167,7 +181,25 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         <mesh 
             onClick={(e) => {
                 e.stopPropagation();
-                onSelect(e);
+                onSelect(e, false);
+            }}
+            onDoubleClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onSelect(e, true);
+            }}
+            onPointerDown={(e) => {
+                if (e.pointerType !== 'touch') return;
+
+                const now = performance.now();
+                if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                    lastTouchRef.current = 0;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onSelect(e, true);
+                } else {
+                    lastTouchRef.current = now;
+                }
             }}
             onPointerOver={() => document.body.style.cursor = 'pointer'}
             onPointerOut={() => document.body.style.cursor = 'auto'}
@@ -189,9 +221,9 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             scale={[0.6, 0.6, 0.6]} 
         >
             <extrudeGeometry args={[CHEVRON_SHAPE, EXTRUDE_SETTINGS]} />
-            <meshStandardMaterial 
-                color={isSelected ? highlightColor : color} 
-                emissive={isSelected ? highlightColor : color}
+            <meshStandardMaterial
+                color={color}
+                emissive={emissiveColor}
                 emissiveIntensity={isSelected ? 0.6 : 0.4}
                 roughness={0.4}
                 metalness={0.6}
@@ -202,7 +234,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         {isSelected && (
             <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]}>
                 <ringGeometry args={[1, 1.2, 32]} />
-                <meshBasicMaterial color={highlightColor} transparent opacity={0.6} />
+                <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} />
             </mesh>
         )}
 
@@ -216,7 +248,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         >
             <Text
                 fontSize={1.2}
-                color={highlightColor}
+                color={highlightPalette.light}
                 outlineWidth={0.1}
                 outlineColor="#000000"
                 fontWeight="bold"

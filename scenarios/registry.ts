@@ -1,4 +1,5 @@
 import { ScenarioTemplate } from './types';
+import { ShipType } from '../types';
 import conquestSandbox from './templates/conquest_sandbox';
 import spiralConvergence from './templates/spiral_convergence';
 
@@ -86,6 +87,8 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
         if (sum > 1.00001) throw new Error(`territoryAllocation shares sum to > 1.0 (${sum})`);
     }
 
+    const knownShipTypes = new Set<string>(Object.values(ShipType));
+
     for (const fleet of s.setup.initialFleets) {
         if (!factionIds.has(fleet.ownerFactionId)) {
             throw new Error(`Fleet definition references unknown faction ID: '${fleet.ownerFactionId}'`);
@@ -97,6 +100,15 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
         if (fleet.ships.some((t: any) => typeof t !== 'string' || t.trim() === '')) {
             throw new Error(`Fleet definition contains invalid ship type strings`);
         }
+
+        fleet.ships.forEach((t: string) => {
+            if (!knownShipTypes.has(t)) {
+                console.warn(
+                    `[ScenarioRegistry] Fleet '${fleet.ownerFactionId}' declares unknown ship type '${t}'. ` +
+                    `It will be replaced with a fallback during world generation.`
+                );
+            }
+        });
     }
 
     return s as ScenarioTemplate;

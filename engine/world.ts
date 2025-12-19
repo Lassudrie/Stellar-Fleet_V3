@@ -3,6 +3,7 @@ import { GameState, StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '.
 import { SENSOR_RANGE, SHIP_STATS } from '../data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
+import { devWarn } from '../tools/devLogger';
 
 // --- QUERIES ---
 
@@ -61,7 +62,7 @@ export const calculateFleetPower = (fleet: Fleet): number => {
     if (!ship || !ship.type || !SHIP_STATS[ship.type]) return sum;
     const s = SHIP_STATS[ship.type];
     // Heuristic: Sustainability (HP) + DPS + Burst Potential (Missiles/Torps)
-    return sum + (s.maxHp / 10) + (s.damage * 2) + (s.missileStock * 10) + (s.torpedoStock * 20);
+    return sum + (s.maxHp / 10) + (s.damage * 2) + (s.offensiveMissileStock * 10) + (s.torpedoStock * 20);
   }, 0);
 };
 
@@ -69,14 +70,50 @@ export const calculateFleetPower = (fleet: Fleet): number => {
 
 /**
  * Creates a ship using the provided RNG for ID generation.
+ * Falls back to a safe default if the requested type is not recognized.
  */
 export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
   const stats = SHIP_STATS[type];
+
+  if (!stats) {
+    const fallbackType = ShipType.FRIGATE;
+    const fallbackStats = SHIP_STATS[fallbackType];
+
+    if (!fallbackStats) {
+      throw new Error('[World] Missing fallback ship stats for frigate');
+    }
+
+    devWarn(`[World] Unknown ship type '${type}', falling back to '${fallbackType}'.`);
+
+    return {
+      id: rng.id('ship'),
+      type: fallbackType,
+      hp: fallbackStats.maxHp,
+      maxHp: fallbackStats.maxHp,
+      carriedArmyId: null,
+      consumables: {
+        offensiveMissiles: fallbackStats.offensiveMissileStock,
+        torpedoes: fallbackStats.torpedoStock,
+        interceptors: fallbackStats.interceptorStock
+      },
+      killHistory: []
+    };
+  }
+
   return {
     id: rng.id('ship'),
     type,
     hp: stats.maxHp,
     maxHp: stats.maxHp,
-    carriedArmyId: null // Default: No army loaded
+    carriedArmyId: null, // Default: No army loaded
+    consumables: {
+      offensiveMissiles: stats.offensiveMissileStock,
+      torpedoes: stats.torpedoStock,
+      interceptors: stats.interceptorStock
+    },
+    offensiveMissilesLeft: stats.offensiveMissileStock,
+    torpedoesLeft: stats.torpedoStock,
+    interceptorsLeft: stats.interceptorStock,
+    killHistory: []
   };
 };

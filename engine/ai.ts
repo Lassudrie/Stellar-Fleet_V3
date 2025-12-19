@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType } from '../types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting } from '../types';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
@@ -58,6 +58,15 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
     ...overrides.taskTargets,
   },
 });
+
+export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
+  factions
+    .filter(faction => faction.aiProfile)
+    .map(faction => faction.id)
+    .sort((a, b) => a.localeCompare(b));
+
+export const getLegacyAiFactionId = (factions: FactionState[]): FactionId | undefined =>
+  getAiFactionIds(factions)[0];
 
 const AI_PROFILE_CONFIGS: Record<AiProfile, AiConfig> = {
   aggressive: withOverrides({
@@ -151,18 +160,33 @@ const updateMemory = (
 
   const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
   const refreshedSightings = new Set<string>();
+  const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
 
   visibleEnemyFleets.forEach(fleet => {
-    const systemInRange = state.systems.find(sys => distSq(sys.position, fleet.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
-    memory.sightings[fleet.id] = {
+    let closestSystemId: string | null = null;
+    let closestDistanceSq = Infinity;
+
+    state.systems.forEach(sys => {
+      const distanceSq = distSq(sys.position, fleet.position);
+
+      if (distanceSq <= captureSq && distanceSq < closestDistanceSq) {
+        closestSystemId = sys.id;
+        closestDistanceSq = distanceSq;
+      }
+    });
+
+    const updatedSighting: EnemySighting = {
       fleetId: fleet.id,
-      systemId: systemInRange ? systemInRange.id : null,
+      factionId: fleet.factionId,
+      systemId: closestSystemId,
       position: { ...fleet.position },
       daySeen: state.day,
       estimatedPower: calculateFleetPower(fleet),
       confidence: 1.0,
       lastUpdateDay: state.day
     };
+
+    memory.sightings[fleet.id] = updatedSighting;
     refreshedSightings.add(fleet.id);
   });
 
@@ -816,7 +840,8 @@ const generateCommands = (
   commands.push({
       type: 'AI_UPDATE_STATE',
       factionId,
-      newState: memory
+      newState: memory,
+      primaryAi: factionId === state.playerFactionId
   });
 
   return commands;

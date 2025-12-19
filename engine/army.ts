@@ -1,6 +1,7 @@
 
 import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
 import { RNG } from './rng';
+import { devLog } from '../tools/devLogger';
 
 export const MIN_ARMY_CREATION_STRENGTH = 10000;
 export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
@@ -46,7 +47,7 @@ export const createArmy = (
     containerId
   };
 
-  console.log(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
+  devLog(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
   return army;
 };
 

@@ -67,6 +67,19 @@ interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null; // ID de l'armée transportée (si Transport)
+  consumables?: {
+    offensiveMissiles: number;
+    torpedoes: number;
+    interceptors: number;
+  }; // Stocks consommables courants
+  killHistory?: Array<{
+    id: string;
+    day: number;
+    turn: number;
+    targetId: string;
+    targetType: ShipType;
+    targetFactionId: string;
+  }>; // Historique des destructions confirmées par ce vaisseau
 }
 ```
 
@@ -108,10 +121,11 @@ interface ShipStats {
   speed: number;        // Modificateur de vitesse de flotte
   pdStrength: number;   // Capacité anti-missile
   evasion: number;      // 0.0 - 1.0
-  missileStock: number;
+  offensiveMissileStock: number;
   missileDamage: number;
   torpedoStock: number;
   torpedoDamage: number;
+  interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
 }
 ```

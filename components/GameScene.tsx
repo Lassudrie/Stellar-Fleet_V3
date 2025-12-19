@@ -5,7 +5,6 @@ import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { BufferGeometry, BufferAttribute } from 'three';
 import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../types';
-import { COLORS } from '../data/static';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
 import TerritoryBorders from './TerritoryBorders';
@@ -17,10 +16,15 @@ import { useMapMetrics } from './hooks/useMapMetrics';
 interface GameSceneProps {
   gameState: GameState;
   enemySightings: Record<string, EnemySighting>;
+  selectedFleetId: string | null;
   onFleetSelect: (id: string | null) => void;
+  onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
   onBackgroundClick: () => void;
 }
+
+const resolveFactionColor = (factions: GameState['factions'], id: string) =>
+  factions.find(faction => faction.id === id)?.color || '#999';
 
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
   const lineRef = useRef<any>(null);
@@ -71,21 +75,26 @@ const LaserRenderer: React.FC<{ lasers: LaserShot[] }> = React.memo(({ lasers })
 });
 
 // TrajectoryRenderer - Now uses playerFactionId check for coloring
-const TrajectoryRenderer: React.FC<{ fleets: GameState['fleets']; day: number; playerFactionId: string }> = React.memo(({ fleets, day, playerFactionId }) => {
+const TrajectoryRenderer: React.FC<{
+  fleets: GameState['fleets'];
+  factions: GameState['factions'];
+  day: number;
+  playerFactionId: string;
+}> = React.memo(({ fleets, factions, day, playerFactionId }) => {
     return (
         <group>
             {fleets.map(fleet => {
                 if (fleet.state === FleetState.MOVING && fleet.targetPosition) {
                     const isPlayer = fleet.factionId === playerFactionId;
-                    const color = isPlayer ? COLORS.blueHighlight : COLORS.redHighlight;
-                    
+                    const color = resolveFactionColor(factions, fleet.factionId);
+
                     return (
                         <SimpleLine
                             key={`traj-${fleet.id}`}
                             start={fleet.position}
                             end={fleet.targetPosition}
                             color={color}
-                            dashed={!isPlayer} 
+                            dashed={!isPlayer}
                         />
                     );
                 }
@@ -98,13 +107,29 @@ const TrajectoryRenderer: React.FC<{ fleets: GameState['fleets']; day: number; p
 const GameScene: React.FC<GameSceneProps> = ({
   gameState,
   enemySightings,
+  selectedFleetId,
   onFleetSelect,
+  onFleetInspect,
   onSystemClick,
   onBackgroundClick
 }) => {
 
   const playerHomeworld = useMemo(() => {
-    return gameState.systems.find(system => system.ownerFactionId === gameState.playerFactionId)?.position || { x: 0, y: 0, z: 0 };
+    const ownedHomeworld = gameState.systems.find(
+      (system) => system.isHomeworld && system.ownerFactionId === gameState.playerFactionId
+    );
+
+    if (ownedHomeworld) {
+      return ownedHomeworld.position;
+    }
+
+    const ownedSystem = gameState.systems.find((system) => system.ownerFactionId === gameState.playerFactionId);
+
+    if (ownedSystem) {
+      return ownedSystem.position;
+    }
+
+    return { x: 0, y: 0, z: 0 };
   }, [gameState.playerFactionId, gameState.systems]);
 
   const isScenarioReady = gameState.systems.length > 0;
@@ -132,7 +157,9 @@ const GameScene: React.FC<GameSceneProps> = ({
   const mapMetrics = useMapMetrics(gameState.systems);
 
   const ownershipSignature = useMemo(() => {
-      return gameState.systems.map(s => s.ownerFactionId ? s.ownerFactionId[0] : 'N').join('');
+      const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
+      owners.sort();
+      return owners.join('|');
   }, [gameState.systems]);
 
   const battlingSystemIds = useMemo(() => {
@@ -148,19 +175,37 @@ const GameScene: React.FC<GameSceneProps> = ({
       return new Set(gameState.fleets.map(f => f.id));
   }, [gameState.fleets]);
 
+  const lastTapRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
+  const DOUBLE_TAP_THRESHOLD_MS = 500;
+
+  const handleFleetInteraction = (fleetId: string, isDouble = false) => {
+    const now = performance.now();
+
+    if (isDouble) {
+      lastTapRef.current = { id: null, time: 0 };
+      onFleetInspect(fleetId);
+      return;
+    }
+
+    if (lastTapRef.current.id === fleetId && now - lastTapRef.current.time < DOUBLE_TAP_THRESHOLD_MS) {
+      lastTapRef.current = { id: null, time: 0 };
+      onFleetInspect(fleetId);
+      return;
+    }
+
+    lastTapRef.current = { id: fleetId, time: now };
+    onFleetSelect(fleetId);
+  };
+
   // Color Helper
-  const getFactionColor = (id: string) => gameState.factions.find(f => f.id === id)?.color || '#999';
+  const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   return (
     <div className="absolute inset-0 z-0 bg-black">
       <Canvas
         gl={{ antialias: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
-        onClick={(e) => {
-            if (e.target === e.currentTarget) {
-                onBackgroundClick();
-            }
-        }}
+        onPointerMissed={() => onBackgroundClick()}
       >
         <Suspense fallback={null}>
             <GameCamera
@@ -189,23 +234,29 @@ const GameScene: React.FC<GameSceneProps> = ({
                   playerFactionId={gameState.playerFactionId}
                 />
                 
-                <TrajectoryRenderer fleets={gameState.fleets} day={gameState.day} playerFactionId={gameState.playerFactionId} />
+                <TrajectoryRenderer
+                  fleets={gameState.fleets}
+                  factions={gameState.factions}
+                  day={gameState.day}
+                  playerFactionId={gameState.playerFactionId}
+                />
 
-                <IntelGhosts 
-                    sightings={enemySightings} 
-                    currentDay={gameState.day} 
-                    visibleFleetIds={visibleFleetIds} 
+                <IntelGhosts
+                    sightings={enemySightings}
+                    currentDay={gameState.day}
+                    visibleFleetIds={visibleFleetIds}
+                    getFactionColor={getFactionColor}
                 />
 
                 {gameState.fleets.map(fleet => (
-                    <FleetMesh 
-                        key={fleet.id} 
+                    <FleetMesh
+                        key={fleet.id}
                         fleet={fleet}
                         day={gameState.day}
-                        isSelected={gameState.selectedFleetId === fleet.id}
-                        onSelect={(e) => {
+                        isSelected={selectedFleetId === fleet.id}
+                        onSelect={(e, isDouble) => {
                             e.stopPropagation();
-                            onFleetSelect(fleet.id);
+                            handleFleetInteraction(fleet.id, isDouble);
                         }}
                         playerFactionId={gameState.playerFactionId}
                         color={getFactionColor(fleet.factionId)}
@@ -218,11 +269,6 @@ const GameScene: React.FC<GameSceneProps> = ({
             <EffectComposer enableNormalPass={false}>
                 <Bloom luminanceThreshold={0.2} mipmapBlur intensity={1.2} radius={0.4} />
             </EffectComposer>
-
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -5, 0]} onClick={(e) => { e.stopPropagation(); onBackgroundClick(); }}>
-                <planeGeometry args={[500, 500]} />
-                <meshBasicMaterial visible={false} />
-            </mesh>
         </Suspense>
       </Canvas>
     </div>

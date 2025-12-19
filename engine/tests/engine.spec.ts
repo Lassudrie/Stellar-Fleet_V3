@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import path from 'node:path';
-import { isOrbitContested, resolveGroundConflict } from '../conquest';
+import { resolveGroundConflict } from '../conquest';
 import { sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
@@ -23,10 +23,18 @@ import {
   StarSystem
 } from '../../types';
 import { Vec3 } from '../math/vec3';
+import { GameEngine } from '../GameEngine';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
+import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import ts from 'typescript';
+import { getTerritoryOwner } from '../territory';
+import { resolveBattleOutcome, FactionRegistry } from '../battle/outcome';
+import { checkVictoryConditions } from '../objectives';
+import { deserializeGameState, serializeGameState } from '../serialization';
+import { resolveFleetMovement } from '../../services/movement/movementPhase';
+import { isOrbitContested } from '../orbit';
 
 interface TestCase {
   name: string;
@@ -117,6 +125,258 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
 };
 
 const tests: TestCase[] = [
+  {
+    name: 'Battle resolution preserves generic faction winners',
+    run: () => {
+      const alpha: FactionState = { id: 'alpha', name: 'Alpha', color: '#aaaaaa', isPlayable: true };
+      const beta: FactionState = { id: 'beta', name: 'Beta', color: '#bbbbbb', isPlayable: true };
+
+      const alphaFleet = createFleet('fleet-alpha', alpha.id, { ...baseVec }, [
+        { id: 'alpha-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null },
+        { id: 'alpha-2', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const betaFleet = createFleet('fleet-beta', beta.id, { ...baseVec }, [
+        { id: 'beta-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-alpha-beta',
+        systemId: 'sys-alpha-beta',
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [alphaFleet.id, betaFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        factions: [alpha, beta],
+        systems: [createSystem(battle.systemId, null)],
+        fleets: [alphaFleet, betaFleet],
+        seed: 42
+      });
+
+      const { updatedBattle } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(updatedBattle.winnerFactionId, 'alpha', 'Winner should match computed surviving faction id');
+    }
+  },
+  {
+    name: 'ORDER_LOAD_MOVE applique le chargement après un runTurn',
+    run: () => {
+      const system = createSystem('sys-load-runturn', 'blue');
+      const transport: ShipEntity = {
+        id: 'blue-transport-runturn',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: null
+      };
+
+      const fleet = createFleet('fleet-blue-runturn', 'blue', { ...baseVec }, [transport]);
+      const army = createArmy('army-blue-runturn', 'blue', 12000, ArmyState.DEPLOYED, system.id);
+
+      const initialState = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
+      const withOrder = applyCommand(
+        initialState,
+        { type: 'ORDER_LOAD_MOVE', fleetId: fleet.id, targetSystemId: system.id },
+        new RNG(3)
+      );
+
+      const result = runTurn(withOrder, new RNG(3));
+      const updatedArmy = result.armies.find(a => a.id === army.id);
+      const updatedFleet = result.fleets.find(f => f.id === fleet.id);
+      const updatedTransport = updatedFleet?.ships.find(ship => ship.id === transport.id);
+
+      assert.strictEqual(updatedArmy?.state, ArmyState.EMBARKED, 'L’armée doit être embarquée après la phase de mouvement');
+      assert.strictEqual(
+        updatedArmy?.containerId,
+        fleet.id,
+        'Le conteneur de l’armée doit être la flotte qui a exécuté l’ordre'
+      );
+      assert.strictEqual(
+        updatedTransport?.carriedArmyId,
+        army.id,
+        'Le transport doit porter l’armée après le runTurn'
+      );
+      assert.strictEqual(
+        updatedFleet?.loadTargetSystemId,
+        null,
+        'L’ordre de chargement doit être consommé pendant le runTurn'
+      );
+    }
+  },
+  {
+    name: 'Battle resolution keeps victories for factions outside the core palette',
+    run: () => {
+      const greenFleet = createFleet('fleet-green-victory', 'green', { ...baseVec }, [
+        { id: 'green-1', type: ShipType.CRUISER, hp: 80, maxHp: 80, carriedArmyId: null }
+      ]);
+
+      const blueFleet = createFleet('fleet-blue-empty', 'blue', { ...baseVec }, []);
+
+      const battle: Battle = {
+        id: 'battle-green-win',
+        systemId: 'sys-green-win',
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [greenFleet.id, blueFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [createSystem(battle.systemId, null)],
+        fleets: [greenFleet, blueFleet],
+        seed: 7
+      });
+
+      const { updatedBattle } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(
+        updatedBattle.winnerFactionId,
+        'green',
+        'Non-blue/red factions should remain credited for their victories'
+      );
+    }
+  },
+  {
+    name: 'Territory ignores neutral systems when evaluating influence',
+    run: () => {
+      const neutralSystem = { ...createSystem('neutral', null), position: { x: 0, y: 0, z: 0 } };
+      const ownedSystem = { ...createSystem('owned', 'blue'), position: { x: 20, y: 0, z: 0 } };
+
+      const owner = getTerritoryOwner([neutralSystem, ownedSystem], { x: 1, y: 0, z: 0 });
+
+      assert.strictEqual(owner, 'blue', 'Owned systems should be considered even if neutral space is closer');
+    }
+  },
+  {
+    name: 'Battle outcome reports non-player faction victories by name',
+    run: () => {
+      const translate = (key: string, params?: Record<string, string>) => {
+        if (key === 'battle.victory') return `${params?.winner} VICTORY`;
+        if (key === 'battle.draw') return 'DRAW';
+        return 'RESULT UNKNOWN';
+      };
+
+      const registry: FactionRegistry = {
+        blue: { name: 'Alliance Navy', color: '#3b82f6' },
+        yellow: { name: 'Nomad League', color: '#facc15' }
+      };
+
+      const battle: Battle = {
+        id: 'battle-outcome-1',
+        systemId: 'sys-x',
+        turnCreated: 1,
+        status: 'resolved',
+        involvedFleetIds: [],
+        logs: [],
+        winnerFactionId: 'yellow'
+      };
+
+      const outcome = resolveBattleOutcome(battle, 'blue', registry, translate);
+
+      assert.strictEqual(outcome.status, 'defeat');
+      assert.strictEqual(outcome.label, 'Nomad League VICTORY');
+      assert.strictEqual(outcome.color, '#facc15');
+      assert.strictEqual(outcome.winnerName, 'Nomad League');
+    }
+  },
+  {
+    name: 'Max turns victory triggers on the exact turn limit',
+    run: () => {
+      const playerFleet = createFleet('fleet-blue-turncap', 'blue', baseVec, [
+        { id: 'blue-ship-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateAtTurnLimit = createBaseState({
+        day: 4,
+        fleets: [playerFleet],
+        systems: [createSystem('sys-home', 'blue')],
+        objectives: { maxTurns: 5, conditions: [{ type: 'survival' }] }
+      });
+
+      const nextState = runTurn(stateAtTurnLimit, new RNG(9));
+
+      assert.strictEqual(nextState.day, 5, 'The turn counter should advance to the limit');
+      assert.strictEqual(
+        nextState.winnerFactionId,
+        'blue',
+        'Survival objectives should resolve as soon as the max turn is reached'
+      );
+    }
+  },
+  {
+    name: 'Elimination requires destroying fleets and removing system ownership',
+    run: () => {
+      const redFleet = createFleet('fleet-red', 'red', baseVec, [
+        { id: 'red-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const stateWithSystemsAndFleet = createBaseState({
+        systems: [createSystem('sys-blue', 'blue'), createSystem('sys-red', 'red')],
+        fleets: [redFleet]
+      });
+
+      const initialWinner = checkVictoryConditions(stateWithSystemsAndFleet);
+      assert.strictEqual(initialWinner, null, 'Enemy systems should block elimination even without battles');
+
+      const stateWithoutSystem = {
+        ...stateWithSystemsAndFleet,
+        systems: stateWithSystemsAndFleet.systems.map(system =>
+          system.id === 'sys-red' ? { ...system, ownerFactionId: null } : system
+        )
+      };
+
+      const winnerWithoutSystem = checkVictoryConditions(stateWithoutSystem);
+      assert.strictEqual(winnerWithoutSystem, null, 'Enemy fleets should block elimination even after losing systems');
+
+      const stateWithoutFleet = {
+        ...stateWithoutSystem,
+        fleets: stateWithoutSystem.fleets.filter(fleet => fleet.factionId !== 'red')
+      };
+
+      const finalWinner = checkVictoryConditions(stateWithoutFleet);
+      assert.strictEqual(finalWinner, 'blue', 'Elimination should require destroying fleets and owning no systems');
+    }
+  },
+  {
+    name: 'Battle outcome handles draws without faction assumptions',
+    run: () => {
+      const translate = (key: string) => (key === 'battle.draw' ? 'DRAW' : 'RESULT UNKNOWN');
+
+      const registry: FactionRegistry = {
+        blue: { name: 'Alliance Navy', color: '#3b82f6' }
+      };
+
+      const battle: Battle = {
+        id: 'battle-outcome-2',
+        systemId: 'sys-y',
+        turnCreated: 2,
+        status: 'resolved',
+        involvedFleetIds: [],
+        logs: [],
+        winnerFactionId: 'draw'
+      };
+
+      const outcome = resolveBattleOutcome(battle, 'blue', registry, translate);
+
+      assert.strictEqual(outcome.status, 'draw');
+      assert.strictEqual(outcome.label, 'DRAW');
+      assert.strictEqual(outcome.winnerName, null);
+    }
+  },
+  {
+    name: 'Equidistant factions contest territory deterministically',
+    run: () => {
+      const blueSystem = { ...createSystem('blue-core', 'blue'), position: { x: 10, y: 0, z: 0 } };
+      const redSystem = { ...createSystem('red-core', 'red'), position: { x: -10, y: 0, z: 0 } };
+
+      const owner = getTerritoryOwner([blueSystem, redSystem], { x: 0, y: 0, z: 0 });
+
+      assert.strictEqual(owner, null, 'Equal influence from different factions should contest the territory');
+    }
+  },
   {
     name: 'Unopposed conquest is blocked by contested orbit',
     run: () => {
@@ -224,6 +484,94 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'LOAD_ARMY respecte le ciblage du vaisseau imposé',
+    run: () => {
+      const system = createSystem('sys-load-targeted', null);
+      const allowedTransport: ShipEntity = {
+        id: 'blue-transport-allowed',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      };
+      const blockedTransport: ShipEntity = {
+        id: 'blue-transport-blocked',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      };
+
+      const blueArmy = createArmy('army-blue-load', 'blue', 7000, ArmyState.DEPLOYED, system.id);
+      const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [allowedTransport, blockedTransport]);
+      const rng = new RNG(9);
+
+      const updated = applyCommand(
+        createBaseState({ systems: [system], fleets: [blueFleet], armies: [blueArmy] }),
+        { type: 'LOAD_ARMY', fleetId: blueFleet.id, shipId: allowedTransport.id, armyId: blueArmy.id, systemId: system.id },
+        rng
+      );
+
+      const loadedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.strictEqual(loadedArmy?.state, ArmyState.EMBARKED, 'Army must embark after load');
+      assert.strictEqual(loadedArmy?.containerId, blueFleet.id, 'Army container should move to the fleet');
+
+      const updatedFleet = updated.fleets.find(fleet => fleet.id === blueFleet.id);
+      const allowedShip = updatedFleet?.ships.find(ship => ship.id === allowedTransport.id);
+      const blockedShip = updatedFleet?.ships.find(ship => ship.id === blockedTransport.id);
+
+      assert.strictEqual(allowedShip?.carriedArmyId, blueArmy.id, 'Allowed transport should carry the army');
+      assert.strictEqual(blockedShip?.carriedArmyId, null, 'Blocked transport must remain empty');
+    }
+  },
+  {
+    name: 'ORDER_LOAD_MOVE charge une armée alliée à l’arrivée',
+    run: () => {
+      const system = createSystem('sys-load-move-arrival', 'blue');
+      const transport: ShipEntity = {
+        id: 'blue-transport-move-load',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: null
+      };
+
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-blue-move-load', 'blue', { ...baseVec }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        loadTargetSystemId: system.id,
+        invasionTargetSystemId: null,
+        unloadTargetSystemId: null
+      };
+
+      const groundArmy = createArmy('army-blue-ground', 'blue', 6000, ArmyState.DEPLOYED, system.id);
+      const rng = new RNG(11);
+
+      const result = resolveFleetMovement(movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
+
+      const updatedFleet = result.nextFleet;
+      const loadedShip = updatedFleet.ships.find(ship => ship.id === transport.id);
+      const loadUpdate = result.armyUpdates.find(update => update.id === groundArmy.id);
+
+      assert.strictEqual(loadedShip?.carriedArmyId, groundArmy.id, 'Le transport doit embarquer l’armée après le mouvement');
+      assert.strictEqual(
+        loadUpdate?.changes.state,
+        ArmyState.EMBARKED,
+        'L’armée doit passer à l’état EMBARKED lors de la séquence de mouvement'
+      );
+      assert.strictEqual(
+        loadUpdate?.changes.containerId,
+        movingFleet.id,
+        'L’armée doit être rattachée à la flotte ayant exécuté l’ordre de chargement'
+      );
+      assert.strictEqual(updatedFleet.loadTargetSystemId, null, 'L’ordre de chargement doit être consommé après l’arrivée');
+      assert.strictEqual(updatedFleet.unloadTargetSystemId, null, 'Aucun ordre de déchargement ne doit rester actif');
+      assert.strictEqual(updatedFleet.invasionTargetSystemId, null, 'Aucun ordre d’invasion ne doit persister');
+    }
+  },
+  {
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
@@ -308,6 +656,96 @@ const tests: TestCase[] = [
         combatLog?.text.includes('took fire'),
         'Combat log should record the contested drop losses'
       );
+    }
+  },
+  {
+    name: 'Fleet movement commands stamp stateStartTurn using provided turn or current day',
+    run: () => {
+      const system = createSystem('sys-move-time', null);
+      const fleet = createFleet('fleet-move-time', 'blue', { ...baseVec }, []);
+      const rng = new RNG(3);
+
+      const stateAtDay = createBaseState({ day: 5, systems: [system], fleets: [fleet] });
+      const moved = applyCommand(
+        stateAtDay,
+        { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: system.id },
+        rng
+      );
+
+      const movedFleet = moved.fleets.find(f => f.id === fleet.id);
+      assert.strictEqual(
+        movedFleet?.stateStartTurn,
+        stateAtDay.day,
+        'Movement without an explicit turn should use the current day'
+      );
+
+      const customTurn = 12;
+      const movedWithTurn = applyCommand(
+        stateAtDay,
+        { type: 'ORDER_INVASION_MOVE', fleetId: fleet.id, targetSystemId: system.id, turn: customTurn },
+        rng
+      );
+
+      const invasionFleet = movedWithTurn.fleets.find(f => f.id === fleet.id);
+      assert.strictEqual(
+        invasionFleet?.stateStartTurn,
+        customTurn,
+        'Movement commands should respect an explicit turn override'
+      );
+    }
+  },
+  {
+    name: 'Invasion movement deploys embarked armies and logs the landing on arrival',
+    run: () => {
+      const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
+
+      const transport: ShipEntity = {
+        id: 'transport-invasion',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 2000,
+        maxHp: 2000,
+        carriedArmyId: 'army-invasion'
+      };
+
+      const army = createArmy(transport.carriedArmyId!, 'blue', 8000, ArmyState.EMBARKED, 'fleet-invasion');
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-invasion', 'blue', { x: -30, y: 0, z: 0 }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        invasionTargetSystemId: system.id
+      };
+
+      const rng = new RNG(9);
+
+      const initialStep = resolveFleetMovement(movingFleet, [system], [army], 0, rng, [movingFleet]);
+      const fleetsAfterFirstStep = [initialStep.nextFleet];
+      const armiesAfterFirstStep = [army];
+
+      const arrivalStep = resolveFleetMovement(
+        initialStep.nextFleet,
+        [system],
+        armiesAfterFirstStep,
+        1,
+        rng,
+        fleetsAfterFirstStep
+      );
+
+      const armiesAfterArrival = armiesAfterFirstStep.map(currentArmy => {
+        const update = arrivalStep.armyUpdates.find(change => change.id === currentArmy.id);
+        return update ? { ...currentArmy, ...update.changes } : currentArmy;
+      });
+
+      const landedArmy = armiesAfterArrival.find(updatedArmy => updatedArmy.id === army.id);
+      assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Army should be deployed upon invasion arrival');
+      assert.strictEqual(
+        landedArmy?.containerId,
+        system.id,
+        'Deployed army must be placed on the invaded system after landing'
+      );
+
+      const invasionLog = arrivalStep.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
+      assert.ok(invasionLog, 'Arrival should generate an invasion log entry');
     }
   },
   {
@@ -405,6 +843,48 @@ const tests: TestCase[] = [
 
       const followUp = resolveGroundConflict(system, updatedState);
       assert.strictEqual(followUp, null, 'Once the attacker is destroyed, the ground battle should not loop');
+    }
+  },
+  {
+    name: 'Fleet orders are cleared when battle detection locks combat',
+    run: () => {
+      const system = createSystem('sys-combat-lock', 'red');
+
+      const blueFleet = {
+        ...createFleet('fleet-blue-lock', 'blue', { ...baseVec }, [
+          { id: 'blue-lock', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+        ]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...baseVec },
+        invasionTargetSystemId: 'pending-invasion',
+        loadTargetSystemId: 'load-target',
+        unloadTargetSystemId: 'unload-target'
+      };
+
+      const redFleet = {
+        ...createFleet('fleet-red-lock', 'red', { ...baseVec }, [
+          { id: 'red-lock', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+        ])
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet] });
+      const ctx = { turn: 3, rng: new RNG(5) };
+
+      const nextState = phaseBattleDetection(state, ctx);
+
+      const lockedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      assert.ok(lockedFleet, 'Fleet should still exist after detection');
+      assert.strictEqual(lockedFleet?.state, FleetState.COMBAT, 'Fleet must be set to COMBAT state');
+      assert.strictEqual(lockedFleet?.targetSystemId, null, 'Movement target is cleared when combat locks the fleet');
+      assert.strictEqual(lockedFleet?.targetPosition, null, 'Target position is cleared when combat locks the fleet');
+      assert.strictEqual(
+        lockedFleet?.invasionTargetSystemId,
+        null,
+        'Pending invasion order is cleared when combat locks the fleet'
+      );
+      assert.strictEqual(lockedFleet?.loadTargetSystemId, null, 'Load order is cleared when combat locks the fleet');
+      assert.strictEqual(lockedFleet?.unloadTargetSystemId, null, 'Unload order is cleared when combat locks the fleet');
     }
   },
   {
@@ -578,6 +1058,30 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'System colors fallback to faction or default during save round-trip',
+    run: () => {
+      const redSystem: StarSystem = { ...createSystem('sys-red-fallback', 'red'), color: '' };
+      const neutralSystem: StarSystem = { ...createSystem('sys-neutral-fallback', null), color: '' };
+
+      const state = createBaseState({ systems: [redSystem, neutralSystem] });
+
+      const saved = serializeGameState(state);
+      const restored = deserializeGameState(saved);
+
+      const reloadedRed = restored.systems.find(system => system.id === redSystem.id);
+      const reloadedNeutral = restored.systems.find(system => system.id === neutralSystem.id);
+
+      const redColor = factions.find(faction => faction.id === 'red')?.color;
+
+      assert.strictEqual(reloadedRed?.color, redColor, 'Owned systems should inherit their faction color when unset');
+      assert.strictEqual(
+        reloadedNeutral?.color,
+        '#ffffff',
+        'Neutral systems should default to white when missing an explicit color'
+      );
+    }
+  },
+  {
     name: 'Orphan carriedArmyId is cleared during cleanup',
     run: () => {
       const system = createSystem('sys-3', 'blue');
@@ -614,6 +1118,31 @@ const tests: TestCase[] = [
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'Player commands are blocked when fleet is in combat',
+    run: () => {
+      const fleet = { ...createFleet('combat-fleet', 'blue', baseVec, []), state: FleetState.COMBAT };
+      const system = createSystem('alpha', 'blue');
+
+      const engine = new GameEngine(
+        createBaseState({
+          systems: [system],
+          fleets: [fleet]
+        })
+      );
+
+      const result = engine.dispatchPlayerCommand({
+        type: 'MOVE_FLEET',
+        fleetId: fleet.id,
+        targetSystemId: system.id
+      });
+
+      assert.deepStrictEqual(result, {
+        ok: false,
+        error: 'Fleet is in combat and cannot receive commands.'
+      });
     }
   }
 ];
