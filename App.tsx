@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
   const [inspectedFleetId, setInspectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
+  const [systemDetailSystem, setSystemDetailSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
@@ -347,6 +348,17 @@ const App: React.FC = () => {
       setUiMode('ORBIT_FLEET_PICKER');
   };
 
+  const handleOpenSystemDetails = () => {
+      if (!targetSystem || !viewGameState) return;
+      const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
+      setSystemDetailSystem(latestSystem);
+      setUiMode('NONE');
+  };
+
+  const handleCloseSystemDetails = () => {
+      setSystemDetailSystem(null);
+  };
+
   const handleCloseMenu = () => {
       setFleetPickerMode(null);
       setUiMode('NONE');
@@ -498,6 +510,9 @@ const App: React.FC = () => {
                 onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
+                onOpenSystemDetails={handleOpenSystemDetails}
+                systemDetailSystem={systemDetailSystem}
+                onCloseSystemDetails={handleCloseSystemDetails}
                 onSelectFleet={setSelectedFleetId}
                 onCloseShipDetail={() => handleCloseMenu()}
 

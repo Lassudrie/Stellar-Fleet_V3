@@ -11,6 +11,7 @@ import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
+import SystemDetailModal from './ui/SystemDetailModal';
 import { hasInvadingForce } from '../engine/army';
 import { distSq, dist } from '../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
@@ -47,6 +48,9 @@ interface UIProps {
   onOpenOrbitingFleetPicker: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
+  onOpenSystemDetails: () => void;
+  systemDetailSystem: StarSystem | null;
+  onCloseSystemDetails: () => void;
   fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
   onCloseShipDetail: () => void;
 
@@ -69,7 +73,7 @@ const UI: React.FC<UIProps> = ({
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
-    fleetPickerMode,
+    onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
     devMode, godEyes, onSetUiSettings
@@ -286,6 +290,7 @@ const UI: React.FC<UIProps> = ({
             showLoadOption={showLoadOption}
             showUnloadOption={showUnloadOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
+            onOpenSystemDetails={onOpenSystemDetails}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
             onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
@@ -368,6 +373,13 @@ const UI: React.FC<UIProps> = ({
             day={day} 
             onRestart={onRestart} 
         />
+      )}
+
+      {systemDetailSystem && (
+          <SystemDetailModal
+              system={systemDetailSystem}
+              onClose={onCloseSystemDetails}
+          />
       )}
     </div>
   );

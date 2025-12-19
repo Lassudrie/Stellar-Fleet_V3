@@ -28,6 +28,7 @@ interface SystemContextMenuProps {
   showLoadOption: boolean;
   showUnloadOption: boolean;
   canSelectFleet: boolean;
+  onOpenSystemDetails: () => void;
   onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
   onOpenLoadPicker: () => void;
@@ -39,7 +40,7 @@ interface SystemContextMenuProps {
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption,
-    canSelectFleet, onSelectFleetAtSystem,
+    canSelectFleet, onOpenSystemDetails, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
@@ -78,6 +79,18 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
               </span>
           )}
       </div>
+
+      <button
+          onClick={onOpenSystemDetails}
+          className="text-left px-3 py-2 hover:bg-slate-700/50 text-slate-200 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+      >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+              <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm0 1.5a8.25 8.25 0 110 16.5 8.25 8.25 0 010-16.5z" />
+              <path d="M11.25 11.25a.75.75 0 000 1.5h.5v3a.75.75 0 001.5 0v-3A1.75 1.75 0 0011.5 10h-.25a.75.75 0 00-.75.75z" />
+              <circle cx="12" cy="8" r="1" />
+          </svg>
+          {t('ctx.systemDetails')}
+      </button>
 
       {canSelectFleet && (
           <button
