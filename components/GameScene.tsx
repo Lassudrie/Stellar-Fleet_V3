@@ -176,10 +176,16 @@ const GameScene: React.FC<GameSceneProps> = ({
   }, [gameState.fleets]);
 
   const lastTapRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
-  const DOUBLE_TAP_THRESHOLD_MS = 350;
+  const DOUBLE_TAP_THRESHOLD_MS = 500;
 
-  const handleFleetInteraction = (fleetId: string) => {
+  const handleFleetInteraction = (fleetId: string, isDouble = false) => {
     const now = performance.now();
+
+    if (isDouble) {
+      lastTapRef.current = { id: null, time: 0 };
+      onFleetInspect(fleetId);
+      return;
+    }
 
     if (lastTapRef.current.id === fleetId && now - lastTapRef.current.time < DOUBLE_TAP_THRESHOLD_MS) {
       lastTapRef.current = { id: null, time: 0 };
@@ -252,9 +258,9 @@ const GameScene: React.FC<GameSceneProps> = ({
                         fleet={fleet}
                         day={gameState.day}
                         isSelected={selectedFleetId === fleet.id}
-                        onSelect={(e) => {
+                        onSelect={(e, isDouble) => {
                             e.stopPropagation();
-                            handleFleetInteraction(fleet.id);
+                            handleFleetInteraction(fleet.id, isDouble);
                         }}
                         playerFactionId={gameState.playerFactionId}
                         color={getFactionColor(fleet.factionId)}
