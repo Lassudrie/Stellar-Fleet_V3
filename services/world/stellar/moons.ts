@@ -47,7 +47,7 @@ export function drawMoonTypes(
 ): MoonType[] {
   const moons: MoonType[] = [];
 
-  const maybeEden = () => (rng.next() < 0.02 ? 'Eden' : null);
+  const maybeEden = (): MoonType | null => (rng.next() < 0.02 ? 'Eden' : null);
 
   for (let k = 1; k <= regularCount; k++) {
     if (planetType === 'GasGiant' || planetType === 'IceGiant') {

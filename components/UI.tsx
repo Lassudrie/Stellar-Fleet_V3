@@ -11,6 +11,7 @@ import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
+import SystemInspectorModal from './ui/SystemInspectorModal';
 import { hasInvadingForce } from '../engine/army';
 import { distSq, dist } from '../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
@@ -23,7 +24,7 @@ interface UIProps {
   inspectedFleet: Fleet | null;
   logs: LogEntry[];
 
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'SYSTEM_INSPECTOR_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -45,6 +46,7 @@ interface UIProps {
   onUnloadCommand: (fleetId: string) => void;
   onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK') => void;
   onOpenOrbitingFleetPicker: () => void;
+  onInspectSystem: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   fleetPickerMode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null;
@@ -72,7 +74,8 @@ const UI: React.FC<UIProps> = ({
     fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
-    devMode, godEyes, onSetUiSettings
+    devMode, godEyes, onSetUiSettings,
+    onInspectSystem
 }) => {
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
@@ -287,12 +290,20 @@ const UI: React.FC<UIProps> = ({
             showUnloadOption={showUnloadOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
+            onInspect={() => { onInspectSystem(); }}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
             onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
             onOpenUnloadPicker={() => onOpenFleetPicker('UNLOAD')}
             onInvade={() => onInvade(targetSystem.id)}
             onAttack={() => onOpenFleetPicker('ATTACK')}
             onClose={onCloseMenu}
+        />
+      )}
+
+      {uiMode === 'SYSTEM_INSPECTOR_MODAL' && targetSystem && (
+        <SystemInspectorModal
+          system={targetSystem}
+          onClose={onCloseMenu}
         />
       )}
 

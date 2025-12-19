@@ -3,7 +3,7 @@ import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
 import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
-import { StarSystem, Army, ArmyState } from '../types';
+import { StarSystem, Army, ArmyState, SpectralType, PlanetData } from '../types';
 import { CAPTURE_RANGE, COLORS } from '../data/static';
 
 interface GalaxyProps {
@@ -20,16 +20,80 @@ interface ArmyInfo {
     hasConflict: boolean;
 }
 
-const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ system, armyInfo }) => {
+type AstroSummary = {
+    spectralType?: SpectralType;
+    planetCount?: number;
+    hasGasGiant?: boolean;
+    hasHabitableLike?: boolean;
+};
+
+const spectralColor = (t?: SpectralType): string => {
+    // Approximate star colors (UI only)
+    switch (t) {
+        case 'O': return '#7dd3fc'; // cyan-blue
+        case 'B': return '#93c5fd'; // blue
+        case 'A': return '#f8fafc'; // near-white
+        case 'F': return '#fde68a'; // pale yellow
+        case 'G': return '#fbbf24'; // yellow
+        case 'K': return '#fb923c'; // orange
+        case 'M': return '#f87171'; // red
+        default: return '#ffffff';
+    }
+};
+
+const isHabitableLike = (p: PlanetData, hzInnerAu: number, hzOuterAu: number): boolean => {
+    if (!Number.isFinite(p.semiMajorAxisAu)) return false;
+    const inHz = p.semiMajorAxisAu >= hzInnerAu && p.semiMajorAxisAu <= hzOuterAu;
+    if (!inHz) return false;
+
+    // Simple heuristic: terrestrial-ish + non-null atmosphere + plausible temperature
+    if (p.type !== 'Terrestrial') return false;
+    if (p.atmosphere === 'None') return false;
+    if (!Number.isFinite(p.temperatureK)) return false;
+    return p.temperatureK >= 240 && p.temperatureK <= 330;
+};
+
+const summarizeSystemAstro = (system: StarSystem): AstroSummary => {
+    const astro = system.astro;
+    if (!astro) return {};
+
+    const planets = astro.planets || [];
+    const hasGasGiant = planets.some(p => p.type === 'GasGiant' || p.type === 'IceGiant');
+    const hzInnerAu = astro.derived?.hzInnerAu ?? NaN;
+    const hzOuterAu = astro.derived?.hzOuterAu ?? NaN;
+    const hasHabitableLike =
+        Number.isFinite(hzInnerAu) && Number.isFinite(hzOuterAu)
+            ? planets.some(p => isHabitableLike(p, hzInnerAu, hzOuterAu))
+            : false;
+
+    return {
+        spectralType: astro.primarySpectralType,
+        planetCount: planets.length,
+        hasGasGiant,
+        hasHabitableLike
+    };
+};
+
+const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; astro?: AstroSummary }> = ({ system, armyInfo, astro }) => {
     const textRef = useRef<any>(null);
     const iconRef = useRef<any>(null);
     const armyIconRef = useRef<any>(null);
+    const astroRef = useRef<any>(null);
     const isOwned = system.ownerFactionId !== null;
     
     const resourceIcon = useMemo(() => {
         if (system.resourceType === 'gas') return '🪐';
         return null;
     }, [system.resourceType]);
+
+    const astroLine = useMemo(() => {
+        if (!astro || !astro.spectralType) return null;
+        const bits: string[] = [];
+        bits.push(`${astro.spectralType}`);
+        if (typeof astro.planetCount === 'number') bits.push(`🪐 ${astro.planetCount}`);
+        if (astro.hasHabitableLike) bits.push('🌍');
+        return bits.join('  ');
+    }, [astro]);
 
     const armyVisual = useMemo(() => {
         if (!armyInfo || (armyInfo.playerCount === 0 && armyInfo.enemyCount === 0)) return null;
@@ -84,6 +148,14 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
                 armyIconRef.current.outlineOpacity = opacity;
             }
         }
+
+        if (astroRef.current) {
+            astroRef.current.visible = isVisible;
+            if (isVisible) {
+                astroRef.current.fillOpacity = opacity;
+                astroRef.current.outlineOpacity = opacity;
+            }
+        }
     });
 
     return (
@@ -104,11 +176,29 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
                  </Billboard>
              )}
 
+             {astroLine && (
+                 <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
+                     <Text
+                        ref={astroRef}
+                        position={[0, resourceIcon ? 2.2 : 1.2, 0]}
+                        fontSize={0.55}
+                        color={spectralColor(astro?.spectralType)}
+                        anchorX="center"
+                        anchorY="bottom"
+                        outlineWidth={0.05}
+                        outlineColor="#000000"
+                        fontWeight="bold"
+                     >
+                        {astroLine}
+                     </Text>
+                 </Billboard>
+             )}
+
              {armyVisual && (
                  <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
                      <Text
                         ref={armyIconRef}
-                        position={[0, resourceIcon ? 2.8 : 1.5, 0]}
+                        position={[0, (resourceIcon ? 2.8 : 1.5) + (astroLine ? 1.0 : 0), 0]}
                         fontSize={1.0}
                         color={armyVisual.color}
                         anchorX="center"
@@ -162,6 +252,14 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
       return map;
   }, [armies, playerFactionId]);
 
+  const astroSummaryBySystemId = useMemo(() => {
+      const map = new Map<string, AstroSummary>();
+      for (const sys of systems) {
+          map.set(sys.id, summarizeSystemAstro(sys));
+      }
+      return map;
+  }, [systems]);
+
   const lineGeometry = useMemo(() => {
     if (!systems || systems.length === 0) return new BufferGeometry();
     const positions: number[] = [];
@@ -202,6 +300,20 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
             ))}
         </Instances>
 
+        {/* Inner "stellar tint" (astro-driven) */}
+        <Instances range={systems.length}>
+            <sphereGeometry args={[0.2, 16, 16]} />
+            <meshBasicMaterial />
+            {systems.map((sys) => (
+                <Instance
+                    key={`astro-${sys.id}`}
+                    position={[sys.position.x, sys.position.y, sys.position.z]}
+                    scale={[1.0, 1.0, 1.0]}
+                    color={spectralColor(sys.astro?.primarySpectralType)}
+                />
+            ))}
+        </Instances>
+
         {battleSystems.length > 0 && (
           <Instances range={battleSystems.length}>
             <torusGeometry args={[CAPTURE_RANGE * 0.8, 0.1, 8, 32]} />
@@ -237,7 +349,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
 
         {systems.map((sys) => (
             <group key={`label-${sys.id}`} position={[sys.position.x, sys.position.y, sys.position.z]}>
-                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} />
+                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} astro={astroSummaryBySystemId.get(sys.id)} />
             </group>
         ))}
     </group>

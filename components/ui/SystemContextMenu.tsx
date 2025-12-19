@@ -29,6 +29,7 @@ interface SystemContextMenuProps {
   showUnloadOption: boolean;
   canSelectFleet: boolean;
   onSelectFleetAtSystem: () => void;
+  onInspect: () => void;
   onOpenFleetPicker: () => void;
   onOpenLoadPicker: () => void;
   onOpenUnloadPicker: () => void;
@@ -40,9 +41,10 @@ interface SystemContextMenuProps {
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption,
     canSelectFleet, onSelectFleetAtSystem,
-    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
+    onInspect, onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
+  const astro = system.astro;
 
   const renderFactionBlock = (entry: GroundForceSummaryEntry, labelOverride?: string) => {
       const colorStyle = { color: entry.color };
@@ -79,6 +81,17 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
           )}
       </div>
 
+      {/* INSPECT */}
+      <button
+          onClick={onInspect}
+          className="text-left px-3 py-2 hover:bg-slate-700/40 text-slate-200 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+      >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+              <path fillRule="evenodd" d="M10 2a8 8 0 105.293 14.293l4.707 4.707a1 1 0 001.414-1.414l-4.707-4.707A8 8 0 0010 2zm-6 8a6 6 0 1112 0 6 6 0 01-12 0z" clipRule="evenodd" />
+          </svg>
+          {t('ctx.inspect')}
+      </button>
+
       {canSelectFleet && (
           <button
               onClick={onSelectFleetAtSystem}
@@ -90,6 +103,39 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
               </svg>
               {t('ctx.selectFleet')}
           </button>
+      )}
+
+      {/* ASTRO SECTION */}
+      {astro && (
+          <div className="px-3 py-2 mb-1 bg-slate-800/50 rounded border border-slate-700/50 text-[10px]">
+              <div className="uppercase font-bold text-slate-400 mb-1 flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                      <path fillRule="evenodd" d="M10 2a.75.75 0 01.75.75v.82a6.5 6.5 0 014.68 10.96l.58.58a.75.75 0 01-1.06 1.06l-.58-.58A6.5 6.5 0 013.57 6.43h-.82A.75.75 0 012 5.68V5.5A.75.75 0 012.75 4.75h.82A6.5 6.5 0 019.25 3.57v-.82A.75.75 0 0110 2zm0 3a5 5 0 100 10 5 5 0 000-10z" clipRule="evenodd" />
+                  </svg>
+                  {t('astro.title')}
+              </div>
+              <div className="flex justify-between gap-4">
+                  <span className="text-slate-300">{t('astro.primary')}</span>
+                  <span className="font-mono text-slate-100">{astro.primarySpectralType} • {astro.starCount}★</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                  <span className="text-slate-300">{t('astro.planets')}</span>
+                  <span className="font-mono text-slate-100">{astro.planets.length}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                  <span className="text-slate-300">{t('astro.habitable')}</span>
+                  <span className="font-mono text-slate-100">
+                      {astro.planets.some(p =>
+                          p.type === 'Terrestrial' &&
+                          p.semiMajorAxisAu >= astro.derived.hzInnerAu &&
+                          p.semiMajorAxisAu <= astro.derived.hzOuterAu &&
+                          p.atmosphere !== 'None' &&
+                          p.temperatureK >= 240 &&
+                          p.temperatureK <= 330
+                      ) ? t('astro.yes') : t('astro.no')}
+                  </span>
+              </div>
+          </div>
       )}
 
       {/* GROUND INTEL SECTION */}

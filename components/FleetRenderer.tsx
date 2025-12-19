@@ -185,7 +185,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             }}
             onDoubleClick={(e) => {
                 e.stopPropagation();
-                e.preventDefault();
                 onSelect(e, true);
             }}
             onPointerDown={(e) => {
@@ -195,7 +194,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                 if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
                     lastTouchRef.current = 0;
                     e.stopPropagation();
-                    e.preventDefault();
                     onSelect(e, true);
                 } else {
                     lastTouchRef.current = now;
