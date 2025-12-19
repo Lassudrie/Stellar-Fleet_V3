@@ -11,7 +11,7 @@ interface FleetMeshProps {
   fleet: Fleet;
   day: number;
   isSelected: boolean;
-  onSelect: (e: any) => void;
+  onSelect: (e: any, isDouble?: boolean) => void;
   playerFactionId: string;
   color: string;
 }
@@ -63,6 +63,10 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
   const meshRef = useRef<Mesh>(null);
+
+  // Double interaction detection (touch)
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   
   // Flash Effect Refs
   const flashMeshRef = useRef<Mesh>(null);
@@ -177,7 +181,25 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         <mesh 
             onClick={(e) => {
                 e.stopPropagation();
-                onSelect(e);
+                onSelect(e, false);
+            }}
+            onDoubleClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onSelect(e, true);
+            }}
+            onPointerDown={(e) => {
+                if (e.pointerType !== 'touch') return;
+
+                const now = performance.now();
+                if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                    lastTouchRef.current = 0;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onSelect(e, true);
+                } else {
+                    lastTouchRef.current = now;
+                }
             }}
             onPointerOver={() => document.body.style.cursor = 'pointer'}
             onPointerOut={() => document.body.style.cursor = 'auto'}
