@@ -50,8 +50,8 @@ export const fr = {
   // UI SideMenu
   'sidemenu.command': 'Commandement',
   'sidemenu.com_logs': 'Journaux Com',
-  'sidemenu.registry': 'Registre Flotte',
-  'sidemenu.territory': 'Territoire',
+  'sidemenu.registry': 'Fleet',
+  'sidemenu.territory': 'System',
   'sidemenu.settings': 'Paramètres',
   'sidemenu.recentEvents': 'Événements Récents : {{count}}',
   'sidemenu.activeUnits': 'Unités Actives : {{count}}',
