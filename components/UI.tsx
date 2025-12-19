@@ -12,25 +12,9 @@ import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
 import { hasInvadingForce } from '../engine/army';
-import { ORBIT_RADIUS } from '../data/static';
 import { distSq, dist } from '../engine/math/vec3';
-
-const ORBIT_MATCH_RADIUS_SQ = (ORBIT_RADIUS * 3) ** 2;
-
-const findOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
-  let closest: { system: StarSystem; distanceSq: number } | null = null;
-
-  systems.forEach(system => {
-      const distanceSq = distSq(fleet.position, system.position);
-      if (distanceSq > ORBIT_MATCH_RADIUS_SQ) return;
-
-      if (!closest || distanceSq < closest.distanceSq) {
-          closest = { system, distanceSq };
-      }
-  });
-
-  return closest?.system ?? null;
-};
+import { findOrbitingSystem } from './ui/orbiting';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 
 interface UIProps {
   startYear: number;
@@ -183,7 +167,7 @@ const UI: React.FC<UIProps> = ({
   const orbitingPlayerFleets = useMemo(() => {
       if (!targetSystem) return [];
 
-      const orbitThresholdSq = (ORBIT_RADIUS * 3) ** 2;
+      const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
 
       return blueFleets
           .filter(fleet => (

@@ -14,11 +14,11 @@ import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from './engine/fogOfWar';
 import { calculateFleetPower } from './engine/world';
-import { clone, distSq, equals } from './engine/math/vec3';
+import { clone, equals } from './engine/math/vec3';
 import { serializeGameState, deserializeGameState } from './engine/serialization';
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
-import { ORBIT_PROXIMITY_RANGE_SQ } from './data/static';
+import { findOrbitingSystem } from './components/ui/orbiting';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
 
@@ -406,31 +406,11 @@ const App: React.FC = () => {
       }
   };
 
-  const findOrbitingSystem = (fleet: Fleet | null): StarSystem | null => {
-      if (!fleet || !viewGameState) return null;
-      if (fleet.state !== FleetState.ORBIT) return null;
-
-      const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
-
-      let closest: { system: StarSystem; distanceSq: number } | null = null;
-
-      viewGameState.systems.forEach(system => {
-          const distanceSq = distSq(fleet.position, system.position);
-          if (distanceSq > orbitThresholdSq) return;
-
-          if (!closest || distanceSq < closest.distanceSq) {
-              closest = { system, distanceSq };
-          }
-      });
-
-      return closest?.system ?? null;
-  };
-
   const handleDeploySingle = (shipId: string) => {
       if (!engine || !selectedFleetId) return;
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
-      const system = findOrbitingSystem(fleet);
+      const system = findOrbitingSystem(fleet, engine.state.systems);
       if (!fleet || !system) return;
 
       const ship = fleet.ships.find(s => s.id === shipId);
@@ -449,7 +429,7 @@ const App: React.FC = () => {
       if (!engine || !selectedFleetId) return;
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
-      const system = findOrbitingSystem(fleet);
+      const system = findOrbitingSystem(fleet, engine.state.systems);
       if (!fleet || !system) return;
 
       engine.dispatchCommand({

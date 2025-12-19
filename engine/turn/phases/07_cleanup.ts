@@ -4,6 +4,13 @@ import { TurnContext } from '../types';
 import { pruneBattles } from '../../../services/battle/detection';
 import { sanitizeArmyLinks } from '../../army';
 
+const LOG_RETENTION_LIMIT = 2000;
+
+const trimLogs = (logs: GameState['logs']): GameState['logs'] => {
+    if (logs.length <= LOG_RETENTION_LIMIT) return logs;
+    return logs.slice(-LOG_RETENTION_LIMIT);
+};
+
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Prune Old Battles
     const activeBattles = pruneBattles(state.battles, ctx.turn);
@@ -26,6 +33,6 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     return {
         ...sanitizedArmyState,
         battles: activeBattles,
-        logs: newLogs
+        logs: trimLogs(newLogs)
     };
 };

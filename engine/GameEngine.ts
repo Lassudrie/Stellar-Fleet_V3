@@ -7,7 +7,7 @@ import { clone, distSq } from './math/vec3';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
-import { isOrbitContested } from './conquest';
+import { isOrbitContested } from './orbit';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }

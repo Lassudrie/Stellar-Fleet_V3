@@ -5,7 +5,7 @@ import { getSystemById } from './world';
 import { clone, distSq } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
-import { isOrbitContested } from './conquest';
+import { isOrbitContested } from './orbit';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 
 export type GameCommand =

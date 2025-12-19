@@ -2,6 +2,7 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../types';
 import { useI18n } from '../../i18n';
+import { BattleOutcome, FactionRegistry, resolveBattleOutcome } from '../../engine/battle/outcome';
 
 interface BattleScreenProps {
   battleId?: string;
@@ -11,48 +12,6 @@ interface BattleScreenProps {
   blueFleetOverride?: Fleet;
   redFleetOverride?: Fleet;
 }
-
-export type FactionRegistry = Record<string, { name: string; color: string }>;
-
-export interface BattleOutcome {
-  label: string;
-  color: string;
-  winnerName: string | null;
-  status: 'victory' | 'defeat' | 'draw' | 'unknown';
-}
-
-const fallbackFactionMeta = (factionId: string | undefined, registry: FactionRegistry) => {
-  if (!factionId) {
-    return { name: 'UNKNOWN', color: '#94a3b8' };
-  }
-
-  return registry[factionId] || { name: factionId.toUpperCase(), color: '#94a3b8' };
-};
-
-export const resolveBattleOutcome = (
-  battle: Battle,
-  playerFactionId: FactionId,
-  registry: FactionRegistry,
-  translate: ReturnType<typeof useI18n>['t']
-): BattleOutcome => {
-  if (!battle.winnerFactionId) {
-    return { label: translate('battle.unknown'), color: '#cbd5e1', winnerName: null, status: 'unknown' };
-  }
-
-  if (battle.winnerFactionId === 'draw') {
-    return { label: translate('battle.draw'), color: '#94a3b8', winnerName: null, status: 'draw' };
-  }
-
-  const winnerMeta = fallbackFactionMeta(battle.winnerFactionId, registry);
-  const isPlayerVictory = battle.winnerFactionId === playerFactionId;
-
-  return {
-    label: translate('battle.victory', { winner: winnerMeta.name }),
-    color: winnerMeta.color,
-    winnerName: winnerMeta.name,
-    status: isPlayerVictory ? 'victory' : 'defeat'
-  };
-};
 
 const BattleScreen: React.FC<BattleScreenProps> = ({
     battleId, gameState, onClose, blueFleetOverride, redFleetOverride
@@ -170,22 +129,22 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       };
   }, [battle, factionRegistry, gameState.fleets, playerFactionId]);
 
+  const outcome = useMemo(
+      () => (battle ? resolveBattleOutcome(battle, playerFactionId, factionRegistry, t) : null),
+      [battle, factionRegistry, playerFactionId, t]
+  );
+
   useEffect(() => {
       if (logContainerRef.current) {
           logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
       }
   }, [battle]);
 
-  if (!battle || !stats) return null;
+  if (!battle || !stats || !outcome) return null;
 
   const systemName = battle.systemId === 'debug-system' 
       ? 'SIMULATION' 
       : (gameState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown System');
-  
-  const outcome = useMemo(
-      () => resolveBattleOutcome(battle, playerFactionId, factionRegistry, t),
-      [battle, factionRegistry, playerFactionId, t]
-  );
 
   const roundsText = battle.roundsPlayed
         ? (battle.roundsPlayed === 1 ? t('battle.rounds_one') : t('battle.rounds_other', { count: battle.roundsPlayed }))
