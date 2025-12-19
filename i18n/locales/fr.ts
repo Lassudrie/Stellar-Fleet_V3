@@ -83,6 +83,7 @@ export const fr = {
   'ctx.morale': 'Moral',
   'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
+  'ctx.systemDetails': 'Détails du système',
 
   // Fleet Picker
   'picker.title': 'Choisir Flotte',
