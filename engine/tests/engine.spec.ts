@@ -18,6 +18,7 @@ import {
   GameplayRules,
   GameState,
   LogEntry,
+  PlanetBody,
   ShipEntity,
   ShipType,
   StarSystem
@@ -51,7 +52,7 @@ const factions: FactionState[] = [
 
 const baseVec: Vec3 = { x: 0, y: 0, z: 0 };
 
-const createPlanet = (systemId: string, ownerFactionId: string | null, index = 1) => ({
+const createPlanet = (systemId: string, ownerFactionId: string | null, index = 1): PlanetBody => ({
   id: `planet-${systemId}-${index}`,
   systemId,
   name: `${systemId} ${index}`,
