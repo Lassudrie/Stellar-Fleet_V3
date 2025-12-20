@@ -109,6 +109,20 @@ export interface PlanetData {
   moons: MoonData[];
 }
 
+export type PlanetBodyType = 'planet' | 'moon';
+export type PlanetClass = 'solid' | 'gas_giant' | 'ice_giant';
+
+export interface PlanetBody {
+  id: string;
+  systemId: string;
+  name: string;
+  bodyType: PlanetBodyType;
+  class: PlanetClass;
+  ownerFactionId?: FactionId | null;
+  size: number;
+  isSolid: boolean;
+}
+
 // Helper to pass a few derived orbit/HZ values into planet logic
 export interface StellarDerived {
   semiMajorAxisAu: number;
@@ -173,6 +187,7 @@ export interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId: string | null;
+  transferBusyUntilDay?: number;
   consumables?: ShipConsumables;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -199,6 +214,7 @@ export interface StarSystem {
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
   isHomeworld: boolean;
+  planets: PlanetBody[];
   astro?: StarSystemAstro; // Optional procedural astro data (stars/planets/moons)
 }
 

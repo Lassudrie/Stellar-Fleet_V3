@@ -27,21 +27,23 @@ interface SystemContextMenuProps {
   showAttackOption: boolean;
   showLoadOption: boolean;
   showUnloadOption: boolean;
+  showGroundOpsOption: boolean;
   canSelectFleet: boolean;
   onOpenSystemDetails: () => void;
   onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
   onOpenLoadPicker: () => void;
   onOpenUnloadPicker: () => void;
+  onOpenGroundOps: () => void;
   onInvade: () => void;
   onAttack: () => void;
   onClose: () => void;
 }
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
-    position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption,
+    position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption, showGroundOpsOption,
     canSelectFleet, onOpenSystemDetails, onSelectFleetAtSystem,
-    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onInvade, onAttack, onClose
+    onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onOpenGroundOps, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
 
@@ -166,6 +168,22 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   })()}
               </div>
           </div>
+      )}
+
+      {showGroundOpsOption && (
+          <button
+              onClick={onOpenGroundOps}
+              className="text-left px-3 py-2 hover:bg-indigo-600/20 text-indigo-300 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path d="M12 3.75a.75.75 0 01.75.75v2.5a.75.75 0 01-1.5 0v-2.5a.75.75 0 01.75-.75z" />
+                  <path d="M12 16.5a.75.75 0 01.75.75v2.5a.75.75 0 01-1.5 0v-2.5a.75.75 0 01.75-.75z" />
+                  <path d="M3.75 12a.75.75 0 01.75-.75h2.5a.75.75 0 010 1.5h-2.5a.75.75 0 01-.75-.75z" />
+                  <path d="M16.5 12a.75.75 0 01.75-.75h2.5a.75.75 0 010 1.5h-2.5a.75.75 0 01-.75-.75z" />
+                  <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5zM9.75 12a2.25 2.25 0 114.5 0 2.25 2.25 0 01-4.5 0z" />
+              </svg>
+              {t('ctx.groundOps')}
+          </button>
       )}
 
       {/* MOVE OR ATTACK ACTION */}

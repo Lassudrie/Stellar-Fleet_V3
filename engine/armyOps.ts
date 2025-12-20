@@ -1,6 +1,7 @@
 import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../types';
 import { shortId } from './idUtils';
 import { RNG } from './rng';
+import { getDefaultSolidPlanet } from './planets';
 
 const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
 const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
@@ -26,6 +27,7 @@ export interface UnloadOpsParams extends ArmyOpsOptions {
     armies: Army[];
     day: number;
     rng: RNG;
+    targetPlanetId?: string;
     allowedArmyIds?: Set<string>;
     allowedShipIds?: Set<string>;
 }
@@ -38,10 +40,17 @@ export interface ArmyOpsResult {
     unloadedArmyIds?: string[];
 }
 
-const getLogText = (count: number, system: StarSystem, fleetLabel: string, override?: string | ((count: number) => string)) => {
+const getLogText = (
+    count: number,
+    system: StarSystem,
+    fleetLabel: string,
+    planetName?: string,
+    override?: string | ((count: number) => string)
+) => {
     if (typeof override === 'string') return override;
     if (typeof override === 'function') return override(count);
-    return `Fleet ${fleetLabel} unloaded ${count} armies at ${system.name}.`;
+    const suffix = planetName ? ` on ${planetName}` : '';
+    return `Fleet ${fleetLabel} unloaded ${count} armies at ${system.name}${suffix}.`;
 };
 
 const getLoadLogText = (count: number, system: StarSystem, fleetLabel: string, override?: string | ((count: number) => string)) => {
@@ -54,8 +63,13 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
     const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds } = params;
     const label = fleetLabel ?? shortId(fleet.id);
 
+    const validPlanetIds = new Set(system.planets.filter(planet => planet.isSolid).map(planet => planet.id));
+    if (validPlanetIds.size === 0) {
+        return { fleet, armies, logs: [], count: 0 };
+    }
+
     const availableArmies = armies.filter(army =>
-        army.containerId === system.id &&
+        validPlanetIds.has(army.containerId) &&
         army.factionId === fleet.factionId &&
         army.state === ArmyState.DEPLOYED &&
         (!allowedArmyIds || allowedArmyIds.has(army.id))
@@ -73,7 +87,7 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
     }
 
     const updatedArmies = armies.map(army => {
-        if (army.containerId !== system.id) return army;
+        if (!validPlanetIds.has(army.containerId)) return army;
         if (army.factionId !== fleet.factionId) return army;
         if (army.state !== ArmyState.DEPLOYED) return army;
 
@@ -113,8 +127,16 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
 };
 
 export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
-    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds } = params;
+    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds, targetPlanetId } = params;
     const label = fleetLabel ?? shortId(fleet.id);
+    const fallbackPlanet = getDefaultSolidPlanet(system);
+    const targetPlanet =
+        system.planets.find(planet => planet.id === targetPlanetId && planet.isSolid) ??
+        fallbackPlanet;
+
+    if (!targetPlanet) {
+        return { fleet, armies, logs: [], count: 0, unloadedArmyIds: [] };
+    }
 
     const embarkedArmies = armies.filter(army =>
         army.containerId === fleet.id &&
@@ -149,7 +171,7 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
         return {
             ...army,
             state: ArmyState.DEPLOYED,
-            containerId: system.id
+            containerId: targetPlanet.id
         };
     });
 
@@ -157,7 +179,7 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
         {
             id: rng.id('log'),
             day,
-            text: getLogText(unloadedArmyIds.size, system, label, logText),
+            text: getLogText(unloadedArmyIds.size, system, label, targetPlanet.name, logText),
             type: 'move'
         }
     ];
@@ -169,6 +191,7 @@ export const applyContestedUnloadRisk = (
     armies: Army[],
     targetArmyIds: string[],
     systemName: string,
+    planetName: string | undefined,
     day: number,
     rng: RNG
 ): { armies: Army[]; logs: LogEntry[] } => {
@@ -192,7 +215,7 @@ export const applyContestedUnloadRisk = (
             logs.push({
                 id: rng.id('log'),
                 day,
-                text: `Dropships took fire while unloading army ${targetArmyId} at ${systemName}, losing ${appliedLoss} strength.`,
+                text: `Dropships took fire while unloading army ${targetArmyId} at ${planetName ?? systemName}, losing ${appliedLoss} strength.`,
                 type: 'combat'
             });
 
@@ -202,7 +225,7 @@ export const applyContestedUnloadRisk = (
         logs.push({
             id: rng.id('log'),
             day,
-            text: `Army ${targetArmyId} dodged enemy fire while unloading at ${systemName}.`,
+            text: `Army ${targetArmyId} dodged enemy fire while unloading at ${planetName ?? systemName}.`,
             type: 'combat'
         });
 

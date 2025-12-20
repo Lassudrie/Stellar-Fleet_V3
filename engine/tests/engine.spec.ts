@@ -50,6 +50,17 @@ const factions: FactionState[] = [
 
 const baseVec: Vec3 = { x: 0, y: 0, z: 0 };
 
+const createPlanet = (systemId: string, ownerFactionId: string | null, index = 1) => ({
+  id: `planet-${systemId}-${index}`,
+  systemId,
+  name: `${systemId} ${index}`,
+  bodyType: 'planet',
+  class: 'solid',
+  ownerFactionId,
+  size: 1,
+  isSolid: true
+});
+
 const createSystem = (id: string, ownerFactionId: string | null): StarSystem => ({
   id,
   name: id,
@@ -58,7 +69,8 @@ const createSystem = (id: string, ownerFactionId: string | null): StarSystem => 
   size: 1,
   ownerFactionId,
   resourceType: 'none',
-  isHomeworld: false
+  isHomeworld: false,
+  planets: [createPlanet(id, ownerFactionId)]
 });
 
 const createFleet = (id: string, factionId: string, position: Vec3, ships: ShipEntity[]): Fleet => ({
@@ -198,7 +210,7 @@ const tests: TestCase[] = [
       };
 
       const fleet = createFleet('fleet-blue-runturn', 'blue', { ...baseVec }, [transport]);
-      const army = createArmy('army-blue-runturn', 'blue', 12000, ArmyState.DEPLOYED, system.id);
+      const army = createArmy('army-blue-runturn', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const initialState = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
       const withOrder = applyCommand(
@@ -402,25 +414,16 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'Unopposed conquest is blocked by contested orbit',
+    name: 'Unopposed deployments skip combat resolution',
     run: () => {
       const system = createSystem('sys-1', 'red');
 
-      const blueArmy = createArmy('army-blue', 'blue', 12000, ArmyState.DEPLOYED, system.id);
-      const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [
-        { id: 'blue-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
-      ]);
-      const redFleet = createFleet('fleet-red', 'red', { x: CAPTURE_RANGE - 1, y: 0, z: 0 }, [
-        { id: 'red-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
-      ]);
+      const blueArmy = createArmy('army-blue', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
 
-      const state = createBaseState({ systems: [system], armies: [blueArmy], fleets: [blueFleet, redFleet] });
+      const state = createBaseState({ systems: [system], armies: [blueArmy] });
 
-      const result = resolveGroundConflict(system, state);
-      assert.ok(result, 'Ground conflict should resolve');
-      assert.strictEqual(result?.winnerFactionId, 'blue');
-      assert.strictEqual(result?.conquestOccurred, false, 'Conquest must be blocked by contested orbit');
-      assert.deepStrictEqual(result?.armiesDestroyed, [], 'Unopposed assault should not destroy armies');
+      const result = resolveGroundConflict(system.planets[0], system, state);
+      assert.strictEqual(result, null, 'Unopposed armies should not generate combat resolution');
     }
   },
   {
@@ -463,15 +466,14 @@ const tests: TestCase[] = [
     name: '10k vs 10k armies survive initial clash under new threshold',
     run: () => {
       const system = createSystem('sys-2', 'blue');
-      const blueArmy = createArmy('army-blue-10k', 'blue', 10000, ArmyState.DEPLOYED, system.id);
-      const redArmy = createArmy('army-red-10k', 'red', 10000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue-10k', 'blue', 10000, ArmyState.DEPLOYED, system.planets[0].id);
+      const redArmy = createArmy('army-red-10k', 'red', 10000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
-      const result = resolveGroundConflict(system, state);
+      const result = resolveGroundConflict(system.planets[0], system, state);
       assert.ok(result, 'Ground conflict should resolve');
       assert.strictEqual(result?.winnerFactionId, 'draw', 'Balanced forces should stalemate');
-      assert.strictEqual(result?.conquestOccurred, false, 'Stalemate cannot trigger conquest');
       assert.deepStrictEqual(result?.armiesDestroyed, [], 'Threshold should prevent immediate destruction');
 
       const blueUpdate = result?.armyUpdates.find(update => update.armyId === blueArmy.id);
@@ -484,7 +486,7 @@ const tests: TestCase[] = [
     name: 'Damaged attackers are still removed when defenders already own the system',
     run: () => {
       const system = createSystem('sys-5', 'blue');
-      const blueArmy = createArmy('army-blue-hold', 'blue', 12000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue-hold', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
       const redArmy: Army = {
         id: 'army-red-broken',
         factionId: 'red',
@@ -492,12 +494,12 @@ const tests: TestCase[] = [
         maxStrength: 20000,
         morale: 0.5,
         state: ArmyState.DEPLOYED,
-        containerId: system.id
+        containerId: system.planets[0].id
       };
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
-      const result = resolveGroundConflict(system, state);
+      const result = resolveGroundConflict(system.planets[0], system, state);
       assert.ok(result, 'Ground conflict should be reported even without conquest');
       assert.strictEqual(result?.winnerFactionId, 'blue', 'Defenders should be considered the winners');
       assert.ok(result?.armiesDestroyed.includes(redArmy.id), 'Damaged attackers should be destroyed');
@@ -526,7 +528,7 @@ const tests: TestCase[] = [
         carriedArmyId: null
       };
 
-      const blueArmy = createArmy('army-blue-load', 'blue', 7000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue-load', 'blue', 7000, ArmyState.DEPLOYED, system.planets[0].id);
       const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [allowedTransport, blockedTransport]);
       const rng = new RNG(9);
 
@@ -570,7 +572,7 @@ const tests: TestCase[] = [
         unloadTargetSystemId: null
       };
 
-      const groundArmy = createArmy('army-blue-ground', 'blue', 6000, ArmyState.DEPLOYED, system.id);
+      const groundArmy = createArmy('army-blue-ground', 'blue', 6000, ArmyState.DEPLOYED, system.planets[0].id);
       const rng = new RNG(11);
 
       const result = resolveFleetMovement(movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
@@ -615,14 +617,21 @@ const tests: TestCase[] = [
 
       const updated = applyCommand(
         state,
-        { type: 'UNLOAD_ARMY', fleetId: blueFleet.id, shipId: transport.id, armyId: blueArmy.id, systemId: system.id },
+        {
+          type: 'UNLOAD_ARMY',
+          fleetId: blueFleet.id,
+          shipId: transport.id,
+          armyId: blueArmy.id,
+          systemId: system.id,
+          planetId: system.planets[0].id
+        },
         rng
       );
 
       const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
       assert.ok(unloadedArmy, 'Army should still exist after unloading');
       assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must be deployed on the surface');
-      assert.strictEqual(unloadedArmy?.containerId, system.id, 'Army container should move to the system');
+      assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
       assert.strictEqual(unloadedArmy?.strength, blueArmy.strength, 'No risk should apply in a clear orbit');
 
       const combatLogs = updated.logs.filter(log => log.type === 'combat');
@@ -660,7 +669,8 @@ const tests: TestCase[] = [
           fleetId: blueFleet.id,
           shipId: transport.id,
           armyId: blueArmy.id,
-          systemId: system.id
+          systemId: system.id,
+          planetId: system.planets[0].id
         },
         rng
       );
@@ -668,7 +678,7 @@ const tests: TestCase[] = [
       const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
       assert.ok(unloadedArmy, 'Army should persist after contested unload');
       assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must still disembark');
-      assert.strictEqual(unloadedArmy?.containerId, system.id, 'Army container should move to the system');
+      assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
       assert.ok(
         (unloadedArmy?.strength ?? 0) < blueArmy.strength,
         'Contested unload should apply deterministic strength loss'
@@ -680,6 +690,47 @@ const tests: TestCase[] = [
         combatLog?.text.includes('took fire'),
         'Combat log should record the contested drop losses'
       );
+    }
+  },
+  {
+    name: 'TRANSFER_ARMY_PLANET moves a deployed army using an idle transport',
+    run: () => {
+      const system = createSystem('sys-transfer', 'blue');
+      system.planets.push(createPlanet(system.id, 'blue', 2));
+
+      const fromPlanet = system.planets[0];
+      const toPlanet = system.planets[1];
+
+      const army = createArmy('army-transfer', 'blue', 6000, ArmyState.DEPLOYED, fromPlanet.id);
+      const transport: ShipEntity = {
+        id: 'transfer-ship',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      };
+      const fleet = createFleet('fleet-transfer', 'blue', { ...baseVec }, [transport]);
+
+      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army], day: 4 });
+      const rng = new RNG(5);
+
+      const updated = applyCommand(
+        state,
+        {
+          type: 'TRANSFER_ARMY_PLANET',
+          armyId: army.id,
+          fromPlanetId: fromPlanet.id,
+          toPlanetId: toPlanet.id,
+          systemId: system.id
+        },
+        rng
+      );
+
+      const movedArmy = updated.armies.find(current => current.id === army.id);
+      const updatedShip = updated.fleets[0].ships[0];
+
+      assert.strictEqual(movedArmy?.containerId, toPlanet.id, 'Army should move to the destination planet');
+      assert.strictEqual(updatedShip.transferBusyUntilDay, state.day, 'Transport should be marked busy for the current day');
     }
   },
   {
@@ -764,8 +815,8 @@ const tests: TestCase[] = [
       assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Army should be deployed upon invasion arrival');
       assert.strictEqual(
         landedArmy?.containerId,
-        system.id,
-        'Deployed army must be placed on the invaded system after landing'
+        system.planets[0].id,
+        'Deployed army must be placed on the invaded planet after landing'
       );
 
       const invasionLog = arrivalStep.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
@@ -777,13 +828,13 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-coalition-hold', 'red');
 
-      const redArmy = createArmy('army-red', 'red', 10000, ArmyState.DEPLOYED, system.id);
-      const blueArmy = createArmy('army-blue', 'blue', 4000, ArmyState.DEPLOYED, system.id);
-      const greenArmy = createArmy('army-green', 'green', 3000, ArmyState.DEPLOYED, system.id);
+      const redArmy = createArmy('army-red', 'red', 10000, ArmyState.DEPLOYED, system.planets[0].id);
+      const blueArmy = createArmy('army-blue', 'blue', 4000, ArmyState.DEPLOYED, system.planets[0].id);
+      const greenArmy = createArmy('army-green', 'green', 3000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [redArmy, blueArmy, greenArmy] });
 
-      const result = resolveGroundConflict(system, state);
+      const result = resolveGroundConflict(system.planets[0], system, state);
 
       assert.ok(result, 'Ground conflict should be resolved when multiple factions are present');
       assert.strictEqual(result?.winnerFactionId, 'red', 'Defenders should keep control against a weaker coalition');
@@ -799,13 +850,13 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-coalition-win', 'red');
 
-      const redArmy = createArmy('army-red-win', 'red', 3000, ArmyState.DEPLOYED, system.id);
-      const blueArmy = createArmy('army-blue-win', 'blue', 9000, ArmyState.DEPLOYED, system.id);
-      const greenArmy = createArmy('army-green-win', 'green', 7000, ArmyState.DEPLOYED, system.id);
+      const redArmy = createArmy('army-red-win', 'red', 3000, ArmyState.DEPLOYED, system.planets[0].id);
+      const blueArmy = createArmy('army-blue-win', 'blue', 9000, ArmyState.DEPLOYED, system.planets[0].id);
+      const greenArmy = createArmy('army-green-win', 'green', 7000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [redArmy, blueArmy, greenArmy] });
 
-      const result = resolveGroundConflict(system, state);
+      const result = resolveGroundConflict(system.planets[0], system, state);
 
       assert.ok(result, 'Ground conflict should resolve for coalition attacks');
       assert.strictEqual(result?.winnerFactionId, 'blue', 'Top surviving attacker should be credited with the coalition win');
@@ -820,13 +871,13 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-ffa', null);
 
-      const alphaArmy = createArmy('army-alpha', 'blue', 6000, ArmyState.DEPLOYED, system.id);
-      const betaArmy = createArmy('army-beta', 'red', 4000, ArmyState.DEPLOYED, system.id);
-      const gammaArmy = createArmy('army-gamma', 'green', 2000, ArmyState.DEPLOYED, system.id);
+      const alphaArmy = createArmy('army-alpha', 'blue', 6000, ArmyState.DEPLOYED, system.planets[0].id);
+      const betaArmy = createArmy('army-beta', 'red', 4000, ArmyState.DEPLOYED, system.planets[0].id);
+      const gammaArmy = createArmy('army-gamma', 'green', 2000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [alphaArmy, betaArmy, gammaArmy] });
 
-      const result = resolveGroundConflict(system, state);
+      const result = resolveGroundConflict(system.planets[0], system, state);
 
       assert.ok(result, 'Free-for-all ground conflicts should resolve');
       assert.strictEqual(result?.winnerFactionId, 'blue', 'Highest remaining ground power should win on neutral ground');
@@ -837,7 +888,7 @@ const tests: TestCase[] = [
     name: 'Exhausted invaders are cleared so the ground battle does not loop',
     run: () => {
       const system = createSystem('sys-loop-1', 'blue');
-      const blueArmy = createArmy('army-blue-loop', 'blue', 18000, ArmyState.DEPLOYED, system.id);
+      const blueArmy = createArmy('army-blue-loop', 'blue', 18000, ArmyState.DEPLOYED, system.planets[0].id);
       const redArmy: Army = {
         id: 'army-red-loop',
         factionId: 'red',
@@ -845,12 +896,12 @@ const tests: TestCase[] = [
         maxStrength: 20000,
         morale: 0.8,
         state: ArmyState.DEPLOYED,
-        containerId: system.id
+        containerId: system.planets[0].id
       };
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
-      const firstResult = resolveGroundConflict(system, state);
+      const firstResult = resolveGroundConflict(system.planets[0], system, state);
       assert.ok(firstResult, 'Ground conflict should resolve even with exhausted invaders present');
       assert.strictEqual(firstResult?.winnerFactionId, 'blue', 'Defenders should secure their own system');
       assert.ok(firstResult?.armiesDestroyed.includes(redArmy.id), 'Invading army at zero strength must be removed');
@@ -865,7 +916,7 @@ const tests: TestCase[] = [
           .filter(army => !(firstResult?.armiesDestroyed || []).includes(army.id))
       };
 
-      const followUp = resolveGroundConflict(system, updatedState);
+      const followUp = resolveGroundConflict(system.planets[0], system, updatedState);
       assert.strictEqual(followUp, null, 'Once the attacker is destroyed, the ground battle should not loop');
     }
   },
@@ -998,7 +1049,7 @@ const tests: TestCase[] = [
     name: 'Phase ground conquest uses faction color and AI hold updates for any winner',
     run: () => {
       const system = createSystem('sys-green-capture', 'red');
-      const greenArmy = createArmy('army-green', 'green', 8000, ArmyState.DEPLOYED, system.id);
+      const greenArmy = createArmy('army-green', 'green', 8000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [greenArmy], aiStates: {} });
       const ctx = { rng: new RNG(21), turn: state.day + 1 };

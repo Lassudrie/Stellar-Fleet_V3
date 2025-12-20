@@ -9,7 +9,8 @@ import {
   VictoryType,
   GameplayRules,
   FactionState,
-  StarSystemAstro
+  StarSystemAstro,
+  PlanetBody
 } from '../types';
 
 export const SAVE_VERSION = 3 as const;
@@ -44,6 +45,7 @@ export interface ShipDTO {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null;
+  transferBusyUntilDay?: number;
   consumables?: ShipConsumablesDTO;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -86,6 +88,7 @@ export interface StarSystemDTO {
   ownerFactionId: string | null; // Renamed
   resourceType: ResourceType;
   isHomeworld?: boolean;
+  planets?: PlanetBody[];
   astro?: StarSystemAstro;
 }
 

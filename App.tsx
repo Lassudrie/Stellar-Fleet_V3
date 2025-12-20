@@ -20,7 +20,7 @@ import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
@@ -348,6 +348,12 @@ const App: React.FC = () => {
       setUiMode('ORBIT_FLEET_PICKER');
   };
 
+  const handleOpenGroundOps = () => {
+      if (!targetSystem) return;
+      setFleetPickerMode(null);
+      setUiMode('GROUND_OPS_MODAL');
+  };
+
   const handleOpenSystemDetails = () => {
       if (!targetSystem || !viewGameState) return;
       const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
@@ -418,7 +424,7 @@ const App: React.FC = () => {
       }
   };
 
-  const handleDeploySingle = (shipId: string) => {
+  const handleDeploySingle = (shipId: string, planetId: string) => {
       if (!engine || !selectedFleetId) return;
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
@@ -428,12 +434,16 @@ const App: React.FC = () => {
       const ship = fleet.ships.find(s => s.id === shipId);
       if (!ship || !ship.carriedArmyId) return;
 
+      const targetPlanet = system.planets.find(planet => planet.id === planetId && planet.isSolid);
+      if (!targetPlanet) return;
+
       engine.dispatchCommand({
           type: 'UNLOAD_ARMY',
           fleetId: fleet.id,
           shipId: ship.id,
           armyId: ship.carriedArmyId,
-          systemId: system.id
+          systemId: system.id,
+          planetId: targetPlanet.id
       });
   };
 
@@ -450,6 +460,18 @@ const App: React.FC = () => {
           shipId,
           armyId,
           systemId: system.id
+      });
+  };
+
+  const handleTransferArmy = (systemId: string, armyId: string, fromPlanetId: string, toPlanetId: string) => {
+      if (!engine) return;
+
+      engine.dispatchCommand({
+          type: 'TRANSFER_ARMY_PLANET',
+          armyId,
+          fromPlanetId,
+          toPlanetId,
+          systemId
       });
   };
 
@@ -499,6 +521,7 @@ const App: React.FC = () => {
                 onMerge={handleMergeFleet}
                 onDeploy={handleDeploySingle}
                 onEmbark={handleEmbarkArmy}
+                onTransferArmy={handleTransferArmy}
                 winner={viewGameState.winnerFactionId}
                 onRestart={() => setScreen('MENU')}
                 onNextTurn={handleNextTurn}
@@ -508,6 +531,7 @@ const App: React.FC = () => {
                 onUnloadCommand={handleUnloadCommand}
                 onOpenFleetPicker={handleOpenFleetPicker}
                 onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
+                onOpenGroundOps={handleOpenGroundOps}
                 onCloseMenu={handleCloseMenu}
                 fleetPickerMode={fleetPickerMode}
                 onOpenSystemDetails={handleOpenSystemDetails}

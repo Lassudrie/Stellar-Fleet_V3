@@ -1,12 +1,11 @@
 
-import { GameState, FactionId, AIState, Army } from '../../../types';
+import { GameState, FactionId, AIState, Army, ArmyState } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
-    let nextSystems = [...state.systems];
     let nextLogs = [...state.logs];
     let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
 
@@ -28,50 +27,30 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     // Track strength/morale updates for surviving armies
     const armyUpdatesMap = new Map<string, { strength: number; morale: number }>();
     
-    // 1. Resolve Conflict per System
-    nextSystems = nextSystems.map(system => {
-        // Pure calculation based on current state
-        const result = resolveGroundConflict(system, state);
+    // 1. Resolve Conflict per Planet
+    state.systems.forEach(system => {
+        system.planets
+            .filter(planet => planet.isSolid)
+            .forEach(planet => {
+                const result = resolveGroundConflict(planet, system, state);
 
-        if (!result) return system;
+                if (!result) return;
 
-        // Queue destroyed armies
-        result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
+                result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
 
-        // Queue army stat updates
-        result.armyUpdates.forEach(update => {
-            armyUpdatesMap.set(update.armyId, { strength: update.strength, morale: update.morale });
-        });
-        
-        // Add Logs
-        result.logs.forEach(txt => {
-            nextLogs.push({
-                id: ctx.rng.id('log'),
-                day: ctx.turn,
-                text: txt,
-                type: 'combat'
+                result.armyUpdates.forEach(update => {
+                    armyUpdatesMap.set(update.armyId, { strength: update.strength, morale: update.morale });
+                });
+
+                result.logs.forEach(txt => {
+                    nextLogs.push({
+                        id: ctx.rng.id('log'),
+                        day: ctx.turn,
+                        text: txt,
+                        type: 'combat'
+                    });
+                });
             });
-        });
-        
-        // Update Ownership
-        if (result.conquestOccurred && result.winnerFactionId && result.winnerFactionId !== 'draw') {
-            if (aiFactionIds.has(result.winnerFactionId)) {
-                if (!holdUpdates[result.winnerFactionId]) {
-                    holdUpdates[result.winnerFactionId] = [];
-                }
-                holdUpdates[result.winnerFactionId].push(system.id);
-            }
-
-            const winnerColor = state.factions.find(faction => faction.id === result.winnerFactionId)?.color ?? system.color ?? COLORS.star;
-
-            return {
-                ...system,
-                ownerFactionId: result.winnerFactionId,
-                color: winnerColor
-            };
-        }
-        
-        return system;
     });
 
     // 2. Apply accumulated updates then filter destroyed armies
@@ -84,6 +63,65 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     const nextArmies: Army[] = patchedArmies.filter(army => !armiesToDestroyIds.has(army.id));
+
+    const nextSystems = state.systems.map(system => ({
+        ...system,
+        planets: system.planets.map(planet => ({ ...planet }))
+    }));
+
+    const planetIndex = new Map<string, { systemId: string; planetId: string }>();
+    nextSystems.forEach(system => {
+        system.planets.forEach(planet => {
+            planetIndex.set(planet.id, { systemId: system.id, planetId: planet.id });
+        });
+    });
+
+    const armiesByPlanetId = new Map<string, Army[]>();
+    nextArmies.forEach(army => {
+        if (army.state !== ArmyState.DEPLOYED) return;
+        const match = planetIndex.get(army.containerId);
+        if (!match) return;
+        const list = armiesByPlanetId.get(match.planetId) ?? [];
+        list.push(army);
+        armiesByPlanetId.set(match.planetId, list);
+    });
+
+    const updatedSystems = nextSystems.map(system => {
+        const updatedPlanets = system.planets.map(planet => {
+            const armies = armiesByPlanetId.get(planet.id) ?? [];
+            const factionIds = new Set(armies.map(a => a.factionId));
+            const ownerFactionId = factionIds.size === 1 ? Array.from(factionIds)[0] : null;
+            return { ...planet, ownerFactionId };
+        });
+
+        const systemFactionIds = new Set<FactionId>();
+        updatedPlanets.forEach(planet => {
+            if (!planet.isSolid) return;
+            const armies = armiesByPlanetId.get(planet.id) ?? [];
+            armies.forEach(army => systemFactionIds.add(army.factionId));
+        });
+
+        const newOwnerFactionId = systemFactionIds.size === 1 ? Array.from(systemFactionIds)[0] : null;
+        const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
+
+        if (ownerChanged && newOwnerFactionId && aiFactionIds.has(newOwnerFactionId)) {
+            if (!holdUpdates[newOwnerFactionId]) {
+                holdUpdates[newOwnerFactionId] = [];
+            }
+            holdUpdates[newOwnerFactionId].push(system.id);
+        }
+
+        const newColor = newOwnerFactionId
+            ? state.factions.find(faction => faction.id === newOwnerFactionId)?.color ?? COLORS.star
+            : COLORS.star;
+
+        return {
+            ...system,
+            ownerFactionId: newOwnerFactionId,
+            color: newColor,
+            planets: updatedPlanets
+        };
+    });
 
     if (Object.keys(holdUpdates).length > 0) {
         nextAiStates = { ...nextAiStates };
@@ -108,7 +146,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
 
     return {
         ...state,
-        systems: nextSystems,
+        systems: updatedSystems,
         armies: nextArmies,
         logs: nextLogs,
         aiStates: nextAiStates

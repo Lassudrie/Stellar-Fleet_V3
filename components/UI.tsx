@@ -6,12 +6,13 @@ import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
 import SystemContextMenu, { GroundForceSummaryEntry } from './ui/SystemContextMenu';
 import FleetPicker from './ui/FleetPicker';
-import FleetPanel from './ui/FleetPanel';
+import FleetPanel, { AvailableArmy } from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
 import SystemDetailModal from './ui/SystemDetailModal';
+import GroundOpsModal from './ui/GroundOpsModal';
 import { hasInvadingForce } from '../engine/army';
 import { distSq, dist } from '../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
@@ -24,7 +25,7 @@ interface UIProps {
   inspectedFleet: Fleet | null;
   logs: LogEntry[];
 
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -35,8 +36,9 @@ interface UIProps {
   
   onSplit: (shipIds: string[]) => void;
   onMerge: (targetFleetId: string) => void;
-  onDeploy: (shipId: string) => void;
+  onDeploy: (shipId: string, planetId: string) => void;
   onEmbark: (shipId: string, armyId: string) => void;
+  onTransferArmy: (systemId: string, armyId: string, fromPlanetId: string, toPlanetId: string) => void;
   winner: FactionId | 'draw' | null; // Changed type
   onRestart: () => void;
   onNextTurn: () => void;
@@ -46,6 +48,7 @@ interface UIProps {
   onUnloadCommand: (fleetId: string) => void;
   onOpenFleetPicker: (mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK') => void;
   onOpenOrbitingFleetPicker: () => void;
+  onOpenGroundOps: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   onOpenSystemDetails: () => void;
@@ -68,11 +71,11 @@ interface UIProps {
 }
 
 const UI: React.FC<UIProps> = ({
-    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, winner, logs,
+    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, onTransferArmy, winner, logs,
     onRestart, onNextTurn,
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
-    onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onCloseMenu, onSelectFleet,
+    onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
     onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
@@ -114,17 +117,24 @@ const UI: React.FC<UIProps> = ({
   // Compute Ground Context for FleetPanel
   const { orbitingSystem, availableArmies } = useMemo(() => {
       if (!selectedFleet || selectedFleet.state !== FleetState.ORBIT) {
-          return { orbitingSystem: null, availableArmies: [] };
+          return { orbitingSystem: null, availableArmies: [] as AvailableArmy[] };
       }
 
       const sys = findOrbitingSystem(selectedFleet, systems);
 
-      if (!sys) return { orbitingSystem: null, availableArmies: [] };
+      if (!sys) return { orbitingSystem: null, availableArmies: [] as AvailableArmy[] };
+
+      const planetIndex = new Map(sys.planets.filter(planet => planet.isSolid).map(planet => [planet.id, planet]));
 
       // Get armies at this system belonging to Player
       const armies = gameState.armies
-          .filter(a => a.containerId === sys.id && a.factionId === playerFactionId && a.state === ArmyState.DEPLOYED)
-          .sort((a, b) => a.id.localeCompare(b.id));
+          .filter(a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId))
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map(army => ({
+              army,
+              planetId: army.containerId,
+              planetName: planetIndex.get(army.containerId)?.name ?? sys.name
+          }));
 
       return { orbitingSystem: sys, availableArmies: armies };
   }, [selectedFleet, systems, gameState.armies, playerFactionId]);
@@ -135,6 +145,9 @@ const UI: React.FC<UIProps> = ({
       if (!targetSystem) return false;
 
       if (targetSystem.ownerFactionId === playerFactionId) return false;
+
+      const hasLandingZone = targetSystem.planets.some(planet => planet.isSolid);
+      if (!hasLandingZone) return false;
 
       return blueFleets.some(hasInvadingForce);
   }, [targetSystem, blueFleets, playerFactionId]);
@@ -148,8 +161,10 @@ const UI: React.FC<UIProps> = ({
   const showLoadOption = useMemo(() => {
       if (!targetSystem) return false;
 
+      const systemPlanetIds = new Set(targetSystem.planets.filter(planet => planet.isSolid).map(planet => planet.id));
+
       return gameState.armies.some(army =>
-          army.containerId === targetSystem.id &&
+          systemPlanetIds.has(army.containerId) &&
           army.factionId === playerFactionId &&
           army.state === ArmyState.DEPLOYED
       );
@@ -158,6 +173,9 @@ const UI: React.FC<UIProps> = ({
   const showUnloadOption = useMemo(() => {
       if (!targetSystem) return false;
       if (targetSystem.ownerFactionId !== playerFactionId) return false;
+
+      const hasLandingZone = targetSystem.planets.some(planet => planet.isSolid);
+      if (!hasLandingZone) return false;
 
       const playerFleetIds = new Set(blueFleets.map(fleet => fleet.id));
 
@@ -189,10 +207,12 @@ const UI: React.FC<UIProps> = ({
   const groundForcesSummary = useMemo<Record<FactionId, GroundForceSummaryEntry> | null>(() => {
       if (!targetSystem || !gameState.armies) return null;
 
+      const systemPlanetIds = new Set(targetSystem.planets.filter(planet => planet.isSolid).map(planet => planet.id));
+
       const aggregates: Record<FactionId, { count: number, currentStrength: number, maxStrength: number, moraleSum: number }> = {};
 
       gameState.armies.forEach(army => {
-          if (army.containerId === targetSystem.id && army.state === ArmyState.DEPLOYED) {
+          if (systemPlanetIds.has(army.containerId) && army.state === ArmyState.DEPLOYED) {
               if (!aggregates[army.factionId]) {
                   aggregates[army.factionId] = { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 };
               }
@@ -234,6 +254,11 @@ const UI: React.FC<UIProps> = ({
 
       return summaries;
   }, [targetSystem, gameState.armies, playerFactionId, factionLookup]);
+
+  const showGroundOpsOption = useMemo(() => {
+      if (!targetSystem) return false;
+      return targetSystem.planets.some(planet => planet.isSolid);
+  }, [targetSystem]);
 
   const handleSelectFleetAtSystem = () => {
       if (orbitingPlayerFleets.length === 0) return;
@@ -289,12 +314,14 @@ const UI: React.FC<UIProps> = ({
             showAttackOption={showAttackOption}
             showLoadOption={showLoadOption}
             showUnloadOption={showUnloadOption}
+            showGroundOpsOption={showGroundOpsOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
             onOpenSystemDetails={onOpenSystemDetails}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
             onOpenLoadPicker={() => onOpenFleetPicker('LOAD')}
             onOpenUnloadPicker={() => onOpenFleetPicker('UNLOAD')}
+            onOpenGroundOps={onOpenGroundOps}
             onInvade={() => onInvade(targetSystem.id)}
             onAttack={() => onOpenFleetPicker('ATTACK')}
             onClose={onCloseMenu}
@@ -332,6 +359,21 @@ const UI: React.FC<UIProps> = ({
             onConfirm={onCommitInvasion}
             onClose={onCloseMenu}
             playerFactionId={playerFactionId}
+        />
+      )}
+
+      {uiMode === 'GROUND_OPS_MODAL' && targetSystem && (
+        <GroundOpsModal
+            system={targetSystem}
+            armies={gameState.armies}
+            fleets={gameState.fleets}
+            factions={gameState.factions}
+            playerFactionId={playerFactionId}
+            day={day}
+            onTransfer={(armyId, fromPlanetId, toPlanetId) =>
+                onTransferArmy(targetSystem.id, armyId, fromPlanetId, toPlanetId)
+            }
+            onClose={onCloseMenu}
         />
       )}
 

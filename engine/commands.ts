@@ -1,5 +1,5 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry } from '../types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone, distSq } from './math/vec3';
@@ -7,16 +7,51 @@ import { deepFreezeDev } from './state/immutability';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { isOrbitContested } from './orbit';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { getDefaultSolidPlanet, getPlanetById } from './planets';
+import { shortId } from './idUtils';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
-  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
+  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
+  | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
+
+const getAvailableTransportsInOrbit = (
+    state: GameState,
+    systemId: string,
+    factionId: FactionId
+): Array<{ fleet: Fleet; shipIndex: number }> => {
+    const system = getSystemById(state.systems, systemId);
+    if (!system) return [];
+
+    const inOrbit = state.fleets.filter(fleet =>
+        fleet.factionId === factionId &&
+        fleet.state === FleetState.ORBIT &&
+        distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ
+    );
+
+    const candidates: Array<{ fleet: Fleet; shipIndex: number }> = [];
+
+    inOrbit.forEach(fleet => {
+        fleet.ships.forEach((ship, index) => {
+            if (ship.type !== ShipType.TROOP_TRANSPORT) return;
+            if (ship.carriedArmyId) return;
+            if ((ship.transferBusyUntilDay ?? -Infinity) >= state.day) return;
+            candidates.push({ fleet, shipIndex: index });
+        });
+    });
+
+    return candidates.sort((a, b) => {
+        const fleetDiff = a.fleet.id.localeCompare(b.fleet.id);
+        if (fleetDiff !== 0) return fleetDiff;
+        return a.fleet.ships[a.shipIndex].id.localeCompare(b.fleet.ships[b.shipIndex].id);
+    });
+};
 
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): GameState => {
     // Enforce Immutability in Dev
@@ -190,7 +225,13 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const ship = fleet.ships.find(s => s.id === command.shipId && !s.carriedArmyId);
             if (!ship) return state;
 
-            const validArmy = army.state === ArmyState.DEPLOYED && army.containerId === system.id && army.factionId === fleet.factionId;
+            const armyPlanet = getPlanetById(state.systems, army.containerId);
+            const validArmy = (
+                army.state === ArmyState.DEPLOYED &&
+                army.factionId === fleet.factionId &&
+                armyPlanet?.system.id === system.id &&
+                armyPlanet.planet.isSolid
+            );
             if (!validArmy) return state;
 
             const loadResult = computeLoadOps({
@@ -219,8 +260,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const system = getSystemById(state.systems, command.systemId);
             const fleet = state.fleets.find(f => f.id === command.fleetId);
             const army = state.armies.find(a => a.id === command.armyId);
+            const targetPlanet = getPlanetById(state.systems, command.planetId);
 
-            if (!system || !fleet || !army) return state;
+            if (!system || !fleet || !army || !targetPlanet) return state;
+            if (targetPlanet.system.id !== system.id || !targetPlanet.planet.isSolid) return state;
 
             const inOrbit =
                 fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
@@ -241,15 +284,16 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 day: state.day,
                 rng,
                 fleetLabel: fleet.id,
+                targetPlanetId: targetPlanet.planet.id,
                 allowedArmyIds: new Set([command.armyId]),
                 allowedShipIds: new Set([command.shipId]),
-                logText: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${system.name}.`
+                logText: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${targetPlanet.planet.name}.`
             });
 
             if (unloadResult.count === 0) return state;
 
             const riskOutcome = contested
-                ? applyContestedUnloadRisk(unloadResult.armies, [command.armyId], system.name, state.day, rng)
+                ? applyContestedUnloadRisk(unloadResult.armies, [command.armyId], system.name, targetPlanet.planet.name, state.day, rng)
                 : { armies: unloadResult.armies, logs: [] };
 
             return {
@@ -257,6 +301,54 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
                 armies: riskOutcome.armies,
                 logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
+            };
+        }
+
+        case 'TRANSFER_ARMY_PLANET': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army || army.state !== ArmyState.DEPLOYED) return state;
+
+            if (army.containerId !== command.fromPlanetId) return state;
+
+            const fromMatch = getPlanetById(state.systems, command.fromPlanetId);
+            const toMatch = getPlanetById(state.systems, command.toPlanetId);
+            if (!fromMatch || !toMatch) return state;
+            if (!fromMatch.planet.isSolid || !toMatch.planet.isSolid) return state;
+            if (fromMatch.system.id !== toMatch.system.id || fromMatch.system.id !== command.systemId) return state;
+
+            const availableTransports = getAvailableTransportsInOrbit(state, fromMatch.system.id, army.factionId);
+            const carrier = availableTransports[0];
+            if (!carrier) return state;
+
+            const updatedFleets = state.fleets.map(fleet => {
+                if (fleet.id !== carrier.fleet.id) return fleet;
+                const ships = fleet.ships.map((ship, index) => {
+                    if (index !== carrier.shipIndex) return ship;
+                    return { ...ship, transferBusyUntilDay: state.day };
+                });
+                return { ...fleet, ships };
+            });
+
+            const updatedArmies = state.armies.map(existing => {
+                if (existing.id !== army.id) return existing;
+                return { ...existing, containerId: toMatch.planet.id };
+            });
+
+            const carrierShip = carrier.fleet.ships[carrier.shipIndex];
+            const logText = command.reason ?? `Army ${shortId(army.id)} transferred from ${fromMatch.planet.name} to ${toMatch.planet.name} using ${shortId(carrierShip.id)}.`;
+
+            const transferLog: LogEntry = {
+                id: rng.id('log'),
+                day: state.day,
+                text: logText,
+                type: 'move'
+            };
+
+            return {
+                ...state,
+                fleets: updatedFleets,
+                armies: updatedArmies,
+                logs: [...state.logs, transferLog]
             };
         }
 

@@ -1,7 +1,8 @@
 
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
+import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody } from '../types';
 import { RNG } from './rng';
 import { devLog } from '../tools/devLogger';
+import { getPlanetById } from './planets';
 
 export const MIN_ARMY_CREATION_STRENGTH = 10000;
 export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
@@ -12,7 +13,7 @@ export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(
  * 
  * @param factionId The faction owning the army.
  * @param strength Number of soldiers.
- * @param containerId ID of the Fleet (if embarked) or System (if deployed).
+ * @param containerId ID of the Fleet (if embarked) or Planet/Moon (if deployed).
  * @param initialState Initial state (default: EMBARKED).
  * @param rng Random Number Generator for ID creation.
  * @returns The created Army object or null if validation fails.
@@ -64,10 +65,9 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
 
   // 2. Location Integrity
   if (army.state === ArmyState.DEPLOYED) {
-    // Must be in a valid System
-    const system = state.systems.find(s => s.id === army.containerId);
-    if (!system) {
-      // console.warn(`[Army] Orphaned Deployed Army: ${army.id} refers to missing system ${army.containerId}.`);
+    const match = getPlanetById(state.systems, army.containerId);
+    if (!match || !match.planet.isSolid) {
+      // console.warn(`[Army] Orphaned Deployed Army: ${army.id} refers to missing/invalid planet ${army.containerId}.`);
       return false;
     }
   } else if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
@@ -299,11 +299,11 @@ export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): bo
 };
 
 /**
- * Unloads an army from a ship to a system.
+ * Unloads an army from a ship to a planet.
  * 
  * @returns true if successful.
  */
-export const deployArmyToSystem = (army: Army, ship: ShipEntity, system: StarSystem): boolean => {
+export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): boolean => {
     if (ship.carriedArmyId !== army.id) {
         console.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
         return false;
@@ -311,9 +311,9 @@ export const deployArmyToSystem = (army: Army, ship: ShipEntity, system: StarSys
 
     ship.carriedArmyId = null;
     army.state = ArmyState.DEPLOYED;
-    army.containerId = system.id;
+    army.containerId = planet.id;
     
-    console.log(`[Army] ${army.id} DEPLOYED to ${system.name}.`);
+    console.log(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
     return true;
 };
 

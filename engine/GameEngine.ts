@@ -8,6 +8,7 @@ import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './ar
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import { isOrbitContested } from './orbit';
+import { getDefaultSolidPlanet } from './planets';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -115,6 +116,9 @@ export class GameEngine {
     private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
         if (!this.isFleetAtSystem(fleet, system)) return false;
 
+        const targetPlanet = getDefaultSolidPlanet(system);
+        if (!targetPlanet) return false;
+
         const contestedOrbit = isOrbitContested(system, this.state);
         const unloadResult = computeUnloadOps({
             fleet,
@@ -122,7 +126,8 @@ export class GameEngine {
             armies: this.state.armies,
             day: this.state.day,
             rng: this.rng,
-            fleetLabel: fleet.id
+            fleetLabel: fleet.id,
+            targetPlanetId: targetPlanet.id
         });
 
         if (unloadResult.count === 0) return false;
@@ -135,6 +140,7 @@ export class GameEngine {
                 updatedArmies,
                 unloadResult.unloadedArmyIds,
                 system.name,
+                targetPlanet.name,
                 this.state.day,
                 this.rng
             );
@@ -209,9 +215,11 @@ export class GameEngine {
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
 
+            const systemPlanetIds = new Set(system.planets.map(planet => planet.id));
             const hasAlliedArmies = this.state.armies.some(a =>
-                a.containerId === system.id &&
-                a.factionId === playerFactionId
+                a.factionId === playerFactionId &&
+                a.state === ArmyState.DEPLOYED &&
+                systemPlanetIds.has(a.containerId)
             );
 
             if (!hasAlliedArmies) return { ok: false, error: 'No allied armies to load' };
@@ -245,6 +253,7 @@ export class GameEngine {
             if (!system) return { ok: false, error: 'System not found' };
 
             if (system.ownerFactionId !== playerFactionId) return { ok: false, error: 'System is not allied' };
+            if (!getDefaultSolidPlanet(system)) return { ok: false, error: 'No viable landing zone' };
 
             const unloadedImmediately = this.tryImmediateUnload(fleet, system);
             if (unloadedImmediately) {

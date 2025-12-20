@@ -27,15 +27,15 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
     const isOwned = system.ownerFactionId !== null;
     
     const resourceIcon = useMemo(() => {
-        const planets = system.astro?.planets;
+        const planets = system.planets;
         if (!planets || planets.length === 0) return null;
 
         const hasGaseousGiant = planets.some(
-            (planet) => planet.type === 'GasGiant' || planet.type === 'IceGiant'
+            (planet) => planet.class === 'gas_giant' || planet.class === 'ice_giant'
         );
 
         return hasGaseousGiant ? '🪐' : null;
-    }, [system.astro]);
+    }, [system.planets]);
 
     const armyVisual = useMemo(() => {
         if (!armyInfo || (armyInfo.playerCount === 0 && armyInfo.enemyCount === 0)) return null;
@@ -152,13 +152,22 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
       const map = new Map<string, ArmyInfo>();
       if (!armies) return map;
 
+      const planetToSystem = new Map<string, string>();
+      systems.forEach(system => {
+          system.planets.forEach(planet => {
+              planetToSystem.set(planet.id, system.id);
+          });
+      });
+
       armies.forEach(army => {
           if (army.state !== ArmyState.DEPLOYED) return;
+          const systemId = planetToSystem.get(army.containerId);
+          if (!systemId) return;
           
-          if (!map.has(army.containerId)) {
-              map.set(army.containerId, { playerCount: 0, enemyCount: 0, hasConflict: false });
+          if (!map.has(systemId)) {
+              map.set(systemId, { playerCount: 0, enemyCount: 0, hasConflict: false });
           }
-          const info = map.get(army.containerId)!;
+          const info = map.get(systemId)!;
           
           if (army.factionId === playerFactionId) info.playerCount++;
           else info.enemyCount++;
@@ -166,7 +175,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
           info.hasConflict = info.playerCount > 0 && info.enemyCount > 0;
       });
       return map;
-  }, [armies, playerFactionId]);
+  }, [armies, playerFactionId, systems]);
 
   const lineGeometry = useMemo(() => {
     if (!systems || systems.length === 0) return new BufferGeometry();

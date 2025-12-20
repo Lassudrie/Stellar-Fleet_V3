@@ -35,6 +35,7 @@ import {
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../data/static';
 import { generateStellarSystem } from '../services/world/stellar';
+import { normalizePlanetBodies } from './planets';
 
 // --- HELPERS ---
 
@@ -228,7 +229,8 @@ export const serializeGameState = (state: GameState): string => {
       ...s,
       color: s.color || factionColorById.get(s.ownerFactionId ?? '') || '#ffffff',
       ownerFactionId: s.ownerFactionId,
-      position: serializeVector3(s.position)
+      position: serializeVector3(s.position),
+      planets: s.planets
     })),
     fleets: state.fleets.map(f => ({
       ...f,
@@ -245,6 +247,7 @@ export const serializeGameState = (state: GameState): string => {
           hp: s.hp,
           maxHp: s.maxHp,
           carriedArmyId: s.carriedArmyId || null,
+          transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
           consumables: extractConsumables(s, s.type),
           offensiveMissilesLeft: s.offensiveMissilesLeft ?? s.consumables?.offensiveMissiles,
           torpedoesLeft: s.torpedoesLeft ?? s.consumables?.torpedoes,
@@ -337,6 +340,13 @@ export const deserializeGameState = (json: string): GameState => {
         console.warn(`System '${s.id ?? 'unknown'}' had an invalid color; applying fallback.`);
       }
 
+      const astro = restoreAstro(s.astro, worldSeed, s.id);
+      const planets = normalizePlanetBodies(
+        { id: s.id, name: s.name, ownerFactionId },
+        s.planets,
+        astro
+      );
+
       return {
         id: s.id,
         name: s.name,
@@ -345,7 +355,8 @@ export const deserializeGameState = (json: string): GameState => {
         size: s.size,
         resourceType: s.resourceType,
         isHomeworld: s.isHomeworld ?? false,
-        astro: restoreAstro(s.astro, worldSeed, s.id),
+        astro,
+        planets,
         // Map Legacy 'owner' (enum) to 'ownerFactionId' (string)
         ownerFactionId
       };
@@ -391,6 +402,7 @@ export const deserializeGameState = (json: string): GameState => {
               hp,
               maxHp,
               carriedArmyId: s.carriedArmyId ?? null,
+              transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
               consumables,
               offensiveMissilesLeft: s.offensiveMissilesLeft ?? consumables.offensiveMissiles,
               torpedoesLeft: s.torpedoesLeft ?? consumables.torpedoes,

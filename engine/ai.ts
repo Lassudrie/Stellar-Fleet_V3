@@ -1,12 +1,13 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting } from '../types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army } from '../types';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
-import { CAPTURE_RANGE } from '../data/static';
+import { CAPTURE_RANGE, ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { getDefaultSolidPlanet } from './planets';
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
 
@@ -67,6 +68,16 @@ export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
 
 export const getLegacyAiFactionId = (factions: FactionState[]): FactionId | undefined =>
   getAiFactionIds(factions)[0];
+
+const buildPlanetSystemMap = (systems: GameState['systems']): Map<string, string> => {
+  const map = new Map<string, string>();
+  systems.forEach(system => {
+    system.planets.forEach(planet => {
+      map.set(planet.id, system.id);
+    });
+  });
+  return map;
+};
 
 const AI_PROFILE_CONFIGS: Record<AiProfile, AiConfig> = {
   aggressive: withOverrides({
@@ -316,6 +327,7 @@ const generateTasks = (
   minDistanceBySystemId: Record<string, number>,
   myFleets: Fleet[],
   mySystems: GameState['systems'],
+  planetSystemMap: Map<string, string>,
   totalMyPower: number,
   rng: RNG,
   activeHoldSystems: Record<string, number>
@@ -399,11 +411,12 @@ const generateTasks = (
       });
     } else if (!sysData.isOwner && sysData.value > 20) {
       if (sysData.threat < totalMyPower * 0.8) {
-          const defenders = state.armies.filter(a =>
-              a.containerId === sysData.id &&
-              a.state === ArmyState.DEPLOYED &&
-              a.factionId !== factionId
-          ).length;
+          const defenders = state.armies.filter(a => {
+              if (a.state !== ArmyState.DEPLOYED) return false;
+              const systemId = planetSystemMap.get(a.containerId);
+              if (systemId !== sysData.id) return false;
+              return a.factionId !== factionId;
+          }).length;
 
           const hasEmbarkedArmies = myFleets.some(f =>
               f.ships.some(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
@@ -666,12 +679,15 @@ const planArmyEmbarkation = (
   state: GameState,
   factionId: FactionId,
   assignments: FleetAssignment[],
-  embarkedFriendlyArmies: Set<string>
+  embarkedFriendlyArmies: Set<string>,
+  planetSystemMap: Map<string, string>
 ) => {
   const availableArmyCounts: Record<string, number> = {};
   state.armies.forEach(army => {
     if (army.factionId !== factionId || army.state !== ArmyState.DEPLOYED) return;
-    availableArmyCounts[army.containerId] = (availableArmyCounts[army.containerId] || 0) + 1;
+    const systemId = planetSystemMap.get(army.containerId);
+    if (!systemId) return;
+    availableArmyCounts[systemId] = (availableArmyCounts[systemId] || 0) + 1;
   });
 
   const loadCommands: GameCommand[] = [];
@@ -758,6 +774,10 @@ const generateCommands = (
       if (fleet.state === FleetState.ORBIT &&
           state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
           if (task.type === 'INVADE') {
+              const targetSystem = getSystemById(state.systems, task.systemId);
+              const targetPlanet = targetSystem ? getDefaultSolidPlanet(targetSystem) : null;
+              if (!targetPlanet) return;
+
               fleet.ships
                   .filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
                   .forEach(ship => {
@@ -768,6 +788,7 @@ const generateCommands = (
                           shipId: ship.id,
                           armyId: ship.carriedArmyId,
                           systemId: task.systemId,
+                          planetId: targetPlanet.id,
                           reason: 'Unload embarked army for invasion objective'
                       });
                   });
@@ -847,6 +868,84 @@ const generateCommands = (
   return commands;
 };
 
+const planPlanetTransfers = (state: GameState, factionId: FactionId): GameCommand[] => {
+  const commands: GameCommand[] = [];
+  const armiesByPlanetId = new Map<string, Army[]>();
+
+  state.armies.forEach(army => {
+    if (army.state !== ArmyState.DEPLOYED) return;
+    const list = armiesByPlanetId.get(army.containerId) ?? [];
+    list.push(army);
+    armiesByPlanetId.set(army.containerId, list);
+  });
+
+  const orderedSystems = [...state.systems].sort((a, b) => a.id.localeCompare(b.id));
+
+  orderedSystems.forEach(system => {
+    const solidPlanets = system.planets.filter(planet => planet.isSolid).sort((a, b) => a.id.localeCompare(b.id));
+    if (solidPlanets.length < 2) return;
+
+    const availableTransports = state.fleets
+      .filter(fleet =>
+        fleet.factionId === factionId &&
+        fleet.state === FleetState.ORBIT &&
+        distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ
+      )
+      .reduce((count, fleet) => {
+        const freeTransports = fleet.ships.filter(ship =>
+          ship.type === ShipType.TROOP_TRANSPORT &&
+          !ship.carriedArmyId &&
+          (ship.transferBusyUntilDay ?? -Infinity) < state.day
+        ).length;
+        return count + freeTransports;
+      }, 0);
+
+    if (availableTransports <= 0) return;
+
+    const planetStats = solidPlanets.map(planet => {
+      const armies = (armiesByPlanetId.get(planet.id) ?? []).slice().sort((a, b) => a.id.localeCompare(b.id));
+      const friendlyArmies = armies.filter(army => army.factionId === factionId);
+      const hostileArmies = armies.filter(army => army.factionId !== factionId);
+      return { planet, friendlyArmies, hostileCount: hostileArmies.length };
+    });
+
+    const friendlyPlanets = planetStats.filter(stat => stat.friendlyArmies.length > 0);
+    const hostilePlanets = planetStats.filter(stat => stat.hostileCount > 0);
+
+    if (friendlyPlanets.length === 0 || hostilePlanets.length === 0) return;
+
+    friendlyPlanets.sort((a, b) => {
+      const diff = b.friendlyArmies.length - a.friendlyArmies.length;
+      if (diff !== 0) return diff;
+      return a.planet.id.localeCompare(b.planet.id);
+    });
+
+    hostilePlanets.sort((a, b) => {
+      const diff = b.hostileCount - a.hostileCount;
+      if (diff !== 0) return diff;
+      return a.planet.id.localeCompare(b.planet.id);
+    });
+
+    const fromPlanet = friendlyPlanets[0];
+    const toPlanet = hostilePlanets[0];
+    if (fromPlanet.planet.id === toPlanet.planet.id) return;
+
+    const army = fromPlanet.friendlyArmies[0];
+    if (!army) return;
+
+    commands.push({
+      type: 'TRANSFER_ARMY_PLANET',
+      armyId: army.id,
+      fromPlanetId: fromPlanet.planet.id,
+      toPlanetId: toPlanet.planet.id,
+      systemId: system.id,
+      reason: `Redistribute forces toward ${toPlanet.planet.name}`
+    });
+  });
+
+  return commands;
+};
+
 export const planAiTurn = (
   state: GameState,
   factionId: FactionId,
@@ -855,6 +954,7 @@ export const planAiTurn = (
 ): GameCommand[] => {
   const factionProfile = state.factions.find(faction => faction.id === factionId)?.aiProfile;
   const cfg = getAiConfig(factionProfile);
+  const planetSystemMap = buildPlanetSystemMap(state.systems);
 
   const { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory } =
     updateMemory(state, factionId, existingState, cfg);
@@ -877,6 +977,7 @@ export const planAiTurn = (
     minDistanceBySystemId,
     myFleets,
     mySystems,
+    planetSystemMap,
     totalMyPower,
     rng,
     activeHoldSystems
@@ -887,7 +988,8 @@ export const planAiTurn = (
     state,
     factionId,
     assignments,
-    embarkedFriendlyArmies
+    embarkedFriendlyArmies,
+    planetSystemMap
   );
 
   const commandList = generateCommands(
@@ -901,5 +1003,7 @@ export const planAiTurn = (
     loadPlannedFleetIds
   );
 
-  return commandList;
+  const transferCommands = planPlanetTransfers(state, factionId);
+
+  return [...commandList, ...transferCommands];
 };

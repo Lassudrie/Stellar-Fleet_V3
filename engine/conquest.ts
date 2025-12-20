@@ -1,14 +1,11 @@
 
-import { GameState, StarSystem, FactionId, ArmyState, Army } from '../types';
-import { COLORS, CAPTURE_RANGE } from '../data/static';
+import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../types';
 import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
-import { Vec3 } from './math/vec3';
-import { isOrbitContested } from './orbit';
 
 export interface GroundBattleResult {
     systemId: string;
+    planetId: string;
     winnerFactionId: FactionId | 'draw' | null;
-    conquestOccurred: boolean;
     armiesDestroyed: string[]; // IDs of destroyed armies
     armyUpdates: { armyId: string; strength: number; morale: number }[];
     casualties: { factionId: FactionId; strengthLost: number; moraleLost: number; destroyed: string[] }[];
@@ -124,10 +121,10 @@ const applyLosses = (
  * - Surviving armies update strength and morale; units below the destruction threshold are removed.
  * - Conquest only triggers when one faction retains armies above the threshold and the opponent has none.
  */
-export const resolveGroundConflict = (system: StarSystem, state: GameState): GroundBattleResult | null => {
+export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, state: GameState): GroundBattleResult | null => {
     // 1. Gather Forces
     const armiesOnGround = state.armies.filter(a =>
-        a.containerId === system.id &&
+        a.containerId === planet.id &&
         a.state === ArmyState.DEPLOYED
     );
 
@@ -168,7 +165,7 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         }
         const soleFaction = soleFactionResult.value as FactionId;
         winnerFactionId = soleFaction;
-        logText = `System ${system.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
+        logText = `Planet ${planet.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
         casualties = [{ factionId: soleFaction, strengthLost: 0, moraleLost: 0, destroyed: [] }];
     } else {
         // Case B: Active Combat (rule depends on defender presence)
@@ -232,7 +229,7 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
                 const baseArmy = originalArmiesById.get(update.armyId);
                 return baseArmy
                     ? { ...baseArmy, strength: update.strength, morale: update.morale }
-                    : { id: update.armyId, factionId, strength: update.strength, morale: update.morale, maxStrength: update.strength, state: ArmyState.DEPLOYED, containerId: system.id };
+                    : { id: update.armyId, factionId, strength: update.strength, morale: update.morale, maxStrength: update.strength, state: ArmyState.DEPLOYED, containerId: planet.id };
             });
 
             survivingPowers.push({ factionId, remainingPower: calculatePower(reconstructedArmies) });
@@ -292,7 +289,7 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
                 ? 'attacker coalition vs defender (attackers cooperate; strongest surviving attacker claims the conquest; defender keeps control on ties)'
                 : 'free-for-all (everyone fights everyone else; highest remaining ground power wins; ties are stalemates; no survivors neutralize the site)';
 
-        logText = `Ground battle at ${system.name} resolved as ${ruleDescription}. Outcome: ${outcomeLabel}.`;
+        logText = `Ground battle at ${planet.name} (${system.name}) resolved as ${ruleDescription}. Outcome: ${outcomeLabel}.`;
         if (survivorsText.length > 0) {
             logText += ` Remaining power: ${survivorsText}.`;
         }
@@ -305,29 +302,17 @@ export const resolveGroundConflict = (system: StarSystem, state: GameState): Gro
         }
     }
 
-    let conquestOccurred = false;
-    const conquestAttempt = winnerFactionId && winnerFactionId !== 'draw' && system.ownerFactionId !== winnerFactionId;
-
-    if (conquestAttempt && winnerFactionId && winnerFactionId !== 'draw') {
-        const contested = isOrbitContested(system, state);
-        if (contested) {
-            logText += ' Orbital contestation within capture range blocks the capture.';
-        } else {
-            conquestOccurred = true;
-        }
-    }
-
     const unopposed = armiesByFaction.size === 1;
     const hasUpdates = armyUpdates.length > 0 || armiesToDestroy.length > 0;
 
-    if (!hasUpdates && !conquestAttempt && !conquestOccurred && unopposed) {
+    if (!hasUpdates && unopposed) {
         return null;
     }
 
     return {
         systemId: system.id,
+        planetId: planet.id,
         winnerFactionId,
-        conquestOccurred,
         armiesDestroyed: armiesToDestroy,
         armyUpdates,
         casualties,

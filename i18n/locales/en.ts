@@ -72,6 +72,7 @@ export const en = {
 
   // Context Menu
   'ctx.groundForces': 'Ground Forces',
+  'ctx.groundOps': 'Ground Ops',
   'ctx.homeworld': 'Homeworld',
   'ctx.moveTo': 'Move To...',
   'ctx.selectFleet': 'Select fleet',
@@ -144,10 +145,25 @@ export const en = {
   'fleet.mergeWith': 'Merge with {{fleet}}',
   'fleet.hostile': 'HOSTILE SIGNAL',
   'fleet.deploy': 'Deploy {{army}}',
+  'fleet.deployTo': 'Deploy to...',
   'fleet.load': 'Load Army...',
   'fleet.status.orbit': 'ORBIT',
   'fleet.status.moving': 'MOVING',
   'fleet.status.combat': 'COMBAT',
+
+  // Ground Ops
+  'groundOps.title': 'Ground Fronts',
+  'groundOps.system': 'System: {{system}}',
+  'groundOps.transports': 'Transports available: {{count}}',
+  'groundOps.transportsNone': 'No transports in orbit.',
+  'groundOps.noLandingZones': 'No solid bodies available for ground ops.',
+  'groundOps.owner': 'Owner',
+  'groundOps.neutral': 'Neutral',
+  'groundOps.contested': 'Contested',
+  'groundOps.noTroops': 'No deployed troops.',
+  'groundOps.transfer': 'Transfer',
+  'groundOps.transferTo': 'Transfer to...',
+  'groundOps.transferDisabled': 'Transfers require free transports in orbit and another solid body.',
 
   // Invasion
   'invasion.title': 'Invasion Planner',

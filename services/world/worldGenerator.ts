@@ -8,6 +8,7 @@ import { vec3, clone, Vec3, distSq } from '../../engine/math/vec3';
 import { SHIP_STATS } from '../../data/static';
 import { devLog, devWarn } from '../../tools/devLogger';
 import { generateStellarSystem } from './stellar';
+import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../../engine/planets';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -54,6 +55,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   
   // 1a. Static Systems (Overrides)
   const staticDefs = scenario.generation.staticSystems || [];
+  const staticPlanetOverrides = new Map<string, PlanetBodySeed[]>();
   const staticNames = new Set<string>();
 
   staticDefs.forEach(def => {
@@ -65,9 +67,13 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       size: 1.5, // Static systems are usually significant
       ownerFactionId: null,
       resourceType: def.resourceType,
-      isHomeworld: false
+      isHomeworld: false,
+      planets: []
     });
     staticNames.add(def.name);
+    if (def.planets && def.planets.length > 0) {
+      staticPlanetOverrides.set(def.id, def.planets);
+    }
   });
 
   // Validate static systems spacing (static positions are not auto-adjusted).
@@ -273,7 +279,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       size: rng.range(0.8, 1.2),
       ownerFactionId: null,
       resourceType: rng.next() > 0.75 ? 'gas' : 'none',
-      isHomeworld: false
+      isHomeworld: false,
+      planets: []
     });
   }
 
@@ -460,6 +467,16 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       }
   }
 
+  // --- 2.5. BUILD PLANETARY BODIES (from astro + scenario overrides) ---
+  systems.forEach(system => {
+    const overrides = staticPlanetOverrides.get(system.id) ?? [];
+    system.planets = buildPlanetBodies(
+      { id: system.id, name: system.name, ownerFactionId: system.ownerFactionId },
+      system.astro,
+      overrides
+    );
+  });
+
   // --- 3. GENERATE FLEETS & ARMIES ---
   const fleets: Fleet[] = [];
   const armies: Army[] = [];
@@ -591,17 +608,25 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
 
           // Capital gets 3 armies, other owned territory gets 1
           const garrisonCount = isCapital ? 3 : 1;
+          const occupiablePlanets = getSolidPlanets(sys);
+          if (occupiablePlanets.length === 0) {
+              return;
+          }
 
           for (let i = 0; i < garrisonCount; i++) {
+              const targetPlanet = occupiablePlanets[i % occupiablePlanets.length];
               const army = createArmy(
                   sys.ownerFactionId,
                   MIN_ARMY_CREATION_STRENGTH,
-                  sys.id, // Container is System ID
+                  targetPlanet.id,
                   ArmyState.DEPLOYED,
                   rng
               );
               if (army) {
                   armies.push(army);
+                  if (!targetPlanet.ownerFactionId) {
+                      targetPlanet.ownerFactionId = sys.ownerFactionId;
+                  }
               }
           }
       }
