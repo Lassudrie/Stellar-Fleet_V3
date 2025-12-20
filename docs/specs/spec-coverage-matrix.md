@@ -1,0 +1,8 @@
+# Matrice de Couverture des Spécifications
+
+| Sous-système | Fichiers code principaux | Spécification associée | Statut | Action à mener |
+| --- | --- | --- | --- | --- |
+| Engine | `engine/GameEngine.ts`, `engine/runTurn.ts`, `engine/turn/` (cycle de tour), `engine/fogOfWar.ts`, `engine/conquest.ts` | `docs/specs/functional-overview.md`, `docs/specs/battle-system-v1.md` | PARTIAL | Compléter la spécification pour couvrir l’IA (`engine/ai.ts`), la brume de guerre et les règles de conquête, puis aligner les étapes du cycle de tour documenté avec les phases réelles de `runTurn`. |
+| Services | `services/world/worldGenerator.ts`, `services/movement/movementPhase.ts`, `services/battle/resolution.ts`, `services/format/units.ts`, `services/audio/useButtonClickSound.ts` | *(Aucune spécification dédiée)* | MISSING | Rédiger une spécification des services (génération du monde, mouvement, résolution de combat, formatage et audio) incluant leurs entrées/sorties et contrats de dépendance. |
+| Scénarios | `scenarios/index.ts`, `scenarios/registry.ts`, `scenarios/schemaV1.ts`, `scenarios/templates/` | `docs/specs/scenario-spec.md` | OK | Conserver l’alignement entre le schéma V1 et les templates ; ajouter une section « validation automatique » pour formaliser les contrôles lors de l’ajout de nouveaux scénarios. |
+| UI | `App.tsx`, `components/UI.tsx`, `components/GameScene.tsx`, `components/GameCamera.tsx`, `components/Galaxy.tsx` | `docs/manual-camera-bounds.md` (partiel) | OUTDATED | Écrire une spécification UI couvrant le HUD, les interactions (sélection, ordres, infos) et les contraintes caméra, puis remplacer/compléter la note actuelle sur les limites de caméra. |
