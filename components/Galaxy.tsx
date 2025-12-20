@@ -27,9 +27,15 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
     const isOwned = system.ownerFactionId !== null;
     
     const resourceIcon = useMemo(() => {
-        if (system.resourceType === 'gas') return '🪐';
-        return null;
-    }, [system.resourceType]);
+        const planets = system.astro?.planets;
+        if (!planets || planets.length === 0) return null;
+
+        const hasGaseousGiant = planets.some(
+            (planet) => planet.type === 'GasGiant' || planet.type === 'IceGiant'
+        );
+
+        return hasGaseousGiant ? '🪐' : null;
+    }, [system.astro]);
 
     const armyVisual = useMemo(() => {
         if (!armyInfo || (armyInfo.playerCount === 0 && armyInfo.enemyCount === 0)) return null;
