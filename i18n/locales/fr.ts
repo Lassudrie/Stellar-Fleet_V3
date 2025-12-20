@@ -159,6 +159,7 @@ export const fr = {
   'groundOps.owner': 'Controle',
   'groundOps.neutral': 'Neutre',
   'groundOps.contested': 'Conteste',
+  'groundOps.bombardment': 'Bombardement orbital',
   'groundOps.noTroops': 'Aucune troupe deployee.',
   'groundOps.transfer': 'Transfert',
   'groundOps.transferTo': 'Transferer vers...',

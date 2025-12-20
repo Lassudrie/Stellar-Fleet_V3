@@ -4,6 +4,7 @@ import { useI18n } from '../../i18n';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 import { distSq } from '../../engine/math/vec3';
 import { shortId } from '../../engine/idUtils';
+import { getBombardedPlanetIdsForSystem } from '../../engine/orbitalBombardment';
 
 interface GroundOpsModalProps {
   system: StarSystem;
@@ -40,6 +41,10 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
       .filter(planet => planet.isSolid)
       .sort((a, b) => a.id.localeCompare(b.id));
   }, [system.planets]);
+
+  const bombardedPlanetIds = useMemo(() => {
+    return getBombardedPlanetIdsForSystem(system, armies, fleets);
+  }, [system, armies, fleets]);
 
   const planetIdSet = useMemo(() => new Set(solidPlanets.map(planet => planet.id)), [solidPlanets]);
 
@@ -111,6 +116,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
           ) : (
             solidPlanets.map(planet => {
               const planetArmies = armiesByPlanetId.get(planet.id) ?? [];
+              const isBombarded = bombardedPlanetIds.has(planet.id);
               const byFaction = planetArmies.reduce<Map<FactionId, Army[]>>((map, army) => {
                 const list = map.get(army.factionId) ?? [];
                 list.push(army);
@@ -144,7 +150,14 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
                 <div key={planet.id} className="bg-slate-800/60 border border-slate-700 rounded-lg p-4">
                   <div className="flex flex-wrap justify-between gap-2">
                     <div>
-                      <div className="text-sm font-semibold text-white">{planet.name}</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-white">{planet.name}</div>
+                        {isBombarded && (
+                          <span className="text-[10px] uppercase text-red-200 bg-red-900/40 border border-red-500/40 px-2 py-0.5 rounded">
+                            {t('groundOps.bombardment')}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[10px] uppercase text-slate-400">
                         {planet.bodyType} / {planet.class}
                       </div>

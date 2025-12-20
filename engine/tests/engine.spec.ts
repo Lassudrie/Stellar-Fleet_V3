@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import path from 'node:path';
 import { resolveGroundConflict } from '../conquest';
-import { sanitizeArmyLinks } from '../army';
-import { CAPTURE_RANGE, COLORS } from '../../data/static';
+import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
+import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
@@ -28,6 +28,7 @@ import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
 import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
+import { phaseOrbitalBombardment } from '../turn/phases/05_orbital_bombardment';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../battle/outcome';
@@ -459,6 +460,128 @@ const tests: TestCase[] = [
         isOrbitContested(system, stateWithEmptyFleet),
         false,
         'Fleets without ships should not contribute to contesting'
+      );
+    }
+  },
+  {
+    name: 'Orbital bombardment applies to all enemy planets in a secured system',
+    run: () => {
+      const system = createSystem('sys-bombard', 'blue');
+      const secondPlanet = createPlanet(system.id, 'blue', 2);
+      const systemWithTwo = { ...system, planets: [system.planets[0], secondPlanet] };
+
+      const blueFleet = createFleet('fleet-blue-bombard', 'blue', { ...baseVec }, [
+        { id: 'blue-bombard-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const redArmyA = createArmy('army-red-a', 'red', 12000, ArmyState.DEPLOYED, systemWithTwo.planets[0].id);
+      const redArmyB = createArmy('army-red-b', 'red', 10000, ArmyState.DEPLOYED, systemWithTwo.planets[1].id);
+
+      const state = createBaseState({
+        systems: [systemWithTwo],
+        fleets: [blueFleet],
+        armies: [redArmyA, redArmyB]
+      });
+      const ctx = { turn: state.day + 1, rng: new RNG(11) };
+
+      const nextState = phaseOrbitalBombardment(state, ctx);
+      const updatedA = nextState.armies.find(army => army.id === redArmyA.id);
+      const updatedB = nextState.armies.find(army => army.id === redArmyB.id);
+
+      assert.ok(updatedA && updatedA.strength < redArmyA.strength, 'Bombardment should reduce strength on planet 1');
+      assert.ok(updatedB && updatedB.strength < redArmyB.strength, 'Bombardment should reduce strength on planet 2');
+      assert.ok(updatedA && updatedA.morale < redArmyA.morale, 'Bombardment should reduce morale on planet 1');
+      assert.ok(updatedB && updatedB.morale < redArmyB.morale, 'Bombardment should reduce morale on planet 2');
+      assert.ok(
+        nextState.logs.some(log => log.text.includes('Orbital bombardment')),
+        'Bombardment should log results'
+      );
+    }
+  },
+  {
+    name: 'Orbital bombardment is blocked by enemy fleets in system',
+    run: () => {
+      const system = createSystem('sys-bombard-block', 'red');
+
+      const blueFleet = createFleet('fleet-blue-block', 'blue', { ...baseVec }, [
+        { id: 'blue-block-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+      const redFleet = createFleet('fleet-red-block', 'red', { ...baseVec }, [
+        { id: 'red-block-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const redArmy = createArmy('army-red-block', 'red', 12000, ArmyState.DEPLOYED, system.planets[0].id);
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet, redFleet],
+        armies: [redArmy]
+      });
+      const ctx = { turn: state.day + 1, rng: new RNG(13) };
+
+      const nextState = phaseOrbitalBombardment(state, ctx);
+      const updated = nextState.armies.find(army => army.id === redArmy.id);
+
+      assert.strictEqual(updated?.strength, redArmy.strength, 'Contested orbit should prevent bombardment losses');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should prevent morale loss');
+    }
+  },
+  {
+    name: 'Troop transports alone cannot trigger orbital bombardment',
+    run: () => {
+      const system = createSystem('sys-bombard-transport', null);
+      const transportFleet = createFleet('fleet-transport-only', 'blue', { ...baseVec }, [
+        { id: 'blue-transport', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: null }
+      ]);
+
+      const redArmy = createArmy('army-red-transport', 'red', 12000, ArmyState.DEPLOYED, system.planets[0].id);
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [transportFleet],
+        armies: [redArmy]
+      });
+      const ctx = { turn: state.day + 1, rng: new RNG(17) };
+
+      const nextState = phaseOrbitalBombardment(state, ctx);
+      const updated = nextState.armies.find(army => army.id === redArmy.id);
+
+      assert.strictEqual(updated?.strength, redArmy.strength, 'Transport-only fleets should not bombard');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Transport-only fleets should not affect morale');
+    }
+  },
+  {
+    name: 'Orbital bombardment does not reduce armies below destruction thresholds',
+    run: () => {
+      const system = createSystem('sys-bombard-floor', 'blue');
+      const blueFleet = createFleet('fleet-blue-floor', 'blue', { ...baseVec }, [
+        { id: 'blue-floor-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const minStrength = ARMY_DESTROY_THRESHOLD(10000) + ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER;
+      const redArmy: Army = {
+        id: 'army-red-floor',
+        factionId: 'red',
+        strength: minStrength,
+        maxStrength: 10000,
+        morale: 1,
+        state: ArmyState.DEPLOYED,
+        containerId: system.planets[0].id
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet],
+        armies: [redArmy]
+      });
+      const ctx = { turn: state.day + 1, rng: new RNG(19) };
+
+      const nextState = phaseOrbitalBombardment(state, ctx);
+      const updated = nextState.armies.find(army => army.id === redArmy.id);
+
+      assert.ok(
+        updated && updated.strength >= minStrength,
+        'Bombardment should not drop strength below the destruction threshold buffer'
       );
     }
   },

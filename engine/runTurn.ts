@@ -10,6 +10,7 @@ import { phaseBattleResolution } from './turn/phases/01_battle_resolution';
 import { phaseAI } from './turn/phases/02_ai';
 import { phaseMovement } from './turn/phases/03_movement';
 import { phaseBattleDetection } from './turn/phases/04_battle_detection';
+import { phaseOrbitalBombardment } from './turn/phases/05_orbital_bombardment';
 import { phaseGround } from './turn/phases/05_ground';
 import { phaseObjectives } from './turn/phases/06_objectives';
 import { phaseCleanup } from './turn/phases/07_cleanup';
@@ -40,10 +41,13 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 4. Resolve all scheduled battles immediately (Scheduled -> Resolved)
   nextState = phaseBattleResolution(nextState, ctx);
 
-  // 5. Ground Combat & Conquest
+  // 5. Orbital Bombardment (auto)
+  nextState = phaseOrbitalBombardment(nextState, ctx);
+
+  // 6. Ground Combat & Conquest
   nextState = phaseGround(nextState, ctx);
 
-  // 6. Check Victory Objectives
+  // 7. Check Victory Objectives
   nextState = phaseObjectives(nextState, ctx);
 
   // SAFETY: Ensure all battles are resolved before cleanup so turnResolved is always set
@@ -66,7 +70,7 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
     };
   }
 
-  // 7. Cleanup & Maintenance
+  // 8. Cleanup & Maintenance
   nextState = phaseCleanup(nextState, ctx);
 
   // 8. Canonicalize output & Time Advance

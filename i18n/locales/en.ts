@@ -160,6 +160,7 @@ export const en = {
   'groundOps.owner': 'Owner',
   'groundOps.neutral': 'Neutral',
   'groundOps.contested': 'Contested',
+  'groundOps.bombardment': 'Orbital Bombardment',
   'groundOps.noTroops': 'No deployed troops.',
   'groundOps.transfer': 'Transfer',
   'groundOps.transferTo': 'Transfer to...',
