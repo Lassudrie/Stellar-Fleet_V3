@@ -1,126 +1,153 @@
 
 # Modèles de Données
 
-## Entités Principales
+Ce document résume les structures décrites dans `types.ts` pour les factions, flottes, armées, combats, objectifs, règles et données astro. Les exemples sont donnés en minuscules pour les valeurs d'enum et utilisent les clés mises à jour (`winnerFactionId`, `ownerFactionId`).
 
-### GameState
-L'objet racine qui contient tout l'état de la simulation.
+## Types de base et identifiants
+
 ```typescript
-interface GameState {
-  seed: number;       // Seed initiale
-  rngState: number;   // État courant du curseur RNG
-  day: number;        // Tour actuel
-  systems: StarSystem[];
-  fleets: Fleet[];
-  armies: Army[];     // Liste globale des armées (au sol ou embarquées)
-  battles: Battle[];  // Liste des conflits (Actifs et Passés)
-  logs: LogEntry[];   // Historique des événements
-  winner: Faction | null;
+export type FactionId = string;
+export type ResourceType = 'none' | 'gas';
+export type PlanetBodyType = 'planet' | 'moon';
+export type PlanetClass = 'solid' | 'gas_giant' | 'ice_giant';
+```
+
+### États et valeurs
+
+```typescript
+export enum FleetState {
+  ORBIT = 'ORBIT',
+  MOVING = 'MOVING',
+  COMBAT = 'COMBAT',
+}
+
+export enum ArmyState {
+  EMBARKED = 'EMBARKED',
+  DEPLOYED = 'DEPLOYED',
+  IN_TRANSIT = 'IN_TRANSIT',
 }
 ```
 
-### Army & Ground Forces
-Représente une division d'infanterie planétaire.
-```typescript
-enum ArmyState {
-  EMBARKED = 'embarked',   // Dans un vaisseau (Link via containerId = FleetID)
-  IN_TRANSIT = 'inTransit', // Flotte en mouvement (Logique interne)
-  DEPLOYED = 'deployed'    // Au sol (Link via containerId = SystemID)
-}
+Valeurs suggérées dans les exemples JSON :
+* `FleetState` : `'orbit'`, `'moving'`, `'combat'`
+* `ArmyState` : `'embarked'`, `'deployed'`, `'in_transit'`
 
-interface Army {
-  id: string;
-  faction: Faction;
-  strength: number;    // Effectif (Min 10,000)
-  state: ArmyState;
-  containerId: string; // ID du Système ou de la Flotte
+## Factions
+
+```typescript
+export interface FactionState {
+  id: FactionId;
+  name: string;
+  color: string;
+  isPlayable: boolean;
+  aiProfile?: string;
 }
 ```
 
-### StarSystem
-Représente un nœud sur la carte galactique.
-```typescript
-interface StarSystem {
-  id: string;
-  position: Vector3; // Three.js Vector3
-  owner: Faction | null;
-  resourceType: 'gas' | 'none';
-  // ...props visuelles
-}
-```
+## Systèmes et astro
 
-### Fleet & Ships
-Une flotte contient une liste de vaisseaux. Les vaisseaux sont des entités individuelles.
 ```typescript
-interface Fleet {
-  id: string;
-  faction: Faction;
-  state: 'orbit' | 'moving' | 'combat';
-  position: Vector3;
-  targetSystemId: string | null; // Destination si moving
-  ships: ShipEntity[];
-}
-
-interface ShipEntity {
-  id: string;
-  type: ShipType; // 'carrier' | 'troop_transport' | ...
-  hp: number;
-  maxHp: number;
-  carriedArmyId?: string | null; // ID de l'armée transportée (si Transport)
-  consumables?: {
-    offensiveMissiles: number;
-    torpedoes: number;
-    interceptors: number;
-  }; // Stocks consommables courants
-  killHistory?: Array<{
-    id: string;
-    day: number;
-    turn: number;
-    targetId: string;
-    targetType: ShipType;
-    targetFactionId: string;
-  }>; // Historique des destructions confirmées par ce vaisseau
-}
-```
-
-### GameCommand (Actions Joueur)
-Commandes dispatchées au moteur pour modifier l'état.
-```typescript
-type GameCommand = 
-  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
-  | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
-  | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-  // Opérations Armée
-  | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string }
-  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string };
-```
-
-### Battle (V1)
-Structure persistante pour gérer les combats sur plusieurs phases.
-```typescript
-interface Battle {
+export interface PlanetBody {
   id: string;
   systemId: string;
-  turnCreated: number;
-  status: 'scheduled' | 'resolving' | 'resolved';
-  involvedFleetIds: string[];
-  logs: string[]; // Logs textuels détaillés du combat
-  shipsLost?: { [key in Faction]: number };
+  name: string;
+  bodyType: PlanetBodyType;
+  class: PlanetClass;
+  ownerFactionId?: FactionId | null;
+  size: number;
+  isSolid: boolean;
+}
+
+export interface StarSystem {
+  id: string;
+  name: string;
+  position: Vec3;
+  color: string;
+  size: number;
+  ownerFactionId: FactionId | null;
+  resourceType: ResourceType;
+  isHomeworld: boolean;
+  planets: PlanetBody[];
+  astro?: StarSystemAstro;
 }
 ```
 
-## Données Statiques (`data/static.ts`)
-Les constantes d'équilibrage ne sont pas dans l'état, elles sont codées en dur ("Data-Driven" via code).
+### Données astro procédurales (résumé)
 
-### ShipStats
-Définit les capacités de chaque classe de vaisseau.
 ```typescript
-interface ShipStats {
+export interface StarSystemAstro {
+  seed: number;
+  primarySpectralType: SpectralType;
+  starCount: number;
+  metallicityFeH: number;
+  derived: {
+    luminosityTotalLSun: number;
+    snowLineAu: number;
+    hzInnerAu: number;
+    hzOuterAu: number;
+  };
+  stars: StarData[];
+  planets: PlanetData[];
+}
+```
+
+Les types `SpectralType`, `PlanetType`, `MoonType` et `AtmosphereType` sont des littéraux de chaînes décrits dans `types.ts`. Les champs numériques sont directement sérialisables pour les sauvegardes.
+
+## Flottes et vaisseaux
+
+```typescript
+export interface Fleet {
+  id: string;
+  factionId: FactionId;
+  ships: ShipEntity[];
+  position: Vec3;
+  state: FleetState;
+  targetSystemId: string | null;
+  targetPosition: Vec3 | null;
+  radius: number;
+  stateStartTurn: number;
+  retreating?: boolean;
+  invasionTargetSystemId?: string | null;
+  loadTargetSystemId?: string | null;
+  unloadTargetSystemId?: string | null;
+}
+
+export interface ShipEntity {
+  id: string;
+  type: ShipType;
+  hp: number;
   maxHp: number;
-  damage: number;       // Dégâts cinétiques
-  speed: number;        // Modificateur de vitesse de flotte
-  pdStrength: number;   // Capacité anti-missile
-  evasion: number;      // 0.0 - 1.0
+  carriedArmyId: string | null;
+  transferBusyUntilDay?: number;
+  consumables?: ShipConsumables;
+  offensiveMissilesLeft?: number;
+  torpedoesLeft?: number;
+  interceptorsLeft?: number;
+  killHistory?: ShipKillRecord[];
+}
+```
+
+Types de vaisseaux et statistiques associées :
+
+```typescript
+export enum ShipType {
+  CARRIER = 'carrier',
+  CRUISER = 'cruiser',
+  DESTROYER = 'destroyer',
+  FRIGATE = 'frigate',
+  FIGHTER = 'fighter',
+  BOMBER = 'bomber',
+  TROOP_TRANSPORT = 'troop_transport',
+}
+
+export interface ShipStats {
+  maxHp: number;
+  damage: number;
+  speed: number;
+  cost: number;
+  pdStrength: number;
+  evasion: number;
+  maneuverability: number;
   offensiveMissileStock: number;
   missileDamage: number;
   torpedoStock: number;
@@ -128,4 +155,162 @@ interface ShipStats {
   interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
 }
+```
+
+Exemple d'état de flotte (valeurs d'enum en minuscules) :
+
+```json
+{
+  "id": "fleet_01",
+  "factionId": "red",
+  "state": "orbit",
+  "targetSystemId": null,
+  "ships": [
+    { "id": "ship_a", "type": "carrier", "hp": 120, "maxHp": 200, "carriedArmyId": null }
+  ]
+}
+```
+
+## Armées
+
+```typescript
+export interface Army {
+  id: string;
+  factionId: FactionId;
+  strength: number;
+  maxStrength: number;
+  morale: number;
+  state: ArmyState;
+  containerId: string;
+}
+```
+
+`containerId` référence soit une flotte (armée embarquée), soit un système stellaire (armée déployée).
+
+## Combats
+
+```typescript
+export type BattleStatus = 'scheduled' | 'resolved';
+
+export interface Battle {
+  id: string;
+  systemId: string;
+  turnCreated: number;
+  turnResolved?: number;
+  status: BattleStatus;
+  involvedFleetIds: string[];
+  logs: string[];
+  initialShips?: BattleShipSnapshot[];
+  survivorShipIds?: string[];
+  winnerFactionId?: FactionId | 'draw';
+  roundsPlayed?: number;
+  shipsLost?: Record<FactionId, number>;
+  missilesIntercepted?: number;
+  projectilesDestroyedByPd?: number;
+  ammunitionByFaction?: BattleAmmunitionByFaction;
+}
+```
+
+Exemple minimal :
+
+```json
+{
+  "id": "battle_alpha",
+  "systemId": "sol",
+  "turnCreated": 12,
+  "status": "resolved",
+  "involvedFleetIds": ["fleet_01", "fleet_02"],
+  "winnerFactionId": "red"
+}
+```
+
+## Objectifs et règles de partie
+
+```typescript
+export type VictoryType = 'elimination' | 'domination' | 'survival' | 'king_of_the_hill';
+
+export interface VictoryCondition {
+  type: VictoryType;
+  value?: number | string;
+}
+
+export interface GameObjectives {
+  conditions: VictoryCondition[];
+  maxTurns?: number;
+}
+
+export interface GameplayRules {
+  fogOfWar: boolean;
+  useAdvancedCombat: boolean;
+  aiEnabled: boolean;
+  totalWar: boolean;
+}
+```
+
+## Messages et journaux
+
+```typescript
+export interface LogEntry {
+  id: string;
+  day: number;
+  text: string;
+  type: 'info' | 'combat' | 'move' | 'ai';
+}
+
+export interface GameMessage {
+  id: string;
+  day: number;
+  type: string;
+  priority: number;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  payload: Record<string, unknown>;
+  read: boolean;
+  dismissed: boolean;
+  createdAtTurn: number;
+}
+```
+
+## GameState (agrégat)
+
+```typescript
+export interface GameState {
+  scenarioId: string;
+  scenarioTitle?: string;
+  playerFactionId: FactionId;
+  factions: FactionState[];
+  seed: number;
+  rngState: number;
+  startYear: number;
+  day: number;
+  systems: StarSystem[];
+  fleets: Fleet[];
+  armies: Army[];
+  lasers: LaserShot[];
+  battles: Battle[];
+  logs: LogEntry[];
+  messages: GameMessage[];
+  selectedFleetId: string | null;
+  winnerFactionId: FactionId | 'draw' | null;
+  aiStates?: Record<FactionId, AIState>;
+  aiState?: AIState;
+  objectives: GameObjectives;
+  rules: GameplayRules;
+}
+```
+
+## Commandes moteur (`GameCommand`)
+
+```typescript
+export type GameCommand =
+  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
+  | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
+  | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
+  | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
+  | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
 ```
