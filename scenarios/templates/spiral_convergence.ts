@@ -10,8 +10,6 @@ const spiralConvergence: ScenarioDefinitionV1 = {
     tags: ["Spiral", "Conquest"]
   },
   generation: {
-    // Fixed seed ensures the same map + initial placements every run (stable difficulty & tuning).
-    fixedSeed: 230017,
     systemCount: 72,
     radius: 140,
     topology: "spiral",
