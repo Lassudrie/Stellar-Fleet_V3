@@ -1,6 +1,6 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
 import { Fleet, FleetState } from '../types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
@@ -183,19 +183,19 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                 e.stopPropagation();
                 onSelect(e, false);
             }}
-            onDoubleClick={(e) => {
+            onDoubleClick={(e: ThreeEvent<MouseEvent>) => {
                 e.stopPropagation();
-                e.preventDefault();
+                e.nativeEvent.preventDefault();
                 onSelect(e, true);
             }}
-            onPointerDown={(e) => {
+            onPointerDown={(e: ThreeEvent<PointerEvent>) => {
                 if (e.pointerType !== 'touch') return;
 
                 const now = performance.now();
                 if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
                     lastTouchRef.current = 0;
                     e.stopPropagation();
-                    e.preventDefault();
+                    e.nativeEvent.preventDefault();
                     onSelect(e, true);
                 } else {
                     lastTouchRef.current = now;
