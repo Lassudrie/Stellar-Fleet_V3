@@ -1,281 +1,312 @@
 
-# Scenario Specification (spec.md)
+# Spécification des scénarios (ScenarioDefinitionV1)
 
-**Version:** 1.0  
-**Status:** Approved  
-**Target Audience:** Engine Developers, Scenario Designers, Modders  
+**Version :** 1.0  
+**Statut :** Approved  
+**Public cible :** Développeurs moteur, concepteurs de scénarios, moddeurs  
 
 ---
 
 ## 1. Introduction
 
-### 1.1 Purpose
-The **Scenario** is the single source of truth for initializing a game session in *Stellar Fleet*. It is a static, data-driven configuration file that describes the initial state of the universe, the participating actors, and the rules of engagement.
+### 1.1 Objet
+Le **ScenarioDefinitionV1** est la source unique pour initialiser une partie de *Stellar Fleet*. Le format est pensé pour :
 
-### 1.2 Architectural Principles
-*   **Data-Driven:** A scenario contains **no code**. It is purely declarative (JSON/YAML).
-*   **Engine Agnostic:** The scenario defines *what* to load, not *how* to simulate it. The engine consumes the scenario contract, parses it, and instantiates the runtime GameState.
-*   **Immutability:** A scenario definition does not change during gameplay. It is a template used to seed the initial mutable GameState.
-*   **Decoupled:** The scenario system is unaware of the UI or specific AI implementations. It only references them via string identifiers (IDs).
+* **Templates TypeScript** dans `scenarios/templates/*.ts` (export d'un `const` typé `ScenarioDefinitionV1`).
+* **JSON sérialisable** sans logique (même forme que le template, utilisable par des mods ou des outils).
 
----
+Le moteur consomme ces données, instancie l'état initial et ne dépend d'aucune fonction définie dans le scénario.
 
-## 2. Schema Versioning
-
-To support long-term backward compatibility and community mods, every scenario file must declare a schema version.
-
-*   **Field:** `schemaVersion` (integer, required).
-*   **Current Version:** `1`
-*   **Versioning Policy:**
-    *   **Minor changes** (adding optional fields) do not require a version bump.
-    *   **Breaking changes** (renaming required fields, changing structure) require a version bump.
-    *   The Engine must implement migrations or legacy loaders for older schema versions.
+### 1.2 Principes
+* **Data-driven :** aucune fonction, uniquement des valeurs sérialisables.
+* **Immutabilité :** la définition sert à ensemencer le GameState mutable, mais ne change pas en cours de partie.
+* **Découplage :** le scénario ne connaît pas l'UI ni les implémentations IA, seulement des identifiants (IDs).
 
 ---
 
-## 3. Contract Overview
+## 2. Versionnage de schéma
 
-A scenario definition is composed of five primary sections:
+* **Champ :** `schemaVersion` (entier, requis).  
+* **Version actuelle :** `1`.  
+* **Politique :**
+  * Ajouts optionnels : pas de bump.
+  * Ruptures (renommage de champs requis, changement de structure) : bump obligatoire + loader rétrocompatible.
+
+---
+
+## 3. Vue d'ensemble du contrat
 
 ```text
-ScenarioDefinition
-├── meta          (Display info, ID, author)
-├── generation    (Map topology, seed, physics constants)
-├── setup         (Factions, fleet placements, starting resources)
-├── objectives    (Win/Loss conditions, time limits)
-└── rules         (Gameplay toggles, mutators)
+ScenarioDefinitionV1
+├── schemaVersion (1)
+├── id            (identifiant racine du scénario)
+├── meta          (titre, description, auteur, difficulté, tags)
+├── generation    (topologie, seed fixe, placement statique éventuel)
+├── setup         (factions, répartition initiale, flottes de départ)
+├── objectives    (conditions de victoire/défaite)
+└── rules         (toggles de gameplay)
 ```
 
 ---
 
-## 4. Section: Meta
+## 4. Racine
 
-Metadata used primarily by the Main Menu / Scenario Selector UI to display information to the player before the game starts.
-
-| Field | Type | Required | Description |
+| Champ | Type | Requis | Description |
 | :--- | :--- | :---: | :--- |
-| `id` | string | Yes | Unique identifier (snake_case). Used for saves and references. |
-| `title` | string | Yes | Human-readable title. |
-| `description` | string | Yes | Flavor text or tactical briefing. |
-| `author` | string | No | Creator name. |
-| `version` | string | No | Semantic version of the scenario itself (e.g., "1.2.0"). |
-| `difficulty` | integer | Yes | 1 (Easy) to 5 (Impossible). Visual indicator only. |
-| `tags` | string[] | No | Filtering keys (e.g., `["duel", "huge_map", "tutorial"]`). |
+| `schemaVersion` | `1` | Oui | Version du contrat. |
+| `id` | string | Oui | Identifiant unique du scénario (snake_case recommandé). |
+
+Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup`, `objectives`, `rules`).
 
 ---
 
-## 5. Section: Generation
+## 5. Section `meta`
 
-Defines how the physical universe (Star Systems) is constructed.
-
-| Field | Type | Required | Description |
+| Champ | Type | Requis | Description |
 | :--- | :--- | :---: | :--- |
-| `fixedSeed` | integer \| null | Yes | If set, the map is identical every run. If `null`, the Engine generates a random seed. |
-| `systemCount` | integer | Yes | Target number of star systems to generate. |
-| `radius` | number | Yes | The physical radius of the playable galaxy (game units). |
-| `topology` | string | Yes | The algorithm used for star placement. Enum: `spiral`, `cluster`, `ring`, `scattered`. |
-| `density` | number | No | Optional modifier for distance between stars (default: 1.0). |
-| `minimumSystemSpacingLy` | number | No | Minimum distance between star systems (in ly / game units). Default: 5. Set to 0 to disable. |
+| `title` | string | Oui | Nom affiché. |
+| `description` | string | Oui | Texte court ou briefing. |
+| `author` | string | Non | Crédit ou source du mod. |
+| `difficulty` | number | Oui | 1 (facile) à 5 (très difficile). Indicateur UI. |
+| `tags` | string[] | Non | Filtres (ex. `["Spiral", "Sandbox"]`). |
 
 ---
 
-## 6. Section: Setup
+## 6. Section `generation`
 
-Defines the political and military state of the galaxy at Turn 0.
+| Champ | Type | Requis | Description |
+| :--- | :--- | :---: | :--- |
+| `fixedSeed` | number | Non | Si défini, génération déterministe. Si omis, seed aléatoire. |
+| `systemCount` | number | Oui | Nombre cible de systèmes stellaires. |
+| `radius` | number | Oui | Rayon logique de la galaxie. |
+| `topology` | `"spiral" \| "cluster" \| "ring" \| "scattered"` | Oui | Algorithme de placement. |
+| `minimumSystemSpacingLy` | number | Non | Distance minimale entre systèmes. Défaut : `5`. Mettre `0` pour désactiver. |
+| `staticSystems` | array | Non | Points fixes injectés dans la carte. |
 
-### 6.1 Factions
-List of participants.
-
-```json
+### 6.1 `staticSystems` (optionnel)
+```ts
 {
-  "id": "blue",
-  "name": "United Earth Fleet",
-  "colorHex": "#3b82f6",
-  "isPlayable": true,
-  "aiProfile": "defensive" // optional reference to AI behavior tree
+  id: string;
+  name: string;
+  position: { x: number; y: number; z: number };
+  resourceType: "gas" | "none";
+  planets?: Array<{
+    id?: string;
+    name?: string;
+    bodyType: "planet" | "moon";
+    class: "solid" | "gas_giant" | "ice_giant";
+    size?: number;
+    ownerFactionId?: string | null;
+  }>;
 }
 ```
 
-Supported AI profiles: `aggressive`, `defensive`, or `balanced`.
+---
 
-### 6.2 Starting Distribution
-Defines how factions are placed relative to the map topology.
+## 7. Section `setup`
 
-*   **Field:** `startingDistribution` (enum).
-*   **Values:**
-    *   `scattered`: Factions spawn at random points far from each other.
-    *   `cluster`: Factions spawn with a guaranteed cluster of safe systems.
-    *   `equidistant`: Factions spawn in a perfect circle (competitive).
-    *   `none`: No territory ownership at start (Battle Royale).
+### 7.1 Factions (`factions`)
 
-### 6.3 Initial Fleets
-Explicit placement of military assets.
+```ts
+{
+  id: string;
+  name: string;
+  colorHex: string;          // "#RRGGBB"
+  isPlayable: boolean;       // Sélectionnable par le joueur ?
+  aiProfile?: "aggressive" | "defensive" | "balanced";
+}
+```
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `ownerFactionId` | string | Must match a Faction ID defined above. |
-| `spawnLocation` | string \| object | Location strategy. <br>`"home_system"`: The faction's capital.<br>`"random"`: Any neutral system.<br>`{x, y, z}`: Specific deep space coordinates. |
-| `ships` | string[] | Array of Ship Design IDs (e.g., `["carrier_mk1", "frigate_std"]`). |
-| `behavior` | string | (Optional) Initial AI state (e.g., `guard`, `scout`). |
+### 7.2 Distribution initiale
+
+| Champ | Type | Requis | Description |
+| :--- | :--- | :---: | :--- |
+| `startingDistribution` | `"scattered" \| "cluster" \| "none"` | Oui | Logique de placement initial (systèmes maison isolés, groupés, ou aucun territoire). |
+| `territoryAllocation` | object | Non | Cible de répartition lors de la génération. |
+
+`territoryAllocation` (si présent) suit la forme :
+```ts
+{
+  type: "percentages";
+  byFactionId: Record<string, number>; // parts 0..1
+  neutralShare?: number;               // part neutre (défaut : reste)
+  contiguity?: "clustered";            // défaut : "clustered"
+}
+```
+
+### 7.3 Flottes initiales (`initialFleets`)
+
+| Champ | Type | Requis | Description |
+| :--- | :--- | :---: | :--- |
+| `ownerFactionId` | string | Oui | Doit référencer une faction déclarée. |
+| `spawnLocation` | `"home_system" \| "random" \| {x:number,y:number,z:number}` | Oui | Point d'apparition. |
+| `ships` | string[] | Oui | IDs de modèles de vaisseaux (base de données moteur). |
+| `withArmies` | boolean | Non | Si `true`, des armées embarquées sont créées sur les transports. |
 
 ---
 
-## 7. Section: Objectives
+## 8. Section `objectives`
 
-Defines how the game ends. The Engine evaluates these conditions at the end of every turn.
+Structure :
+```ts
+{
+  win: Array<{
+    type: "elimination" | "domination" | "survival" | "king_of_the_hill";
+    value?: number | string;
+  }>;
+  maxTurns?: number;
+}
+```
 
-### 7.1 Victory Conditions
-An array of condition objects. Logic is typically **OR** (meeting any condition triggers victory), unless specified otherwise.
+### 8.1 Sémantique runtime
 
-*   **Type:** `elimination`
-    *   Description: Destroy all enemy assets.
-*   **Type:** `domination`
-    *   Param: `percentage` (e.g., 0.75 for 75% of systems).
-*   **Type:** `survival`
-    *   Param: `turns` (e.g., 50). Player wins if they exist at turn 50.
-*   **Type:** `king_of_the_hill`
-    *   Param: `systemId` (Requires static system definition support).
-    *   Param: `turnsHeld`.
-
-### 7.2 Constraints
-*   `maxTurns`: (integer) Hard limit. If reached without victory, results in Draw or Defeat based on engine logic.
-
----
-
-## 8. Section: Rules
-
-Global mutators that toggle engine subsystems. Allows for "Arcade" modes or "Hardcore" simulations.
-
-| Field | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `fogOfWar` | boolean | `true` | If false, all fleets are visible constantly. |
-| `diplomacyEnabled` | boolean | `true` | Enables trading/alliances. |
-| `researchEnabled` | boolean | `true` | Enables tech tree progression. |
-| `randomEvents` | boolean | `true` | Enables solar flares, space anomalies, etc. |
-| `combatModel` | string | `"v1_standard"` | Selects the combat resolution algorithm. |
+* **OR logique :** une seule condition de `win` suffit. Si la liste est vide, l'élimination sert de fallback par faction.
+* **`domination` :** `value` attendu en pourcentage 0..100 (défaut 50). Le moteur compare la part de systèmes possédés.  
+* **`king_of_the_hill` :** `value` doit être l'ID d'un système existant (idéalement défini dans `staticSystems`).  
+* **`survival` :** se combine avec `maxTurns`. Quand `day >= maxTurns`, la victoire revient à la faction du joueur si elle a encore présence (sinon `draw`). La condition ne se déclenche pas avant cette limite.
+* **`maxTurns` :** borne dure. Sans `survival`, la résolution dépend de la possession de systèmes (égalité possible).
 
 ---
 
-## 9. Validation Constraints
+## 9. Section `rules`
 
-To ensure stability, the Engine's Scenario Loader must enforce:
-
-1.  **Referential Integrity:** All `ownerFactionId` references must match an ID in the `setup.factions` list.
-2.  **Ship Validity:** All strings in `ships` arrays must match valid Ship Templates in the Engine's Unit Database.
-3.  **Minimums:**
-    *   At least 2 factions defined (unless `single_player_sandbox`).
-    *   `systemCount` >= `factions.length`.
-4.  **Formatting:** `colorHex` must be a valid 6-char hex string (`#RRGGBB`).
+| Champ | Type | Requis | Description |
+| :--- | :--- | :---: | :--- |
+| `fogOfWar` | boolean | Oui | Brouillard de guerre actif ? |
+| `useAdvancedCombat` | boolean | Oui | Modèle de combat V1 (true) ou simplifié V0 (false). |
+| `aiEnabled` | boolean | Oui | Active l'IA. |
+| `totalWar` | boolean | Oui | Désactive diplomatie/échanges (guerre totale). |
 
 ---
 
-## 10. Examples
+## 10. Contraintes de validation
 
-### 10.1 Minimal Example
-*A standardized 1v1 skirmish.*
+1. **Intégrité référentielle :** `ownerFactionId` des flottes et des planètes statiques doit correspondre à une faction déclarée (ou `null` pour neutre).  
+2. **Règles de base :** au moins deux factions pour un mode compétitif ; `systemCount` ≥ `factions.length`.  
+3. **Formats :** `colorHex` = `#RRGGBB`; `minimumSystemSpacingLy` ≥ 0.  
+4. **Conditions :** `domination.value` en pourcentage, `king_of_the_hill.value` pointe un système existant, `survival` doit être accompagné d'un `maxTurns` cohérent.
+
+---
+
+## 11. Exemples compatibles runtime
+
+### 11.1 Template TypeScript minimal (1v1)
+
+```ts
+import { ScenarioDefinitionV1 } from "../../scenarios/schemaV1";
+
+const skirmishStd1v1: ScenarioDefinitionV1 = {
+  schemaVersion: 1,
+  id: "skirmish_std_1v1",
+  meta: {
+    title: "Escarmouche Standard",
+    description: "Un affrontement rapide sur une petite carte.",
+    difficulty: 2
+  },
+  generation: {
+    systemCount: 40,
+    radius: 100,
+    topology: "cluster"
+  },
+  setup: {
+    factions: [
+      { id: "blue", name: "Joueur", colorHex: "#0000FF", isPlayable: true },
+      { id: "red", name: "IA", colorHex: "#FF0000", isPlayable: false }
+    ],
+    startingDistribution: "scattered",
+    initialFleets: [
+      { ownerFactionId: "blue", spawnLocation: "home_system", ships: ["carrier", "frigate", "frigate"] },
+      { ownerFactionId: "red", spawnLocation: "home_system", ships: ["cruiser", "destroyer"] }
+    ]
+  },
+  objectives: { win: [{ type: "elimination" }] },
+  rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true }
+};
+
+export default skirmishStd1v1;
+```
+
+### 11.2 JSON équivalent (modding)
 
 ```json
 {
   "schemaVersion": 1,
   "id": "skirmish_std_1v1",
   "meta": {
-    "title": "Standard Skirmish",
-    "description": "A quick 1v1 battle on a small map.",
+    "title": "Escarmouche Standard",
+    "description": "Un affrontement rapide sur une petite carte.",
     "difficulty": 2
   },
-  "generation": {
-    "fixedSeed": null,
-    "systemCount": 40,
-    "radius": 100,
-    "topology": "cluster"
-  },
+  "generation": { "systemCount": 40, "radius": 100, "topology": "cluster" },
   "setup": {
     "factions": [
-      { "id": "blue", "name": "Player", "colorHex": "#0000FF", "isPlayable": true },
-      { "id": "red", "name": "AI", "colorHex": "#FF0000", "isPlayable": false }
+      { "id": "blue", "name": "Joueur", "colorHex": "#0000FF", "isPlayable": true },
+      { "id": "red", "name": "IA", "colorHex": "#FF0000", "isPlayable": false }
     ],
     "startingDistribution": "scattered",
     "initialFleets": [
-      {
-        "ownerFactionId": "blue",
-        "spawnLocation": "home_system",
-        "ships": ["carrier_01", "frigate_01", "frigate_01"]
-      },
-      {
-        "ownerFactionId": "red",
-        "spawnLocation": "home_system",
-        "ships": ["cruiser_01", "destroyer_01"]
-      }
+      { "ownerFactionId": "blue", "spawnLocation": "home_system", "ships": ["carrier", "frigate", "frigate"] },
+      { "ownerFactionId": "red", "spawnLocation": "home_system", "ships": ["cruiser", "destroyer"] }
     ]
   },
-  "objectives": {
-    "win": [{ "type": "elimination" }]
-  },
-  "rules": {
-    "fogOfWar": true,
-    "useAdvancedCombat": true,
-    "aiEnabled": true,
-    "totalWar": true
-  }
+  "objectives": { "win": [{ "type": "elimination" }] },
+  "rules": { "fogOfWar": true, "useAdvancedCombat": true, "aiEnabled": true, "totalWar": true }
 }
 ```
 
-### 10.2 Advanced Example (Survival)
-*A defensive scenario against overwhelming odds.*
+### 11.3 Exemple avancé (statique + domination)
 
-```json
-{
-  "schemaVersion": 1,
-  "id": "last_stand",
-  "meta": {
-    "title": "The Last Stand",
-    "description": "Hold the line against the swarm for 20 turns.",
-    "difficulty": 5,
-    "tags": ["survival", "hard"]
+```ts
+import { ScenarioDefinitionV1 } from "../../scenarios/schemaV1";
+
+const spiralConvergence: ScenarioDefinitionV1 = {
+  schemaVersion: 1,
+  id: "spiral_convergence",
+  meta: {
+    title: "Convergence Spiralée",
+    description: "Deux coalitions convergent vers le noyau.",
+    difficulty: 3,
+    tags: ["Spiral", "Conquest"]
   },
-  "generation": {
-    "fixedSeed": 99887766,
-    "systemCount": 200,
-    "radius": 500,
-    "topology": "ring"
+  generation: {
+    systemCount: 72,
+    radius: 140,
+    topology: "spiral",
+    minimumSystemSpacingLy: 6,
+    staticSystems: [
+      { id: "aurora_gate", name: "Aurora Gate", position: { x: -18, y: 6, z: 0 }, resourceType: "gas" },
+      { id: "ember_core", name: "Ember Core", position: { x: 18, y: -6, z: 0 }, resourceType: "gas" }
+    ]
   },
-  "setup": {
-    "factions": [
-      { "id": "defenders", "name": "Guardians", "colorHex": "#FFFFFF", "isPlayable": true },
-      { "id": "swarm", "name": "The Hive", "colorHex": "#00FF00", "isPlayable": false, "aiProfile": "aggressive" }
+  setup: {
+    factions: [
+      { id: "aurora", name: "Aurora Coalition", colorHex: "#38bdf8", isPlayable: true },
+      { id: "ember", name: "Ember Dominion", colorHex: "#f97316", isPlayable: false, aiProfile: "balanced" }
     ],
-    "startingDistribution": "none",
-    "initialFleets": [
-      {
-        "ownerFactionId": "defenders",
-        "spawnLocation": { "x": 0, "y": 0, "z": 0 },
-        "ships": ["station_citadel", "carrier_heavy", "carrier_heavy"]
-      },
-      {
-        "ownerFactionId": "swarm",
-        "spawnLocation": "random",
-        "ships": ["swarmer", "swarmer", "swarmer", "swarmer", "swarmer"]
-      }
+    startingDistribution: "cluster",
+    territoryAllocation: {
+      type: "percentages",
+      byFactionId: { aurora: 0.12, ember: 0.12 },
+      neutralShare: 0.76,
+      contiguity: "clustered"
+    },
+    initialFleets: [
+      { ownerFactionId: "aurora", spawnLocation: "home_system", ships: ["carrier", "cruiser", "destroyer", "destroyer", "frigate", "fighter"], withArmies: false },
+      { ownerFactionId: "aurora", spawnLocation: "random", ships: ["troop_transport", "destroyer", "frigate"], withArmies: true },
+      { ownerFactionId: "ember", spawnLocation: "home_system", ships: ["carrier", "cruiser", "destroyer", "destroyer", "frigate", "bomber"], withArmies: false },
+      { ownerFactionId: "ember", spawnLocation: "random", ships: ["troop_transport", "destroyer", "frigate"], withArmies: true }
     ]
   },
-  "objectives": {
-    "win": [
-      { "type": "survival", "value": 20 }
+  objectives: {
+    win: [
+      { type: "elimination" },
+      { type: "domination", value: 65 }
     ]
   },
-  "rules": {
-    "fogOfWar": false,
-    "diplomacyEnabled": false
-  }
-}
+  rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true }
+};
+
+export default spiralConvergence;
 ```
 
----
-
-## 11. Future Evolution
-
-This contract is designed to be extended. Planned evolutions for Schema v2+:
-
-1.  **Scripted Events:** A `scripts` section defining triggers (e.g., "On Turn 10, spawn reinforcement").
-2.  **Asset Overrides:** Allowing a scenario to define custom Ship Stats or Unit Models locally, enabling full-conversion mods via a single JSON entry.
-3.  **Linked Scenarios:** A `nextScenarioId` field in `objectives` to enable linear campaigns where the state of the winner carries over.
+Ces exemples respectent le contrat `ScenarioDefinitionV1` et sont sérialisables en JSON sans logique.
