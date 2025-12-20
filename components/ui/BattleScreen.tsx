@@ -62,7 +62,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       const initialShips = battle.initialShips || [];
       const survivorSet = new Set(battle.survivorShipIds || []);
 
-      const factions = initialShips.length > 0
+      const factions: string[] = initialShips.length > 0
           ? Array.from(new Set(initialShips.map(s => s.factionId)))
           : Array.from(new Set(
               (battle.involvedFleetIds || [])
@@ -79,7 +79,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       const playerPresent = factions.includes(playerFactionId);
       const primaryEnemyId = factions
           .filter(f => f !== playerFactionId || !playerPresent)
-          .sort((a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0))[0]
+          .sort((a, b) => ((factionCounts[b] || 0) - (factionCounts[a] || 0)))[0]
           || null;
 
       const buildSide = (targetFactionId: string) => {
@@ -118,7 +118,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       if (primaryEnemyId && !orderedFactionIds.includes(primaryEnemyId)) orderedFactionIds.push(primaryEnemyId);
       factions
           .filter(fid => !orderedFactionIds.includes(fid))
-          .sort((a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0))
+          .sort((a, b) => ((factionCounts[b] || 0) - (factionCounts[a] || 0)))
           .forEach(fid => orderedFactionIds.push(fid));
 
       const sides = orderedFactionIds.map(fid => buildSide(fid));

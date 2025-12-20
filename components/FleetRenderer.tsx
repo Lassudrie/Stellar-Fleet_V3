@@ -1,7 +1,7 @@
 
 import React, { useRef, useMemo, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, ExtrudeGeometry, SphereGeometry, RingGeometry } from 'three';
 import { Fleet, FleetState } from '../types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../data/static';
 import { Text, Billboard } from '@react-three/drei';
@@ -33,6 +33,15 @@ const EXTRUDE_SETTINGS = {
   bevelSize: 0.1,
   bevelSegments: 2
 };
+
+// Optimization: Create shared geometries once
+const FLEET_GEOMETRY = new ExtrudeGeometry(CHEVRON_SHAPE, EXTRUDE_SETTINGS);
+// Pre-rotate geometry to lie flat, avoiding per-frame quaternion multiplication
+FLEET_GEOMETRY.rotateX(-Math.PI / 2);
+
+const HITBOX_GEOMETRY = new SphereGeometry(2.5, 8, 8);
+const FLASH_GEOMETRY = new SphereGeometry(1, 16, 16);
+const RING_GEOMETRY = new RingGeometry(1, 1.2, 32);
 
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
@@ -78,7 +87,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const highlightPalette = useMemo(() => deriveHighlightPalette(color), [color]);
   const emissiveColor = isSelected ? highlightPalette.light : highlightPalette.dark;
   const isOrbiting = fleet.state === FleetState.ORBIT;
-  const tiltQuaternion = useMemo(() => new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0)), []);
 
   // Generate a stable random start angle based on fleet ID
   const angleOffset = useMemo(() => {
@@ -162,7 +170,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         const lookAtZ = fleet.position.z + Math.sin(futureTime) * ORBIT_RADIUS;
         
         meshRef.current.lookAt(lookAtX, fleet.position.y, lookAtZ);
-        meshRef.current.quaternion.multiply(tiltQuaternion);
+        // Rotation is now baked into geometry, no manual multiply needed!
 
     } else {
         // Convert Vec3 to Three.Vector3 on the fly for Lerp target
@@ -170,7 +178,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         groupRef.current.position.lerp(_vec3, 0.5);
         if (fleet.targetPosition) {
             meshRef.current.lookAt(fleet.targetPosition.x, fleet.targetPosition.y, fleet.targetPosition.z);
-            meshRef.current.quaternion.multiply(tiltQuaternion);
+            // Rotation is now baked into geometry, no manual multiply needed!
         }
     }
   });
@@ -179,6 +187,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
     <group ref={groupRef}>
         {/* HITBOX: Large invisible sphere for easier selection on mobile/desktop */}
         <mesh 
+            geometry={HITBOX_GEOMETRY}
             onClick={(e) => {
                 e.stopPropagation();
                 onSelect(e, false);
@@ -204,13 +213,11 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             onPointerOver={() => document.body.style.cursor = 'pointer'}
             onPointerOut={() => document.body.style.cursor = 'auto'}
         >
-            <sphereGeometry args={[2.5, 8, 8]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
 
         {/* HYPERDRIVE FLASH FX */}
-        <mesh ref={flashMeshRef} scale={[0,0,0]}>
-            <sphereGeometry args={[1, 16, 16]} />
+        <mesh ref={flashMeshRef} scale={[0,0,0]} geometry={FLASH_GEOMETRY}>
             <meshBasicMaterial color="#cceeff" transparent opacity={0} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <pointLight ref={flashLightRef} color="#cceeff" distance={20} decay={2} intensity={0} />
@@ -219,8 +226,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         <mesh 
             ref={meshRef}
             scale={[0.6, 0.6, 0.6]} 
+            geometry={FLEET_GEOMETRY}
         >
-            <extrudeGeometry args={[CHEVRON_SHAPE, EXTRUDE_SETTINGS]} />
             <meshStandardMaterial
                 color={color}
                 emissive={emissiveColor}
@@ -232,8 +239,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         
         {/* SELECTION RING */}
         {isSelected && (
-            <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]}>
-                <ringGeometry args={[1, 1.2, 32]} />
+            <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]} geometry={RING_GEOMETRY}>
                 <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} />
             </mesh>
         )}

@@ -106,14 +106,14 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
   const meshes = useMemo(() => {
     if (!systems || systems.length === 0) return [];
 
-    const factionColors = factions.reduce<Record<FactionId, string>>((acc, faction) => {
+    const factionColors = factions.reduce((acc, faction) => {
         acc[faction.id] = faction.color;
         return acc;
-    }, {});
+    }, {} as Record<FactionId, string>);
 
     type FactionGroup = { id: FactionId; color: string; systems: StarSystem[] };
 
-    const groups = systems.reduce<Map<FactionId, FactionGroup>>((acc, system) => {
+    const groups = systems.reduce((acc, system) => {
         if (!system.ownerFactionId) return acc;
 
         const factionId = system.ownerFactionId;
