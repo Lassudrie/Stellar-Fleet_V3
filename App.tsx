@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
+import { GameMessage, GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
@@ -475,6 +475,64 @@ const App: React.FC = () => {
       });
   };
 
+  const handleDismissMessage = (messageId: string) => {
+      if (!engine) return;
+      engine.dismissMessage(messageId);
+  };
+
+  const handleMarkMessageRead = (messageId: string, read: boolean) => {
+      if (!engine) return;
+      engine.markMessageRead(messageId, read);
+  };
+
+  const handleMarkAllMessagesRead = () => {
+      if (!engine) return;
+      engine.markAllMessagesRead();
+  };
+
+  const handleDismissReadMessages = () => {
+      if (!engine) return;
+      engine.dismissReadMessages();
+  };
+
+  const handleOpenMessage = (message: GameMessage) => {
+      if (!engine || !viewGameState) return;
+      engine.markMessageRead(message.id, true);
+
+      const payload = message.payload || {};
+      const battleId = typeof payload.battleId === 'string' ? payload.battleId : null;
+      const systemId = typeof payload.systemId === 'string' ? payload.systemId : null;
+      const planetId = typeof payload.planetId === 'string' ? payload.planetId : null;
+
+      if (battleId) {
+          setSelectedBattleId(battleId);
+          setFleetPickerMode(null);
+          setUiMode('BATTLE_SCREEN');
+          return;
+      }
+
+      const systemFromPlanet = planetId
+          ? viewGameState.systems.find(sys => sys.planets.some(planet => planet.id === planetId))
+          : null;
+
+      if (systemId) {
+          const sys = viewGameState.systems.find(s => s.id === systemId) || systemFromPlanet;
+          if (sys) {
+              setTargetSystem(sys);
+              setSystemDetailSystem(sys);
+              setMenuPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+              setUiMode('SYSTEM_MENU');
+              return;
+          }
+      }
+
+      if (systemFromPlanet) {
+          setTargetSystem(systemFromPlanet);
+          setSystemDetailSystem(systemFromPlanet);
+          setUiMode('NONE');
+      }
+  };
+
   if (loading) return <LoadingScreen />;
 
   if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'LOAD_GAME' ? 'LOAD_GAME' : 'SCENARIO')} />;
@@ -507,6 +565,7 @@ const App: React.FC = () => {
                 selectedFleet={selectedFleet}
                 inspectedFleet={inspectedFleet}
                 logs={viewGameState.logs}
+                messages={viewGameState.messages}
                 
                 uiMode={uiMode}
                 menuPosition={menuPosition}
@@ -561,6 +620,11 @@ const App: React.FC = () => {
                 }}
                 onExportAiLogs={handleExportAiLogs}
                 onClearAiLogs={handleClearAiLogs}
+                onDismissMessage={handleDismissMessage}
+                onOpenMessage={handleOpenMessage}
+                onMarkMessageRead={handleMarkMessageRead}
+                onMarkAllMessagesRead={handleMarkAllMessagesRead}
+                onDismissReadMessages={handleDismissReadMessages}
             />
         </div>
       );

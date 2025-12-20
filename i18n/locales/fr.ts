@@ -201,6 +201,26 @@ export const fr = {
   'battle.errorMsg': 'Impossible de récupérer la télémétrie pour l\'ID : {{id}}',
   'battle.closeConn': 'COUPER CONNEXION',
 
+  // Messaging
+  'sidemenu.messaging': 'Messagerie',
+  'sidemenu.unread': 'Non lus',
+  'sidemenu.filterByType': 'Filtrer par type',
+  'sidemenu.typeAll': 'Tous',
+  'sidemenu.typeBattle': 'Bataille',
+  'sidemenu.typeGround': 'Terre',
+  'sidemenu.typeOther': 'Autre',
+  'sidemenu.noMessages': 'Aucun message.',
+  'sidemenu.markAllRead': 'Tout marquer lu',
+  'sidemenu.dismissRead': 'Ignorer lus',
+  'sidemenu.dismiss': 'Ignorer',
+  'sidemenu.markRead': 'Marquer lu',
+  'sidemenu.markUnread': 'Marquer non lu',
+  'messages.priority.high': 'Priorité',
+  'messages.priority.normal': 'Standard',
+  'messages.markRead': 'Marquer lu',
+  'messages.markUnread': 'Marquer non lu',
+  'messages.dismiss': 'Ignorer',
+
   // Victory
   'victory.victory': 'VICTOIRE',
   'victory.defeat': 'DEFAITE',

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { LogEntry, Fleet, StarSystem, FactionId } from '../../types';
+import { LogEntry, Fleet, StarSystem, FactionId, GameMessage } from '../../types';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 
@@ -8,11 +8,17 @@ interface SideMenuProps {
   isOpen: boolean;
   onClose: () => void;
   logs: LogEntry[];
+  messages: GameMessage[];
   blueFleets: Fleet[];
   systems: StarSystem[];
   onRestart: () => void;
   onSelectFleet: (fleetId: string) => void;
   onSave: () => void;
+  onOpenMessage: (message: GameMessage) => void;
+  onDismissMessage: (messageId: string) => void;
+  onMarkMessageRead: (messageId: string, read: boolean) => void;
+  onMarkAllMessagesRead: () => void;
+  onDismissReadMessages: () => void;
 
   devMode: boolean;
   godEyes: boolean;
@@ -21,15 +27,15 @@ interface SideMenuProps {
   // New props for AI Debugging
   onExportAiLogs?: () => void;
   onClearAiLogs?: () => void;
-  
+
   playerFactionId: string;
 }
 
-type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS';
+type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES';
 
 const SideMenu: React.FC<SideMenuProps> = ({ 
-    isOpen, onClose, logs, blueFleets, systems, 
-    onRestart, onSelectFleet, onSave,
+    isOpen, onClose, logs, messages, blueFleets, systems, 
+    onRestart, onSelectFleet, onSave, onOpenMessage, onDismissMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
     playerFactionId
@@ -38,6 +44,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [view, setView] = useState<MenuView>('MAIN');
   
   const [aiDebug, setAiDebug] = useState(false);
+  const [messageTypeFilter, setMessageTypeFilter] = useState<string>('ALL');
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -47,6 +54,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }, [isOpen]);
 
   const mySystems = useMemo(() => systems.filter(s => s.ownerFactionId === playerFactionId), [systems, playerFactionId]);
+  const unreadMessages = useMemo(() => messages.filter(msg => !msg.read && !msg.dismissed).length, [messages]);
+  const messageTypes = useMemo(() => {
+      const types = new Set(messages.map(m => m.type.toLowerCase()));
+      return Array.from(types).sort();
+  }, [messages]);
 
   if (!isOpen) return null;
 
@@ -67,6 +79,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 {view === 'FLEETS' && t('sidemenu.registry')}
                 {view === 'SYSTEMS' && t('sidemenu.territory')}
                 {view === 'SETTINGS' && t('sidemenu.settings')}
+                {view === 'MESSAGES' && t('sidemenu.messaging')}
             </h2>
         </div>
         <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
@@ -83,6 +96,16 @@ const SideMenu: React.FC<SideMenuProps> = ({
              <div className="flex flex-col">
                  <span className="text-white font-bold tracking-wider uppercase">{t('sidemenu.com_logs')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.recentEvents', { count: logs.length })}</span>
+             </div>
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
+             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+           </svg>
+        </button>
+
+        <button onClick={() => setView('MESSAGES')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
+             <div className="flex flex-col">
+                 <span className="text-amber-200 font-bold tracking-wider uppercase">{t('sidemenu.messaging')}</span>
+                 <span className="text-xs text-slate-500">{t('sidemenu.unread')}: {unreadMessages}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -324,6 +347,107 @@ const SideMenu: React.FC<SideMenuProps> = ({
       </div>
   );
 
+  const renderMessages = () => {
+      const sortedMessages = [...messages]
+        .filter(msg => !msg.dismissed)
+        .sort((a, b) => {
+            const turnDiff = b.createdAtTurn - a.createdAtTurn;
+            if (turnDiff !== 0) return turnDiff;
+            const priorityDiff = b.priority - a.priority;
+            if (priorityDiff !== 0) return priorityDiff;
+            return b.id.localeCompare(a.id);
+        });
+
+      const filteredMessages = sortedMessages.filter(msg => {
+          if (messageTypeFilter === 'ALL') return true;
+          if (messageTypeFilter === 'BATTLE') return msg.type.toLowerCase().includes('battle');
+          if (messageTypeFilter === 'GROUND') return msg.type.toLowerCase().includes('ground') || msg.type.toLowerCase().includes('planet');
+          return msg.type.toUpperCase() === messageTypeFilter;
+      });
+
+      return (
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+            <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 text-xs text-slate-400 uppercase">
+                    <span>{t('sidemenu.filterByType')}:</span>
+                    <select
+                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs"
+                        value={messageTypeFilter}
+                        onChange={(e) => setMessageTypeFilter(e.target.value)}
+                    >
+                        <option value="ALL">{t('sidemenu.typeAll')}</option>
+                        <option value="BATTLE">{t('sidemenu.typeBattle')}</option>
+                        <option value="GROUND">{t('sidemenu.typeGround')}</option>
+                        {messageTypes
+                            .filter(tVal => !tVal.includes('battle') && !tVal.includes('ground') && !tVal.includes('planet'))
+                            .map(type => (
+                                <option key={type} value={type.toUpperCase()}>{type}</option>
+                            ))}
+                    </select>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        onClick={onMarkAllMessagesRead}
+                        className="text-[10px] px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-blue-500/60"
+                    >
+                        {t('sidemenu.markAllRead')}
+                    </button>
+                    <button
+                        onClick={onDismissReadMessages}
+                        className="text-[10px] px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-red-500/60"
+                    >
+                        {t('sidemenu.dismissRead')}
+                    </button>
+                </div>
+            </div>
+            {filteredMessages.length === 0 && (
+                <div className="text-center text-xs text-slate-500 py-6">{t('sidemenu.noMessages')}</div>
+            )}
+            {filteredMessages.map(message => (
+                <div key={message.id} className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3 hover:border-blue-500/60 transition-colors">
+                    <div className="flex justify-between items-start gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${message.read ? 'bg-slate-600' : 'bg-amber-400'}`} />
+                            <div className="text-[10px] uppercase text-slate-500 font-mono">
+                                {t('ui.turn')} {message.day}
+                            </div>
+                            <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${message.priority >= 2 ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-slate-400'}`}>
+                                {message.priority >= 2 ? t('messages.priority.high') : t('messages.priority.normal')}
+                            </span>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => onMarkMessageRead(message.id, !message.read)}
+                                className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white"
+                            >
+                                {message.read ? t('sidemenu.markUnread') : t('sidemenu.markRead')}
+                            </button>
+                            <button
+                                onClick={() => onDismissMessage(message.id)}
+                                className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-red-300"
+                            >
+                                {t('sidemenu.dismiss')}
+                            </button>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => onOpenMessage(message)}
+                        className="mt-2 text-left block"
+                    >
+                        <div className="text-white font-bold">{message.title}</div>
+                        <div className="text-xs text-slate-400">{message.subtitle}</div>
+                        <ul className="mt-2 space-y-1">
+                            {message.lines.map((line, idx) => (
+                                <li key={idx} className="text-xs text-slate-300 leading-tight">• {line}</li>
+                            ))}
+                        </ul>
+                    </button>
+                </div>
+            ))}
+        </div>
+      );
+  };
+
   return (
     <>
         <div 
@@ -338,6 +462,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 {view === 'FLEETS' && renderFleets()}
                 {view === 'SYSTEMS' && renderSystems()}
                 {view === 'SETTINGS' && renderSettings()}
+                {view === 'MESSAGES' && renderMessages()}
             </div>
             <div className="p-4 border-t border-slate-800 text-center bg-slate-950/30">
                 <p className="text-[10px] text-slate-600 uppercase tracking-widest">Galactic Conflict v1.1</p>
