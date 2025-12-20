@@ -130,15 +130,18 @@ An array of condition objects. Logic is typically **OR** (meeting any condition 
 *   **Type:** `elimination`
     *   Description: Destroy all enemy assets.
 *   **Type:** `domination`
-    *   Param: `percentage` (e.g., 0.75 for 75% of systems).
+    *   Param: `percentage` (0..100). Exprime directement le pourcentage de systèmes à contrôler (ex. `75` pour 75%).
 *   **Type:** `survival`
-    *   Param: `turns` (e.g., 50). Player wins if they exist at turn 50.
+    *   Horizon : `constraints.maxTurns` (obligatoire). La victoire est acquise si la faction est encore en jeu au tour `maxTurns`.
 *   **Type:** `king_of_the_hill`
     *   Param: `systemId` (Requires static system definition support).
-    *   Param: `turnsHeld`.
+    *   Param optionnel: `turnsHeld` (conserve le contrôle pendant `n` tours consécutifs). Si absent ou `0`, la possession actuelle du système suffit à la fin du tour.
 
 ### 7.2 Constraints
-*   `maxTurns`: (integer) Hard limit. If reached without victory, results in Draw or Defeat based on engine logic.
+*   `objectives.constraints` :
+    * `maxTurns`: (integer) Limite dure appliquée à tous les scénarios.
+    * Requis dès qu’un objectif `survival` est présent (la faction doit survivre jusqu’à ce tour).
+    * Si atteint sans déclenchement de victoire, se traduit en Nul ou Défaite selon la logique moteur.
 
 ---
 
@@ -260,8 +263,11 @@ To ensure stability, the Engine's Scenario Loader must enforce:
   },
   "objectives": {
     "win": [
-      { "type": "survival", "value": 20 }
-    ]
+      { "type": "survival" }
+    ],
+    "constraints": {
+      "maxTurns": 20
+    }
   },
   "rules": {
     "fogOfWar": false,
