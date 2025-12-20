@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameMessage } from '../../types';
 import { useI18n } from '../../i18n';
 
@@ -20,10 +20,31 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
   const { t } = useI18n();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const timersRef = useRef<Record<string, number>>({});
+  const [hiddenToastIds, setHiddenToastIds] = useState<Set<string>>(new Set());
+
+  const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
+    setHiddenToastIds(prev => {
+        const next = new Set(prev);
+        next.add(messageId);
+        return next;
+    });
+
+    if (options?.markRead) {
+        onMarkRead(messageId, true);
+    }
+  }, [onMarkRead]);
+
+  useEffect(() => {
+    const knownIds = new Set(messages.map(msg => msg.id));
+    setHiddenToastIds(prev => {
+        const next = new Set(Array.from(prev).filter(id => knownIds.has(id)));
+        return next.size === prev.size ? prev : next;
+    });
+  }, [messages]);
 
   const activeMessages = useMemo(() => {
     return messages
-      .filter(msg => !msg.dismissed)
+      .filter(msg => !msg.dismissed && !hiddenToastIds.has(msg.id))
       .sort((a, b) => {
         const turnDiff = b.createdAtTurn - a.createdAtTurn;
         if (turnDiff !== 0) return turnDiff;
@@ -32,7 +53,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
         return b.id.localeCompare(a.id);
       })
       .slice(0, 6);
-  }, [messages]);
+  }, [messages, hiddenToastIds]);
 
   useEffect(() => {
     activeMessages.forEach(message => {
@@ -46,7 +67,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 
       if (!timersRef.current[message.id]) {
         timersRef.current[message.id] = window.setTimeout(() => {
-          onDismissMessage(message.id);
+          hideToast(message.id, { markRead: true });
           delete timersRef.current[message.id];
         }, AUTO_DISMISS_MS);
       }
@@ -63,7 +84,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
       Object.values(timersRef.current).forEach(timer => clearTimeout(timer));
       timersRef.current = {};
     };
-  }, [activeMessages, hoveredId, onDismissMessage]);
+  }, [activeMessages, hideToast, hoveredId, onDismissMessage]);
 
   if (activeMessages.length === 0) return null;
 
@@ -107,7 +128,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
               </button>
               <button
                 aria-label={t('messages.dismiss')}
-                onClick={(e) => { e.stopPropagation(); onDismissMessage(message.id); }}
+                onClick={(e) => { e.stopPropagation(); hideToast(message.id, { markRead: true }); }}
                 className="text-slate-400 hover:text-white transition-colors"
               >
                 ×
