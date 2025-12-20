@@ -274,6 +274,20 @@ export interface BattleShipSnapshot {
   startingHp: number;
 }
 
+export interface BattleAmmunitionTally {
+  initial: number;
+  used: number;
+  remaining: number;
+}
+
+export interface BattleAmmunitionBreakdown {
+  offensiveMissiles: BattleAmmunitionTally;
+  torpedoes: BattleAmmunitionTally;
+  interceptors: BattleAmmunitionTally;
+}
+
+export type BattleAmmunitionByFaction = Record<FactionId, BattleAmmunitionBreakdown>;
+
 export interface Battle {
   id: string;
   systemId: string;
@@ -289,6 +303,7 @@ export interface Battle {
   shipsLost?: Record<FactionId, number>; // Keys are FactionId strings
   missilesIntercepted?: number;
   projectilesDestroyedByPd?: number;
+  ammunitionByFaction?: BattleAmmunitionByFaction;
 }
 
 export interface EnemySighting {

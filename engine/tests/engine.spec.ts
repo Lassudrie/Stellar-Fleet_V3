@@ -1171,6 +1171,69 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Space battle aggregates faction ammunition usage with conserved totals',
+    run: () => {
+      const system = createSystem('sys-ammo', null);
+      const cruiserStats = SHIP_STATS[ShipType.CRUISER];
+      const fighterStats = SHIP_STATS[ShipType.FIGHTER];
+
+      const blueFleet = createFleet('fleet-blue-ammo', 'blue', { ...baseVec }, [
+        { id: 'blue-cruiser-ammo', type: ShipType.CRUISER, hp: cruiserStats.maxHp, maxHp: cruiserStats.maxHp, carriedArmyId: null }
+      ]);
+      const redFleet = createFleet('fleet-red-ammo', 'red', { ...baseVec }, [
+        { id: 'red-fighter-ammo', type: ShipType.FIGHTER, hp: fighterStats.maxHp, maxHp: fighterStats.maxHp, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-ammo',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id, redFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], seed: 99, day: 5 });
+
+      const { updatedBattle } = resolveBattle(battle, state, 5);
+
+      assert.strictEqual(updatedBattle.winnerFactionId, 'blue', 'Heavier fleet should secure victory');
+      assert.ok(updatedBattle.ammunitionByFaction, 'Ammunition summary should be recorded on the battle result');
+
+      const blueTotals = updatedBattle.ammunitionByFaction?.blue;
+      const redTotals = updatedBattle.ammunitionByFaction?.red;
+
+      assert.ok(blueTotals, 'Blue faction should include aggregated ammunition data');
+      assert.ok(redTotals, 'Red faction should include aggregated ammunition data');
+
+      const verifyTally = (label: string, tally: { initial: number; used: number; remaining: number }) => {
+        assert.ok(tally.initial >= 0 && tally.used >= 0 && tally.remaining >= 0, `${label} should never be negative`);
+        assert.strictEqual(tally.initial, tally.used + tally.remaining, `${label} must conserve ammunition totals`);
+      };
+
+      verifyTally('Blue offensive missiles', blueTotals!.offensiveMissiles);
+      verifyTally('Blue torpedoes', blueTotals!.torpedoes);
+      verifyTally('Blue interceptors', blueTotals!.interceptors);
+      verifyTally('Red offensive missiles', redTotals!.offensiveMissiles);
+      verifyTally('Red torpedoes', redTotals!.torpedoes);
+      verifyTally('Red interceptors', redTotals!.interceptors);
+
+      assert.strictEqual(
+        blueTotals!.offensiveMissiles.initial,
+        cruiserStats.offensiveMissileStock,
+        'Blue initial missile stock should match cruiser loadout'
+      );
+      assert.strictEqual(
+        redTotals!.offensiveMissiles.initial,
+        fighterStats.offensiveMissileStock,
+        'Red initial missile stock should match fighter loadout'
+      );
+      assert.strictEqual(redTotals!.offensiveMissiles.remaining, 0, 'Destroyed ships should not retain remaining stock');
+      assert.strictEqual(redTotals!.torpedoes.remaining, 0, 'Destroyed ships should lose torpedoes alongside hulls');
+      assert.strictEqual(redTotals!.interceptors.remaining, 0, 'Destroyed ships should lose interceptors alongside hulls');
+    }
+  },
+  {
     name: 'Phase ground conquest uses faction color and AI hold updates for any winner',
     run: () => {
       const system = createSystem('sys-green-capture', 'red');
