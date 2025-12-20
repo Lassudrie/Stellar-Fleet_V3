@@ -121,7 +121,8 @@ const App: React.FC = () => {
                            position: clone(f.position),
                            daySeen: baseState.day,
                            estimatedPower: calculateFleetPower(f),
-                           confidence: 1.0
+                           confidence: 1.0,
+                           lastUpdateDay: baseState.day
                        };
                        changed = true;
                   }
@@ -136,7 +137,7 @@ const App: React.FC = () => {
               }
           });
 
-          const entries = Object.values(next);
+          const entries: EnemySighting[] = Object.values(next);
           if (entries.length > ENEMY_SIGHTING_LIMIT) {
               const keepIds = new Set(entries
                   .sort((a, b) => b.daySeen - a.daySeen)

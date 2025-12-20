@@ -82,10 +82,10 @@ const UI: React.FC<UIProps> = ({
   const playerFactionId = gameState.playerFactionId;
 
   const factionLookup = useMemo(() => {
-      return gameState.factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
+      return gameState.factions.reduce((acc, faction) => {
           acc[faction.id] = faction;
           return acc;
-      }, {});
+      }, {} as Record<FactionId, FactionState>);
   }, [gameState.factions]);
 
   // Compute nearby fleets suitable for merging
@@ -200,7 +200,7 @@ const UI: React.FC<UIProps> = ({
           }
       });
 
-      const summaries = Object.entries(aggregates).reduce<Record<FactionId, GroundForceSummaryEntry>>((acc, [factionId, bucket]) => {
+      const summaries = Object.entries(aggregates).reduce((acc, [factionId, bucket]) => {
           if (bucket.count === 0) return acc;
 
           const losses = bucket.maxStrength - bucket.currentStrength;
@@ -224,7 +224,7 @@ const UI: React.FC<UIProps> = ({
           };
 
           return acc;
-      }, {});
+      }, {} as Record<FactionId, GroundForceSummaryEntry>);
 
       if (Object.keys(summaries).length === 0) return null;
 

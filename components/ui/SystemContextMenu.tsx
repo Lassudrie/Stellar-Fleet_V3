@@ -103,7 +103,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
               </div>
               <div className="flex flex-col gap-1">
                   {(() => {
-                      const entries = Object.values(groundForces);
+                      const entries: GroundForceSummaryEntry[] = Object.values(groundForces);
                       const playerEntry = entries.find(entry => entry.isPlayer);
                       const hostileEntries = entries
                           .filter(entry => !entry.isPlayer)
@@ -115,13 +115,14 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                           const coalition = coalitionEntries.length > 0
                           ? coalitionEntries.reduce<GroundForceSummaryEntry | null>((acc, entry) => {
                               if (!acc) {
-                                  return {
+                                  const base: GroundForceSummaryEntry = {
                                       ...entry,
                                       factionId: 'hostile-coalition',
                                       factionName: t('ctx.hostileCoalition'),
                                       color: '#f87171',
                                       isPlayer: false,
                                   };
+                                  return base;
                               }
 
                               const totalCount = acc.count + entry.count;
@@ -131,7 +132,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                               const updatedCurrent = acc.currentStrength + entry.currentStrength;
                               const updatedLosses = updatedMax - updatedCurrent;
 
-                              return {
+                              const updated: GroundForceSummaryEntry = {
                                   ...acc,
                                   count: totalCount,
                                   currentStrength: updatedCurrent,
@@ -140,6 +141,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                                   lossPercent: updatedMax > 0 ? (updatedLosses / updatedMax) * 100 : 0,
                                   averageMoralePercent: totalCount > 0 ? combinedMorale / totalCount : 0,
                               };
+                              return updated;
                           }, null)
                           : null;
 
