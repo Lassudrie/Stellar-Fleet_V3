@@ -5,6 +5,15 @@
 
 ---
 
+## 0. Statuts et État
+
+Le type `BattleStatus` défini dans `types.ts` est volontairement minimal :
+
+* `scheduled` — bataille détectée et en attente de résolution dans le tour courant.
+* `resolved` — bataille déjà simulée ; les rapports restent consultables quelques tours.
+
+Les autres statuts précédemment envisagés (`resolving` par exemple) **ne sont pas utilisés** par le moteur actuel.
+
 ## 1. Objectif
 Le Battle System V1 remplace la résolution instantanée par une simulation déterministe complexe, gérant les types d'armes (Cinétique, Missile, Torpille), la défense ponctuelle (PD) et l'évasion.
 
@@ -15,7 +24,7 @@ Le Battle System V1 remplace la résolution instantanée par une simulation dét
 2.  Si des flottes **BLUE** et **RED** sont présentes dans le rayon de capture (`CAPTURE_RANGE`).
 3.  Une entité `Battle` est créée avec le statut `scheduled` et `turnCreated = turn`.
 4.  Les flottes concernées passent en état `COMBAT`.
-5.  **Note Importante** : Si un système contient déjà une bataille *active* (statut `scheduled` ou `resolving`), aucune nouvelle bataille n'est créée. Cependant, si une bataille passée est `resolved`, elle ne bloque pas la détection d'un nouveau conflit si des ennemis sont toujours présents au tour suivant.
+5.  **Note Importante** : Si un système contient déjà une bataille planifiée (statut `scheduled`), aucune nouvelle bataille n'est créée. Une bataille déjà `resolved` ne bloque pas la détection d'un nouveau conflit si des ennemis sont toujours présents au tour suivant.
 
 ### Phase B : Résolution (Tour N)
 1.  Les batailles `scheduled` sont résolues immédiatement dans le même tour.

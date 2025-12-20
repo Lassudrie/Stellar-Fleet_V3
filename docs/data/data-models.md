@@ -15,7 +15,7 @@ interface GameState {
   armies: Army[];     // Liste globale des armées (au sol ou embarquées)
   battles: Battle[];  // Liste des conflits (Actifs et Passés)
   logs: LogEntry[];   // Historique des événements
-  winner: Faction | null;
+  winnerFactionId: string | 'draw' | null; // FactionId ou nul si la partie continue
 }
 ```
 
@@ -102,10 +102,11 @@ interface Battle {
   id: string;
   systemId: string;
   turnCreated: number;
-  status: 'scheduled' | 'resolving' | 'resolved';
+  status: 'scheduled' | 'resolved';
+  turnResolved?: number;
   involvedFleetIds: string[];
   logs: string[]; // Logs textuels détaillés du combat
-  shipsLost?: { [key in Faction]: number };
+  shipsLost?: Record<string, number>; // Clefs = FactionId
 }
 ```
 
