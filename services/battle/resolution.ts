@@ -1,5 +1,18 @@
 
-import { GameState, Battle, FactionId, Fleet, ShipEntity, ShipType, FleetState, BattleShipSnapshot } from '../../types';
+import {
+  GameState,
+  Battle,
+  FactionId,
+  Fleet,
+  ShipEntity,
+  ShipType,
+  FleetState,
+  BattleShipSnapshot,
+  BattleAmmunitionBreakdown,
+  BattleAmmunitionByFaction,
+  BattleAmmunitionTally,
+  ShipConsumables
+} from '../../types';
 import { RNG } from '../../engine/rng';
 import { SHIP_STATS } from '../../data/static';
 import { BattleShipState, Projectile } from './types';
@@ -16,6 +29,19 @@ const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
 
 // --- HELPERS ---
+const clampRemaining = (initial: number, remaining: number) => Math.min(Math.max(remaining, 0), initial);
+
+const createEmptyAmmunitionTally = (): BattleAmmunitionTally => ({
+  initial: 0,
+  used: 0,
+  remaining: 0
+});
+
+const createEmptyAmmunitionBreakdown = (): BattleAmmunitionBreakdown => ({
+  offensiveMissiles: createEmptyAmmunitionTally(),
+  torpedoes: createEmptyAmmunitionTally(),
+  interceptors: createEmptyAmmunitionTally()
+});
 
 const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId): BattleShipState | null => {
   if (!ship || !ship.type) {
@@ -99,6 +125,7 @@ export const resolveBattle = (
   
   // --- CAPTURE SNAPSHOT BEFORE SIMULATION ---
   const initialShips: BattleShipSnapshot[] = [];
+  const initialAmmunitionByShip = new Map<string, ShipConsumables>();
   
   // Deterministic ship initialization
   const battleShips: BattleShipState[] = [];
@@ -123,6 +150,11 @@ export const resolveBattle = (
             type: s.type,
             maxHp: s.maxHp,
             startingHp: s.hp
+        });
+        initialAmmunitionByShip.set(s.id, {
+          offensiveMissiles: Math.max(0, bs.offensiveMissilesLeft),
+          torpedoes: Math.max(0, bs.torpedoesLeft),
+          interceptors: Math.max(0, bs.interceptorsLeft)
         });
         battleShips.push(bs);
         shipMap.set(s.id, bs);
@@ -149,7 +181,8 @@ export const resolveBattle = (
         shipsLost: {},
         survivorShipIds: [],
         missilesIntercepted: 0,
-        projectilesDestroyedByPd: 0
+        projectilesDestroyedByPd: 0,
+        ammunitionByFaction: {}
       },
       survivingFleets: involvedFleets // Return fleets unchanged
     };
@@ -505,7 +538,59 @@ export const resolveBattle = (
       shipsLost,
       survivorShipIds, // Store survivor list
       missilesIntercepted: totalMissilesIntercepted,
-      projectilesDestroyedByPd: totalProjectilesDestroyedByPd
+      projectilesDestroyedByPd: totalProjectilesDestroyedByPd,
+      ammunitionByFaction: (() => {
+        const breakdown: BattleAmmunitionByFaction = {};
+
+        const ensureFaction = (faction: FactionId) => {
+          if (!breakdown[faction]) {
+            breakdown[faction] = createEmptyAmmunitionBreakdown();
+          }
+          return breakdown[faction];
+        };
+
+        const recordForFaction = (
+          faction: FactionId,
+          key: keyof BattleAmmunitionBreakdown,
+          initial: number,
+          remaining: number
+        ) => {
+          const factionBreakdown = ensureFaction(faction);
+          const tally = factionBreakdown[key];
+          const clampedRemaining = clampRemaining(initial, remaining);
+          tally.initial += initial;
+          tally.remaining += clampedRemaining;
+          tally.used += initial - clampedRemaining;
+        };
+
+        battleShips.forEach(ship => {
+          const initialStock = initialAmmunitionByShip.get(ship.shipId);
+          if (!initialStock) return;
+
+          const isOperational = ship.currentHp > 0;
+
+          recordForFaction(
+            ship.faction,
+            'offensiveMissiles',
+            initialStock.offensiveMissiles,
+            isOperational ? ship.offensiveMissilesLeft : 0
+          );
+          recordForFaction(
+            ship.faction,
+            'torpedoes',
+            initialStock.torpedoes,
+            isOperational ? ship.torpedoesLeft : 0
+          );
+          recordForFaction(
+            ship.faction,
+            'interceptors',
+            initialStock.interceptors,
+            isOperational ? ship.interceptorsLeft : 0
+          );
+        });
+
+        return breakdown;
+      })()
   };
 
   return { updatedBattle, survivingFleets };
