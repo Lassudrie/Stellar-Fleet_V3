@@ -1,13 +1,15 @@
 
-import { GameState, FactionId, AIState, Army, ArmyState } from '../../../types';
+import { GameState, FactionId, AIState, Army, ArmyState, GameMessage } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
 import { isOrbitContested } from '../../orbit';
+import { canonicalizeMessages } from '../../state/canonicalize';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextLogs = [...state.logs];
+    let nextMessages = [...state.messages];
     let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
 
     const aiFactionIds = new Set(state.factions.filter(faction => faction.aiProfile).map(faction => faction.id));
@@ -27,16 +29,24 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
 
     // Track strength/morale updates for surviving armies
     const armyUpdatesMap = new Map<string, { strength: number; morale: number }>();
+
+    // Track initial solid-planet owners for change detection
+    const initialPlanetOwners = new Map<string, FactionId | null>();
+
+    // Track ground battle outcomes per planet
+    const groundResults = new Map<string, ReturnType<typeof resolveGroundConflict>>();
     
     // 1. Resolve Conflict per Planet
     state.systems.forEach(system => {
         system.planets
             .filter(planet => planet.isSolid)
             .forEach(planet => {
+                initialPlanetOwners.set(planet.id, planet.ownerFactionId ?? null);
                 const result = resolveGroundConflict(planet, system, state);
 
                 if (!result) return;
 
+                groundResults.set(planet.id, result);
                 result.armiesDestroyed.forEach(id => armiesToDestroyIds.add(id));
 
                 result.armyUpdates.forEach(update => {
@@ -97,6 +107,72 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 factionIds.size === 1 && !contestedOrbit
                     ? Array.from(factionIds)[0]
                     : planet.ownerFactionId;
+
+            const initialOwner = initialPlanetOwners.get(planet.id) ?? null;
+            const ownerChanged = planet.isSolid && ownerFactionId !== initialOwner;
+
+            if (ownerChanged) {
+                const battleResult = groundResults.get(planet.id);
+                const casualtiesByFaction = new Map<FactionId, { strengthLost: number; destroyed: number }>();
+
+                battleResult?.casualties.forEach(entry => {
+                    const current = casualtiesByFaction.get(entry.factionId) ?? { strengthLost: 0, destroyed: 0 };
+                    casualtiesByFaction.set(entry.factionId, {
+                        strengthLost: current.strengthLost + entry.strengthLost,
+                        destroyed: current.destroyed + entry.destroyed.length
+                    });
+                });
+
+                const remainingByFaction = new Map<FactionId, number>();
+                armies.forEach(army => {
+                    remainingByFaction.set(army.factionId, (remainingByFaction.get(army.factionId) ?? 0) + army.strength);
+                });
+
+                const involvedFactionIds = new Set<FactionId>();
+                casualtiesByFaction.forEach((_, factionId) => involvedFactionIds.add(factionId));
+                remainingByFaction.forEach((_, factionId) => involvedFactionIds.add(factionId));
+                [initialOwner, ownerFactionId].forEach(factionId => {
+                    if (factionId) involvedFactionIds.add(factionId);
+                });
+
+                const formatCasualtiesLine = (): string => {
+                    if (casualtiesByFaction.size === 0) return 'Losses - none';
+                    const parts = Array.from(casualtiesByFaction.entries())
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([factionId, data]) => `${factionId}: ${data.strengthLost} strength (${data.destroyed} destroyed)`);
+                    return `Losses - ${parts.join(', ')}`;
+                };
+
+                const formatRemainingLine = (): string => {
+                    if (remainingByFaction.size === 0) return 'Remaining forces - none';
+                    const parts = Array.from(remainingByFaction.entries())
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([factionId, totalStrength]) => `${factionId}: ${totalStrength} strength`);
+                    return `Remaining forces - ${parts.join(', ')}`;
+                };
+
+                const isPlayerInvolved = involvedFactionIds.has(state.playerFactionId);
+
+                const message: GameMessage = {
+                    id: ctx.rng.id('msg'),
+                    day: ctx.turn,
+                    type: 'PLANET_CONQUERED',
+                    priority: isPlayerInvolved ? 2 : 1,
+                    title: `${planet.name} conquered`,
+                    subtitle: `${system.name} • Turn ${ctx.turn}`,
+                    lines: [formatCasualtiesLine(), formatRemainingLine()],
+                    payload: {
+                        planetId: planet.id,
+                        systemId: system.id,
+                        involvedFactionIds: Array.from(involvedFactionIds).sort((a, b) => a.localeCompare(b))
+                    },
+                    read: false,
+                    dismissed: false,
+                    createdAtTurn: ctx.turn
+                };
+
+                nextMessages = canonicalizeMessages([...nextMessages, message]);
+            }
 
             return { ...planet, ownerFactionId };
         });
@@ -160,6 +236,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         systems: updatedSystems,
         armies: nextArmies,
         logs: nextLogs,
+        messages: nextMessages,
         aiStates: nextAiStates
     };
 };
