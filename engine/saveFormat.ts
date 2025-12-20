@@ -156,6 +156,20 @@ export interface GameObjectivesDTO {
   maxTurns?: number;
 }
 
+export interface GameMessageDTO {
+  id: string;
+  day: number;
+  type: string;
+  priority: number;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  payload: Record<string, unknown>;
+  read: boolean;
+  dismissed: boolean;
+  createdAtTurn: number;
+}
+
 export interface GameStateDTO {
   scenarioId?: string;
   scenarioTitle?: string;
@@ -174,6 +188,7 @@ export interface GameStateDTO {
   lasers?: LaserShotDTO[];
   battles?: BattleDTO[];
   logs?: LogEntry[];
+  messages?: GameMessageDTO[];
   selectedFleetId: string | null;
   winnerFactionId: string | 'draw' | null; // Renamed
 

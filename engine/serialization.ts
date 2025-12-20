@@ -15,7 +15,8 @@ import {
   FactionId,
   ShipConsumables,
   ShipKillRecord,
-  StarSystemAstro
+  StarSystemAstro,
+  GameMessage
 } from '../types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -31,7 +32,8 @@ import {
   BattleDTO,
   AIStateDTO,
   EnemySightingDTO,
-  ArmyDTO
+  ArmyDTO,
+  GameMessageDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../data/static';
 import { generateStellarSystem } from '../services/world/stellar';
@@ -113,6 +115,16 @@ const extractConsumables = (ship: any, type: ShipType): ShipConsumables => {
       stats?.interceptorStock ?? 0
     )
   };
+};
+
+const sanitizeMessagePayload = (payload: unknown): Record<string, unknown> => {
+  if (!payload || typeof payload !== 'object') return {};
+  return payload as Record<string, unknown>;
+};
+
+const sanitizeMessageLines = (lines: unknown): string[] => {
+  if (!Array.isArray(lines)) return [];
+  return lines.map(line => String(line));
 };
 
 const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
@@ -276,6 +288,11 @@ export const serializeGameState = (state: GameState): string => {
       shipsLost: b.shipsLost 
     })),
     logs: state.logs,
+    messages: state.messages.map((message): GameMessageDTO => ({
+      ...message,
+      payload: sanitizeMessagePayload(message.payload),
+      lines: sanitizeMessageLines(message.lines)
+    })),
     selectedFleetId: state.selectedFleetId,
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
@@ -456,6 +473,20 @@ export const deserializeGameState = (json: string): GameState => {
         };
     });
 
+    const messages: GameMessage[] = (dto.messages || []).map((m: any, index: number) => ({
+      id: typeof m.id === 'string' ? m.id : `message-${index}`,
+      day: Number.isFinite(m.day) ? m.day : 0,
+      type: typeof m.type === 'string' ? m.type : 'generic',
+      priority: Number.isFinite(m.priority) ? m.priority : 0,
+      title: typeof m.title === 'string' ? m.title : 'Untitled message',
+      subtitle: typeof m.subtitle === 'string' ? m.subtitle : '',
+      lines: sanitizeMessageLines(m.lines),
+      payload: sanitizeMessagePayload(m.payload),
+      read: Boolean(m.read),
+      dismissed: Boolean(m.dismissed),
+      createdAtTurn: Number.isFinite(m.createdAtTurn) ? m.createdAtTurn : 0
+    }));
+
     const aiStatesDto = dto.aiStates as Record<string, AIStateDTO> | undefined;
     const aiStates: Record<FactionId, AIState> | undefined = aiStatesDto
       ? Object.entries(aiStatesDto).reduce<Record<FactionId, AIState>>((acc, [factionId, aiStateDto]) => {
@@ -513,6 +544,7 @@ export const deserializeGameState = (json: string): GameState => {
       lasers,
       battles,
       logs: dto.logs || [],
+      messages: messages || [],
       selectedFleetId: dto.selectedFleetId ?? null,
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
       aiStates: migratedAiStates,

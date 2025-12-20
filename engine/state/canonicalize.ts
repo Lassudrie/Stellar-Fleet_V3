@@ -7,7 +7,7 @@
  * Canonical order is always by ID (lexicographic) for all entity types.
  */
 
-import { GameState, Fleet, Army, Battle, StarSystem, LogEntry } from '../../types';
+import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage } from '../../types';
 
 /**
  * Returns a new GameState with all entity arrays sorted in canonical order.
@@ -26,7 +26,8 @@ export const canonicalizeState = (state: GameState): GameState => {
         fleets: canonicalizeFleets(state.fleets),
         armies: canonicalizeArmies(state.armies),
         battles: canonicalizeBattles(state.battles),
-        logs: canonicalizeLogs(state.logs)
+        logs: canonicalizeLogs(state.logs),
+        messages: canonicalizeMessages(state.messages)
     };
 };
 
@@ -70,6 +71,14 @@ export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
  */
 export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
     return [...logs].sort((a, b) => {
+        const dayDiff = a.day - b.day;
+        if (dayDiff !== 0) return dayDiff;
+        return a.id.localeCompare(b.id);
+    });
+};
+
+export const canonicalizeMessages = (messages: GameMessage[]): GameMessage[] => {
+    return [...messages].sort((a, b) => {
         const dayDiff = a.day - b.day;
         if (dayDiff !== 0) return dayDiff;
         return a.id.localeCompare(b.id);

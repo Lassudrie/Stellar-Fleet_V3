@@ -249,6 +249,20 @@ export interface LogEntry {
   type: 'info' | 'combat' | 'move' | 'ai';
 }
 
+export interface GameMessage {
+  id: string;
+  day: number;
+  type: string;
+  priority: number;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  payload: Record<string, unknown>;
+  read: boolean;
+  dismissed: boolean;
+  createdAtTurn: number;
+}
+
 export type BattleStatus = 'scheduled' | 'resolved';
 
 export interface BattleShipSnapshot {
@@ -333,6 +347,7 @@ export interface GameState {
   lasers: LaserShot[];
   battles: Battle[];
   logs: LogEntry[];
+  messages: GameMessage[];
   selectedFleetId: string | null;
   winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;

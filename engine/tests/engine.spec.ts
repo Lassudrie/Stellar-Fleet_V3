@@ -131,6 +131,7 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     lasers: [],
     battles: [],
     logs: [],
+    messages: [],
     selectedFleetId: null,
     winnerFactionId: null,
     objectives,

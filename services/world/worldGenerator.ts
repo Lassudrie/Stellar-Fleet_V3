@@ -656,6 +656,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           text: `Simulation initialized. Seed: ${scenario.seed}. Topology: ${topology}`,
           type: 'info'
       }],
+      messages: [],
       selectedFleetId: null,
       winnerFactionId: null,
       objectives: {
