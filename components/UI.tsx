@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState } from '../types';
+import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState, GameMessage } from '../types';
 import VictoryScreen from './ui/VictoryScreen';
 import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
@@ -17,6 +17,7 @@ import { hasInvadingForce } from '../engine/army';
 import { distSq, dist } from '../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import MessageToasts from './ui/MessageToasts';
 
 interface UIProps {
   startYear: number;
@@ -24,6 +25,7 @@ interface UIProps {
   selectedFleet: Fleet | null;
   inspectedFleet: Fleet | null;
   logs: LogEntry[];
+  messages: GameMessage[];
 
   uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
   menuPosition: { x: number, y: number } | null;
@@ -68,10 +70,16 @@ interface UIProps {
   devMode: boolean;
   godEyes: boolean;
   onSetUiSettings: (settings: { devMode: boolean, godEyes: boolean, aiDebug?: boolean }) => void;
+
+  onDismissMessage: (messageId: string) => void;
+  onOpenMessage: (message: GameMessage) => void;
+  onMarkMessageRead: (messageId: string, read: boolean) => void;
+  onMarkAllMessagesRead: () => void;
+  onDismissReadMessages: () => void;
 }
 
 const UI: React.FC<UIProps> = ({
-    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, onTransferArmy, winner, logs,
+    startYear, day, selectedFleet, inspectedFleet, onSplit, onMerge, onDeploy, onEmbark, onTransferArmy, winner, logs, messages,
     onRestart, onNextTurn,
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
@@ -79,7 +87,8 @@ const UI: React.FC<UIProps> = ({
     onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
-    devMode, godEyes, onSetUiSettings
+    devMode, godEyes, onSetUiSettings,
+    onDismissMessage, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages
 }) => {
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
@@ -289,11 +298,17 @@ const UI: React.FC<UIProps> = ({
         isOpen={isSideMenuOpen}
         onClose={() => setIsSideMenuOpen(false)}
         logs={logs}
+        messages={messages}
         blueFleets={blueFleets}
         systems={systems}
         onRestart={onRestart}
         onSelectFleet={onSelectFleet}
         onSave={onSave}
+        onOpenMessage={onOpenMessage}
+        onDismissMessage={onDismissMessage}
+        onMarkMessageRead={onMarkMessageRead}
+        onMarkAllMessagesRead={onMarkAllMessagesRead}
+        onDismissReadMessages={onDismissReadMessages}
         
         devMode={devMode}
         godEyes={godEyes}
@@ -423,6 +438,13 @@ const UI: React.FC<UIProps> = ({
               onClose={onCloseSystemDetails}
           />
       )}
+
+      <MessageToasts
+        messages={messages}
+        onDismissMessage={onDismissMessage}
+        onOpenMessage={onOpenMessage}
+        onMarkRead={onMarkMessageRead}
+      />
     </div>
   );
 };

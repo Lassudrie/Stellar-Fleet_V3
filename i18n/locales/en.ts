@@ -202,6 +202,26 @@ export const en = {
   'battle.errorMsg': 'Unable to retrieve combat telemetry for ID: {{id}}',
   'battle.closeConn': 'CLOSE CONNECTION',
 
+  // Messaging
+  'sidemenu.messaging': 'Messaging',
+  'sidemenu.unread': 'Unread',
+  'sidemenu.filterByType': 'Filter by type',
+  'sidemenu.typeAll': 'All',
+  'sidemenu.typeBattle': 'Battle',
+  'sidemenu.typeGround': 'Ground',
+  'sidemenu.typeOther': 'Other',
+  'sidemenu.noMessages': 'No messages.',
+  'sidemenu.markAllRead': 'Mark all as read',
+  'sidemenu.dismissRead': 'Dismiss read',
+  'sidemenu.dismiss': 'Dismiss',
+  'sidemenu.markRead': 'Mark read',
+  'sidemenu.markUnread': 'Mark unread',
+  'messages.priority.high': 'Priority',
+  'messages.priority.normal': 'Standard',
+  'messages.markRead': 'Mark read',
+  'messages.markUnread': 'Mark unread',
+  'messages.dismiss': 'Dismiss',
+
   // Victory
   'victory.victory': 'VICTORY',
   'victory.defeat': 'DEFEAT',

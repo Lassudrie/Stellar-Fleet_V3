@@ -1,5 +1,5 @@
 
-import { ArmyState, FactionId, Fleet, FleetState, GameState, StarSystem } from '../types';
+import { ArmyState, FactionId, Fleet, FleetState, GameMessage, GameState, StarSystem } from '../types';
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
@@ -9,6 +9,7 @@ import { withUpdatedFleetDerived } from './fleetDerived';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import { isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
+import { canonicalizeMessages } from './state/canonicalize';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -73,6 +74,40 @@ export class GameEngine {
         this.state = applyCommand(this.state, cmd, this.rng);
         this.syncRngState();
         this.notify();
+    }
+
+    private updateMessages(updater: (messages: GameMessage[]) => GameMessage[]) {
+        this.state = {
+            ...this.state,
+            messages: canonicalizeMessages(updater(this.state.messages))
+        };
+        this.syncRngState();
+        this.notify();
+    }
+
+    markMessageRead(messageId: string, read: boolean) {
+        this.updateMessages(messages => messages.map(message =>
+            message.id === messageId ? { ...message, read } : message
+        ));
+    }
+
+    dismissMessage(messageId: string) {
+        this.updateMessages(messages => messages.map(message =>
+            message.id === messageId ? { ...message, read: true, dismissed: true } : message
+        ));
+    }
+
+    markAllMessagesRead() {
+        this.updateMessages(messages => messages.map(message => ({
+            ...message,
+            read: true
+        })));
+    }
+
+    dismissReadMessages() {
+        this.updateMessages(messages => messages.map(message =>
+            message.read ? { ...message, dismissed: true } : message
+        ));
     }
 
     private getFleetCommandBlockReason(fleet: Fleet): string | null {
