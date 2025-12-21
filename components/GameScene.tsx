@@ -177,11 +177,26 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   const lastTapRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
   const DOUBLE_TAP_THRESHOLD_MS = 500;
+  const hasCoarsePointer = () => typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
 
-  const handleFleetInteraction = (fleetId: string, isDouble = false) => {
+  const handleFleetInteraction = (
+    fleetId: string,
+    options?: { isDouble?: boolean; pointerType?: string }
+  ) => {
+    const isDouble = options?.isDouble ?? false;
+    const pointerType = options?.pointerType;
+    const isTouchPointer = pointerType === 'touch' || hasCoarsePointer();
     const now = performance.now();
 
     if (isDouble) {
+      lastTapRef.current = { id: null, time: 0 };
+      onFleetInspect(fleetId);
+      return;
+    }
+
+    if (isTouchPointer) {
       lastTapRef.current = { id: null, time: 0 };
       onFleetInspect(fleetId);
       return;
@@ -254,9 +269,9 @@ const GameScene: React.FC<GameSceneProps> = ({
                         fleet={fleet}
                         day={gameState.day}
                         isSelected={selectedFleetId === fleet.id}
-                        onSelect={(e, isDouble) => {
+                        onSelect={(e, isDouble, pointerType) => {
                             e.stopPropagation();
-                            handleFleetInteraction(fleet.id, isDouble);
+                            handleFleetInteraction(fleet.id, { isDouble, pointerType });
                         }}
                         playerFactionId={gameState.playerFactionId}
                         color={getFactionColor(fleet.factionId)}
