@@ -4,6 +4,31 @@ import { CAPTURE_RANGE, SENSOR_RANGE } from '../data/static';
 import { getTerritoryOwner } from './territory';
 import { Vec3, distSq } from './math/vec3';
 
+/**
+ * Current limitations of the fog of war model:
+ * - Visibility is purely range-based: no line-of-sight, obstacles, or sensor degradation.
+ * - Knowledge is instantaneous and perfect once a rule triggers; no "last seen" memory.
+ * - Territory checks still rely on system ownership borders, which remain expensive for dense maps.
+ * - Systems become "observed" only through ownership or proximity; enemy actions cannot currently reveal themselves.
+ */
+
+export interface VisibilityContext {
+  state: GameState;
+  viewerFactionId: FactionId;
+  viewerFleets: Fleet[];
+  observedSystemIds: Set<string>;
+  observedPositions: Vec3[];
+}
+
+export interface FleetVisibilitySensor {
+  id: string;
+  /**
+   * Returns true when the target fleet should be visible to the viewer.
+   * Implementations should avoid mutating the input state.
+   */
+  isVisible: (fleet: Fleet, context: VisibilityContext) => boolean;
+}
+
 // Performance optimization: squared distances
 const CAPTURE_SQ = CAPTURE_RANGE * CAPTURE_RANGE;
 const SENSOR_SQ = SENSOR_RANGE * SENSOR_RANGE;
@@ -50,44 +75,41 @@ export const getObservedSystemIds = (
  * Uses pre-calculated lists (viewerFleets, observedPositions) to avoid 
  * O(N) lookups inside the hot loop.
  */
+const DEFAULT_FLEET_SENSORS: FleetVisibilitySensor[] = [
+  {
+    id: 'ally-visibility',
+    isVisible: (fleet, context) => fleet.factionId === context.viewerFactionId
+  },
+  {
+    id: 'direct-sensor',
+    isVisible: (fleet, context) => {
+      for (const viewer of context.viewerFleets) {
+        if (distSq(fleet.position, viewer.position) <= SENSOR_SQ) return true;
+      }
+      return false;
+    }
+  },
+  {
+    id: 'system-surveillance',
+    isVisible: (fleet, context) => {
+      for (const pos of context.observedPositions) {
+        if (distSq(fleet.position, pos) <= CAPTURE_SQ) return true;
+      }
+      return false;
+    }
+  },
+  {
+    id: 'territory-surveillance',
+    isVisible: (fleet, context) =>
+      getTerritoryOwner(context.state.systems, fleet.position) === context.viewerFactionId
+  }
+];
+
 const checkVisibility = (
   fleet: Fleet,
-  state: GameState,
-  viewerFactionId: FactionId,
-  viewerFleets: Fleet[],
-  observedPositions: Vec3[]
-): boolean => {
-  // 1. Allies always visible
-  if (fleet.factionId === viewerFactionId) return true;
-
-  // 2. Direct Sensor Range (Ship-to-Ship)
-  // Essential for deep space encounters away from systems
-  for (const viewer of viewerFleets) {
-    if (distSq(fleet.position, viewer.position) <= SENSOR_SQ) {
-      return true;
-    }
-  }
-
-  // 3. System Surveillance
-  // Visible if within range of an observed system
-  // WHY: Iterating pre-fetched positions is O(M) vs O(M * S) using systems.find()
-  for (const pos of observedPositions) {
-    if (distSq(fleet.position, pos) <= CAPTURE_SQ) {
-      return true;
-    }
-  }
-
-  // 4. Territorial Surveillance
-  // Visible if inside the viewer's controlled space (borders)
-  // Note: getTerritoryOwner scans systems, so this remains the most expensive check,
-  // but it is only reached if previous checks fail.
-  const territoryOwner = getTerritoryOwner(state.systems, fleet.position);
-  if (territoryOwner === viewerFactionId) {
-      return true;
-  }
-
-  return false;
-};
+  context: VisibilityContext,
+  sensors: FleetVisibilitySensor[]
+): boolean => sensors.some(sensor => sensor.isVisible(fleet, context));
 
 /**
  * Determines if a specific fleet is visible to the viewer.
@@ -95,19 +117,35 @@ const checkVisibility = (
  * WARNING: Less efficient than calling applyFogOfWar for batch processing.
  */
 export const isFleetVisibleToViewer = (
-  fleet: Fleet, 
-  state: GameState, 
-  viewerFactionId: FactionId, 
-  observedSystemIds: Set<string>
+  fleet: Fleet,
+  state: GameState,
+  viewerFactionId: FactionId,
+  observedSystemIds: Set<string>,
+  sensors: FleetVisibilitySensor[] = DEFAULT_FLEET_SENSORS
 ): boolean => {
-  // Reconstruct necessary optimization structures on the fly
+  const context = buildVisibilityContext(state, viewerFactionId, observedSystemIds);
+  return checkVisibility(fleet, context, sensors);
+};
+
+const buildVisibilityContext = (
+  state: GameState,
+  viewerFactionId: FactionId,
+  observedSystemIds?: Set<string>
+): VisibilityContext => {
   const viewerFleets = state.fleets.filter(f => f.factionId === viewerFactionId);
+  const observedIds = observedSystemIds ?? getObservedSystemIds(state, viewerFactionId, viewerFleets);
   const observedPositions: Vec3[] = [];
   for (const sys of state.systems) {
-      if (observedSystemIds.has(sys.id)) observedPositions.push(sys.position);
+    if (observedIds.has(sys.id)) observedPositions.push(sys.position);
   }
 
-  return checkVisibility(fleet, state, viewerFactionId, viewerFleets, observedPositions);
+  return {
+    state,
+    viewerFactionId,
+    viewerFleets,
+    observedSystemIds: observedIds,
+    observedPositions
+  };
 };
 
 /**
@@ -116,32 +154,18 @@ export const isFleetVisibleToViewer = (
  * 
  * OPTIMIZED IMPLEMENTATION
  */
-export const applyFogOfWar = (state: GameState, viewerFactionId: FactionId): GameState => {
-  // 1. Pre-calculate Viewer Fleets (O(N))
-  // Done once per frame instead of for every target fleet
-  const viewerFleets = state.fleets.filter(f => f.factionId === viewerFactionId);
+export const applyFogOfWar = (
+  state: GameState,
+  viewerFactionId: FactionId,
+  sensors: FleetVisibilitySensor[] = DEFAULT_FLEET_SENSORS
+): GameState => {
+  const context = buildVisibilityContext(state, viewerFactionId);
 
-  // 2. Get Observed IDs (O(S * F_view))
-  const observedIds = getObservedSystemIds(state, viewerFactionId, viewerFleets);
-
-  // 3. Pre-calculate Observed Positions (O(S))
-  // WHY: Extracting positions now prevents doing `state.systems.find` 
-  // (which is O(S)) inside the fleet loop (which is O(N)), avoiding O(N*S) complexity.
-  // We use a simple array iteration for distance checks.
-  const observedPositions: Vec3[] = [];
-  for (const sys of state.systems) {
-      if (observedIds.has(sys.id)) {
-          observedPositions.push(sys.position);
-      }
-  }
-
-  // 4. Filter Fleets (O(N_total * (F_view + S_observed)))
-  // The logic is now heavily optimized for the batch operation.
   return {
     ...state,
     systems: state.systems,
-    fleets: state.fleets.filter(f =>
-      checkVisibility(f, state, viewerFactionId, viewerFleets, observedPositions)
-    )
+    fleets: state.fleets.filter(fleet => checkVisibility(fleet, context, sensors))
   };
 };
+
+export const defaultFleetSensors = DEFAULT_FLEET_SENSORS;
