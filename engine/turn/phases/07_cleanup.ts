@@ -1,5 +1,5 @@
 
-import { GameState } from '../../../types';
+import { ArmyState, GameState } from '../../../types';
 import { TurnContext } from '../types';
 import { pruneBattles } from '../../../services/battle/detection';
 import { sanitizeArmyLinks } from '../../army';
@@ -14,14 +14,28 @@ const trimLogs = (logs: GameState['logs']): GameState['logs'] => {
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Prune Old Battles
     const activeBattles = pruneBattles(state.battles, ctx.turn);
+    const fleetIds = new Set(state.fleets.map(fleet => fleet.id));
+
+    const carrierLossLogs: string[] = [];
+    const armiesAfterFleetLoss = state.armies.filter(army => {
+        if (army.state === ArmyState.EMBARKED && !fleetIds.has(army.containerId)) {
+            carrierLossLogs.push(`Army ${army.id} removed after losing transport fleet ${army.containerId}.`);
+            return false;
+        }
+        return true;
+    });
     
     // 2. Sanitize Armies (Remove orphans, fix references)
     // Note: We use a temp state with pruned battles to ensure army logic has fresh context
-    const { state: sanitizedArmyState, logs: sanitizationLogs } = sanitizeArmyLinks({ ...state, battles: activeBattles });
+    const { state: sanitizedArmyState, logs: sanitizationLogs } = sanitizeArmyLinks({
+        ...state,
+        armies: armiesAfterFleetLoss,
+        battles: activeBattles
+    });
 
     // 3. Add Tech Logs
     const newLogs = [...sanitizedArmyState.logs];
-    sanitizationLogs.forEach(txt => {
+    [...carrierLossLogs, ...sanitizationLogs].forEach(txt => {
         newLogs.push({
             id: ctx.rng.id('log'),
             day: ctx.turn,

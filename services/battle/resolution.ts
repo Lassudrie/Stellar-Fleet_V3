@@ -11,7 +11,8 @@ import {
   BattleAmmunitionBreakdown,
   BattleAmmunitionByFaction,
   BattleAmmunitionTally,
-  ShipConsumables
+  ShipConsumables,
+  ArmyState
 } from '../../types';
 import { RNG } from '../../engine/rng';
 import { SHIP_STATS } from '../../data/static';
@@ -105,6 +106,14 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
 
 const short = (id: string) => id.split('_').pop()?.toUpperCase() || '???';
 
+export interface BattleResolutionResult {
+  updatedBattle: Battle;
+  survivingFleets: Fleet[];
+  destroyedShipIds: string[];
+  destroyedFleetIds: string[];
+  destroyedArmyIds: string[];
+}
+
 // --- RESOLVER ---
 
 // Optimization: Removed unused masterRng param. The battle creates its own isolated RNG.
@@ -112,7 +121,7 @@ export const resolveBattle = (
   battle: Battle,
   state: GameState,
   turn: number
-): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
+): BattleResolutionResult => {
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
@@ -517,6 +526,33 @@ export const resolveBattle = (
 
   logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
+  const destroyedShipIds = battleShips.filter(s => s.currentHp <= 0).map(s => s.shipId);
+  const survivingFleetIds = new Set(survivingFleets.map(fleet => fleet.id));
+  const destroyedFleetIds = battle.involvedFleetIds.filter(fleetId => !survivingFleetIds.has(fleetId));
+
+  const carrierArmyByShipId = new Map<string, string>();
+  involvedFleets.forEach(fleet => {
+    fleet.ships.forEach(ship => {
+      if (ship.carriedArmyId) {
+        carrierArmyByShipId.set(ship.id, ship.carriedArmyId);
+      }
+    });
+  });
+
+  const destroyedArmyIds = new Set<string>();
+  carrierArmyByShipId.forEach((armyId, shipId) => {
+    const battleShip = shipMap.get(shipId);
+    if (!battleShip || battleShip.currentHp <= 0) {
+      destroyedArmyIds.add(armyId);
+    }
+  });
+
+  state.armies.forEach(army => {
+    if (army.state === ArmyState.EMBARKED && destroyedFleetIds.includes(army.containerId)) {
+      destroyedArmyIds.add(army.id);
+    }
+  });
+
   const shipsLost: Record<FactionId, number> = {};
   battleShips.forEach(s => {
       if (s.currentHp <= 0) {
@@ -593,5 +629,11 @@ export const resolveBattle = (
       })()
   };
 
-  return { updatedBattle, survivingFleets };
+  return {
+    updatedBattle,
+    survivingFleets,
+    destroyedShipIds,
+    destroyedFleetIds,
+    destroyedArmyIds: Array.from(destroyedArmyIds)
+  };
 };
