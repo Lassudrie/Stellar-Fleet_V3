@@ -63,6 +63,8 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
 
 const compareStrings = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
+const isCommandableFleet = (fleet: Fleet): boolean => fleet.state !== FleetState.COMBAT && !fleet.retreating;
+
 export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
   factions
     .filter(faction => faction.aiProfile)
@@ -136,7 +138,7 @@ const updateMemory = (
   cfg: AiConfig
 ) => {
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
-  const myFleets = state.fleets.filter(f => f.factionId === factionId);
+  const myFleets = state.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f));
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
 
   const minDistanceBySystemId: Record<string, number> = {};
@@ -169,10 +171,12 @@ const updateMemory = (
   });
 
   const observedSystemIds = state.rules.fogOfWar
-    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
+    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f)))
     : new Set(state.systems.map(s => s.id));
 
-  const visibleEnemyFleets = perceivedState.fleets.filter(f => f.factionId !== factionId);
+  const visibleEnemyFleets = perceivedState.fleets.filter(
+    f => f.factionId !== factionId && isCommandableFleet(f)
+  );
   const refreshedSightings = new Set<string>();
   const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
 
@@ -258,7 +262,7 @@ const evaluateSystems = (
     fogAge: number
   }[] = [];
   const totalMyPower = perceivedState.fleets
-    .filter(f => f.factionId === factionId)
+    .filter(f => f.factionId === factionId && isCommandableFleet(f))
     .reduce((sum, f) => sum + calculateFleetPower(f), 0);
 
   state.systems.forEach(sys => {
@@ -271,7 +275,7 @@ const evaluateSystems = (
       const distanceToEmpire = minDistanceBySystemId[sys.id] ?? Infinity;
 
       const visibleFleetsHere = perceivedState.fleets
-        .filter(f => f.factionId !== factionId)
+        .filter(f => f.factionId !== factionId && isCommandableFleet(f))
         .filter(f => distSq(f.position, sys.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
 
       const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
@@ -889,7 +893,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     if (solidPlanets.length < 2) return;
 
     const availableTransports = state.fleets
-      .filter(fleet => fleet.factionId === factionId && isFleetOrbitingSystem(fleet, system))
+      .filter(fleet => fleet.factionId === factionId && isFleetOrbitingSystem(fleet, system) && isCommandableFleet(fleet))
       .reduce((count, fleet) => {
         const freeTransports = fleet.ships.filter(ship =>
           ship.type === ShipType.TROOP_TRANSPORT &&
