@@ -6,7 +6,7 @@ import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
-import { applyCommand } from '../commands';
+import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
   ArmyState,
@@ -892,6 +892,36 @@ const tests: TestCase[] = [
         customTurn,
         'Movement commands should respect an explicit turn override'
       );
+    }
+  },
+  {
+    name: 'Combat fleets ignore movement commands in AI/replay flows',
+    run: () => {
+      const system = createSystem('sys-combat-locked', null);
+      const combatFleet: Fleet = {
+        ...createFleet('fleet-combat-locked', 'blue', { ...baseVec }, []),
+        state: FleetState.COMBAT,
+        targetSystemId: 'engaged-system',
+        stateStartTurn: 7
+      };
+
+      const baseState = createBaseState({ day: 3, systems: [system], fleets: [combatFleet] });
+
+      const commands: GameCommand[] = [
+        { type: 'MOVE_FLEET', fleetId: combatFleet.id, targetSystemId: system.id },
+        { type: 'ORDER_INVASION_MOVE', fleetId: combatFleet.id, targetSystemId: system.id },
+        { type: 'ORDER_LOAD_MOVE', fleetId: combatFleet.id, targetSystemId: system.id },
+        { type: 'ORDER_UNLOAD_MOVE', fleetId: combatFleet.id, targetSystemId: system.id }
+      ];
+
+      commands.forEach(command => {
+        const updated = applyCommand(baseState, command, new RNG(11));
+        assert.strictEqual(
+          updated,
+          baseState,
+          `${command.type} should be ignored when the fleet is locked in combat`
+        );
+      });
     }
   },
   {

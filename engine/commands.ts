@@ -65,8 +65,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             // Validation
             if (!system) return state;
-            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
-            if (!fleetExists) return state;
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return state;
+            // Combat-locked fleets must ignore movement orders to preserve engagement lock
+            if (fleet.state === FleetState.COMBAT) return state;
 
             // Structural Sharing Update
             return {
@@ -76,8 +78,6 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     
                     // Locked fleets cannot move
                     if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -99,16 +99,16 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const stateStartTurn = command.turn ?? state.day;
 
             if (!system) return state;
-            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
-            if (!fleetExists) return state;
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return state;
+            // Combat-locked fleets must ignore movement orders to preserve engagement lock
+            if (fleet.state === FleetState.COMBAT) return state;
 
             return {
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -130,16 +130,16 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const stateStartTurn = command.turn ?? state.day;
 
             if (!system) return state;
-            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
-            if (!fleetExists) return state;
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return state;
+            // Combat-locked fleets must ignore movement orders to preserve engagement lock
+            if (fleet.state === FleetState.COMBAT) return state;
 
             return {
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
@@ -161,16 +161,16 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             const stateStartTurn = command.turn ?? state.day;
 
             if (!system) return state;
-            const fleetExists = state.fleets.some(f => f.id === command.fleetId);
-            if (!fleetExists) return state;
+            const fleet = state.fleets.find(f => f.id === command.fleetId);
+            if (!fleet) return state;
+            // Combat-locked fleets must ignore movement orders to preserve engagement lock
+            if (fleet.state === FleetState.COMBAT) return state;
 
             return {
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
 
                     return {
                         ...fleet,
