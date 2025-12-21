@@ -723,6 +723,31 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'ORDER_INVASION_MOVE est ignoré pour une flotte en combat',
+    run: () => {
+      const system = createSystem('sys-order-block-combat', null);
+      const combatFleet: Fleet = {
+        ...createFleet('fleet-blue-combat', 'blue', { ...baseVec }, [
+          { id: 'blue-fighter-1', type: ShipType.FIGHTER, hp: 10, maxHp: 10, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT
+      };
+      const state = createBaseState({ systems: [system], fleets: [combatFleet] });
+      const rng = new RNG(12);
+
+      const updated = applyCommand(
+        state,
+        { type: 'ORDER_INVASION_MOVE', fleetId: combatFleet.id, targetSystemId: system.id },
+        rng
+      );
+
+      const persistedFleet = updated.fleets.find(fleet => fleet.id === combatFleet.id);
+      assert.ok(persistedFleet, 'La flotte doit rester présente si la commande est ignorée');
+      assert.strictEqual(persistedFleet?.targetSystemId, null, 'La flotte en combat ne doit pas recevoir de cible');
+      assert.strictEqual(updated.logs.length, state.logs.length, 'Aucun log ne doit être ajouté si la commande est rejetée');
+    }
+  },
+  {
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
@@ -761,6 +786,56 @@ const tests: TestCase[] = [
 
       const combatLogs = updated.logs.filter(log => log.type === 'combat');
       assert.strictEqual(combatLogs.length, 0, 'No combat logs should be generated when orbit is clear');
+    }
+  },
+  {
+    name: 'SPLIT_FLEET est refusé pour une flotte en combat',
+    run: () => {
+      const shipA: ShipEntity = { id: 'split-a', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const shipB: ShipEntity = { id: 'split-b', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const combatFleet: Fleet = {
+        ...createFleet('fleet-split-combat', 'blue', { ...baseVec }, [shipA, shipB]),
+        state: FleetState.COMBAT
+      };
+      const state = createBaseState({ fleets: [combatFleet] });
+      const rng = new RNG(21);
+
+      const updated = applyCommand(
+        state,
+        { type: 'SPLIT_FLEET', originalFleetId: combatFleet.id, shipIds: [shipA.id] },
+        rng
+      );
+
+      assert.strictEqual(updated.fleets.length, 1, 'Aucune nouvelle flotte ne doit être créée pendant un combat');
+      assert.strictEqual(updated.fleets[0].ships.length, combatFleet.ships.length, 'Les vaisseaux doivent rester inchangés');
+      assert.strictEqual(updated.logs.length, state.logs.length, 'Aucun log ne doit être ajouté si la scission est bloquée');
+    }
+  },
+  {
+    name: 'MERGE_FLEETS est refusé si une des flottes est en combat',
+    run: () => {
+      const sourceShip: ShipEntity = { id: 'merge-source', type: ShipType.FIGHTER, hp: 40, maxHp: 40, carriedArmyId: null };
+      const targetShip: ShipEntity = { id: 'merge-target', type: ShipType.FIGHTER, hp: 40, maxHp: 40, carriedArmyId: null };
+      const sourceFleet: Fleet = {
+        ...createFleet('fleet-merge-source', 'blue', { ...baseVec }, [sourceShip]),
+        state: FleetState.COMBAT
+      };
+      const targetFleet: Fleet = createFleet('fleet-merge-target', 'blue', { ...baseVec }, [targetShip]);
+      const state = createBaseState({ fleets: [sourceFleet, targetFleet] });
+      const rng = new RNG(22);
+
+      const updated = applyCommand(
+        state,
+        { type: 'MERGE_FLEETS', sourceFleetId: sourceFleet.id, targetFleetId: targetFleet.id },
+        rng
+      );
+
+      assert.strictEqual(updated.fleets.length, 2, 'Les deux flottes doivent rester présentes si la fusion est bloquée');
+      const persistedSource = updated.fleets.find(fleet => fleet.id === sourceFleet.id);
+      const persistedTarget = updated.fleets.find(fleet => fleet.id === targetFleet.id);
+      assert.strictEqual(persistedSource?.ships.length, sourceFleet.ships.length, 'La flotte source doit conserver ses vaisseaux');
+      assert.strictEqual(persistedTarget?.ships.length, targetFleet.ships.length, 'La flotte cible ne doit pas recevoir de vaisseaux');
+      assert.strictEqual(updated.logs.length, state.logs.length, 'Aucun log ne doit être ajouté quand la fusion est rejetée');
     }
   },
   {

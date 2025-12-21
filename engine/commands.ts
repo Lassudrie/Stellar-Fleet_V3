@@ -9,6 +9,7 @@ import { isOrbitContested } from './orbit';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
+import { withUpdatedFleetDerived } from './fleetDerived';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -19,7 +20,9 @@ export type GameCommand =
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
-  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
+  | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string };
 
 const getAvailableTransportsInOrbit = (
     state: GameState,
@@ -53,6 +56,10 @@ const getAvailableTransportsInOrbit = (
     });
 };
 
+const isFleetCommandLocked = (fleet: Fleet): boolean => {
+    return fleet.state === FleetState.COMBAT || fleet.retreating === true;
+};
+
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): GameState => {
     // Enforce Immutability in Dev
     deepFreezeDev(state);
@@ -75,9 +82,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     if (fleet.id !== command.fleetId) return fleet;
                     
                     // Locked fleets cannot move
-                    if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
+                    if (isFleetCommandLocked(fleet)) return fleet;
 
                     return {
                         ...fleet,
@@ -106,9 +111,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
-                    if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
+                    if (isFleetCommandLocked(fleet)) return fleet;
 
                     return {
                         ...fleet,
@@ -137,9 +140,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
-                    if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
+                    if (isFleetCommandLocked(fleet)) return fleet;
 
                     return {
                         ...fleet,
@@ -168,9 +169,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
-                    if (fleet.retreating) return fleet;
-                    // Combat-locked fleets must ignore movement orders to preserve engagement lock
-                    if (fleet.state === FleetState.COMBAT) return fleet;
+                    if (isFleetCommandLocked(fleet)) return fleet;
 
                     return {
                         ...fleet,
@@ -301,6 +300,100 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
                 armies: riskOutcome.armies,
                 logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
+            };
+        }
+
+        case 'SPLIT_FLEET': {
+            const fleet = state.fleets.find(f => f.id === command.originalFleetId);
+            if (!fleet) return state;
+            if (isFleetCommandLocked(fleet)) return state;
+
+            const shipIdSet = new Set(command.shipIds);
+            const splitShips = fleet.ships.filter(ship => shipIdSet.has(ship.id));
+
+            if (splitShips.length === 0) return state;
+            if (splitShips.length !== shipIdSet.size) return state;
+            if (splitShips.length === fleet.ships.length) return state;
+
+            const remainingShips = fleet.ships.filter(ship => !shipIdSet.has(ship.id));
+
+            const newFleet: Fleet = withUpdatedFleetDerived({
+                ...fleet,
+                id: rng.id('fleet'),
+                ships: splitShips,
+                position: clone(fleet.position),
+                targetPosition: fleet.targetPosition ? clone(fleet.targetPosition) : null,
+                invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+                loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+                unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
+            });
+
+            const updatedOriginalFleet = withUpdatedFleetDerived({
+                ...fleet,
+                ships: remainingShips
+            });
+
+            const updatedArmies = state.armies.map(army => {
+                if (army.containerId !== fleet.id) return army;
+                const carriedByMovedShip = splitShips.some(ship => ship.carriedArmyId === army.id);
+                if (!carriedByMovedShip) return army;
+                return { ...army, containerId: newFleet.id };
+            });
+
+            const splitLog: LogEntry = {
+                id: rng.id('log'),
+                day: state.day,
+                text: `Fleet ${fleet.id} split into ${updatedOriginalFleet.id} and ${newFleet.id}. ${newFleet.id} received ${splitShips.length} ships.`,
+                type: 'info'
+            };
+
+            return {
+                ...state,
+                fleets: state.fleets
+                    .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
+                    .concat(newFleet),
+                armies: updatedArmies,
+                logs: [...state.logs, splitLog],
+                selectedFleetId: newFleet.id
+            };
+        }
+
+        case 'MERGE_FLEETS': {
+            const sourceFleet = state.fleets.find(f => f.id === command.sourceFleetId);
+            const targetFleet = state.fleets.find(f => f.id === command.targetFleetId);
+
+            if (!sourceFleet || !targetFleet) return state;
+            if (sourceFleet.id === targetFleet.id) return state;
+            if (sourceFleet.factionId !== targetFleet.factionId) return state;
+            if (isFleetCommandLocked(sourceFleet) || isFleetCommandLocked(targetFleet)) return state;
+            if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT) return state;
+            if (distSq(sourceFleet.position, targetFleet.position) > ORBIT_PROXIMITY_RANGE_SQ) return state;
+
+            const mergedTarget = withUpdatedFleetDerived({
+                ...targetFleet,
+                ships: [...targetFleet.ships, ...sourceFleet.ships]
+            });
+
+            const updatedArmies = state.armies.map(army => {
+                if (army.containerId !== sourceFleet.id) return army;
+                return { ...army, containerId: targetFleet.id };
+            });
+
+            const mergeLog: LogEntry = {
+                id: rng.id('log'),
+                day: state.day,
+                text: `Fleet ${sourceFleet.id} merged into ${targetFleet.id}, transferring ${sourceFleet.ships.length} ships.`,
+                type: 'info'
+            };
+
+            return {
+                ...state,
+                fleets: state.fleets
+                    .filter(f => f.id !== sourceFleet.id)
+                    .map(f => (f.id === targetFleet.id ? mergedTarget : f)),
+                armies: updatedArmies,
+                logs: [...state.logs, mergeLog],
+                selectedFleetId: mergedTarget.id
             };
         }
 
