@@ -1,4 +1,3 @@
-
 export const fr = {
   // Main Menu
   'menu.title': 'Stellar',
@@ -72,6 +71,7 @@ export const fr = {
 
   // Context Menu
   'ctx.groundForces': 'Forces au Sol',
+  'ctx.groundOps': 'Ops au sol',
   'ctx.homeworld': 'Monde natal',
   'ctx.moveTo': 'Aller vers...',
   'ctx.selectFleet': 'Sélectionner flotte',
@@ -83,6 +83,37 @@ export const fr = {
   'ctx.morale': 'Moral',
   'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
+  'ctx.systemDetails': 'Détails du système',
+
+  // System Detail Modal
+  'system.value.unknown': 'Inconnu',
+  'system.modal.systemLabel': 'Système',
+  'system.modal.headerLine': 'Graine {{seed}} ⬢ Type spectral {{spectralType}} ⬢ {{stars}}',
+  'system.modal.noAstro': 'Aucune donnée astronomique procédurale disponible pour ce système.',
+  'system.modal.stellarSummary': 'Synthèse stellaire',
+  'system.planets.title': 'Planètes',
+  'system.label.spectralType': 'Type spectral',
+  'system.label.stars': 'Étoiles',
+  'system.label.metallicity': 'Métallicité [Fe/H]',
+  'system.label.totalLuminosity': 'Luminosité totale',
+  'system.label.snowLine': 'Ligne de neige',
+  'system.label.habitableZone': 'Zone habitable',
+  'system.stars_one': '1 étoile',
+  'system.stars_other': '{{count}} étoiles',
+  'planet.name': 'Planète {{index}}',
+  'planet.label.massRadius': 'Masse / Rayon',
+  'planet.label.gravity': 'Gravité',
+  'planet.label.temperature': 'Température',
+  'planet.label.atmosphere': 'Atmosphère',
+  'planet.label.pressure': 'Pression',
+  'planet.label.eccentricity': 'Excentricité',
+  'planet.label.semiMajorAxis': 'Axe semi-major',
+  'planet.label.albedo': 'Albédo',
+  'planet.label.climate': 'Climat',
+  'moon.section.title': 'Lunes',
+  'moon.none': 'Aucune lune détectée.',
+  'moon.name': 'Lune {{index}}',
+  'moon.label.orbit': 'Orbite',
 
   // Fleet Picker
   'picker.title': 'Choisir Flotte',
@@ -113,10 +144,26 @@ export const fr = {
   'fleet.mergeWith': 'Fusionner avec {{fleet}}',
   'fleet.hostile': 'SIGNAL HOSTILE',
   'fleet.deploy': 'Déployer {{army}}',
+  'fleet.deployTo': 'Deployer vers...',
   'fleet.load': 'Embarquer Armée...',
   'fleet.status.orbit': 'ORBITE',
   'fleet.status.moving': 'TRANSIT',
   'fleet.status.combat': 'COMBAT',
+
+  // Ground Ops
+  'groundOps.title': 'Fronts au sol',
+  'groundOps.system': 'Systeme: {{system}}',
+  'groundOps.transports': 'Transports disponibles: {{count}}',
+  'groundOps.transportsNone': 'Aucun transport en orbite.',
+  'groundOps.noLandingZones': 'Aucun corps solide pour les operations au sol.',
+  'groundOps.owner': 'Controle',
+  'groundOps.neutral': 'Neutre',
+  'groundOps.contested': 'Conteste',
+  'groundOps.bombardment': 'Bombardement orbital',
+  'groundOps.noTroops': 'Aucune troupe deployee.',
+  'groundOps.transfer': 'Transfert',
+  'groundOps.transferTo': 'Transferer vers...',
+  'groundOps.transferDisabled': 'Transferts: transport libre en orbite et autre destination solide.',
 
   // Invasion
   'invasion.title': 'Planification Invasion',
@@ -154,6 +201,26 @@ export const fr = {
   'battle.errorMsg': 'Impossible de récupérer la télémétrie pour l\'ID : {{id}}',
   'battle.closeConn': 'COUPER CONNEXION',
 
+  // Messaging
+  'sidemenu.messaging': 'Messagerie',
+  'sidemenu.unread': 'Non lus',
+  'sidemenu.filterByType': 'Filtrer par type',
+  'sidemenu.typeAll': 'Tous',
+  'sidemenu.typeBattle': 'Bataille',
+  'sidemenu.typeGround': 'Terre',
+  'sidemenu.typeOther': 'Autre',
+  'sidemenu.noMessages': 'Aucun message.',
+  'sidemenu.markAllRead': 'Tout marquer lu',
+  'sidemenu.dismissRead': 'Ignorer lus',
+  'sidemenu.dismiss': 'Ignorer',
+  'sidemenu.markRead': 'Marquer lu',
+  'sidemenu.markUnread': 'Marquer non lu',
+  'messages.priority.high': 'Priorité',
+  'messages.priority.normal': 'Standard',
+  'messages.markRead': 'Marquer lu',
+  'messages.markUnread': 'Marquer non lu',
+  'messages.dismiss': 'Ignorer',
+
   // Victory
   'victory.victory': 'VICTOIRE',
   'victory.defeat': 'DEFAITE',
@@ -163,7 +230,7 @@ export const fr = {
 
   // Loading
   'loading.init': 'Initialisation Simulation',
-  'loading.version': 'V1.1 • MOTEUR DETERMINISTE',
+  'loading.version': 'V1.1 ⬢ MOTEUR DETERMINISTE',
 
   // App / Engine Messages
   'msg.commandFailed': 'Commande échouée : {{error}}',

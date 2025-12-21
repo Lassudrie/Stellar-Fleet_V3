@@ -23,9 +23,9 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         const moveResult = moveFleet(fleet, state.systems, nextDay, ctx.rng);
         movementResults.push({
             ...moveResult,
-            invasionTargetSystemId: fleet.invasionTargetSystemId,
-            loadTargetSystemId: fleet.loadTargetSystemId,
-            unloadTargetSystemId: fleet.unloadTargetSystemId
+            invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+            loadTargetSystemId: fleet.loadTargetSystemId ?? null,
+            unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
         });
         workingFleets = workingFleets.map(existing => (existing.id === fleet.id ? moveResult.fleet : existing));
         newLogs.push(...moveResult.logs);

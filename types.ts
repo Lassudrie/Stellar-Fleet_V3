@@ -36,6 +36,120 @@ export enum ShipType {
 
 export type ResourceType = 'none' | 'gas';
 
+// --- Procedural Stellar System Generation (Astro data) ---
+// NOTE: This is intentionally JSON-serializable (numbers/strings/arrays only) to support save files.
+
+export type SpectralType = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
+export type PlanetType = 'Terrestrial' | 'SubNeptune' | 'IceGiant' | 'GasGiant' | 'Dwarf';
+export type MoonType = 'Regular' | 'Icy' | 'Volcanic' | 'Eden' | 'Irregular';
+export type AtmosphereType = 'None' | 'Thin' | 'Earthlike' | 'CO2' | 'H2He';
+
+export interface WeightedSpectralType {
+  type: SpectralType;
+  weight: number;
+}
+
+export interface StellarClassBounds {
+  massSun: [number, number];
+  teffK: [number, number];
+}
+
+export type StellarMultiplicityByPrimaryType = Record<SpectralType, number>;
+
+export interface StellarSystemGenParams {
+  maxPlanets: number;
+  maxSemiMajorAxisAu: number;
+  minSemiMajorAxisAu: number;
+  innerSlotRatio: number;
+  hotGiantChance: number;
+  snowLineMatchRange: [number, number];
+  spacingLogMean: number;
+  spacingLogStd: number;
+  firstOrbitLogRange: [number, number];
+}
+
+export type PlanetTypePlan = PlanetType[];
+export type PlanetTypeProbs = Record<PlanetType, number>;
+
+export interface StarData {
+  role: 'primary' | 'companion';
+  spectralType: SpectralType;
+  massSun: number;
+  radiusSun: number;
+  luminositySun: number;
+  teffK: number;
+}
+
+export interface MoonData {
+  type: MoonType;
+  orbitDistanceRp: number;
+  massEarth: number;
+  radiusEarth: number;
+  gravityG: number;
+  albedo: number;
+  teqK: number;
+  tidalBonusK?: number;
+  atmosphere: Exclude<AtmosphereType, 'H2He'>;
+  temperatureK: number;
+}
+
+export interface PlanetData {
+  type: PlanetType;
+  semiMajorAxisAu: number;
+  eccentricity: number;
+  massEarth: number;
+  radiusEarth: number;
+  gravityG: number;
+  albedo: number;
+  teqK: number;
+  atmosphere: AtmosphereType;
+  pressureBar?: number;
+  temperatureK: number;
+  climateTag?: string;
+  moons: MoonData[];
+}
+
+export type PlanetBodyType = 'planet' | 'moon';
+export type PlanetClass = 'solid' | 'gas_giant' | 'ice_giant';
+
+export interface PlanetBody {
+  id: string;
+  systemId: string;
+  name: string;
+  bodyType: PlanetBodyType;
+  class: PlanetClass;
+  ownerFactionId?: FactionId | null;
+  size: number;
+  isSolid: boolean;
+}
+
+// Helper to pass a few derived orbit/HZ values into planet logic
+export interface StellarDerived {
+  semiMajorAxisAu: number;
+  hzInnerAu: number;
+  hzOuterAu: number;
+}
+
+export interface StarSystemAstro {
+  seed: number; // Derived per-system seed for debug / reproducibility
+  primarySpectralType: SpectralType;
+  starCount: number;
+  metallicityFeH: number;
+  derived: {
+    luminosityTotalLSun: number;
+    snowLineAu: number;
+    hzInnerAu: number;
+    hzOuterAu: number;
+  };
+  stars: StarData[];
+  planets: PlanetData[];
+}
+
+export interface StellarSystemPlan {
+  planetTypes: PlanetTypePlan;
+  moons: MoonType[][];
+}
+
 export interface ShipStats {
   maxHp: number;
   damage: number;
@@ -73,6 +187,7 @@ export interface ShipEntity {
   hp: number;
   maxHp: number;
   carriedArmyId: string | null;
+  transferBusyUntilDay?: number;
   consumables?: ShipConsumables;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -99,6 +214,8 @@ export interface StarSystem {
   ownerFactionId: FactionId | null; // Renamed from owner
   resourceType: ResourceType;
   isHomeworld: boolean;
+  planets: PlanetBody[];
+  astro?: StarSystemAstro; // Optional procedural astro data (stars/planets/moons)
 }
 
 export interface Fleet {
@@ -132,6 +249,20 @@ export interface LogEntry {
   type: 'info' | 'combat' | 'move' | 'ai';
 }
 
+export interface GameMessage {
+  id: string;
+  day: number;
+  type: string;
+  priority: number;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  payload: Record<string, unknown>;
+  read: boolean;
+  dismissed: boolean;
+  createdAtTurn: number;
+}
+
 export type BattleStatus = 'scheduled' | 'resolved';
 
 export interface BattleShipSnapshot {
@@ -142,6 +273,20 @@ export interface BattleShipSnapshot {
   maxHp: number;
   startingHp: number;
 }
+
+export interface BattleAmmunitionTally {
+  initial: number;
+  used: number;
+  remaining: number;
+}
+
+export interface BattleAmmunitionBreakdown {
+  offensiveMissiles: BattleAmmunitionTally;
+  torpedoes: BattleAmmunitionTally;
+  interceptors: BattleAmmunitionTally;
+}
+
+export type BattleAmmunitionByFaction = Record<FactionId, BattleAmmunitionBreakdown>;
 
 export interface Battle {
   id: string;
@@ -158,6 +303,7 @@ export interface Battle {
   shipsLost?: Record<FactionId, number>; // Keys are FactionId strings
   missilesIntercepted?: number;
   projectilesDestroyedByPd?: number;
+  ammunitionByFaction?: BattleAmmunitionByFaction;
 }
 
 export interface EnemySighting {
@@ -216,6 +362,7 @@ export interface GameState {
   lasers: LaserShot[];
   battles: Battle[];
   logs: LogEntry[];
+  messages: GameMessage[];
   selectedFleetId: string | null;
   winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;

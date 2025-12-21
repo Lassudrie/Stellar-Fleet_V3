@@ -25,6 +25,18 @@ export interface ScenarioMeta {
 // --- 2. GENERATION (World Gen) ---
 export type GalaxyTopology = 'spiral' | 'cluster' | 'ring' | 'scattered';
 
+export type PlanetBodyType = 'planet' | 'moon';
+export type PlanetBodyClass = 'solid' | 'gas_giant' | 'ice_giant';
+
+export interface PlanetBodyDefinition {
+  id?: string;
+  name?: string;
+  bodyType: PlanetBodyType;
+  class: PlanetBodyClass;
+  size?: number;
+  ownerFactionId?: string | null;
+}
+
 export interface WorldGenerationConfig {
   /** 
    * Si défini, la génération est déterministe. 
@@ -60,6 +72,7 @@ export interface WorldGenerationConfig {
     name: string;
     position: { x: number; y: number; z: number }; // DTO simple, pas de Vector3
     resourceType: 'gas' | 'none';
+    planets?: PlanetBodyDefinition[];
   }>;
 }
 

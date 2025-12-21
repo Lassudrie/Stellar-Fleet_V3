@@ -1,7 +1,7 @@
 
 import { GameState, Battle, FleetState } from '../../types';
 import { RNG } from '../../engine/rng';
-import { CAPTURE_RANGE } from '../../data/static';
+import { CAPTURE_RANGE_SQ } from '../../data/static';
 import { distSq } from '../../engine/math/vec3';
 
 /**
@@ -35,7 +35,7 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
 
     activeSystems.forEach(system => {
       const distanceSq = distSq(fleet.position, system.position);
-      if (distanceSq > CAPTURE_RANGE * CAPTURE_RANGE) return;
+      if (distanceSq > CAPTURE_RANGE_SQ) return;
       if (distanceSq < nearestDistanceSq) {
         nearestDistanceSq = distanceSq;
         nearestSystemId = system.id;

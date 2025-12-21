@@ -7,7 +7,7 @@
 ---
 
 ## 1. Concept Global
-Stellar Fleet est un jeu de stratégie et de simulation spatiale au tour par tour. Le joueur commande une flotte spatiale (Faction: **BLUE**) contre une IA ennemie (Faction: **RED**) dans une galaxie générée procéduralement.
+Stellar Fleet est un jeu de stratégie et de simulation spatiale au tour par tour. Le joueur incarne l'une des nombreuses factions jouables d'une galaxie générée procéduralement ; plusieurs IA peuvent coexister et chaque faction possède sa propre couleur, son nom et son espace vital. Les scénarios peuvent définir plusieurs participants (joueurs ou IA), leurs couleurs et leurs objectifs propres.
 
 ## 2. Génération de l'Univers
 Au démarrage d'une partie (ou restart), un univers est généré via une `seed`.
@@ -17,23 +17,25 @@ Au démarrage d'une partie (ou restart), un univers est généré via une `seed`
 
 ## 3. Gestion du Temps et Tours
 Le jeu repose sur une boucle de jeu séquentielle :
-1.  **Phase de Planification** : Le joueur donne des ordres (Mouvement, Split, Load/Unload). L'IA planifie ses coups.
-2.  **Phase d'Exécution (`runTurn`)** :
-    *   Résolution des combats spatiaux en attente (Battle System V1).
-    *   Sanitization des Armées (Intégrité des références).
-    *   Exécution des ordres IA.
-    *   Mise à jour des positions (Mouvement des flottes).
-    *   Synchronisation Armées : `IN_TRANSIT` -> `EMBARKED` à l'arrivée.
-    *   Détection des nouveaux conflits spatiaux.
-    *   **Résolution des conflits au sol (Ground Conflict).**
-3.  **Incrémentation** : Le jour (`day`) avance de +1.
+1.  **Phase d'IA** : Génération et exécution des ordres IA.
+2.  **Phase de Mouvement** : Mise à jour des positions des flottes.
+3.  **Détection des combats** : Verrouillage des combats spatiaux à résoudre.
+4.  **Résolution des combats spatiaux** : Traitement immédiat de toutes les batailles planifiées.
+5.  **Bombardement orbital** : Application automatique des bombardements sur les armées au sol exposées.
+6.  **Combat terrestre & Conquête** : Résolution des combats au sol et application de la capture.
+7.  **Objectifs de victoire** : Vérification des conditions de victoire configurées.
+8.  **Nettoyage & Avancement** : Maintenance de l'état, canonicalisation et incrémentation du `day` de +1.
 
-## 4. Flottes et Vaisseaux
+## 4. Flottes, Brouillard de Guerre et Vaisseaux
 Une flotte est une entité composée d'un ou plusieurs vaisseaux.
 - **Types de vaisseaux** :
     *   `CARRIER`, `CRUISER`, `DESTROYER`, `FRIGATE`, `FIGHTER`, `BOMBER`.
     *   `TROOP_TRANSPORT` : Vaisseau non-combattant (Hull élevée, 0 DPS) capable de transporter une Armée.
 - **Propriétés** : Chaque type possède des stats définies (HP, Damage, Speed, PD, Evasion, Stocks missiles/torpilles).
+- **Brouillard de guerre (`rules.fogOfWar`)** : quand activé, seul ce qui est observé est visible :
+    *  Un système est considéré observé s'il est possédé par la faction observatrice ou si au moins une de ses flottes se trouve dans la portée de capture (`CAPTURE_RANGE`).
+    *  Une flotte ennemie est visible si elle appartient à la même faction que l'observateur, se trouve dans la portée de capteurs (`SENSOR_RANGE`) d'une flotte observatrice, est proche d'un système observé (portée de capture) ou se situe dans le territoire contrôlé par l'observateur.
+    *  Les systèmes et leurs propriétaires restent visibles même lorsqu'ils ne sont pas observés, afin de préserver le rendu des frontières et du score territorial.
 
 ## 5. Mouvement
 Le mouvement est spatial (Vector3) mais contraint par les règles de jeu :
@@ -70,7 +72,18 @@ Le système change de couleur et d'owner si :
 1.  Une faction a gagné le combat au sol (ou est seule présente) et conserve au moins une armée au‑dessus des seuils de destruction.
 2.  **Règle de Contestation Orbitale** : la capture est bloquée s'il existe une orbite contestée (`isOrbitContested`) dans la portée de capture, même après une victoire terrestre. Il faut nettoyer l'orbite ET le sol pour sécuriser la conquête.
 
-## 7. Conditions de Victoire
-La partie s'arrête si :
-- **Victoire** : Toutes les flottes RED sont détruites.
-- **Défaite** : Toutes les flottes BLUE sont détruites.
+### 6.4. Bombardement Orbital
+Les flottes peuvent affaiblir des forces terrestres ennemies par bombardement orbital entre la résolution spatiale et le combat au sol :
+- **Conditions** : une seule faction doit occuper l'orbite du système, au moins un vaisseau combattant (non `TROOP_TRANSPORT`) doit être en `ORBIT` et des armées ennemies doivent être déployées sur une planète solide du système.
+- **Effets** : chaque bombardement inflige une perte de `strength` proportionnelle à la puissance de bombardement disponible, plafonnée pour éviter l'annihilation instantanée, et réduit la `morale` jusqu'à un minimum. Les pertes sont réparties entre les armées ciblées mais respectent un buffer pour éviter de passer sous le seuil minimal instantanément.
+- **Journalisation** : chaque bombardement génère un log indiquant le système, la planète, la faction attaquante et les pertes appliquées. Si plusieurs factions partagent l'orbite, aucun bombardement n'a lieu.
+
+## 7. Objectifs et Conditions de Victoire
+Les conditions de victoire sont entièrement configurables par scénario (`objectives.conditions`) et peuvent impliquer plusieurs factions simultanément :
+- **Aucune condition explicite** : par défaut, chaque faction tente d'éliminer toutes les autres (`elimination`).
+- **Élimination (`elimination`)** : une faction gagne si tous ses adversaires n'ont plus ni flottes actives ni systèmes contrôlés.
+- **Domination (`domination`)** : une faction gagne si elle contrôle au moins `X%` des systèmes (50% par défaut si la valeur n'est pas précisée).
+- **Roi de la Colline (`king_of_the_hill`)** : une faction gagne si elle possède un système cible spécifique.
+- **Survie (`survival`)** : utilisée avec un `maxTurns` ; le joueur remporte la partie s'il est encore présent (flottes actives) lorsque le tour limite est atteint, sinon la partie se termine en match nul.
+
+Les conditions sont évaluées en "OU" pour chaque faction à la fin du tour (phase 7). Si un `maxTurns` est défini et atteint, la résolution est immédiate : priorité à `survival` pour la faction du joueur, sinon victoire du ou des leaders en nombre de systèmes contrôlés (égalité = match nul).

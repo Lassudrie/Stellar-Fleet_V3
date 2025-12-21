@@ -4,16 +4,24 @@ import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../
 import { shortId, fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
+export interface AvailableArmy {
+  army: Army;
+  planetId: string;
+  planetName: string;
+}
+
 interface FleetPanelProps {
   fleet: Fleet;
   otherFleetsInSystem: Fleet[];
   // Ground Context
   currentSystem: StarSystem | null;
-  availableArmies: Army[];
+  availableArmies: AvailableArmy[];
   // Actions
   onSplit: (shipIds: string[]) => void;
   onMerge: (targetFleetId: string) => void;
-  onDeploy: (shipId: string) => void;
+  onDeploy: (shipId: string, planetId: string) => void;
   onEmbark: (shipId: string, armyId: string) => void;
   playerFactionId: string;
 }
@@ -76,6 +84,13 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
 }) => {
   const { t } = useI18n();
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
+
+  const solidPlanets = useMemo(() => {
+    if (!currentSystem) return [];
+    return currentSystem.planets
+      .filter(planet => planet.isSolid)
+      .sort((a, b) => compareIds(a.id, b.id));
+  }, [currentSystem]);
 
   // Reset selection when fleet changes
   useEffect(() => {
@@ -216,7 +231,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                             // Army Logic for Transports
                             const hasArmy = !!ship.carriedArmyId;
                             const isTransport = ship.type === ShipType.TROOP_TRANSPORT;
-                            const canDeploy = isPlayer && isTransport && hasArmy && currentSystem;
+                            const canDeploy = isPlayer && isTransport && hasArmy && solidPlanets.length > 0;
                             const canEmbark = isPlayer && isTransport && !hasArmy && currentSystem && availableArmies.length > 0;
                             const carriedArmyLabel = ship.carriedArmyId ? shortId(ship.carriedArmyId) : '?';
                             const deployDisabled = !ship.carriedArmyId;
@@ -253,14 +268,33 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                     {/* ROW BOTTOM: Actions (Transport Only) */}
                                     {isTransport && isPlayer && (canDeploy || canEmbark) && (
                                         <div className="flex justify-end pt-1 border-t border-white/5" onClick={e => e.stopPropagation()}>
-                                            {canDeploy && (
+                                            {canDeploy && solidPlanets.length <= 1 && (
                                                 <button
-                                                    onClick={() => onDeploy(ship.id)}
+                                                    onClick={() => onDeploy(ship.id, solidPlanets[0].id)}
                                                     className="w-full bg-green-600/80 hover:bg-green-500 text-white text-[9px] py-1 rounded font-bold uppercase tracking-wider"
                                                     disabled={deployDisabled}
                                                 >
                                                     {t('fleet.deploy', { army: carriedArmyLabel })}
                                                 </button>
+                                            )}
+                                            {canDeploy && solidPlanets.length > 1 && (
+                                                <select
+                                                    className="w-full bg-slate-800 border border-slate-600 text-slate-300 text-[9px] py-1 rounded focus:outline-none focus:border-blue-500"
+                                                    onChange={(e) => {
+                                                        if (e.target.value) {
+                                                            onDeploy(ship.id, e.target.value);
+                                                            e.target.value = "";
+                                                        }
+                                                    }}
+                                                    defaultValue=""
+                                                >
+                                                    <option value="" disabled>{t('fleet.deployTo')}</option>
+                                                    {solidPlanets.map(planet => (
+                                                        <option key={planet.id} value={planet.id}>
+                                                            {planet.name} ({carriedArmyLabel})
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             )}
                                             {canEmbark && (
                                                 <select
@@ -274,9 +308,9 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                                     defaultValue=""
                                                 >
                                                     <option value="" disabled>{t('fleet.load')}</option>
-                                                    {availableArmies.map(army => (
+                                                    {availableArmies.map(({ army, planetName }) => (
                                                         <option key={army.id} value={army.id}>
-                                                            {shortId(army.id)} ({army.strength})
+                                                            {shortId(army.id)} ({planetName}) ({army.strength})
                                                         </option>
                                                     ))}
                                                 </select>

@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "typecheck:watch": "tsc --noEmit --watch",
     "smoke": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/aiSmoke.ts",
-    "test": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/engine.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs i18n/tests/i18n.spec.ts"
+    "test": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/engine.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/rangeConsistency.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/stellarSystemGen.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/fogOfWar.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/rng.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/immutability.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/aiSpatialIndex.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs engine/tests/serializationRobustness.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs components/ui/FleetPicker.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs components/ui/MessageToasts.logic.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs components/GameCamera.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs services/commands/processCommandResult.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs i18n/tests/i18n.spec.ts"
   },
   "dependencies": {
     "react": "^19.2.1",
@@ -21,8 +23,12 @@
     "@react-three/postprocessing": "^3.0.4"
   },
   "devDependencies": {
+    "@eslint/js": "^8.57.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

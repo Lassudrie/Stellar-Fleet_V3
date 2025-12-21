@@ -2,6 +2,7 @@
 import { StarSystem, FactionId } from '../types';
 import { TERRITORY_RADIUS } from '../data/static';
 import { Vec3, distSq } from './math/vec3';
+import { SpatialIndex } from './spatialIndex';
 
 // Pre-calculate squared radius to avoid Sqrt operations in hot loops
 const TERRITORY_RADIUS_SQ = TERRITORY_RADIUS * TERRITORY_RADIUS;
@@ -55,4 +56,33 @@ export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): Factio
 
   // 3. Return Owner
   return closestSystem.ownerFactionId;
+};
+
+export const buildTerritoryResolver = (systems: StarSystem[]) => {
+  const ownedSystems = systems
+    .filter(system => system.ownerFactionId !== null)
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  if (ownedSystems.length === 0) {
+    return (_position: Vec3): FactionId | null => null;
+  }
+
+  const index = new SpatialIndex(ownedSystems, TERRITORY_RADIUS);
+
+  return (position: Vec3): FactionId | null => {
+    const nearest = index.findNearest(position);
+    if (!nearest) return null;
+
+    const minDistSq = nearest.distanceSq;
+    if (minDistSq > TERRITORY_RADIUS_SQ) return null;
+
+    const contenders = index.queryRadius(position, Math.sqrt(minDistSq));
+    const owner = nearest.item.ownerFactionId;
+
+    const contested = contenders.some(system =>
+      system.ownerFactionId !== owner && distSq(system.position, position) === minDistSq
+    );
+
+    return contested ? null : owner;
+  };
 };

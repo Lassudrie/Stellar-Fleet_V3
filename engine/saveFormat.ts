@@ -1,5 +1,17 @@
 
-import { FleetState, ResourceType, ShipType, LogEntry, BattleStatus, ArmyState, VictoryType, GameplayRules, FactionState } from '../types';
+import {
+  FleetState,
+  ResourceType,
+  ShipType,
+  LogEntry,
+  BattleStatus,
+  ArmyState,
+  VictoryType,
+  GameplayRules,
+  FactionState,
+  StarSystemAstro,
+  PlanetBody
+} from '../types';
 
 export const SAVE_VERSION = 3 as const;
 export type SaveVersion = typeof SAVE_VERSION;
@@ -33,6 +45,7 @@ export interface ShipDTO {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null;
+  transferBusyUntilDay?: number;
   consumables?: ShipConsumablesDTO;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -75,6 +88,8 @@ export interface StarSystemDTO {
   ownerFactionId: string | null; // Renamed
   resourceType: ResourceType;
   isHomeworld?: boolean;
+  planets?: PlanetBody[];
+  astro?: StarSystemAstro;
 }
 
 export interface LaserShotDTO {
@@ -141,6 +156,20 @@ export interface GameObjectivesDTO {
   maxTurns?: number;
 }
 
+export interface GameMessageDTO {
+  id: string;
+  day: number;
+  type: string;
+  priority: number;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  payload: Record<string, unknown>;
+  read: boolean;
+  dismissed: boolean;
+  createdAtTurn: number;
+}
+
 export interface GameStateDTO {
   scenarioId?: string;
   scenarioTitle?: string;
@@ -159,6 +188,7 @@ export interface GameStateDTO {
   lasers?: LaserShotDTO[];
   battles?: BattleDTO[];
   logs?: LogEntry[];
+  messages?: GameMessageDTO[];
   selectedFleetId: string | null;
   winnerFactionId: string | 'draw' | null; // Renamed
 

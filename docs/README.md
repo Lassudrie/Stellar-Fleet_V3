@@ -9,6 +9,7 @@ Ce dossier contient la documentation technique, architecturale et fonctionnelle 
 Détail des règles du jeu et des mécaniques.
 - **[Vue d'ensemble fonctionnelle](specs/functional-overview.md)** : Génération de monde, économie, mouvement, IA.
 - **[Battle System V1](specs/battle-system-v1.md)** : Spécification détaillée du moteur de résolution de combat par rounds.
+- **[Gabarit de spécification](specs/_template.md)** : Structure à suivre pour toute nouvelle spécification fonctionnelle.
 
 ### 2. Architecture & Ingénierie (`architecture/`)
 Conception technique et contraintes critiques.
@@ -22,6 +23,12 @@ Structure des données.
 ## Scénario actif
 
 Le simulateur propose désormais plusieurs scénarios, notamment **Conquest Sandbox** (`scenarios/templates/conquest_sandbox.ts`) et **Spiral Convergence** (`scenarios/templates/spiral_convergence.ts`), tous deux référencés manuellement dans `scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
+
+## Conventions de rédaction des spécifications
+
+- **Indexation** : toute nouvelle spécification doit être ajoutée dans `docs/specs/` et référencée dans la liste ci-dessus pour garantir la découvrabilité.
+- **Convention de nommage** : utiliser le `kebab-case` en anglais pour les fichiers de spécification (ex. `battle-system-v1.md`, `scenario-spec.md`). Inclure une version dans le nom uniquement si plusieurs itérations coexistent.
+- **Source de vérité des types** : décrire les données en s'alignant sur les définitions TypeScript existantes (`types.ts`, `engine/**`, `services/**`). Tout écart doit être explicité, et les sections **Données** et **Constantes** doivent pointer vers les types/constantes correspondants.
 
 ## Installation & Démarrage
 

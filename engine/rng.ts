@@ -1,5 +1,51 @@
+import { logger } from '../tools/devLogger';
+
 // Deterministic Random Number Generator
 // Algorithm: Mulberry32
+
+const PROBIT_A = [
+  -3.969683028665376e+01,
+  2.209460984245205e+02,
+  -2.759285104469687e+02,
+  1.383577518672690e+02,
+  -3.066479806614716e+01,
+  2.506628277459239e+00
+];
+
+const PROBIT_B = [
+  -5.447609879822406e+01,
+  1.615858368580409e+02,
+  -1.556989798598866e+02,
+  6.680131188771972e+01,
+  -1.328068155288572e+01
+];
+
+const PROBIT_C = [
+  -7.784894002430293e-03,
+  -3.223964580411365e-01,
+  -2.400758277161838e+00,
+  -2.549732539343734e+00,
+  4.374664141464968e+00,
+  2.938163982698783e+00
+];
+
+const PROBIT_D = [
+  7.784695709041462e-03,
+  3.224671290700398e-01,
+  2.445134137142996e+00,
+  3.754408661907416e+00
+];
+
+const PROBIT_C_TAIL_DENOMINATOR = [...PROBIT_D, 1];
+const PROBIT_B_CENTRAL_DENOMINATOR = [...PROBIT_B, 1];
+const PROBIT_P_LOW = 0.02425;
+const PROBIT_P_HIGH = 1 - PROBIT_P_LOW;
+
+const evaluatePolynomial = (coefficients: number[], x: number): number =>
+  coefficients.reduce((accumulator, coefficient) => (accumulator * x) + coefficient, 0);
+
+const evaluateTail = (q: number): number =>
+  evaluatePolynomial(PROBIT_C, q) / evaluatePolynomial(PROBIT_C_TAIL_DENOMINATOR, q);
 
 export class RNG {
   private state: number;
@@ -26,11 +72,11 @@ export class RNG {
   private normalizeState(value: number): number {
     // Handle invalid values
     if (!Number.isFinite(value)) {
-      console.warn('[RNG] Invalid state value, defaulting to 1');
+      logger.warn('[RNG] Invalid state value, defaulting to 1');
       return 1;
     }
     // Convert to 32-bit unsigned integer (handles negatives and non-integers)
-    return (Math.floor(Math.abs(value)) >>> 0) || 1; // Ensure non-zero
+    return Math.floor(Math.abs(value)) >>> 0;
   }
 
   // --- GENERATION ---
@@ -38,7 +84,8 @@ export class RNG {
   // Returns an unsigned 32-bit integer (0 to 4294967295)
   // This exposes the raw output of the Mulberry32 algorithm
   public nextUint32(): number {
-    let t = (this.state += 0x6d2b79f5);
+    this.state = (this.state + 0x6d2b79f5) >>> 0;
+    let t = this.state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return (t ^ (t >>> 14)) >>> 0;
@@ -63,7 +110,7 @@ export class RNG {
   // Returns undefined if array is empty (safe guard against crash)
   public pick<T>(array: T[]): T | undefined {
     if (array.length === 0) {
-      console.warn('[RNG] pick() called on empty array, returning undefined');
+      logger.debug('[RNG] pick() called on empty array, returning undefined');
       return undefined;
     }
     return array[Math.floor(this.next() * array.length)];
@@ -76,11 +123,31 @@ export class RNG {
     return `${prefix}_${hex}`;
   }
 
+  private inverseStandardNormal(probability: number): number {
+    const p = Math.min(Math.max(probability, Number.EPSILON), 1 - Number.EPSILON);
+
+    if (p < PROBIT_P_LOW) {
+      const q = Math.sqrt(-2 * Math.log(p));
+      return evaluateTail(q);
+    }
+
+    if (p > PROBIT_P_HIGH) {
+      const q = Math.sqrt(-2 * Math.log(1 - p));
+      return -evaluateTail(q);
+    }
+
+    const q = p - 0.5;
+    const r = q * q;
+    const numerator = evaluatePolynomial(PROBIT_A, r);
+    const denominator = evaluatePolynomial(PROBIT_B_CENTRAL_DENOMINATOR, r);
+    return (numerator / denominator) * q;
+  }
+
   // Gaussian / Normal distribution approximation
   public gaussian(): number {
-    let u = 0, v = 0;
-    while(u === 0) u = this.next();
-    while(v === 0) v = this.next();
-    return Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+    // Deterministic inverse-CDF approximation (Acklam, 2003)
+    // Avoids platform-dependent trig implementations used in Box-Muller
+    // while keeping output stable across runtimes for the same seed.
+    return this.inverseStandardNormal(this.next());
   }
 }

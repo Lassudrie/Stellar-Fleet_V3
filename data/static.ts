@@ -11,7 +11,8 @@ export const ENABLE_V1_COMBAT = true;
 export const BASE_FLEET_SPEED = 25; 
 export const COMBAT_RANGE = 8;
 export const SENSOR_RANGE = 15;
-export const CAPTURE_RANGE = 5; 
+export const CAPTURE_RANGE = 5;
+export const CAPTURE_RANGE_SQ = CAPTURE_RANGE * CAPTURE_RANGE;
 
 // New: Territorial Control Radius (Matches Visuals)
 export const TERRITORY_RADIUS = 28;
@@ -21,6 +22,15 @@ export const ORBIT_RADIUS = 3;
 export const ORBIT_SPEED = 0.25;
 
 export const ORBIT_PROXIMITY_RANGE_SQ = (ORBIT_RADIUS * 3) ** 2;
+
+// --- ORBITAL BOMBARDMENT (V1) ---
+export const ORBITAL_BOMBARDMENT_POWER_PER_SHIP = 1;
+export const ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER = 0.003;
+export const ORBITAL_BOMBARDMENT_MAX_STRENGTH_LOSS_FRACTION = 0.2;
+export const ORBITAL_BOMBARDMENT_MORALE_LOSS_PER_POWER = 0.005;
+export const ORBITAL_BOMBARDMENT_MAX_MORALE_LOSS_FRACTION = 0.3;
+export const ORBITAL_BOMBARDMENT_MIN_MORALE = 0.25;
+export const ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER = 1;
 
 // --- V1 SHIP BALANCING ---
 export const SHIP_STATS: Record<ShipType, ShipStats> = {

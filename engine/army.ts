@@ -1,7 +1,8 @@
 
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, StarSystem } from '../types';
+import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody } from '../types';
 import { RNG } from './rng';
-import { devLog } from '../tools/devLogger';
+import { logger } from '../tools/devLogger';
+import { getPlanetById } from './planets';
 
 export const MIN_ARMY_CREATION_STRENGTH = 10000;
 export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
@@ -12,7 +13,7 @@ export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(
  * 
  * @param factionId The faction owning the army.
  * @param strength Number of soldiers.
- * @param containerId ID of the Fleet (if embarked) or System (if deployed).
+ * @param containerId ID of the Fleet (if embarked) or Planet/Moon (if deployed).
  * @param initialState Initial state (default: EMBARKED).
  * @param rng Random Number Generator for ID creation.
  * @returns The created Army object or null if validation fails.
@@ -27,13 +28,13 @@ export const createArmy = (
   
   // Rule Check: Minimum Strength
   if (strength < MIN_ARMY_CREATION_STRENGTH) {
-    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
+    logger.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
     return null;
   }
 
   // Rule Check: Valid Container ID (Basic check)
   if (!containerId) {
-    console.error(`[Army] Creation Failed: No container ID provided.`);
+    logger.error('[Army] Creation Failed: No container ID provided.');
     return null;
   }
 
@@ -47,7 +48,7 @@ export const createArmy = (
     containerId
   };
 
-  devLog(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
+  logger.debug(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
   return army;
 };
 
@@ -64,10 +65,9 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
 
   // 2. Location Integrity
   if (army.state === ArmyState.DEPLOYED) {
-    // Must be in a valid System
-    const system = state.systems.find(s => s.id === army.containerId);
-    if (!system) {
-      // console.warn(`[Army] Orphaned Deployed Army: ${army.id} refers to missing system ${army.containerId}.`);
+    const match = getPlanetById(state.systems, army.containerId);
+    if (!match || !match.planet.isSolid) {
+      // console.warn(`[Army] Orphaned Deployed Army: ${army.id} refers to missing/invalid planet ${army.containerId}.`);
       return false;
     }
   } else if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
@@ -97,130 +97,92 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
  * 
  * @returns Cleaned army list and a list of log messages describing fixes.
  */
-export const sanitizeArmies = (state: GameState): { armies: Army[], logs: string[] } => {
-    const validArmies: Army[] = [];
+export const sanitizeArmies = (state: GameState): { state: GameState, logs: string[] } => {
     const logs: string[] = [];
-    const claimedArmyIds = new Map<string, string[]>(); // ArmyID -> ShipID[]
+    const armiesById = new Map(state.armies.map(army => [army.id, army]));
+    const fleetUpdates = new Map<string, Fleet>();
+    let fleetsChanged = false;
 
-    // 1. O(F*S) Pre-calculation: Map all ship-army references
+    const getFleetClone = (fleet: Fleet): Fleet => {
+        const existing = fleetUpdates.get(fleet.id);
+        if (existing) return existing;
+        const clone = { ...fleet, ships: fleet.ships.slice() };
+        fleetUpdates.set(fleet.id, clone);
+        return clone;
+    };
+
+    const clearShipArmy = (fleet: Fleet, shipIndex: number, armyId: string) => {
+        const fleetClone = getFleetClone(fleet);
+        const ship = fleetClone.ships[shipIndex];
+        if (!ship || ship.carriedArmyId !== armyId) return;
+        fleetClone.ships[shipIndex] = { ...ship, carriedArmyId: null };
+        fleetsChanged = true;
+    };
+
     state.fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
-            if (ship.carriedArmyId) {
-                const list = claimedArmyIds.get(ship.carriedArmyId) || [];
-                list.push(`${ship.id} (${fleet.id})`);
-                claimedArmyIds.set(ship.carriedArmyId, list);
-            }
-        });
-    });
-
-    // 2. Iterate Armies
-    for (const army of state.armies) {
-        let isValid = true;
-
-        // Check A: Local Integrity (Standard Validation)
-        if (!validateArmyState(army, state)) {
-            logs.push(`Army ${army.id} failed validation (Orphaned or Invalid State). Removed.`);
-            isValid = false;
-        }
-
-        // Check B: Reference Integrity (for Embarked armies)
-        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
-            const carriers = claimedArmyIds.get(army.id);
-            
-            if (!carriers || carriers.length === 0) {
-                // Should have been caught by validateArmyState usually, but double check reverse link
-                logs.push(`Army ${army.id} is Embarked but no ship claims it. Removed.`);
-                isValid = false;
-            } else if (carriers.length > 1) {
-                // CRITICAL: Duplication Glitch
-                logs.push(`CRITICAL: Army ${army.id} claim conflict. Carried by multiple ships: [${carriers.join(', ')}]. Army destroyed to prevent paradox.`);
-                // We destroy the army. The ships will point to a non-existent army ID, 
-                // which is "safer" than cloning the army, or we could auto-clean the ships here.
-                // For now, removing the army is the safest state convergence.
-                isValid = false;
-            }
-        }
-
-        // Check C: Destruction threshold
-        if (isValid) {
-            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
-            if (army.strength <= destructionThreshold) {
-                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
-                isValid = false;
-            }
-        }
-
-        if (isValid) {
-            validArmies.push(army);
-        }
-    }
-
-    return { armies: validArmies, logs };
-};
-
-export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: string[] } => {
-    const logs: string[] = [];
-
-    const fleets: Fleet[] = state.fleets.map(fleet => ({
-        ...fleet,
-        ships: fleet.ships.map(ship => ({ ...ship }))
-    }));
-
-    const armies: Army[] = state.armies.map(army => ({ ...army }));
-    const armiesById = new Map(armies.map(army => [army.id, army]));
-
-    fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
+        fleet.ships.forEach((ship, shipIndex) => {
             const armyId = ship.carriedArmyId;
             if (!armyId) return;
 
             if (!armiesById.has(armyId)) {
                 logs.push(`Ship ${ship.id} (${fleet.id}) cleared reference to missing army ${armyId}.`);
-                ship.carriedArmyId = null;
+                clearShipArmy(fleet, shipIndex, armyId);
             }
         });
     });
 
-    const carrierMap = new Map<string, { ship: ShipEntity; fleetId: string }[]>();
-
-    fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
-            if (!ship.carriedArmyId) return;
-            const carriers = carrierMap.get(ship.carriedArmyId) || [];
-            carriers.push({ ship, fleetId: fleet.id });
-            carrierMap.set(ship.carriedArmyId, carriers);
+    const buildCarrierMap = (fleets: Fleet[]) => {
+        const carrierMap = new Map<string, { fleet: Fleet; shipIndex: number; shipId: string }[]>();
+        fleets.forEach(fleet => {
+            fleet.ships.forEach((ship, shipIndex) => {
+                if (!ship.carriedArmyId) return;
+                const carriers = carrierMap.get(ship.carriedArmyId) || [];
+                carriers.push({ fleet, shipIndex, shipId: ship.id });
+                carrierMap.set(ship.carriedArmyId, carriers);
+            });
         });
-    });
+        return carrierMap;
+    };
+
+    const fleetsForValidation = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+
+    const carrierMap = buildCarrierMap(fleetsForValidation);
 
     carrierMap.forEach((carriers, armyId) => {
         if (carriers.length <= 1) return;
 
-        carriers.sort((a, b) => a.ship.id.localeCompare(b.ship.id));
+        carriers.sort((a, b) => a.shipId.localeCompare(b.shipId));
         const [canonical, ...duplicates] = carriers;
-        duplicates.forEach(({ ship, fleetId }) => {
-            ship.carriedArmyId = null;
-            logs.push(`Ship ${ship.id} (${fleetId}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.ship.id} (${canonical.fleetId}).`);
+        duplicates.forEach(({ fleet, shipIndex, shipId }) => {
+            clearShipArmy(fleet, shipIndex, armyId);
+            logs.push(`Ship ${shipId} (${fleet.id}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.shipId} (${canonical.fleet.id}).`);
         });
-        carrierMap.set(armyId, [canonical]);
     });
 
+    const fleetsAfterDedup = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+    const carriersAfterDedup = buildCarrierMap(fleetsAfterDedup);
+
     const sanitizedArmies: Army[] = [];
-    const validationState: GameState = { ...state, fleets, armies };
+    const validationState: GameState = { ...state, fleets: fleetsAfterDedup, armies: state.armies };
 
-    for (const army of armies) {
+    for (const army of state.armies) {
         let isValid = true;
+        const carriers = carriersAfterDedup.get(army.id) || [];
 
-        if (!validateArmyState(army, validationState)) {
-            logs.push(`Army ${army.id} failed validation (missing container or location). Removed.`);
-            isValid = false;
-        }
-
-        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
-            const carriers = carrierMap.get(army.id);
-            if (!carriers || carriers.length === 0) {
+        if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
+            if (carriers.length === 0) {
                 logs.push(`Army ${army.id} had no transport ship. Removed to restore consistency.`);
                 isValid = false;
             }
+        }
+
+        if (isValid && !validateArmyState(army, validationState)) {
+            logs.push(`Army ${army.id} failed validation (missing container or location). Removed.`);
+            isValid = false;
         }
 
         if (isValid) {
@@ -232,11 +194,8 @@ export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: s
         }
 
         if (!isValid) {
-            const carriers = carrierMap.get(army.id) || [];
-            carriers.forEach(({ ship }) => {
-                if (ship.carriedArmyId === army.id) {
-                    ship.carriedArmyId = null;
-                }
+            carriers.forEach(({ fleet, shipIndex }) => {
+                clearShipArmy(fleet, shipIndex, army.id);
             });
             continue;
         }
@@ -244,10 +203,18 @@ export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: s
         sanitizedArmies.push(army);
     }
 
+    const nextFleets = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+
+    if (!fleetsChanged && sanitizedArmies.length === state.armies.length) {
+        return { state, logs };
+    }
+
     return {
         state: {
             ...state,
-            fleets,
+            fleets: nextFleets,
             armies: sanitizedArmies
         },
         logs
@@ -275,17 +242,17 @@ export const canLoadArmy = (ship: ShipEntity): boolean => {
  */
 export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
     if (!canLoadArmy(ship)) {
-        console.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
+        logger.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
         return false;
     }
     
     if (army.factionId !== fleet.factionId) {
-        console.error(`[Army] Load Failed: Faction mismatch.`);
+        logger.error('[Army] Load Failed: Faction mismatch.');
         return false;
     }
 
     if (army.state !== ArmyState.DEPLOYED) {
-        console.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
+        logger.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
         return false;
     }
 
@@ -294,26 +261,26 @@ export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): bo
     army.containerId = fleet.id;
     army.state = ArmyState.EMBARKED;
     
-    console.log(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
+    logger.debug(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
     return true;
 };
 
 /**
- * Unloads an army from a ship to a system.
+ * Unloads an army from a ship to a planet.
  * 
  * @returns true if successful.
  */
-export const deployArmyToSystem = (army: Army, ship: ShipEntity, system: StarSystem): boolean => {
+export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): boolean => {
     if (ship.carriedArmyId !== army.id) {
-        console.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
+        logger.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
         return false;
     }
 
     ship.carriedArmyId = null;
     army.state = ArmyState.DEPLOYED;
-    army.containerId = system.id;
+    army.containerId = planet.id;
     
-    console.log(`[Army] ${army.id} DEPLOYED to ${system.name}.`);
+    logger.info(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
     return true;
 };
 
@@ -324,9 +291,9 @@ export const deployArmyToSystem = (army: Army, ship: ShipEntity, system: StarSys
 export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
     if (ship.carriedArmyId === army.id) {
         ship.carriedArmyId = null;
-        console.log(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
+        logger.info(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
     } else {
-        console.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
+        logger.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
     }
 };
 

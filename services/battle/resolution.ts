@@ -1,5 +1,19 @@
 
-import { GameState, Battle, FactionId, Fleet, ShipEntity, ShipType, FleetState, BattleShipSnapshot } from '../../types';
+import {
+  GameState,
+  Battle,
+  FactionId,
+  Fleet,
+  ShipEntity,
+  ShipType,
+  FleetState,
+  BattleShipSnapshot,
+  BattleAmmunitionBreakdown,
+  BattleAmmunitionByFaction,
+  BattleAmmunitionTally,
+  ShipConsumables,
+  ArmyState
+} from '../../types';
 import { RNG } from '../../engine/rng';
 import { SHIP_STATS } from '../../data/static';
 import { BattleShipState, Projectile } from './types';
@@ -16,6 +30,19 @@ const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
 
 // --- HELPERS ---
+const clampRemaining = (initial: number, remaining: number) => Math.min(Math.max(remaining, 0), initial);
+
+const createEmptyAmmunitionTally = (): BattleAmmunitionTally => ({
+  initial: 0,
+  used: 0,
+  remaining: 0
+});
+
+const createEmptyAmmunitionBreakdown = (): BattleAmmunitionBreakdown => ({
+  offensiveMissiles: createEmptyAmmunitionTally(),
+  torpedoes: createEmptyAmmunitionTally(),
+  interceptors: createEmptyAmmunitionTally()
+});
 
 const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId): BattleShipState | null => {
   if (!ship || !ship.type) {
@@ -79,6 +106,14 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
 
 const short = (id: string) => id.split('_').pop()?.toUpperCase() || '???';
 
+export interface BattleResolutionResult {
+  updatedBattle: Battle;
+  survivingFleets: Fleet[];
+  destroyedShipIds: string[];
+  destroyedFleetIds: string[];
+  destroyedArmyIds: string[];
+}
+
 // --- RESOLVER ---
 
 // Optimization: Removed unused masterRng param. The battle creates its own isolated RNG.
@@ -86,7 +121,10 @@ export const resolveBattle = (
   battle: Battle,
   state: GameState,
   turn: number
-): { updatedBattle: Battle, survivingFleets: Fleet[] } => {
+): BattleResolutionResult => {
+  const logReference = `[Turn ${turn}]`;
+  const formatLog = (message: string) => `${logReference} ${message}`;
+
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
@@ -99,6 +137,7 @@ export const resolveBattle = (
   
   // --- CAPTURE SNAPSHOT BEFORE SIMULATION ---
   const initialShips: BattleShipSnapshot[] = [];
+  const initialAmmunitionByShip = new Map<string, ShipConsumables>();
   
   // Deterministic ship initialization
   const battleShips: BattleShipState[] = [];
@@ -124,6 +163,11 @@ export const resolveBattle = (
             maxHp: s.maxHp,
             startingHp: s.hp
         });
+        initialAmmunitionByShip.set(s.id, {
+          offensiveMissiles: Math.max(0, bs.offensiveMissilesLeft),
+          torpedoes: Math.max(0, bs.torpedoesLeft),
+          interceptors: Math.max(0, bs.interceptorsLeft)
+        });
         battleShips.push(bs);
         shipMap.set(s.id, bs);
       }
@@ -143,25 +187,31 @@ export const resolveBattle = (
         turnResolved: turn,
         status: 'resolved',
         initialShips: [],
-        logs: [...battle.logs, 'Battle resolved as draw - no valid combatants.'],
+        logs: [...battle.logs, formatLog('Battle resolved as draw - no valid combatants.')],
         winnerFactionId: 'draw',
         roundsPlayed: 0,
         shipsLost: {},
         survivorShipIds: [],
         missilesIntercepted: 0,
-        projectilesDestroyedByPd: 0
+        projectilesDestroyedByPd: 0,
+        ammunitionByFaction: {}
       },
-      survivingFleets: involvedFleets // Return fleets unchanged
+      survivingFleets: involvedFleets, // Return fleets unchanged
+      destroyedShipIds: [],
+      destroyedFleetIds: [],
+      destroyedArmyIds: []
     };
   }
 
   const projectiles: Projectile[] = [];
   const logs: string[] = [];
+  const appendLog = (message: string) => logs.push(formatLog(message));
   let roundsPlayed = 0;
 
   // Stats
   let totalMissilesIntercepted = 0;
   let totalProjectilesDestroyedByPd = 0;
+  const battleSystem = state.systems.find(system => system.id === battle.systemId);
 
   const recordKill = (attackerId: string | undefined, target: BattleShipState | undefined, method: string) => {
     if (!attackerId || !target) return;
@@ -171,14 +221,14 @@ export const resolveBattle = (
 
     attacker.killHistory.push({
       id: rng.id('kill'),
-      day: state.day,
+      day: turn,
       turn,
       targetId: target.shipId,
       targetType: target.type,
       targetFactionId: target.faction
     });
 
-    logs.push(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
+    appendLog(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
   };
 
   // 3. ROUND LOOP
@@ -189,7 +239,7 @@ export const resolveBattle = (
     const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
     if (aliveFactions.size <= 1) break;
 
-    logs.push(`--- ROUND ${round} ---`);
+    appendLog(`--- ROUND ${round} ---`);
     
     // --- PHASE 1: FLIGHT UPDATES ---
     // Update ETA for EXISTING projectiles. 
@@ -199,13 +249,52 @@ export const resolveBattle = (
 
     // Identify active participants (Array iteration is fine here as we need to process all)
     const activeShips = battleShips.filter(s => s.currentHp > 0);
+    const activeByFaction = new Map<FactionId, BattleShipState[]>();
+
+    for (const ship of activeShips) {
+      const list = activeByFaction.get(ship.faction);
+      if (list) {
+        list.push(ship);
+      } else {
+        activeByFaction.set(ship.faction, [ship]);
+      }
+    }
+
+    const activeFactions = Array.from(activeByFaction.keys()).sort();
+    const enemiesByFaction = new Map<FactionId, BattleShipState[]>();
+    const enemiesByFactionAndType = new Map<FactionId, Map<ShipType, BattleShipState[]>>();
+
+    for (const faction of activeFactions) {
+      const enemies: BattleShipState[] = [];
+      const byType = new Map<ShipType, BattleShipState[]>();
+
+      for (const otherFaction of activeFactions) {
+        if (otherFaction === faction) continue;
+
+        const hostileShips = activeByFaction.get(otherFaction) ?? [];
+        for (const ship of hostileShips) {
+          enemies.push(ship);
+
+          const shipsOfType = byType.get(ship.type);
+          if (shipsOfType) {
+            shipsOfType.push(ship);
+          } else {
+            byType.set(ship.type, [ship]);
+          }
+        }
+      }
+
+      enemiesByFaction.set(faction, enemies);
+      enemiesByFactionAndType.set(faction, byType);
+    }
 
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
-      const enemies = battleShips.filter(
-        s => s.currentHp > 0 && s.faction !== ship.faction
-      );
-      ship.targetId = selectTarget(ship, enemies, rng.next());
+      const enemies = enemiesByFaction.get(ship.faction) ?? [];
+      ship.targetId = selectTarget(ship, enemies, rng.next(), {
+        enemiesByType: enemiesByFactionAndType.get(ship.faction),
+        shipLookup: shipMap
+      });
     }
 
     // --- PHASE 3: MANEUVER ---
@@ -262,44 +351,52 @@ export const resolveBattle = (
         if (missileCount > 0) {
           firedParts.push(`${missileCount} missiles [ETA:${ETA_MISSILE}]`);
         }
-        logs.push(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
+        appendLog(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
       }
     }
 
     // --- PHASE 5: INTERCEPTION (Soft Kill) ---
-    // Optimization: Build a ThreatQueue to avoid repeated filters
-    const interceptionThreats = new Map<string, Projectile[]>();
-    
-    // Filter potential threats (ETA 0 or 1) and group by target
-    for (const p of projectiles) {
-        if ((p.eta === 0 || p.eta === 1) && p.hp > 0) {
-            if (!interceptionThreats.has(p.targetId)) interceptionThreats.set(p.targetId, []);
-            interceptionThreats.get(p.targetId)!.push(p);
-        }
+    type ProjectileBuckets = { interceptable: Projectile[]; pd: Projectile[] };
+    const projectileThreats = new Map<string, ProjectileBuckets>();
+    const ensureBuckets = (targetId: string): ProjectileBuckets => {
+      const existing = projectileThreats.get(targetId);
+      if (existing) return existing;
+      const buckets: ProjectileBuckets = { interceptable: [], pd: [] };
+      projectileThreats.set(targetId, buckets);
+      return buckets;
+    };
+
+    for (const projectile of projectiles) {
+      if (projectile.hp <= 0) continue;
+      if (projectile.eta === 0 || projectile.eta === 1) {
+        ensureBuckets(projectile.targetId).interceptable.push(projectile);
+      }
+      if (projectile.eta === 0) {
+        ensureBuckets(projectile.targetId).pd.push(projectile);
+      }
     }
 
-    // Deterministic Iteration: Sort Target IDs
-    const interceptionTargets = Array.from(interceptionThreats.keys()).sort();
+    const threatTargets = Array.from(projectileThreats.keys()).sort();
 
-    for (const targetId of interceptionTargets) {
-        const defender = shipMap.get(targetId);
-        if (!defender || defender.currentHp <= 0) continue;
+    for (const targetId of threatTargets) {
+      const defender = shipMap.get(targetId);
+      if (!defender || defender.currentHp <= 0) continue;
 
-        const incoming = interceptionThreats.get(targetId)!;
+      const incoming = projectileThreats.get(targetId)!;
 
-        // Try to intercept each incoming missile
-        for (const p of incoming) {
-            if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
+      // Try to intercept each incoming missile
+      for (const p of incoming.interceptable) {
+        if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
 
-            if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
-                defender.interceptorsLeft--;
-                if (rng.next() < INTERCEPTION_BASE_CHANCE) {
-                    p.hp = 0;
-                    logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
-                    totalMissilesIntercepted++;
-                }
+        if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
+            defender.interceptorsLeft--;
+            if (rng.next() < INTERCEPTION_BASE_CHANCE) {
+                p.hp = 0;
+                appendLog(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
+                totalMissilesIntercepted++;
             }
         }
+      }
     }
 
     // Cleanup dead projectiles
@@ -314,32 +411,24 @@ export const resolveBattle = (
 
     // --- PHASE 6: PD (Hard Kill) ---
     // Only affects projectiles hitting THIS round (ETA 0)
-    const pdThreats = new Map<string, Projectile[]>();
-    for (const p of projectiles) {
-        if (p.eta === 0 && p.hp > 0) {
-            if (!pdThreats.has(p.targetId)) pdThreats.set(p.targetId, []);
-            pdThreats.get(p.targetId)!.push(p);
-        }
-    }
-
-    const pdTargets = Array.from(pdThreats.keys()).sort();
-
-    for (const targetId of pdTargets) {
+    for (const targetId of threatTargets) {
         const defender = shipMap.get(targetId);
         if (!defender || defender.currentHp <= 0) continue;
 
         let pdOutput = defender.pdStrength * PD_DAMAGE_PER_POINT;
-        const incoming = pdThreats.get(targetId)!;
+        const incoming = projectileThreats.get(targetId)!.pd;
+        if (incoming.length === 0) continue;
 
         for (const threat of incoming) {
             if (pdOutput <= 0) break;
+            if (threat.hp <= 0) continue;
 
             const dmg = Math.min(threat.hp, pdOutput);
             threat.hp -= dmg;
             pdOutput -= dmg;
 
             if (threat.hp <= 0) {
-                 logs.push(`>> PD from ${short(defender.shipId)} destroyed ${threat.type}.`);
+                 appendLog(`>> PD from ${short(defender.shipId)} destroyed ${threat.type}.`);
                  totalProjectilesDestroyedByPd++;
             }
         }
@@ -359,7 +448,7 @@ export const resolveBattle = (
                 if (target && target.currentHp > 0) {
                     const previousHp = target.currentHp;
                     target.currentHp -= p.damage;
-                    logs.push(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
+                    appendLog(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
 
                     if (previousHp > 0 && target.currentHp <= 0) {
                       recordKill(p.sourceId, target, p.type);
@@ -383,7 +472,7 @@ export const resolveBattle = (
             const dmg = attacker.damage;
             const previousHp = target.currentHp;
             target.currentHp -= dmg;
-            logs.push(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
+            appendLog(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
 
             if (previousHp > 0 && target.currentHp <= 0) {
               recordKill(attacker.shipId, target, 'kinetic');
@@ -397,8 +486,15 @@ export const resolveBattle = (
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
 
+  const aliveFactionsBeforeAttrition = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+  // Winner is locked in before post-battle attrition so repairs/failures cannot flip the outcome.
+  const winnerFactionId: FactionId | 'draw' = aliveFactionsBeforeAttrition.size === 1
+    ? (Array.from(aliveFactionsBeforeAttrition)[0] as FactionId)
+    : 'draw';
+
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];
+    const orbitPosition = battleSystem?.position ?? oldFleet.targetPosition ?? oldFleet.position;
     oldFleet.ships.forEach(oldShip => {
         // Optimized O(1) Lookup
         const battleState = shipMap.get(oldShip.id);
@@ -426,6 +522,7 @@ export const resolveBattle = (
         const updatedFleet = withUpdatedFleetDerived({
             ...oldFleet,
             ships: newShips,
+            position: { ...orbitPosition },
             state: FleetState.ORBIT,
             stateStartTurn: turn // Correctly update state timestamp to current turn
         });
@@ -439,7 +536,7 @@ export const resolveBattle = (
   const attritionAdjustedFleets: Fleet[] = [];
 
   survivingFleets.forEach(fleet => {
-    const penalizedShips: ShipEntity[] = [];
+        const penalizedShips: ShipEntity[] = [];
 
     fleet.ships.forEach(ship => {
       const attritionDamage = Math.max(
@@ -456,9 +553,9 @@ export const resolveBattle = (
       if (remainingHp > 0) {
         penalizedShips.push({ ...ship, hp: remainingHp });
         adjustedSurvivorIds.push(ship.id);
-        attritionLogs.push(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`);
+        attritionLogs.push(formatLog(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`));
       } else {
-        attritionLogs.push(`xx ${short(ship.id)} was lost to post-battle failures.`);
+        attritionLogs.push(formatLog(`xx ${short(ship.id)} was lost to post-battle failures.`));
       }
     });
 
@@ -477,12 +574,34 @@ export const resolveBattle = (
 
   logs.push(...attritionLogs);
 
-  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
-  const winnerFactionId: FactionId | 'draw' = aliveFactions.size === 1
-    ? (Array.from(aliveFactions)[0] as FactionId)
-    : 'draw';
+  appendLog(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
-  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
+  const destroyedShipIds = battleShips.filter(s => s.currentHp <= 0).map(s => s.shipId);
+  const survivingFleetIds = new Set(survivingFleets.map(fleet => fleet.id));
+  const destroyedFleetIds = battle.involvedFleetIds.filter(fleetId => !survivingFleetIds.has(fleetId));
+
+  const carrierArmyByShipId = new Map<string, string>();
+  involvedFleets.forEach(fleet => {
+    fleet.ships.forEach(ship => {
+      if (ship.carriedArmyId) {
+        carrierArmyByShipId.set(ship.id, ship.carriedArmyId);
+      }
+    });
+  });
+
+  const destroyedArmyIds = new Set<string>();
+  carrierArmyByShipId.forEach((armyId, shipId) => {
+    const battleShip = shipMap.get(shipId);
+    if (!battleShip || battleShip.currentHp <= 0) {
+      destroyedArmyIds.add(armyId);
+    }
+  });
+
+  state.armies.forEach(army => {
+    if (army.state === ArmyState.EMBARKED && destroyedFleetIds.includes(army.containerId)) {
+      destroyedArmyIds.add(army.id);
+    }
+  });
 
   const shipsLost: Record<FactionId, number> = {};
   battleShips.forEach(s => {
@@ -505,8 +624,66 @@ export const resolveBattle = (
       shipsLost,
       survivorShipIds, // Store survivor list
       missilesIntercepted: totalMissilesIntercepted,
-      projectilesDestroyedByPd: totalProjectilesDestroyedByPd
+      projectilesDestroyedByPd: totalProjectilesDestroyedByPd,
+      ammunitionByFaction: (() => {
+        const breakdown: BattleAmmunitionByFaction = {};
+
+        const ensureFaction = (faction: FactionId) => {
+          if (!breakdown[faction]) {
+            breakdown[faction] = createEmptyAmmunitionBreakdown();
+          }
+          return breakdown[faction];
+        };
+
+        const recordForFaction = (
+          faction: FactionId,
+          key: keyof BattleAmmunitionBreakdown,
+          initial: number,
+          remaining: number
+        ) => {
+          const factionBreakdown = ensureFaction(faction);
+          const tally = factionBreakdown[key];
+          const clampedRemaining = clampRemaining(initial, remaining);
+          tally.initial += initial;
+          tally.remaining += clampedRemaining;
+          tally.used += initial - clampedRemaining;
+        };
+
+        battleShips.forEach(ship => {
+          const initialStock = initialAmmunitionByShip.get(ship.shipId);
+          if (!initialStock) return;
+
+          const isOperational = ship.currentHp > 0;
+
+          recordForFaction(
+            ship.faction,
+            'offensiveMissiles',
+            initialStock.offensiveMissiles,
+            isOperational ? ship.offensiveMissilesLeft : 0
+          );
+          recordForFaction(
+            ship.faction,
+            'torpedoes',
+            initialStock.torpedoes,
+            isOperational ? ship.torpedoesLeft : 0
+          );
+          recordForFaction(
+            ship.faction,
+            'interceptors',
+            initialStock.interceptors,
+            isOperational ? ship.interceptorsLeft : 0
+          );
+        });
+
+        return breakdown;
+      })()
   };
 
-  return { updatedBattle, survivingFleets };
+  return {
+    updatedBattle,
+    survivingFleets,
+    destroyedShipIds,
+    destroyedFleetIds,
+    destroyedArmyIds: Array.from(destroyedArmyIds)
+  };
 };

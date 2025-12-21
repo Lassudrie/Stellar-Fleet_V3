@@ -1,0 +1,1 @@
+export { generateStellarSystem } from './generateStellarSystem';
