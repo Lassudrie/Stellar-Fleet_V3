@@ -4,6 +4,82 @@ import { MapControls as ThreeMapControls } from 'three-stdlib';
 import { Vector3 } from 'three';
 import { Vec3 } from '../engine/math/vec3';
 
+export interface CameraVectorPool {
+  direction: Vector3;
+  desired: Vector3;
+  offset: Vector3;
+  safeDirection: Vector3;
+  final: Vector3;
+  bounded: Vector3;
+}
+
+export interface CameraBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface ClampDistanceConfig {
+  minDistance: number;
+  maxDistance: number;
+}
+
+type ClampableControls = Pick<ThreeMapControls, 'object' | 'target' | 'minDistance' | 'maxDistance' | 'update'>;
+
+export const clampCameraToBounds = (
+  controls: ClampableControls,
+  mapBounds: CameraBounds,
+  distanceConfig: ClampDistanceConfig,
+  vectors: CameraVectorPool
+) => {
+  const { object: camera, target, minDistance, maxDistance } = controls;
+  const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const { direction, desired, offset, safeDirection, final, bounded } = vectors;
+
+  direction.subVectors(camera.position, target);
+
+  const clampedTargetX = clampValue(target.x, mapBounds.minX, mapBounds.maxX);
+  const clampedTargetZ = clampValue(target.z, mapBounds.minZ, mapBounds.maxZ);
+  const targetChanged = clampedTargetX !== target.x || clampedTargetZ !== target.z;
+
+  target.set(clampedTargetX, target.y, clampedTargetZ);
+
+  desired.addVectors(target, direction);
+  const clampedPositionX = clampValue(desired.x, mapBounds.minX, mapBounds.maxX);
+  const clampedPositionZ = clampValue(desired.z, mapBounds.minZ, mapBounds.maxZ);
+  desired.setX(clampedPositionX).setZ(clampedPositionZ);
+
+  offset.subVectors(desired, target);
+  const currentDistance = offset.length();
+  const distanceLimits = {
+    min: minDistance ?? distanceConfig.minDistance,
+    max: maxDistance ?? distanceConfig.maxDistance
+  };
+
+  const clampedDistance = clampValue(currentDistance || distanceLimits.min, distanceLimits.min, distanceLimits.max);
+
+  if (offset.lengthSq() === 0) {
+    safeDirection.set(0, 1, 0);
+  } else {
+    safeDirection.copy(offset).normalize();
+  }
+
+  final.addVectors(target, safeDirection.multiplyScalar(clampedDistance));
+  bounded.set(
+    clampValue(final.x, mapBounds.minX, mapBounds.maxX),
+    final.y,
+    clampValue(final.z, mapBounds.minZ, mapBounds.maxZ)
+  );
+
+  const positionChanged = !bounded.equals(camera.position);
+
+  if (targetChanged || positionChanged) {
+    camera.position.copy(bounded);
+    controls.update();
+  }
+};
+
 interface GameCameraProps {
   initialPosition?: Vec3 | [number, number, number];
   initialTarget?: Vec3 | [number, number, number];
@@ -20,6 +96,14 @@ interface GameCameraProps {
 const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
   const hasInitialized = useRef(false);
+  const vectorPoolRef = useRef({
+    direction: new Vector3(),
+    desired: new Vector3(),
+    offset: new Vector3(),
+    safeDirection: new Vector3(),
+    final: new Vector3(),
+    bounded: new Vector3()
+  });
 
   const targetArray = useMemo<[number, number, number]>(() => {
     if (!initialTarget) return [0, 0, 0];
@@ -46,48 +130,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   const clampControls = useCallback(() => {
     if (!controlsRef.current || !mapBounds) return;
 
-    const { object: camera, target, minDistance, maxDistance } = controlsRef.current;
-    const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-    const direction = new Vector3().subVectors(camera.position, target);
-
-    const clampedTargetX = clampValue(target.x, mapBounds.minX, mapBounds.maxX);
-    const clampedTargetZ = clampValue(target.z, mapBounds.minZ, mapBounds.maxZ);
-    const targetChanged = clampedTargetX !== target.x || clampedTargetZ !== target.z;
-
-    target.set(clampedTargetX, target.y, clampedTargetZ);
-
-    const desiredPosition = new Vector3().addVectors(target, direction);
-    const clampedPositionX = clampValue(desiredPosition.x, mapBounds.minX, mapBounds.maxX);
-    const clampedPositionZ = clampValue(desiredPosition.z, mapBounds.minZ, mapBounds.maxZ);
-    desiredPosition.setX(clampedPositionX).setZ(clampedPositionZ);
-
-    const offsetFromTarget = new Vector3().subVectors(desiredPosition, target);
-    const currentDistance = offsetFromTarget.length();
-    const distanceLimits = {
-      min: minDistance ?? distanceConfig.minDistance,
-      max: maxDistance ?? distanceConfig.maxDistance
-    };
-
-    const clampedDistance = clampValue(currentDistance || distanceLimits.min, distanceLimits.min, distanceLimits.max);
-
-    const safeDirection = offsetFromTarget.lengthSq() === 0
-      ? new Vector3(0, 1, 0)
-      : offsetFromTarget.normalize();
-
-    const finalPosition = new Vector3().addVectors(target, safeDirection.multiplyScalar(clampedDistance));
-    const boundedPosition = new Vector3(
-      clampValue(finalPosition.x, mapBounds.minX, mapBounds.maxX),
-      finalPosition.y,
-      clampValue(finalPosition.z, mapBounds.minZ, mapBounds.maxZ)
-    );
-
-    const positionChanged = !boundedPosition.equals(camera.position);
-
-    if (targetChanged || positionChanged) {
-      camera.position.copy(boundedPosition);
-      controlsRef.current.update();
-    }
+    clampCameraToBounds(controlsRef.current, mapBounds, distanceConfig, vectorPoolRef.current);
   }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
 
   useEffect(() => {

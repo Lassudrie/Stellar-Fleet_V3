@@ -73,6 +73,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const flashLightRef = useRef<PointLight>(null);
   const previousState = useRef<FleetState>(fleet.state);
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
+  const previousCursorRef = useRef<string>('');
+  const isHoveringRef = useRef(false);
 
   // Constants for visual representation
   const highlightPalette = useMemo(() => deriveHighlightPalette(color), [color]);
@@ -175,6 +177,27 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
     }
   });
 
+  const handlePointerOver = () => {
+    if (typeof document === 'undefined' || !document.body) return;
+    previousCursorRef.current = document.body.style.cursor;
+    document.body.style.cursor = 'pointer';
+    isHoveringRef.current = true;
+  };
+
+  const handlePointerOut = () => {
+    if (typeof document === 'undefined' || !document.body) return;
+    document.body.style.cursor = previousCursorRef.current || 'auto';
+    isHoveringRef.current = false;
+  };
+
+  useLayoutEffect(() => {
+    return () => {
+        if (isHoveringRef.current) {
+            handlePointerOut();
+        }
+    };
+  }, []);
+
   return (
     <group ref={groupRef}>
         {/* HITBOX: Large invisible sphere for easier selection on mobile/desktop */}
@@ -201,8 +224,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                     lastTouchRef.current = now;
                 }
             }}
-            onPointerOver={() => document.body.style.cursor = 'pointer'}
-            onPointerOut={() => document.body.style.cursor = 'auto'}
+            onPointerOver={handlePointerOver}
+            onPointerOut={handlePointerOut}
         >
             <sphereGeometry args={[2.5, 8, 8]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />

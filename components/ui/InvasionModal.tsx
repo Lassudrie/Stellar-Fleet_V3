@@ -4,7 +4,8 @@ import { Fleet, StarSystem, ShipType, FactionId, FleetState } from '../../types'
 import { fleetLabel, shortId } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
-import { dist } from '../../engine/math/vec3';
+import { distSq } from '../../engine/math/vec3';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 
 interface InvasionModalProps {
   targetSystem: StarSystem;
@@ -32,9 +33,9 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
 
     // Sort by Distance
     return candidates.sort((a, b) => {
-        const distA = dist(a.position, targetPos);
-        const distB = dist(b.position, targetPos);
-        return distA - distB;
+        const distASq = distSq(a.position, targetPos);
+        const distBSq = distSq(b.position, targetPos);
+        return distASq - distBSq;
     });
   }, [fleets, targetSystem, playerFactionId]);
 
@@ -69,12 +70,13 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
               // Distance Calc
               const fleetPos = fleet.position;
               const targetPos = targetSystem.position;
-              const d = dist(fleetPos, targetPos);
-              const isHere = d < 2.0;
+              const dSq = distSq(fleetPos, targetPos);
+              const isHere = dSq <= ORBIT_PROXIMITY_RANGE_SQ;
               
               // ETA Calc
               const speed = getFleetSpeed(fleet);
-              const eta = isHere ? 0 : Math.ceil(d / speed);
+              const distance = Math.sqrt(dSq);
+              const eta = isHere ? 0 : Math.ceil(distance / speed);
               const etaText = eta === 0 ? 'ORBIT' : `${eta} T`;
 
               return (
@@ -95,7 +97,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
                         <div className="text-lg font-mono font-bold text-slate-400 group-hover:text-white leading-tight">
                             {etaText}
                         </div>
-                        <div className="text-[10px] text-slate-600 font-mono">{Math.round(d)} LY</div>
+                        <div className="text-[10px] text-slate-600 font-mono">{Math.round(distance)} LY</div>
                     </div>
                   </div>
                   

@@ -4,7 +4,8 @@ import { Fleet, StarSystem, FleetState, ShipType } from '../../types';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
-import { dist } from '../../engine/math/vec3';
+import { dist, distSq } from '../../engine/math/vec3';
+import { CAPTURE_RANGE } from '../../data/static';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
@@ -22,10 +23,11 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
       const targetPos = targetSystem.position;
 
       const availableFleets = blueFleets.filter(fleet => {
-          const distance = dist(fleet.position, targetPos);
+          const distanceSq = distSq(fleet.position, targetPos);
+          const inCaptureRange = distanceSq <= (CAPTURE_RANGE * CAPTURE_RANGE);
 
           if (mode === 'MOVE' || mode === 'ATTACK') {
-              return distance > 1.0;
+              return !inCaptureRange;
           }
 
           const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);

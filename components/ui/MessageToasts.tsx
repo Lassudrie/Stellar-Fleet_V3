@@ -24,7 +24,10 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
   const [hiddenToastIds, setHiddenToastIds] = useState<Set<string>>(new Set());
 
   const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
+    let dismissed = false;
     setHiddenToastIds(prev => {
+        if (prev.has(messageId)) return prev;
+        dismissed = true;
         const next = new Set(prev);
         next.add(messageId);
         return next;
@@ -33,7 +36,11 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
     if (options?.markRead) {
         onMarkRead(messageId, true);
     }
-  }, [onMarkRead]);
+
+    if (dismissed) {
+        onDismissMessage(messageId);
+    }
+  }, [onDismissMessage, onMarkRead]);
 
   useEffect(() => {
     const knownIds = new Set(messages.map(msg => msg.id));

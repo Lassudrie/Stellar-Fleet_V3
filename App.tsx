@@ -19,6 +19,7 @@ import { serializeGameState, deserializeGameState } from './engine/serialization
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
+import { interpretCommandResult, CommandFeedback } from './services/commands/commandOutcome';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -42,6 +43,7 @@ const App: React.FC = () => {
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
+  const [commandFeedback, setCommandFeedback] = useState<CommandFeedback | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -89,6 +91,12 @@ const App: React.FC = () => {
   useEffect(() => {
       inspectedFleetIdRef.current = inspectedFleetId;
   }, [inspectedFleetId]);
+
+  useEffect(() => {
+      if (!commandFeedback) return;
+      const timer = window.setTimeout(() => setCommandFeedback(null), 3500);
+      return () => window.clearTimeout(timer);
+  }, [commandFeedback]);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -285,25 +293,37 @@ const App: React.FC = () => {
 
   const handleMoveCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          const outcome = interpretCommandResult(result, t);
+          if (outcome.feedback) {
+              setCommandFeedback(outcome.feedback);
+          }
+          if (outcome.shouldClosePicker) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
   const handleAttackCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          const outcome = interpretCommandResult(result, t);
+          if (outcome.feedback) {
+              setCommandFeedback(outcome.feedback);
+          }
+          if (outcome.shouldClosePicker) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
@@ -314,12 +334,14 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
+          const outcome = interpretCommandResult(result, t);
+          if (outcome.feedback) {
+              setCommandFeedback(outcome.feedback);
           }
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          if (outcome.shouldClosePicker) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
@@ -330,12 +352,14 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
+          const outcome = interpretCommandResult(result, t);
+          if (outcome.feedback) {
+              setCommandFeedback(outcome.feedback);
           }
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          if (outcome.shouldClosePicker) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
@@ -547,6 +571,21 @@ const App: React.FC = () => {
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
+            {commandFeedback && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 transform z-50 pointer-events-none">
+                    <div className="bg-red-900/80 border border-red-500/70 text-sm text-white px-4 py-2 rounded shadow-lg flex items-start gap-3 pointer-events-auto">
+                        <span className="font-semibold">{t('msg.commandFailedTitle', { defaultValue: 'Command failed' })}</span>
+                        <span className="flex-1">{commandFeedback.message}</span>
+                        <button
+                            aria-label={t('messages.dismiss')}
+                            className="text-slate-200 hover:text-white"
+                            onClick={() => setCommandFeedback(null)}
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
+            )}
             <GameScene
                 gameState={viewGameState}
                 enemySightings={enemySightings}
