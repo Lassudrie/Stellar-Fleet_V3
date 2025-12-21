@@ -246,6 +246,70 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'ORDER_LOAD ignore le chargement immédiat pour une flotte en transit',
+    run: () => {
+      const system = createSystem('sys-load-transit', 'blue');
+      const transport: ShipEntity = {
+        id: 'blue-transport-transit',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 40,
+        maxHp: 40,
+        carriedArmyId: null
+      };
+
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-blue-transit', 'blue', { ...baseVec }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position }
+      };
+
+      const groundArmy = createArmy('army-blue-transit', 'blue', 6000, ArmyState.DEPLOYED, system.planets[0].id);
+
+      const engine = new GameEngine(
+        createBaseState({
+          systems: [system],
+          fleets: [movingFleet],
+          armies: [groundArmy],
+          seed: 5,
+          rngState: 5
+        })
+      );
+
+      const result = engine.dispatchPlayerCommand({
+        type: 'ORDER_LOAD',
+        fleetId: movingFleet.id,
+        targetSystemId: system.id
+      });
+
+      const updatedFleet = engine.state.fleets.find(fleet => fleet.id === movingFleet.id);
+      const updatedTransport = updatedFleet?.ships.find(ship => ship.id === transport.id);
+      const updatedArmy = engine.state.armies.find(army => army.id === groundArmy.id);
+
+      assert.strictEqual(result.ok, true, 'La commande doit être acceptée pour une flotte en mouvement');
+      assert.strictEqual(
+        updatedArmy?.state,
+        ArmyState.DEPLOYED,
+        'L’armée ne doit pas être embarquée tant que la flotte est en transit'
+      );
+      assert.strictEqual(
+        updatedArmy?.containerId,
+        system.planets[0].id,
+        'L’armée doit rester sur la planète tant que le chargement n’est pas résolu en orbite'
+      );
+      assert.strictEqual(
+        updatedTransport?.carriedArmyId,
+        null,
+        'Aucune unité ne doit être chargée immédiatement pendant le transit'
+      );
+      assert.strictEqual(
+        updatedFleet?.loadTargetSystemId,
+        system.id,
+        'L’ordre de chargement doit être programmé pour résolution à l’arrivée'
+      );
+    }
+  },
+  {
     name: 'Battle resolution keeps victories for factions outside the core palette',
     run: () => {
       const greenFleet = createFleet('fleet-green-victory', 'green', { ...baseVec }, [
