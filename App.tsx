@@ -19,6 +19,7 @@ import { serializeGameState, deserializeGameState } from './engine/serialization
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
+import { processCommandResult } from './services/commands/processCommandResult';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -50,6 +51,10 @@ const App: React.FC = () => {
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
   const [aiDebug, setAiDebug] = useState(false);
+  const notifyCommandError = useCallback((error: string) => {
+      const detail = error || 'Unknown error';
+      alert(t('msg.commandFailed', { error: detail }));
+  }, [t]);
 
   const handleExportAiLogs = () => {
       const history = aiDebugger.getHistory();
@@ -285,11 +290,14 @@ const App: React.FC = () => {
 
   const handleMoveCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
+          if (!processCommandResult(result, notifyCommandError)) {
+              return;
+          }
           setFleetPickerMode(null);
           setUiMode('NONE');
       }
@@ -297,11 +305,14 @@ const App: React.FC = () => {
 
   const handleAttackCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
+          if (!processCommandResult(result, notifyCommandError)) {
+              return;
+          }
           setFleetPickerMode(null);
           setUiMode('NONE');
       }
@@ -314,10 +325,7 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
-          }
+          if (!processCommandResult(result, notifyCommandError)) return;
           setFleetPickerMode(null);
           setUiMode('NONE');
       }
@@ -330,10 +338,7 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
-          }
+          if (!processCommandResult(result, notifyCommandError)) return;
           setFleetPickerMode(null);
           setUiMode('NONE');
       }

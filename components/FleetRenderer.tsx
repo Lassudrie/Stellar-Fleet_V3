@@ -1,5 +1,5 @@
 
-import React, { useRef, useMemo, useLayoutEffect } from 'react';
+import React, { useRef, useMemo, useLayoutEffect, useEffect } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
 import { Fleet, FleetState } from '../types';
@@ -67,6 +67,12 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   // Double interaction detection (touch)
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
+
+  useEffect(() => {
+    return () => {
+        document.body.style.cursor = 'auto';
+    };
+  }, []);
   
   // Flash Effect Refs
   const flashMeshRef = useRef<Mesh>(null);
