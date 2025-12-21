@@ -133,12 +133,12 @@ export class RNG {
 
     if (p < plow) {
       const q = Math.sqrt(-2 * Math.log(p));
-      return -this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
+      return this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
     }
 
     if (p > phigh) {
       const q = Math.sqrt(-2 * Math.log(1 - p));
-      return this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
+      return -this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
     }
 
     const q = p - 0.5;
@@ -152,7 +152,7 @@ export class RNG {
     const num =
       (((((numerator[0] * x + numerator[1]) * x + numerator[2]) * x + numerator[3]) * x + numerator[4]) * x + numerator[5]);
     const den =
-      ((((denominator[0] * x + denominator[1]) * x + denominator[2]) * x + denominator[3]) * x + 1);
+      (((((denominator[0] * x + denominator[1]) * x + denominator[2]) * x + denominator[3]) * x + (denominator[4] ?? 0)) * x + 1);
     return num / den;
   }
 }

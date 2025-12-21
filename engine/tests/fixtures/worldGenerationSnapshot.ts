@@ -39,7 +39,7 @@ export const SPIRAL_CONVERGENCE_SEED_4242_SNAPSHOT: WorldSnapshot = {
     {
       id: 'sys_ee658ae8',
       name: 'Omina',
-      position: { x: -60.923204, y: -0.961244, z: 53.048952 },
+      position: { x: -58.386964, y: -0.961244, z: 50.840518 },
       ownerFactionId: null,
       resourceType: 'none',
       isHomeworld: false
@@ -47,15 +47,15 @@ export const SPIRAL_CONVERGENCE_SEED_4242_SNAPSHOT: WorldSnapshot = {
     {
       id: 'sys_c123ea6b',
       name: 'Pilon',
-      position: { x: 33.150037, y: 1.004807, z: -87.120589 },
-      ownerFactionId: 'aurora',
+      position: { x: 32.375326, y: 1.004807, z: -85.084596 },
+      ownerFactionId: 'ember',
       resourceType: 'none',
       isHomeworld: false
     },
     {
       id: 'sys_2fe4a05a',
       name: 'Sigma',
-      position: { x: 18.493899, y: -1.499435, z: -37.645953 },
+      position: { x: 16.129179, y: -1.499435, z: -32.83236 },
       ownerFactionId: null,
       resourceType: 'none',
       isHomeworld: false
@@ -63,30 +63,30 @@ export const SPIRAL_CONVERGENCE_SEED_4242_SNAPSHOT: WorldSnapshot = {
     {
       id: 'sys_7deda26f',
       name: 'Mupi',
-      position: { x: -113.379304, y: 1.417315, z: -66.177367 },
-      ownerFactionId: 'ember',
+      position: { x: -106.491639, y: 1.417315, z: -62.157167 },
+      ownerFactionId: null,
       resourceType: 'none',
       isHomeworld: false
     },
     {
       id: 'sys_d971faac',
       name: 'Tauka',
-      position: { x: -5.928995, y: -0.045517, z: 3.633596 },
-      ownerFactionId: null,
+      position: { x: 1.644977, y: -0.045517, z: -1.008127 },
+      ownerFactionId: 'aurora',
       resourceType: 'gas',
       isHomeworld: false
     },
     {
       id: 'sys_9cc2dfb4',
       name: 'Nulon',
-      position: { x: 0.841045, y: 1.972861, z: 133.8921 },
+      position: { x: 0.904139, y: 1.972861, z: 143.936438 },
       ownerFactionId: null,
       resourceType: 'none',
       isHomeworld: false
     }
   ],
   homeworlds: {
-    aurora: 'sys_524218da',
-    ember: 'sys_3047d270'
+    ember: 'sys_c6911dda',
+    aurora: 'sys_9cfb7439'
   }
 };
