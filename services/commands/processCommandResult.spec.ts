@@ -26,7 +26,7 @@ const createNotifier = () => {
 {
   const { calls, notify } = createNotifier();
   const mockEngine = {
-    dispatchPlayerCommand: () => ({ ok: false, error: 'Out of range' })
+    dispatchPlayerCommand: () => ({ ok: false, error: 'Out of range', state: {} as any })
   };
   const processed = dispatchAndProcess(
     mockEngine,

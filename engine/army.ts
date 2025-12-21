@@ -99,55 +99,79 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
  */
 export const sanitizeArmies = (state: GameState): { state: GameState, logs: string[] } => {
     const logs: string[] = [];
-    const fleets: Fleet[] = state.fleets.map(fleet => ({
-        ...fleet,
-        ships: fleet.ships.map(ship => ({ ...ship }))
-    }));
+    const armiesById = new Map(state.armies.map(army => [army.id, army]));
+    const fleetUpdates = new Map<string, Fleet>();
+    let fleetsChanged = false;
 
-    const armies: Army[] = state.armies.map(army => ({ ...army }));
-    const armiesById = new Map(armies.map(army => [army.id, army]));
+    const getFleetClone = (fleet: Fleet): Fleet => {
+        const existing = fleetUpdates.get(fleet.id);
+        if (existing) return existing;
+        const clone = { ...fleet, ships: fleet.ships.slice() };
+        fleetUpdates.set(fleet.id, clone);
+        return clone;
+    };
 
-    fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
+    const clearShipArmy = (fleet: Fleet, shipIndex: number, armyId: string) => {
+        const fleetClone = getFleetClone(fleet);
+        const ship = fleetClone.ships[shipIndex];
+        if (!ship || ship.carriedArmyId !== armyId) return;
+        fleetClone.ships[shipIndex] = { ...ship, carriedArmyId: null };
+        fleetsChanged = true;
+    };
+
+    state.fleets.forEach(fleet => {
+        fleet.ships.forEach((ship, shipIndex) => {
             const armyId = ship.carriedArmyId;
             if (!armyId) return;
 
             if (!armiesById.has(armyId)) {
                 logs.push(`Ship ${ship.id} (${fleet.id}) cleared reference to missing army ${armyId}.`);
-                ship.carriedArmyId = null;
+                clearShipArmy(fleet, shipIndex, armyId);
             }
         });
     });
 
-    const carrierMap = new Map<string, { ship: ShipEntity; fleetId: string }[]>();
-
-    fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
-            if (!ship.carriedArmyId) return;
-            const carriers = carrierMap.get(ship.carriedArmyId) || [];
-            carriers.push({ ship, fleetId: fleet.id });
-            carrierMap.set(ship.carriedArmyId, carriers);
+    const buildCarrierMap = (fleets: Fleet[]) => {
+        const carrierMap = new Map<string, { fleet: Fleet; shipIndex: number; shipId: string }[]>();
+        fleets.forEach(fleet => {
+            fleet.ships.forEach((ship, shipIndex) => {
+                if (!ship.carriedArmyId) return;
+                const carriers = carrierMap.get(ship.carriedArmyId) || [];
+                carriers.push({ fleet, shipIndex, shipId: ship.id });
+                carrierMap.set(ship.carriedArmyId, carriers);
+            });
         });
-    });
+        return carrierMap;
+    };
+
+    const fleetsForValidation = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+
+    const carrierMap = buildCarrierMap(fleetsForValidation);
 
     carrierMap.forEach((carriers, armyId) => {
         if (carriers.length <= 1) return;
 
-        carriers.sort((a, b) => a.ship.id.localeCompare(b.ship.id));
+        carriers.sort((a, b) => a.shipId.localeCompare(b.shipId));
         const [canonical, ...duplicates] = carriers;
-        duplicates.forEach(({ ship, fleetId }) => {
-            ship.carriedArmyId = null;
-            logs.push(`Ship ${ship.id} (${fleetId}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.ship.id} (${canonical.fleetId}).`);
+        duplicates.forEach(({ fleet, shipIndex, shipId }) => {
+            clearShipArmy(fleet, shipIndex, armyId);
+            logs.push(`Ship ${shipId} (${fleet.id}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.shipId} (${canonical.fleet.id}).`);
         });
-        carrierMap.set(armyId, [canonical]);
     });
 
-    const sanitizedArmies: Army[] = [];
-    const validationState: GameState = { ...state, fleets, armies };
+    const fleetsAfterDedup = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+    const carriersAfterDedup = buildCarrierMap(fleetsAfterDedup);
 
-    for (const army of armies) {
+    const sanitizedArmies: Army[] = [];
+    const validationState: GameState = { ...state, fleets: fleetsAfterDedup, armies: state.armies };
+
+    for (const army of state.armies) {
         let isValid = true;
-        const carriers = carrierMap.get(army.id) || [];
+        const carriers = carriersAfterDedup.get(army.id) || [];
 
         if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
             if (carriers.length === 0) {
@@ -170,10 +194,8 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
         }
 
         if (!isValid) {
-            carriers.forEach(({ ship }) => {
-                if (ship.carriedArmyId === army.id) {
-                    ship.carriedArmyId = null;
-                }
+            carriers.forEach(({ fleet, shipIndex }) => {
+                clearShipArmy(fleet, shipIndex, army.id);
             });
             continue;
         }
@@ -181,10 +203,18 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
         sanitizedArmies.push(army);
     }
 
+    const nextFleets = fleetUpdates.size
+        ? state.fleets.map(fleet => fleetUpdates.get(fleet.id) ?? fleet)
+        : state.fleets;
+
+    if (!fleetsChanged && sanitizedArmies.length === state.armies.length) {
+        return { state, logs };
+    }
+
     return {
         state: {
             ...state,
-            fleets,
+            fleets: nextFleets,
             armies: sanitizedArmies
         },
         logs

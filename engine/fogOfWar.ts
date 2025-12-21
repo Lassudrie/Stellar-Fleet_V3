@@ -1,7 +1,7 @@
 
 import { GameState, FactionId, Fleet } from '../types';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, SENSOR_RANGE } from '../data/static';
-import { getTerritoryOwner } from './territory';
+import { buildTerritoryResolver } from './territory';
 import { Vec3, distSq } from './math/vec3';
 
 /**
@@ -18,6 +18,7 @@ export interface VisibilityContext {
   viewerFleets: Fleet[];
   observedSystemIds: Set<string>;
   observedPositions: Vec3[];
+  territoryResolver: (position: Vec3) => FactionId | null;
 }
 
 export interface FleetVisibilitySensor {
@@ -101,7 +102,7 @@ const DEFAULT_FLEET_SENSORS: FleetVisibilitySensor[] = [
   {
     id: 'territory-surveillance',
     isVisible: (fleet, context) =>
-      getTerritoryOwner(context.state.systems, fleet.position) === context.viewerFactionId
+      context.territoryResolver(fleet.position) === context.viewerFactionId
   }
 ];
 
@@ -138,13 +139,15 @@ const buildVisibilityContext = (
   for (const sys of state.systems) {
     if (observedIds.has(sys.id)) observedPositions.push(sys.position);
   }
+  const territoryResolver = buildTerritoryResolver(state.systems);
 
   return {
     state,
     viewerFactionId,
     viewerFleets,
     observedSystemIds: observedIds,
-    observedPositions
+    observedPositions,
+    territoryResolver
   };
 };
 

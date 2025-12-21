@@ -5,10 +5,16 @@ import { pruneBattles } from '../../../services/battle/detection';
 import { sanitizeArmies } from '../../army';
 
 const LOG_RETENTION_LIMIT = 2000;
+const MESSAGE_RETENTION_LIMIT = 500;
 
 const trimLogs = (logs: GameState['logs']): GameState['logs'] => {
     if (logs.length <= LOG_RETENTION_LIMIT) return logs;
     return logs.slice(-LOG_RETENTION_LIMIT);
+};
+
+const trimMessages = (messages: GameState['messages']): GameState['messages'] => {
+    if (messages.length <= MESSAGE_RETENTION_LIMIT) return messages;
+    return messages.slice(-MESSAGE_RETENTION_LIMIT);
 };
 
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
@@ -47,6 +53,7 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     return {
         ...sanitizedArmyState,
         battles: activeBattles,
-        logs: trimLogs(newLogs)
+        logs: trimLogs(newLogs),
+        messages: trimMessages(sanitizedArmyState.messages)
     };
 };

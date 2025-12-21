@@ -3,6 +3,7 @@ import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, 
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
+import { SpatialIndex } from './spatialIndex';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
@@ -10,105 +11,6 @@ import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
 
-type PositionedEntity = { position: { x: number; y: number; z: number } };
-
-export class SpatialIndex<T extends PositionedEntity> {
-  private readonly buckets = new Map<string, T[]>();
-  private readonly cellSize: number;
-  private readonly minCell: { x: number; z: number } = { x: Infinity, z: Infinity };
-  private readonly maxCell: { x: number; z: number } = { x: -Infinity, z: -Infinity };
-  private readonly items: T[];
-
-  constructor(items: T[], cellSize: number) {
-    this.cellSize = Math.max(1, cellSize);
-    this.items = items;
-
-    items.forEach(item => {
-      const cell = this.getCellCoords(item.position);
-      this.minCell.x = Math.min(this.minCell.x, cell.x);
-      this.minCell.z = Math.min(this.minCell.z, cell.z);
-      this.maxCell.x = Math.max(this.maxCell.x, cell.x);
-      this.maxCell.z = Math.max(this.maxCell.z, cell.z);
-
-      const key = this.getKey(cell.x, cell.z);
-      const bucket = this.buckets.get(key);
-      if (bucket) {
-        bucket.push(item);
-      } else {
-        this.buckets.set(key, [item]);
-      }
-    });
-  }
-
-  private getCellCoords(position: PositionedEntity['position']) {
-    return {
-      x: Math.floor(position.x / this.cellSize),
-      z: Math.floor(position.z / this.cellSize),
-    };
-  }
-
-  private getKey(x: number, z: number) {
-    return `${x}:${z}`;
-  }
-
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
-    for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
-      for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
-      }
-    }
-    return cells;
-  }
-
-  queryRadius(position: PositionedEntity['position'], maxDistance: number): T[] {
-    if (this.items.length === 0) return [];
-    const center = this.getCellCoords(position);
-    const cellRadius = Math.max(0, Math.ceil(maxDistance / this.cellSize));
-    const maxDistanceSq = maxDistance * maxDistance;
-    const candidates: T[] = [];
-
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
-      if (!bucket) return;
-
-      bucket.forEach(item => {
-        if (distSq(item.position, position) <= maxDistanceSq) {
-          candidates.push(item);
-        }
-      });
-    });
-
-    return candidates;
-  }
-
-  findNearest(position: PositionedEntity['position'], predicate?: (item: T) => boolean): { item: T; distanceSq: number } | null {
-    if (this.items.length === 0) return null;
-
-    const center = this.getCellCoords(position);
-    const maxRadius = Math.max(this.maxCell.x - this.minCell.x, this.maxCell.z - this.minCell.z, 0) + 1;
-    let best: { item: T; distanceSq: number } | null = null;
-
-    for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
-        if (!bucket) return;
-
-        bucket.forEach(item => {
-          if (predicate && !predicate(item)) return;
-          const distanceSq = distSq(item.position, position);
-          if (!best || distanceSq < best.distanceSq) {
-            best = { item, distanceSq };
-          }
-        });
-      });
-    }
-
-    return best;
-  }
-}
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
 
@@ -225,6 +127,20 @@ export const createEmptyAIState = (): AIState => ({
   holdUntilTurnBySystemId: {},
 });
 
+const cloneAIState = (state: AIState): AIState => ({
+  sightings: Object.entries(state.sightings).reduce<Record<string, EnemySighting>>((acc, [key, sighting]) => {
+    acc[key] = {
+      ...sighting,
+      position: { ...sighting.position }
+    };
+    return acc;
+  }, {}),
+  targetPriorities: { ...state.targetPriorities },
+  systemLastSeen: { ...state.systemLastSeen },
+  lastOwnerBySystemId: { ...state.lastOwnerBySystemId },
+  holdUntilTurnBySystemId: { ...state.holdUntilTurnBySystemId },
+});
+
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
 interface Task {
@@ -262,7 +178,7 @@ const updateMemory = (
   const activeHoldSystems: Record<string, number> = {};
 
   const memory: AIState = existingState
-    ? JSON.parse(JSON.stringify(existingState))
+    ? cloneAIState(existingState)
     : createEmptyAIState();
 
   // Hold expirations are inclusive of the stored day: systems remain on hold

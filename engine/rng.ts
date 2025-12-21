@@ -76,7 +76,7 @@ export class RNG {
       return 1;
     }
     // Convert to 32-bit unsigned integer (handles negatives and non-integers)
-    return (Math.floor(Math.abs(value)) >>> 0) || 1; // Ensure non-zero
+    return Math.floor(Math.abs(value)) >>> 0;
   }
 
   // --- GENERATION ---

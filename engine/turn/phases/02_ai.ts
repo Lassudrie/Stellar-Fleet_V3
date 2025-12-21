@@ -31,7 +31,8 @@ export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
         const commands = planAiTurn(nextState, faction.id, existingAiState, ctx.rng);
 
         for (const cmd of commands) {
-            const updatedState = applyCommand(nextState, cmd, ctx.rng);
+            const result = applyCommand(nextState, cmd, ctx.rng);
+            const updatedState = result.state;
             nextState = updatedState.day === ctx.turn ? updatedState : { ...updatedState, day: ctx.turn };
         }
     }

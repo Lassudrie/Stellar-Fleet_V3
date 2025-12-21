@@ -35,6 +35,16 @@ const tests: TestCase[] = [
       rng.nextUint32();
       assert.strictEqual(rng.getState(), 0xda56f3e9, 'State should remain normalized across subsequent steps');
     }
+  },
+  {
+    name: 'State round-trip preserves zero',
+    run: () => {
+      const rng = new RNG(123);
+      rng.setState(0);
+      assert.strictEqual(rng.getState(), 0, 'State should preserve zero');
+      rng.setState(rng.getState());
+      assert.strictEqual(rng.getState(), 0, 'State round-trip should be idempotent');
+    }
   }
 ];
 

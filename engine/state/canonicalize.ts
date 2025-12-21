@@ -11,6 +11,16 @@ import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage } fro
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
+const isSortedByDayThenId = (entries: Array<{ day: number; id: string }>): boolean => {
+    for (let i = 1; i < entries.length; i++) {
+        const prev = entries[i - 1];
+        const curr = entries[i];
+        if (curr.day < prev.day) return false;
+        if (curr.day === prev.day && compareIds(curr.id, prev.id) < 0) return false;
+    }
+    return true;
+};
+
 /**
  * Returns a new GameState with all entity arrays sorted in canonical order.
  * 
@@ -72,6 +82,7 @@ export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
  * Preserves chronological order while ensuring determinism within a day
  */
 export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
+    if (isSortedByDayThenId(logs)) return logs;
     return [...logs].sort((a, b) => {
         const dayDiff = a.day - b.day;
         if (dayDiff !== 0) return dayDiff;
@@ -80,6 +91,7 @@ export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
 };
 
 export const canonicalizeMessages = (messages: GameMessage[]): GameMessage[] => {
+    if (isSortedByDayThenId(messages)) return messages;
     return [...messages].sort((a, b) => {
         const dayDiff = a.day - b.day;
         if (dayDiff !== 0) return dayDiff;
@@ -118,6 +130,16 @@ export const isCanonical = (state: GameState): boolean => {
         if (compareIds(state.systems[i].id, state.systems[i - 1].id) < 0) {
             return false;
         }
+    }
+
+    // Check logs order
+    if (!isSortedByDayThenId(state.logs)) {
+        return false;
+    }
+
+    // Check messages order
+    if (!isSortedByDayThenId(state.messages)) {
+        return false;
     }
 
     return true;

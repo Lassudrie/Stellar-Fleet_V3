@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
-import { GameMessage, GameState, StarSystem, Fleet, EnemySighting, FleetState } from './types';
+import { GameMessage, GameState, StarSystem, EnemySighting } from './types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import MainMenu from './components/screens/MainMenu';
@@ -25,6 +25,7 @@ type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVAS
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
+const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -237,6 +238,9 @@ const App: React.FC = () => {
   const handleLoad = async (file: File) => {
       setLoading(true);
       try {
+          if (file.size > MAX_SAVE_BYTES) {
+              throw new Error(`Save file exceeds ${Math.floor(MAX_SAVE_BYTES / (1024 * 1024))}MB limit.`);
+          }
           const text = await file.text();
           const state = deserializeGameState(text);
           
@@ -394,16 +398,12 @@ const App: React.FC = () => {
           targetSystemId: targetSystem.id
       });
 
-      if (result.ok) {
-          if (typeof result.deployedArmies === 'number') {
-              engine.dispatchCommand({
-                  type: 'ADD_LOG',
-                  text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
-                  logType: 'move'
-              });
-          }
-      } else {
-          alert(t('msg.commandFailed', { error: result.error }));
+      if (processCommandResult(result, notifyCommandError) && typeof result.deployedArmies === 'number') {
+          engine.dispatchCommand({
+              type: 'ADD_LOG',
+              text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
+              logType: 'move'
+          });
       }
 
       handleCloseMenu();
@@ -411,21 +411,23 @@ const App: React.FC = () => {
 
   const handleSplitFleet = (shipIds: string[]) => {
       if (engine && selectedFleetId) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'SPLIT_FLEET',
               originalFleetId: selectedFleetId,
               shipIds
           });
+          processCommandResult(result, notifyCommandError);
       }
   };
 
   const handleMergeFleet = (targetFleetId: string) => {
       if (engine && selectedFleetId) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MERGE_FLEETS',
               sourceFleetId: selectedFleetId,
               targetFleetId
           });
+          processCommandResult(result, notifyCommandError);
       }
   };
 
@@ -442,7 +444,7 @@ const App: React.FC = () => {
       const targetPlanet = system.planets.find(planet => planet.id === planetId && planet.isSolid);
       if (!targetPlanet) return;
 
-      engine.dispatchCommand({
+      const result = engine.dispatchPlayerCommand({
           type: 'UNLOAD_ARMY',
           fleetId: fleet.id,
           shipId: ship.id,
@@ -450,6 +452,7 @@ const App: React.FC = () => {
           systemId: system.id,
           planetId: targetPlanet.id
       });
+      processCommandResult(result, notifyCommandError);
   };
 
   const handleEmbarkArmy = (shipId: string, armyId: string) => {
@@ -459,25 +462,27 @@ const App: React.FC = () => {
       const system = findOrbitingSystem(fleet, engine.state.systems);
       if (!fleet || !system) return;
 
-      engine.dispatchCommand({
+      const result = engine.dispatchPlayerCommand({
           type: 'LOAD_ARMY',
           fleetId: fleet.id,
           shipId,
           armyId,
           systemId: system.id
       });
+      processCommandResult(result, notifyCommandError);
   };
 
   const handleTransferArmy = (systemId: string, armyId: string, fromPlanetId: string, toPlanetId: string) => {
       if (!engine) return;
 
-      engine.dispatchCommand({
+      const result = engine.dispatchPlayerCommand({
           type: 'TRANSFER_ARMY_PLANET',
           armyId,
           fromPlanetId,
           toPlanetId,
           systemId
       });
+      processCommandResult(result, notifyCommandError);
   };
 
   const handleDismissMessage = (messageId: string) => {

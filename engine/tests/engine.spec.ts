@@ -311,7 +311,7 @@ const tests: TestCase[] = [
         initialState,
         { type: 'ORDER_LOAD_MOVE', fleetId: fleet.id, targetSystemId: system.id },
         new RNG(3)
-      );
+      ).state;
 
       const result = runTurn(withOrder, new RNG(3));
       const updatedArmy = result.armies.find(a => a.id === army.id);
@@ -897,7 +897,7 @@ const tests: TestCase[] = [
         createBaseState({ systems: [system], fleets: [blueFleet], armies: [blueArmy] }),
         { type: 'LOAD_ARMY', fleetId: blueFleet.id, shipId: allowedTransport.id, armyId: blueArmy.id, systemId: system.id },
         rng
-      );
+      ).state;
 
       const loadedArmy = updated.armies.find(army => army.id === blueArmy.id);
       assert.strictEqual(loadedArmy?.state, ArmyState.EMBARKED, 'Army must embark after load');
@@ -987,7 +987,7 @@ const tests: TestCase[] = [
           planetId: system.planets[0].id
         },
         rng
-      );
+      ).state;
 
       const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
       assert.ok(unloadedArmy, 'Army should still exist after unloading');
@@ -1034,7 +1034,7 @@ const tests: TestCase[] = [
           planetId: system.planets[0].id
         },
         rng
-      );
+      ).state;
 
       const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
       assert.ok(unloadedArmy, 'Army should persist after contested unload');
@@ -1085,7 +1085,7 @@ const tests: TestCase[] = [
           systemId: system.id
         },
         rng
-      );
+      ).state;
 
       const movedArmy = updated.armies.find(current => current.id === army.id);
       const updatedShip = updated.fleets[0].ships[0];
@@ -1106,7 +1106,7 @@ const tests: TestCase[] = [
         stateAtDay,
         { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: system.id },
         rng
-      );
+      ).state;
 
       const movedFleet = moved.fleets.find(f => f.id === fleet.id);
       assert.strictEqual(
@@ -1120,7 +1120,7 @@ const tests: TestCase[] = [
         stateAtDay,
         { type: 'ORDER_INVASION_MOVE', fleetId: fleet.id, targetSystemId: system.id, turn: customTurn },
         rng
-      );
+      ).state;
 
       const invasionFleet = movedWithTurn.fleets.find(f => f.id === fleet.id);
       assert.strictEqual(
@@ -1151,12 +1151,13 @@ const tests: TestCase[] = [
       ];
 
       commands.forEach(command => {
-        const updated = applyCommand(baseState, command, new RNG(11));
+        const result = applyCommand(baseState, command, new RNG(11));
         assert.strictEqual(
-          updated,
+          result.state,
           baseState,
           `${command.type} should be ignored when the fleet is locked in combat`
         );
+        assert.ok(!result.ok, `${command.type} should return an error result in combat`);
       });
     }
   },
@@ -1187,7 +1188,8 @@ const tests: TestCase[] = [
         new RNG(12)
       );
 
-      assert.strictEqual(splitResult, state, 'SPLIT_FLEET should be ignored for combat-locked fleets');
+      assert.strictEqual(splitResult.state, state, 'SPLIT_FLEET should be ignored for combat-locked fleets');
+      assert.ok(!splitResult.ok, 'SPLIT_FLEET should return an error when combat-locked');
 
       const mergeResult = applyCommand(
         state,
@@ -1195,7 +1197,8 @@ const tests: TestCase[] = [
         new RNG(13)
       );
 
-      assert.strictEqual(mergeResult, state, 'MERGE_FLEETS should be ignored when either fleet is in combat');
+      assert.strictEqual(mergeResult.state, state, 'MERGE_FLEETS should be ignored when either fleet is in combat');
+      assert.ok(!mergeResult.ok, 'MERGE_FLEETS should return an error when combat-locked');
     }
   },
   {
@@ -2093,7 +2096,7 @@ const tests: TestCase[] = [
 
       const updatedFleet = engine.state.fleets.find(f => f.id === fleet.id);
 
-      assert.deepStrictEqual(result, { ok: true }, 'Player dispatch should succeed');
+      assert.ok(result.ok, 'Player dispatch should succeed');
       assert.ok(delegated, 'dispatchPlayerCommand should call dispatchCommand for shared handling');
       assert.strictEqual(updatedFleet?.state, FleetState.MOVING, 'Shared dispatcher should perform the move');
     }
@@ -2124,7 +2127,7 @@ const tests: TestCase[] = [
       const engine = new GameEngine(baseState);
       engine.dispatchCommand(command);
 
-      const applied = applyCommand(baseState, command, new RNG(baseState.seed));
+      const applied = applyCommand(baseState, command, new RNG(baseState.seed)).state;
 
       const dispatchedFleet = engine.state.fleets.find(f => f.id === fleet.id);
       const appliedFleet = applied.fleets.find(f => f.id === fleet.id);
@@ -2151,10 +2154,8 @@ const tests: TestCase[] = [
         targetSystemId: system.id
       });
 
-      assert.deepStrictEqual(result, {
-        ok: false,
-        error: 'Fleet is in combat and cannot receive commands.'
-      });
+      assert.ok(!result.ok, 'Command should be blocked in combat');
+      assert.strictEqual(result.error, 'Fleet is in combat and cannot receive commands.');
     }
   },
   {

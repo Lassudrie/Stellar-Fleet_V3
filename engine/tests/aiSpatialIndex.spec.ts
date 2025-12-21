@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { SpatialIndex } from '../ai';
+import { SpatialIndex } from '../spatialIndex';
 
 type Point = { id: string; position: { x: number; y: number; z: number } };
 

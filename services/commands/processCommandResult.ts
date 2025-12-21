@@ -1,14 +1,10 @@
 import { GameEngine } from '../../engine/GameEngine';
-
-export interface CommandResult {
-  ok: boolean;
-  error?: string;
-}
+import { CommandResult } from '../../engine/commands';
 
 export type ErrorNotifier = (message: string) => void;
 
 export const processCommandResult = (
-  result: CommandResult,
+  result: Pick<CommandResult, 'ok' | 'error'>,
   notifyError: ErrorNotifier
 ): boolean => {
   if (result.ok) return true;
