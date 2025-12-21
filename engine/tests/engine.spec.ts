@@ -5,7 +5,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, createEmptyAIState } from '../ai';
 import { applyCommand } from '../commands';
 import {
   Army,
@@ -1252,6 +1252,29 @@ const tests: TestCase[] = [
         nextState.aiStates?.green?.holdUntilTurnBySystemId?.[system.id],
         ctx.turn + AI_HOLD_TURNS,
         'AI hold orders should be scheduled for newly conquered systems'
+      );
+    }
+  },
+  {
+    name: 'runTurn advances day and expires AI holds at the current turn',
+    run: () => {
+      const system = createSystem('sys-hold-expire', 'green');
+      const aiState = createEmptyAIState();
+      aiState.holdUntilTurnBySystemId = { [system.id]: 5 };
+
+      const state = createBaseState({
+        day: 5,
+        systems: [system],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        aiStates: { green: aiState }
+      });
+
+      const result = runTurn(state, new RNG(31));
+
+      assert.strictEqual(result.day, state.day + 1, 'runTurn should advance the day by one');
+      assert.ok(
+        !result.aiStates?.green?.holdUntilTurnBySystemId?.[system.id],
+        'Expired AI hold markers should be cleared using the current turn'
       );
     }
   },
