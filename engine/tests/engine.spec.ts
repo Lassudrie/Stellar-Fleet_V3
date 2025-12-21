@@ -2203,6 +2203,49 @@ const tests: TestCase[] = [
         'Retreating fleets must be ignored'
       );
     }
+  },
+  {
+    name: 'AI increases required power when ground defenders are present',
+    run: () => {
+      const aiFaction: FactionState = { id: 'ai-ground', name: 'AI Ground', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
+      const enemyFaction: FactionState = { id: 'enemy-ground', name: 'Enemy Ground', color: '#ff0000', isPlayable: true };
+
+      const homeSystem = { ...createSystem('ground-home', aiFaction.id), resourceType: 'gas' };
+      const targetSystem = { ...createSystem('ground-target', enemyFaction.id), resourceType: 'gas' };
+      const fighterShip: ShipEntity = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+
+      const createAssaultFleet = (id: string): Fleet =>
+        createFleet(id, aiFaction.id, { ...homeSystem.position }, [
+          { ...fighterShip, id: `${id}-ship-1` },
+          { ...fighterShip, id: `${id}-ship-2` }
+        ]);
+
+      const assaultFleetA = createAssaultFleet('ai-assault-a');
+      const assaultFleetB = createAssaultFleet('ai-assault-b');
+
+      const defenders: Army[] = [
+        createArmy('enemy-def-1', enemyFaction.id, 4000, ArmyState.DEPLOYED, targetSystem.planets[0].id),
+        createArmy('enemy-def-2', enemyFaction.id, 4000, ArmyState.DEPLOYED, targetSystem.planets[0].id),
+        createArmy('enemy-def-3', enemyFaction.id, 4000, ArmyState.DEPLOYED, targetSystem.planets[0].id)
+      ];
+
+      const state = createBaseState({
+        factions: [aiFaction, enemyFaction],
+        systems: [homeSystem, targetSystem],
+        fleets: [assaultFleetA, assaultFleetB],
+        armies: defenders,
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        playerFactionId: enemyFaction.id
+      });
+
+      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(13));
+      const moveCommands = commands.filter((cmd): cmd is Extract<GameCommand, { type: 'MOVE_FLEET' }> => cmd.type === 'MOVE_FLEET');
+
+      assert.strictEqual(moveCommands.length, 2, 'AI should commit multiple fleets to overcome ground defenses');
+      moveCommands.forEach(cmd => {
+        assert.strictEqual(cmd.targetSystemId, targetSystem.id, 'Target system should be prioritized despite defenders');
+      });
+    }
   }
 ];
 

@@ -431,6 +431,7 @@ const generateTasks = (
 
           let type: TaskType = 'ATTACK';
           const distanceWeightedPriority = applyDistanceWeight(sysData.id, 500 + sysData.value);
+          const groundDefensePower = defenders * 50;
           let basePriority = applyFog(distanceWeightedPriority) + inertia;
 
           if (hasEmbarkedArmies) {
@@ -442,9 +443,9 @@ const generateTasks = (
             type,
             systemId: sysData.id,
             priority: applyTaskPreference(type, basePriority),
-            requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
+            requiredPower: Math.max(50, (sysData.threat * cfg.attackRatio) + groundDefensePower),
             distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
-            reason: 'Expansion opportunity'
+            reason: defenders > 0 ? 'Expansion opportunity against defended system' : 'Expansion opportunity'
           });
       } else {
           const staging = findNearestOwnedSystem(sysData.id);
