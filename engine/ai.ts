@@ -110,6 +110,24 @@ export const createEmptyAIState = (): AIState => ({
   holdUntilTurnBySystemId: {},
 });
 
+const cloneAiState = (state: AIState): AIState => {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(state);
+  }
+
+  const cloneSightings = Object.fromEntries(
+    Object.entries(state.sightings).map(([id, sighting]) => [id, { ...sighting, position: { ...sighting.position } }])
+  );
+
+  return {
+    sightings: cloneSightings,
+    targetPriorities: { ...state.targetPriorities },
+    systemLastSeen: { ...state.systemLastSeen },
+    lastOwnerBySystemId: { ...state.lastOwnerBySystemId },
+    holdUntilTurnBySystemId: { ...state.holdUntilTurnBySystemId }
+  };
+};
+
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
 interface Task {
@@ -149,7 +167,7 @@ const updateMemory = (
   const activeHoldSystems: Record<string, number> = {};
 
   const memory: AIState = existingState
-    ? JSON.parse(JSON.stringify(existingState))
+    ? cloneAiState(existingState)
     : createEmptyAIState();
 
   // Hold expirations are inclusive of the stored day: systems remain on hold

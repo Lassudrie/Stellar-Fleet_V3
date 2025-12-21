@@ -5,7 +5,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
 import { applyCommand } from '../commands';
 import {
   Army,
@@ -198,6 +198,40 @@ const tests: TestCase[] = [
       });
       const restored = deserializeGameState(serializeGameState(missingAstroState));
       assert.deepStrictEqual(restored.systems[0].astro, expectedAstro, 'Astro data must be regenerated when missing');
+    }
+  },
+  {
+    name: 'AI state cloning preserves existing memory references',
+    run: () => {
+      const system = createSystem('sys-ai-clone', 'green');
+      const fleet = createFleet('fleet-green-clone', 'green', { ...baseVec }, [
+        { id: 'green-ship', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const existingAiState = createEmptyAIState();
+      existingAiState.sightings['fleet-seen'] = {
+        fleetId: 'fleet-seen',
+        factionId: 'blue',
+        systemId: system.id,
+        position: { x: 1, y: 2, z: 3 },
+        daySeen: 0,
+        estimatedPower: 25,
+        confidence: 0.5,
+        lastUpdateDay: 0
+      };
+      existingAiState.holdUntilTurnBySystemId[system.id] = 3;
+
+      const snapshot = JSON.parse(JSON.stringify(existingAiState));
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [fleet],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false }
+      });
+
+      planAiTurn(state, 'green', existingAiState, new RNG(5));
+
+      assert.deepStrictEqual(existingAiState, snapshot, 'Existing AI state must remain unchanged after planning');
     }
   },
   {
