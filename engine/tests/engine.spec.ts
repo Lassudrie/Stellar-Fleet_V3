@@ -644,6 +644,39 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Orbital bombardment requires uncontested orbital dominance',
+    run: () => {
+      const system = createSystem('sys-bombard-dominance', 'blue');
+
+      const blueFleet = createFleet('fleet-blue-dominance', 'blue', { ...baseVec }, [
+        { id: 'blue-dominance-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+      const redFleet = createFleet('fleet-red-dominance', 'red', { ...baseVec }, [
+        { id: 'red-dominance-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const redArmy = createArmy('army-red-dominance', 'red', 12000, ArmyState.DEPLOYED, system.planets[0].id);
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet, redFleet],
+        armies: [redArmy]
+      });
+      const ctx = { turn: state.day + 1, rng: new RNG(23) };
+
+      const nextState = phaseOrbitalBombardment(state, ctx);
+      const updated = nextState.armies.find(army => army.id === redArmy.id);
+
+      assert.strictEqual(updated?.strength, redArmy.strength, 'Contested orbit should skip bombardment resolution');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should leave morale unchanged');
+      assert.strictEqual(
+        nextState.logs.length,
+        state.logs.length,
+        'Contested orbit should not add bombardment logs'
+      );
+    }
+  },
+  {
     name: 'Troop transports alone cannot trigger orbital bombardment',
     run: () => {
       const system = createSystem('sys-bombard-transport', null);
