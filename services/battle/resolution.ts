@@ -21,13 +21,11 @@ import { selectTarget } from './targeting';
 import {
   MAX_ROUNDS, ETA_MISSILE, ETA_TORPEDO,
   BASE_ACCURACY, LOCK_GAIN_PER_ROUND, MAX_LAUNCH_PER_ROUND,
-  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP
+  INTERCEPTION_BASE_CHANCE, PD_DAMAGE_PER_POINT, MISSILE_HP, TORPEDO_HP,
+  DEFAULT_MANEUVER_BUDGET, attritionDamageFor
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
 import { devWarn } from '../../tools/devLogger';
-
-const SURVIVOR_ATTRITION_RATIO = 0.1;
-const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
 
 // --- HELPERS ---
 const clampRemaining = (initial: number, remaining: number) => Math.min(Math.max(remaining, 0), initial);
@@ -93,7 +91,7 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     torpedoesLeft,
     interceptorsLeft,
     fireControlLock: 0,
-    maneuverBudget: 0.5,
+    maneuverBudget: DEFAULT_MANEUVER_BUDGET,
     targetId: null,
     evasion,
     pdStrength,
@@ -532,10 +530,7 @@ export const resolveBattle = (
     const penalizedShips: ShipEntity[] = [];
 
     fleet.ships.forEach(ship => {
-      const attritionDamage = Math.max(
-        Math.floor(ship.maxHp * SURVIVOR_ATTRITION_RATIO),
-        SURVIVOR_MIN_POST_BATTLE_DAMAGE
-      );
+      const attritionDamage = attritionDamageFor(ship.maxHp);
       const remainingHp = Math.max(0, ship.hp - attritionDamage);
       const battleState = shipMap.get(ship.id);
 

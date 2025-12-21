@@ -1,4 +1,5 @@
 import { ShipType } from '../../types';
+import { TARGET_REACQUIRE_THRESHOLD } from './constants';
 import { BattleShipState } from './types';
 
 // Priority Tables (Lower index = Higher priority)
@@ -30,7 +31,7 @@ export const selectTarget = (
     const current = shipLookup?.get(attacker.targetId) ?? enemies.find(e => e.shipId === attacker.targetId);
     if (current && current.currentHp > 0 && current.faction !== attacker.faction) {
       // 80% chance to keep target if valid
-      if (rngValue > 0.2) return attacker.targetId;
+      if (rngValue > TARGET_REACQUIRE_THRESHOLD) return attacker.targetId;
     }
   }
 

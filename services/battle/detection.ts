@@ -1,7 +1,7 @@
 
 import { GameState, Battle, FleetState } from '../../types';
 import { RNG } from '../../engine/rng';
-import { CAPTURE_RANGE } from '../../data/static';
+import { BATTLE_ENGAGEMENT_RANGE_SQ, BATTLE_HISTORY_TURNS } from './constants';
 import { distSq } from '../../engine/math/vec3';
 
 /**
@@ -35,7 +35,7 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
 
     activeSystems.forEach(system => {
       const distanceSq = distSq(fleet.position, system.position);
-      if (distanceSq > CAPTURE_RANGE * CAPTURE_RANGE) return;
+      if (distanceSq > BATTLE_ENGAGEMENT_RANGE_SQ) return;
       if (distanceSq < nearestDistanceSq) {
         nearestDistanceSq = distanceSq;
         nearestSystemId = system.id;
@@ -87,11 +87,10 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
   return newBattles;
 };
 
-export const pruneBattles = (battles: Battle[], currentTurn: number): Battle[] => {
-  const KEEP_HISTORY = 5;
-  return battles.filter(b => {
+export const pruneBattles = (battles: Battle[], currentTurn: number): Battle[] => (
+  battles.filter(b => {
     if (b.status !== 'resolved') return true;
     const resolutionTurn = b.turnResolved ?? b.turnCreated ?? currentTurn;
-    return resolutionTurn >= currentTurn - KEEP_HISTORY;
-  });
-};
+    return resolutionTurn >= currentTurn - BATTLE_HISTORY_TURNS;
+  })
+);
