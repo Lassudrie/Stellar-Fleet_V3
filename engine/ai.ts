@@ -411,7 +411,7 @@ const generateTasks = (
       });
     } else if (!sysData.isOwner && sysData.value > 20) {
       if (sysData.threat < totalMyPower * 0.8) {
-          const defenders = state.armies.filter(a => {
+          const defenderCount = state.armies.filter(a => {
               if (a.state !== ArmyState.DEPLOYED) return false;
               const systemId = planetSystemMap.get(a.containerId);
               if (systemId !== sysData.id) return false;
@@ -425,6 +425,8 @@ const generateTasks = (
           let type: TaskType = 'ATTACK';
           const distanceWeightedPriority = applyDistanceWeight(sysData.id, 500 + sysData.value);
           let basePriority = applyFog(distanceWeightedPriority) + inertia;
+          const requiredPower =
+            Math.max(50, sysData.threat * cfg.attackRatio) + defenderCount * 25;
 
           if (hasEmbarkedArmies) {
                type = 'INVADE';
@@ -435,7 +437,7 @@ const generateTasks = (
             type,
             systemId: sysData.id,
             priority: applyTaskPreference(type, basePriority),
-            requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
+            requiredPower,
             distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
             reason: 'Expansion opportunity'
           });

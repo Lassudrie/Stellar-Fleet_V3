@@ -5,8 +5,8 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
-import { applyCommand } from '../commands';
+import { AI_HOLD_TURNS, planAiTurn } from '../ai';
+import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
   ArmyState,
@@ -1381,6 +1381,70 @@ const tests: TestCase[] = [
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'L’IA envoie plus de flottes quand la défense au sol est étoffée',
+    run: () => {
+      const targetSystem: StarSystem = {
+        ...createSystem('sys-red-ground', 'red'),
+        position: { x: 20, y: 0, z: 0 },
+        resourceType: 'gas'
+      };
+      const homeSystem: StarSystem = {
+        ...createSystem('sys-green-home', 'green'),
+        position: { x: -20, y: 0, z: 0 },
+        resourceType: 'gas'
+      };
+
+      const buildFighter = (id: string): ShipEntity => ({
+        id,
+        type: ShipType.FIGHTER,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null
+      });
+
+      const greenFleetAlpha = createFleet('fleet-green-alpha', 'green', { ...homeSystem.position }, [
+        buildFighter('green-alpha-1'),
+        buildFighter('green-alpha-2')
+      ]);
+      const greenFleetBeta = createFleet('fleet-green-beta', 'green', { ...homeSystem.position }, [
+        buildFighter('green-beta-1'),
+        buildFighter('green-beta-2')
+      ]);
+
+      const defenders = Array.from({ length: 4 }).map((_, index) =>
+        createArmy(`army-red-def-${index}`, 'red', 6000, ArmyState.DEPLOYED, targetSystem.planets[0].id)
+      );
+
+      const commands = planAiTurn(
+        createBaseState({
+          systems: [targetSystem, homeSystem],
+          fleets: [greenFleetAlpha, greenFleetBeta],
+          armies: defenders
+        }),
+        'green',
+        undefined,
+        new RNG(7)
+      );
+
+      const isMoveCommand = (
+        command: GameCommand
+      ): command is Extract<GameCommand, { fleetId: string; targetSystemId: string }> => {
+        return command.type === 'MOVE_FLEET' || command.type === 'ORDER_INVASION_MOVE';
+      };
+
+      const moveCommands = commands.filter(
+        command => isMoveCommand(command) && command.targetSystemId === targetSystem.id
+      );
+      const targetedFleets = new Set(moveCommands.map(command => command.fleetId));
+
+      assert.deepStrictEqual(
+        [...targetedFleets].sort(),
+        [greenFleetAlpha.id, greenFleetBeta.id].sort(),
+        'AI should mobilize multiple fleets when strong ground defenses are present'
+      );
     }
   },
   {
