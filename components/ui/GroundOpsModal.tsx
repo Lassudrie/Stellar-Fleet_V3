@@ -6,6 +6,8 @@ import { distSq } from '../../engine/math/vec3';
 import { shortId } from '../../engine/idUtils';
 import { getBombardedPlanetIdsForSystem } from '../../engine/orbitalBombardment';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 interface GroundOpsModalProps {
   system: StarSystem;
   armies: Army[];
@@ -39,7 +41,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
   const solidPlanets = useMemo(() => {
     return system.planets
       .filter(planet => planet.isSolid)
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .sort((a, b) => compareIds(a.id, b.id));
   }, [system.planets]);
 
   const bombardedPlanetIds = useMemo(() => {

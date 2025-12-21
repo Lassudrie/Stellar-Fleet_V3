@@ -10,6 +10,7 @@ interface MessageToastsProps {
 }
 
 const AUTO_DISMISS_MS = 8000;
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
 const MessageToasts: React.FC<MessageToastsProps> = ({
   messages,
@@ -50,7 +51,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
         if (turnDiff !== 0) return turnDiff;
         const priorityDiff = b.priority - a.priority;
         if (priorityDiff !== 0) return priorityDiff;
-        return b.id.localeCompare(a.id);
+        return compareIds(b.id, a.id);
       })
       .slice(0, 6);
   }, [messages, hiddenToastIds]);

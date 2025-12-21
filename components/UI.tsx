@@ -19,6 +19,8 @@ import { findOrbitingSystem } from './ui/orbiting';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import MessageToasts from './ui/MessageToasts';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 interface UIProps {
   startYear: number;
   day: number;
@@ -138,7 +140,7 @@ const UI: React.FC<UIProps> = ({
       // Get armies at this system belonging to Player
       const armies = gameState.armies
           .filter(a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId))
-          .sort((a, b) => a.id.localeCompare(b.id))
+          .sort((a, b) => compareIds(a.id, b.id))
           .map(army => ({
               army,
               planetId: army.containerId,
@@ -208,7 +210,7 @@ const UI: React.FC<UIProps> = ({
           .sort((a, b) => {
               const sizeDiff = b.ships.length - a.ships.length;
               if (sizeDiff !== 0) return sizeDiff;
-              return a.id.localeCompare(b.id);
+              return compareIds(a.id, b.id);
           });
   }, [blueFleets, targetSystem]);
 

@@ -60,11 +60,13 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
   },
 });
 
+const compareStrings = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
   factions
     .filter(faction => faction.aiProfile)
     .map(faction => faction.id)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => compareStrings(a, b));
 
 export const getLegacyAiFactionId = (factions: FactionState[]): FactionId | undefined =>
   getAiFactionIds(factions)[0];
@@ -478,7 +480,7 @@ const generateTasks = (
         const valueDiff = b.value - a.value;
         if (valueDiff !== 0) return valueDiff;
 
-        return a.id.localeCompare(b.id);
+        return compareStrings(a.id, b.id);
       });
 
     const target = scoutCandidates[0];
@@ -502,10 +504,10 @@ const generateTasks = (
     const distanceDiff = a.distanceToClosestFleet - b.distanceToClosestFleet;
     if (distanceDiff !== 0) return distanceDiff;
 
-    const typeDiff = a.type.localeCompare(b.type);
+    const typeDiff = compareStrings(a.type, b.type);
     if (typeDiff !== 0) return typeDiff;
 
-    return a.systemId.localeCompare(b.systemId);
+    return compareStrings(a.systemId, b.systemId);
   });
 
   return { tasks, embarkedFriendlyArmies };
@@ -608,7 +610,7 @@ const assignFleets = (
       const suitabilityDiff = b.suitability - a.suitability;
       if (suitabilityDiff !== 0) return suitabilityDiff;
 
-      return a.fObj.fleet.id.localeCompare(b.fObj.fleet.id);
+      return compareStrings(a.fObj.fleet.id, b.fObj.fleet.id);
     });
 
     let assignedPower = 0;
@@ -879,10 +881,10 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     armiesByPlanetId.set(army.containerId, list);
   });
 
-  const orderedSystems = [...state.systems].sort((a, b) => a.id.localeCompare(b.id));
+  const orderedSystems = [...state.systems].sort((a, b) => compareStrings(a.id, b.id));
 
   orderedSystems.forEach(system => {
-    const solidPlanets = system.planets.filter(planet => planet.isSolid).sort((a, b) => a.id.localeCompare(b.id));
+    const solidPlanets = system.planets.filter(planet => planet.isSolid).sort((a, b) => compareStrings(a.id, b.id));
     if (solidPlanets.length < 2) return;
 
     const availableTransports = state.fleets
@@ -903,7 +905,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     if (availableTransports <= 0) return;
 
     const planetStats = solidPlanets.map(planet => {
-      const armies = (armiesByPlanetId.get(planet.id) ?? []).slice().sort((a, b) => a.id.localeCompare(b.id));
+      const armies = (armiesByPlanetId.get(planet.id) ?? []).slice().sort((a, b) => compareStrings(a.id, b.id));
       const friendlyArmies = armies.filter(army => army.factionId === factionId);
       const hostileArmies = armies.filter(army => army.factionId !== factionId);
       return { planet, friendlyArmies, hostileCount: hostileArmies.length };
@@ -917,13 +919,13 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     friendlyPlanets.sort((a, b) => {
       const diff = b.friendlyArmies.length - a.friendlyArmies.length;
       if (diff !== 0) return diff;
-      return a.planet.id.localeCompare(b.planet.id);
+      return compareStrings(a.planet.id, b.planet.id);
     });
 
     hostilePlanets.sort((a, b) => {
       const diff = b.hostileCount - a.hostileCount;
       if (diff !== 0) return diff;
-      return a.planet.id.localeCompare(b.planet.id);
+      return compareStrings(a.planet.id, b.planet.id);
     });
 
     const fromPlanet = friendlyPlanets[0];
