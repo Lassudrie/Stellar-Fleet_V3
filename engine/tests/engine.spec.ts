@@ -27,6 +27,8 @@ import { Vec3 } from '../math/vec3';
 import { GameEngine } from '../GameEngine';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
+import { phaseBattleResolution } from '../turn/phases/01_battle_resolution';
+import { phaseCleanup } from '../turn/phases/07_cleanup';
 import { phaseGround } from '../turn/phases/05_ground';
 import { phaseBattleDetection } from '../turn/phases/04_battle_detection';
 import { phaseOrbitalBombardment } from '../turn/phases/05_orbital_bombardment';
@@ -1133,6 +1135,94 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Space battle resolution reports embarked armies lost with destroyed transports',
+    run: () => {
+      const system = createSystem('sys-transport-loss', 'red');
+
+      const embarkedArmy = createArmy('army-transport-loss', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-carrier');
+      const transportFleet = createFleet('fleet-blue-carrier', 'blue', { ...baseVec }, [
+        { id: 'blue-transport-loss', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
+      ]);
+      const attackerFleet = createFleet('fleet-red-destroyer', 'red', { ...baseVec }, [
+        { id: 'red-destroyer-loss', type: ShipType.CRUISER, hp: 1200, maxHp: 1200, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-transport-loss',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [transportFleet.id, attackerFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        armies: [embarkedArmy],
+        fleets: [transportFleet, attackerFleet],
+        seed: 17
+      });
+
+      const result = resolveBattle(battle, state, 0);
+
+      assert.ok(result.destroyedArmyIds.includes(embarkedArmy.id), 'Carried army should be flagged as destroyed with its transport');
+      assert.strictEqual(
+        result.survivingFleets.some(fleet => fleet.id === transportFleet.id),
+        false,
+        'Transport fleet should not survive overwhelming opposition'
+      );
+    }
+  },
+  {
+    name: 'Phase battle resolution removes armies whose transports are destroyed',
+    run: () => {
+      const system = createSystem('sys-battle-clean', 'red');
+
+      const embarkedArmy = createArmy('army-battle-clean', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-clean');
+      const carrierFleet = createFleet('fleet-blue-clean', 'blue', { ...baseVec }, [
+        { id: 'blue-clean-transport', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
+      ]);
+      const interceptorFleet = createFleet('fleet-red-clean', 'red', { ...baseVec }, [
+        { id: 'red-clean-cruiser', type: ShipType.CRUISER, hp: 1200, maxHp: 1200, carriedArmyId: null }
+      ]);
+
+      const scheduledBattle: Battle = {
+        id: 'battle-battle-clean',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [carrierFleet.id, interceptorFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        armies: [embarkedArmy],
+        fleets: [
+          { ...carrierFleet, state: FleetState.COMBAT },
+          { ...interceptorFleet, state: FleetState.COMBAT }
+        ],
+        battles: [scheduledBattle],
+        day: 2,
+        seed: 23
+      });
+
+      const ctx = { turn: state.day, rng: new RNG(11) };
+      const afterBattle = phaseBattleResolution(state, ctx);
+
+      assert.strictEqual(
+        afterBattle.armies.some(army => army.id === embarkedArmy.id),
+        false,
+        'Destroyed transports should purge embarked armies during battle resolution'
+      );
+
+      const lossLog = afterBattle.logs.find(
+        log => log.type === 'combat' && log.text.includes(embarkedArmy.id) && log.text.includes(system.name)
+      );
+      assert.ok(lossLog, 'Army loss should be recorded in combat logs for visibility');
+    }
+  },
+  {
     name: 'Space battle survivors exit combat needing repairs and updated metrics',
     run: () => {
       const system = createSystem('sys-repair', 'blue');
@@ -1342,6 +1432,29 @@ const tests: TestCase[] = [
         '#ffffff',
         'Neutral systems should default to white when missing an explicit color'
       );
+    }
+  },
+  {
+    name: 'Cleanup drops embarked armies when their fleet no longer exists',
+    run: () => {
+      const system = createSystem('sys-cleanup-loss', null);
+      const strandedArmy = createArmy('army-cleanup-loss', 'blue', 12000, ArmyState.EMBARKED, 'fleet-missing');
+
+      const state = createBaseState({ systems: [system], armies: [strandedArmy], fleets: [] });
+      const ctx = { rng: new RNG(31), turn: 4 };
+
+      const cleaned = phaseCleanup(state, ctx);
+
+      assert.strictEqual(
+        cleaned.armies.some(army => army.id === strandedArmy.id),
+        false,
+        'Cleanup should remove embarked armies that lost their transport fleet'
+      );
+
+      const removalLog = cleaned.logs.find(
+        log => log.text.includes(strandedArmy.id) && log.text.includes('transport fleet')
+      );
+      assert.ok(removalLog, 'Cleanup should record removal of embarked armies missing a fleet');
     }
   },
   {

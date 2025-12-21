@@ -1,5 +1,5 @@
 
-import { GameState, Battle, Fleet, BattleAmmunitionBreakdown, BattleAmmunitionByFaction, GameMessage, FactionId } from '../../../types';
+import { GameState, Battle, Fleet, BattleAmmunitionBreakdown, BattleAmmunitionByFaction, GameMessage, FactionId, ArmyState, Army } from '../../../types';
 import { TurnContext } from '../types';
 import { resolveBattle } from '../../../services/battle/resolution';
 import { canonicalizeMessages } from '../../state/canonicalize';
@@ -65,11 +65,13 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
 
     let nextBattles = [...state.battles];
     let nextFleets = [...state.fleets];
+    let nextArmies = [...state.armies];
     let nextLogs = [...state.logs];
     let nextMessages = [...state.messages];
 
     // 2. Resolve Each Battle
     scheduledBattles.forEach(battle => {
+        const fleetsInBattle = nextFleets.filter(fleet => battle.involvedFleetIds.includes(fleet.id));
         const result = resolveBattle(battle, { ...state, fleets: nextFleets }, ctx.turn);
 
         // Update Battle in list (Mark as resolved, add logs, stats)
@@ -81,6 +83,42 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         
         // B. Add survivors back (These are new immutable Fleet objects returned by resolver)
         nextFleets.push(...result.survivingFleets);
+
+        const destroyedFleetIds = new Set<string>(
+            result.destroyedFleetIds && result.destroyedFleetIds.length > 0
+                ? result.destroyedFleetIds
+                : battle.involvedFleetIds.filter(fleetId => !result.survivingFleets.some(fleet => fleet.id === fleetId))
+        );
+        const destroyedShipIds = new Set(result.destroyedShipIds ?? []);
+        const destroyedArmyIds = new Set(result.destroyedArmyIds ?? []);
+
+        fleetsInBattle.forEach(fleet => {
+            fleet.ships.forEach(ship => {
+                if (ship.carriedArmyId && destroyedShipIds.has(ship.id)) {
+                    destroyedArmyIds.add(ship.carriedArmyId);
+                }
+            });
+        });
+
+        const armiesAfterBattle: Army[] = [];
+        const lostArmyIds: string[] = [];
+
+        nextArmies.forEach(army => {
+            if (army.state !== ArmyState.EMBARKED) {
+                armiesAfterBattle.push(army);
+                return;
+            }
+
+            if (destroyedArmyIds.has(army.id) || destroyedFleetIds.has(army.containerId)) {
+                destroyedArmyIds.add(army.id);
+                lostArmyIds.push(army.id);
+                return;
+            }
+
+            armiesAfterBattle.push(army);
+        });
+
+        nextArmies = armiesAfterBattle;
         
         // Global Notification
         if (result.updatedBattle.winnerFactionId) {
@@ -105,6 +143,18 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         const systemName = state.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
         const isPlayerInvolved = involvedFactionIds.includes(state.playerFactionId);
         const ammunitionTotals = aggregateAmmunitionTotals(result.updatedBattle.ammunitionByFaction);
+        const battleSystemName = systemName || battle.systemId;
+
+        if (lostArmyIds.length > 0) {
+            lostArmyIds.sort().forEach(armyId => {
+                nextLogs.push({
+                    id: ctx.rng.id('log'),
+                    day: ctx.turn,
+                    text: `Army ${armyId} was lost with its transport during the battle at ${battleSystemName}.`,
+                    type: 'combat'
+                });
+            });
+        }
 
         const message: GameMessage = {
             id: ctx.rng.id('msg'),
@@ -136,6 +186,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         ...state,
         battles: nextBattles,
         fleets: nextFleets,
+        armies: nextArmies,
         logs: nextLogs,
         messages: nextMessages
     };
