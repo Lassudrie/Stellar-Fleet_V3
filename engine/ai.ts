@@ -6,7 +6,7 @@ import { RNG } from './rng';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
-import { CAPTURE_RANGE } from '../data/static';
+import { CAPTURE_RANGE, ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
 
@@ -115,6 +115,62 @@ export const createEmptyAIState = (): AIState => ({
   holdUntilTurnBySystemId: {},
 });
 
+export class DistanceCache {
+  private distSqCache = new Map<string, number>();
+  private systemPositions: Map<string, { x: number; y: number; z: number }>;
+  private fleetPositions: Map<string, { x: number; y: number; z: number }>;
+  private computations = 0;
+
+  constructor(systems: GameState['systems'], fleets: Fleet[]) {
+    this.systemPositions = new Map(systems.map(system => [system.id, system.position]));
+    this.fleetPositions = new Map(fleets.map(fleet => [fleet.id, fleet.position]));
+  }
+
+  private makeKey(a: string, b: string): string {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  private getCachedDistSq(key: string, a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+    const cached = this.distSqCache.get(key);
+    if (cached !== undefined) return cached;
+
+    const value = distSq(a, b);
+    this.distSqCache.set(key, value);
+    this.computations += 1;
+    return value;
+  }
+
+  getSystemToFleetDistanceSq(systemId: string, fleetId: string): number {
+    const systemPos = this.systemPositions.get(systemId);
+    const fleetPos = this.fleetPositions.get(fleetId);
+    if (!systemPos || !fleetPos) return Infinity;
+
+    const key = this.makeKey(`sys:${systemId}`, `fleet:${fleetId}`);
+    return this.getCachedDistSq(key, systemPos, fleetPos);
+  }
+
+  getSystemToFleetDistance(systemId: string, fleetId: string): number {
+    const dSq = this.getSystemToFleetDistanceSq(systemId, fleetId);
+    return Math.sqrt(dSq);
+  }
+
+  getSystemToSystemDistanceSq(a: string, b: string): number {
+    const posA = this.systemPositions.get(a);
+    const posB = this.systemPositions.get(b);
+    if (!posA || !posB) return Infinity;
+
+    const key = this.makeKey(`sys:${a}`, `sys:${b}`);
+    return this.getCachedDistSq(key, posA, posB);
+  }
+
+  getStats() {
+    return {
+      cacheSize: this.distSqCache.size,
+      computations: this.computations
+    };
+  }
+}
+
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
 interface Task {
@@ -135,7 +191,8 @@ const updateMemory = (
   state: GameState,
   factionId: FactionId,
   existingState: AIState | undefined,
-  cfg: AiConfig
+  cfg: AiConfig,
+  distanceCache: DistanceCache
 ) => {
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
   const myFleets = state.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f));
@@ -144,7 +201,7 @@ const updateMemory = (
   const minDistanceBySystemId: Record<string, number> = {};
   state.systems.forEach(system => {
     const minDistance = myFleets.reduce((currentMin, fleet) => {
-      const distance = dist(fleet.position, system.position);
+      const distance = distanceCache.getSystemToFleetDistance(system.id, fleet.id);
       return Math.min(currentMin, distance);
     }, Infinity);
 
@@ -185,7 +242,7 @@ const updateMemory = (
     let closestDistanceSq = Infinity;
 
     state.systems.forEach(sys => {
-      const distanceSq = distSq(sys.position, fleet.position);
+      const distanceSq = distanceCache.getSystemToFleetDistanceSq(sys.id, fleet.id);
 
       if (distanceSq <= captureSq && distanceSq < closestDistanceSq) {
         closestSystemId = sys.id;
@@ -250,7 +307,8 @@ const evaluateSystems = (
   perceivedState: GameState,
   memory: AIState,
   minDistanceBySystemId: Record<string, number>,
-  cfg: AiConfig
+  cfg: AiConfig,
+  distanceCache: DistanceCache
 ) => {
   const analysisArray: {
     id: string,
@@ -276,7 +334,7 @@ const evaluateSystems = (
 
       const visibleFleetsHere = perceivedState.fleets
         .filter(f => f.factionId !== factionId && isCommandableFleet(f))
-        .filter(f => distSq(f.position, sys.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+        .filter(f => distanceCache.getSystemToFleetDistanceSq(sys.id, f.id) <= (CAPTURE_RANGE * CAPTURE_RANGE));
 
       const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
 
@@ -337,7 +395,8 @@ const generateTasks = (
   planetSystemMap: Map<string, string>,
   totalMyPower: number,
   rng: RNG,
-  activeHoldSystems: Record<string, number>
+  activeHoldSystems: Record<string, number>,
+  distanceCache: DistanceCache
 ) => {
   const embarkedFriendlyArmies = new Set(
     state.armies
@@ -371,7 +430,7 @@ const generateTasks = (
 
     let best: { systemId: string; distanceSq: number } | null = null;
     mySystems.forEach(sys => {
-      const distanceSq = distSq(sys.position, targetSystem.position);
+      const distanceSq = distanceCache.getSystemToSystemDistanceSq(sys.id, targetSystem.id);
       if (!best || distanceSq < best.distanceSq) {
         best = { systemId: sys.id, distanceSq };
       }
@@ -525,7 +584,8 @@ const assignFleets = (
   tasks: Task[],
   myFleets: Fleet[],
   mySystems: GameState['systems'],
-  embarkedFriendlyArmies: Set<string>
+  embarkedFriendlyArmies: Set<string>,
+  distanceCache: DistanceCache
 ) => {
   const availableFleetObjs = myFleets.map(f => ({
       fleet: f,
@@ -541,7 +601,7 @@ const assignFleets = (
 
     let best: { systemId: string; distanceSq: number } | null = null;
     mySystems.forEach(sys => {
-      const distanceSq = distSq(sys.position, targetSystem.position);
+      const distanceSq = distanceCache.getSystemToSystemDistanceSq(sys.id, targetSystem.id);
       if (!best || distanceSq < best.distanceSq) {
         best = { systemId: sys.id, distanceSq };
       }
@@ -570,7 +630,7 @@ const assignFleets = (
         const targetSys = getSystemById(state.systems, task.systemId);
         if (!targetSys) return null;
 
-        let d = distSq(f.position, targetSys.position);
+        let d = distanceCache.getSystemToFleetDistanceSq(task.systemId, f.id);
 
         if (f.state === FleetState.MOVING && f.targetSystemId === task.systemId) {
             d = Math.max(0, d - (cfg.inertiaBonus * cfg.inertiaBonus));
@@ -687,7 +747,8 @@ const planArmyEmbarkation = (
   factionId: FactionId,
   assignments: FleetAssignment[],
   embarkedFriendlyArmies: Set<string>,
-  planetSystemMap: Map<string, string>
+  planetSystemMap: Map<string, string>,
+  distanceCache: DistanceCache
 ) => {
   const availableArmyCounts: Record<string, number> = {};
   state.armies.forEach(army => {
@@ -726,7 +787,7 @@ const planArmyEmbarkation = (
       const available = availableArmyCounts[system.id] || 0;
       if (available <= 0) return;
 
-      const distance = dist(fleet.position, system.position);
+      const distance = distanceCache.getSystemToFleetDistance(system.id, fleet.id);
       if (distance < bestDistance) {
         bestDistance = distance;
         bestSystemId = system.id;
@@ -766,10 +827,12 @@ const generateCommands = (
   embarkedFriendlyArmies: Set<string>,
   memory: AIState,
   cfg: AiConfig,
+  distanceCache: DistanceCache,
   plannedLoadCommands: GameCommand[] = [],
   loadPlannedFleetIds: Set<string> = new Set()
 ) => {
   const commands: GameCommand[] = [...plannedLoadCommands];
+  const orbitRangeSq = ORBIT_PROXIMITY_RANGE_SQ;
 
   assignments.forEach(assign => {
       const { fleet, task } = assign;
@@ -779,7 +842,7 @@ const generateCommands = (
       }
 
       if (fleet.state === FleetState.ORBIT &&
-          state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
+          distanceCache.getSystemToFleetDistanceSq(task.systemId, fleet.id) <= orbitRangeSq) {
           if (task.type === 'INVADE') {
               const targetSystem = getSystemById(state.systems, task.systemId);
               const targetPlanet = targetSystem ? getDefaultSolidPlanet(targetSystem) : null;
@@ -958,9 +1021,10 @@ export const planAiTurn = (
   const factionProfile = state.factions.find(faction => faction.id === factionId)?.aiProfile;
   const cfg = getAiConfig(factionProfile);
   const planetSystemMap = buildPlanetSystemMap(state.systems);
+  const distanceCache = new DistanceCache(state.systems, state.fleets);
 
   const { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory } =
-    updateMemory(state, factionId, existingState, cfg);
+    updateMemory(state, factionId, existingState, cfg, distanceCache);
 
   const { analysisArray, totalMyPower } = evaluateSystems(
     state,
@@ -968,7 +1032,8 @@ export const planAiTurn = (
     perceivedState,
     memory,
     minDistanceBySystemId,
-    cfg
+    cfg,
+    distanceCache
   );
 
   const { tasks, embarkedFriendlyArmies } = generateTasks(
@@ -983,16 +1048,27 @@ export const planAiTurn = (
     planetSystemMap,
     totalMyPower,
     rng,
-    activeHoldSystems
+    activeHoldSystems,
+    distanceCache
   );
 
-  const assignments = assignFleets(state, factionId, cfg, tasks, myFleets, mySystems, embarkedFriendlyArmies);
+  const assignments = assignFleets(
+    state,
+    factionId,
+    cfg,
+    tasks,
+    myFleets,
+    mySystems,
+    embarkedFriendlyArmies,
+    distanceCache
+  );
   const { loadCommands, loadPlannedFleetIds, updatedAssignments } = planArmyEmbarkation(
     state,
     factionId,
     assignments,
     embarkedFriendlyArmies,
-    planetSystemMap
+    planetSystemMap,
+    distanceCache
   );
 
   const commandList = generateCommands(
@@ -1002,6 +1078,7 @@ export const planAiTurn = (
     embarkedFriendlyArmies,
     memory,
     cfg,
+    distanceCache,
     loadCommands,
     loadPlannedFleetIds
   );

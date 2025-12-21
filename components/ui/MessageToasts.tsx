@@ -12,6 +12,16 @@ interface MessageToastsProps {
 const AUTO_DISMISS_MS = 8000;
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
+export const applyToastDismissal = (hiddenToastIds: Set<string>, messageId: string) => {
+  if (hiddenToastIds.has(messageId)) {
+    return { nextHidden: hiddenToastIds, shouldNotify: false };
+  }
+
+  const next = new Set(hiddenToastIds);
+  next.add(messageId);
+  return { nextHidden: next, shouldNotify: true };
+};
+
 const MessageToasts: React.FC<MessageToastsProps> = ({
   messages,
   onDismissMessage,
@@ -20,20 +30,24 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 }) => {
   const { t } = useI18n();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const timersRef = useRef<Record<string, number>>({});
+  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [hiddenToastIds, setHiddenToastIds] = useState<Set<string>>(new Set());
 
   const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
+    let shouldNotify = false;
     setHiddenToastIds(prev => {
-        const next = new Set(prev);
-        next.add(messageId);
-        return next;
+        const { nextHidden, shouldNotify: notify } = applyToastDismissal(prev, messageId);
+        shouldNotify = notify;
+        return nextHidden;
     });
 
     if (options?.markRead) {
         onMarkRead(messageId, true);
     }
-  }, [onMarkRead]);
+    if (shouldNotify) {
+        onDismissMessage(messageId);
+    }
+  }, [onDismissMessage, onMarkRead]);
 
   useEffect(() => {
     const knownIds = new Set(messages.map(msg => msg.id));
@@ -67,7 +81,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
       }
 
       if (!timersRef.current[message.id]) {
-        timersRef.current[message.id] = window.setTimeout(() => {
+        timersRef.current[message.id] = setTimeout(() => {
           hideToast(message.id, { markRead: true });
           delete timersRef.current[message.id];
         }, AUTO_DISMISS_MS);

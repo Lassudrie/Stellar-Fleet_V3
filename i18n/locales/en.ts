@@ -235,6 +235,7 @@ export const en = {
 
   // App / Engine Messages
   'msg.commandFailed': 'Command Failed: {{error}}',
+  'msg.commandFailedUnknown': 'Unknown command error',
   'msg.splitFailed': 'Split Failed: {{error}}',
   'msg.mergeFailed': 'Merge Failed: {{error}}',
   'msg.notOrbiting': 'Fleet is not in stable orbit of a system.',

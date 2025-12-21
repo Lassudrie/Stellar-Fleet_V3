@@ -19,6 +19,7 @@ import { serializeGameState, deserializeGameState } from './engine/serialization
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
+import { handlePlayerCommandResult } from './services/ui/commandFeedback';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -50,6 +51,14 @@ const App: React.FC = () => {
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
   const [aiDebug, setAiDebug] = useState(false);
+
+  const formatCommandError = useCallback((error?: string) => {
+      return t('msg.commandFailed', { error: error ?? t('msg.commandFailedUnknown') });
+  }, [t]);
+
+  const showCommandError = useCallback((error?: string) => {
+      alert(formatCommandError(error));
+  }, [formatCommandError]);
 
   const handleExportAiLogs = () => {
       const history = aiDebugger.getHistory();
@@ -285,25 +294,37 @@ const App: React.FC = () => {
 
   const handleMoveCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          const success = handlePlayerCommandResult(result, {
+              formatError: formatCommandError,
+              onError: showCommandError
+          });
+          if (success) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
   const handleAttackCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          const success = handlePlayerCommandResult(result, {
+              formatError: formatCommandError,
+              onError: showCommandError
+          });
+          if (success) {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          }
       }
   };
 
@@ -315,7 +336,7 @@ const App: React.FC = () => {
               targetSystemId: targetSystem.id
           });
           if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
+              showCommandError(result.error);
               return;
           }
           setFleetPickerMode(null);
@@ -331,7 +352,7 @@ const App: React.FC = () => {
               targetSystemId: targetSystem.id
           });
           if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
+              showCommandError(result.error);
               return;
           }
           setFleetPickerMode(null);
@@ -389,7 +410,12 @@ const App: React.FC = () => {
           targetSystemId: targetSystem.id
       });
 
-      if (result.ok) {
+      const success = handlePlayerCommandResult(result, {
+          formatError: formatCommandError,
+          onError: showCommandError
+      });
+
+      if (success) {
           if (typeof result.deployedArmies === 'number') {
               engine.dispatchCommand({
                   type: 'ADD_LOG',
@@ -397,11 +423,11 @@ const App: React.FC = () => {
                   logType: 'move'
               });
           }
-      } else {
-          alert(t('msg.commandFailed', { error: result.error }));
       }
 
-      handleCloseMenu();
+      if (success) {
+          handleCloseMenu();
+      }
   };
 
   const handleSplitFleet = (shipIds: string[]) => {

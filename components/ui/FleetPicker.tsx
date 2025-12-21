@@ -5,6 +5,7 @@ import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { dist } from '../../engine/math/vec3';
+import { ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
@@ -16,6 +17,7 @@ interface FleetPickerProps {
 
 const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleets, onSelectFleet, onClose }) => {
   const { t } = useI18n();
+  const arrivalThreshold = Math.sqrt(ORBIT_PROXIMITY_RANGE_SQ);
 
   // Sort fleets by distance to target system and filter based on mode
   const sortedFleets = useMemo(() => {
@@ -25,7 +27,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
           const distance = dist(fleet.position, targetPos);
 
           if (mode === 'MOVE' || mode === 'ATTACK') {
-              return distance > 1.0;
+              return distance > arrivalThreshold;
           }
 
           const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
