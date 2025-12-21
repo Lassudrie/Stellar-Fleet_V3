@@ -5,11 +5,12 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, planAiTurn } from '../ai';
 import { applyCommand } from '../commands';
 import {
   Army,
   ArmyState,
+  AIState,
   Battle,
   FactionState,
   Fleet,
@@ -1341,6 +1342,51 @@ const tests: TestCase[] = [
         reloadedNeutral?.color,
         '#ffffff',
         'Neutral systems should default to white when missing an explicit color'
+      );
+    }
+  },
+  {
+    name: 'AI planning remains deterministic after serialization round-trip',
+    run: () => {
+      const home = createSystem('sys-green-home', 'green');
+      const frontier = { ...createSystem('sys-green-frontier', null), position: { x: 120, y: 0, z: 0 } };
+
+      const greenFleet = createFleet('fleet-green-determinism', 'green', { ...baseVec }, [
+        { id: 'green-frigate', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+      ]);
+
+      const aiMemory: AIState = {
+        sightings: {},
+        targetPriorities: { [frontier.id]: 240, [home.id]: 120 },
+        systemLastSeen: { [frontier.id]: 3, [home.id]: 4 },
+        lastOwnerBySystemId: { [frontier.id]: null, [home.id]: 'green' },
+        holdUntilTurnBySystemId: { [frontier.id]: 10, [home.id]: 9 }
+      };
+
+      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false };
+
+      const state = createBaseState({
+        day: 5,
+        systems: [home, frontier],
+        fleets: [greenFleet],
+        aiStates: { green: aiMemory },
+        rules
+      });
+
+      const baselineCommands = planAiTurn(state, 'green', state.aiStates?.green, new RNG(11));
+
+      const roundTrip = deserializeGameState(serializeGameState(state));
+      const postSerializationCommands = planAiTurn(
+        roundTrip,
+        'green',
+        roundTrip.aiStates?.green,
+        new RNG(11)
+      );
+
+      assert.deepStrictEqual(
+        postSerializationCommands,
+        baselineCommands,
+        'AI commands should remain deterministic after serialization'
       );
     }
   },

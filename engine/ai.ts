@@ -110,6 +110,15 @@ export const createEmptyAIState = (): AIState => ({
   holdUntilTurnBySystemId: {},
 });
 
+const sortRecord = <T>(record: Record<string, T>): Record<string, T> => {
+  return Object.keys(record)
+    .sort()
+    .reduce<Record<string, T>>((acc, key) => {
+      acc[key] = record[key];
+      return acc;
+    }, {});
+};
+
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
 
 interface Task {
@@ -154,7 +163,10 @@ const updateMemory = (
 
   // Hold expirations are inclusive of the stored day: systems remain on hold
   // while the current day is less than or equal to the recorded turn.
-  Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
+  Object.keys(memory.holdUntilTurnBySystemId)
+    .sort()
+    .forEach(systemId => {
+      const holdUntil = memory.holdUntilTurnBySystemId[systemId];
     const system = state.systems.find(s => s.id === systemId);
 
     if (!system || system.ownerFactionId !== factionId || holdUntil < state.day) {
@@ -233,6 +245,11 @@ const updateMemory = (
       memory.lastOwnerBySystemId[id] = observedSystem.ownerFactionId;
     }
   });
+
+  memory.holdUntilTurnBySystemId = sortRecord(memory.holdUntilTurnBySystemId);
+  memory.systemLastSeen = sortRecord(memory.systemLastSeen);
+  memory.lastOwnerBySystemId = sortRecord(memory.lastOwnerBySystemId);
+  memory.sightings = sortRecord(memory.sightings);
 
   return { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory };
 };
@@ -373,7 +390,8 @@ const generateTasks = (
     return best;
   };
 
-  Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
+  Object.keys(activeHoldSystems).sort().forEach(systemId => {
+    const holdUntil = activeHoldSystems[systemId];
     const sysData = analysisArray.find(data => data.id === systemId);
     const fogAge = sysData?.fogAge ?? 0;
     const fogFactor = 1 / (1 + fogAge * 0.1);
@@ -839,7 +857,8 @@ const generateCommands = (
 
   const targetPriorities: Record<string, number> = {};
 
-  Object.entries(memory.targetPriorities).forEach(([systemId, priority]) => {
+  Object.keys(memory.targetPriorities).sort().forEach(systemId => {
+      const priority = memory.targetPriorities[systemId];
       const decayedPriority = priority * cfg.targetInertiaDecay;
       if (decayedPriority >= cfg.targetInertiaMin) {
           targetPriorities[systemId] = decayedPriority;
@@ -856,7 +875,7 @@ const generateCommands = (
       }
   });
 
-  memory.targetPriorities = targetPriorities;
+  memory.targetPriorities = sortRecord(targetPriorities);
 
   commands.push({
       type: 'AI_UPDATE_STATE',
