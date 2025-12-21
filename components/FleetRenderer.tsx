@@ -11,7 +11,7 @@ interface FleetMeshProps {
   fleet: Fleet;
   day: number;
   isSelected: boolean;
-  onSelect: (e: any, isDouble?: boolean) => void;
+  onSelect: (e: any, isDouble?: boolean, pointerType?: string) => void;
   playerFactionId: string;
   color: string;
 }
@@ -67,6 +67,10 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   // Double interaction detection (touch)
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
+  const lastPointerTypeRef = useRef<string>('');
+  const resolvePointerType = (event: any) => {
+      return event?.pointerType || event?.nativeEvent?.pointerType || lastPointerTypeRef.current || '';
+  };
 
   useEffect(() => {
     return () => {
@@ -187,14 +191,15 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         <mesh 
             onClick={(e) => {
                 e.stopPropagation();
-                onSelect(e, false);
+                onSelect(e, false, resolvePointerType(e));
             }}
             onDoubleClick={(e: ThreeEvent<MouseEvent>) => {
                 e.stopPropagation();
                 e.nativeEvent.preventDefault();
-                onSelect(e, true);
+                onSelect(e, true, resolvePointerType(e));
             }}
             onPointerDown={(e: ThreeEvent<PointerEvent>) => {
+                lastPointerTypeRef.current = e.pointerType || lastPointerTypeRef.current;
                 if (e.pointerType !== 'touch') return;
 
                 const now = performance.now();
@@ -202,7 +207,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                     lastTouchRef.current = 0;
                     e.stopPropagation();
                     e.nativeEvent.preventDefault();
-                    onSelect(e, true);
+                    onSelect(e, true, resolvePointerType(e));
                 } else {
                     lastTouchRef.current = now;
                 }
