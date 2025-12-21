@@ -3,11 +3,10 @@ import { ArmyState, FactionId, Fleet, FleetState, GameMessage, GameState, StarSy
 import { RNG } from './rng';
 import { applyCommand, GameCommand } from './commands';
 import { runTurn } from './runTurn';
-import { clone, distSq } from './math/vec3';
+import { clone } from './math/vec3';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { withUpdatedFleetDerived } from './fleetDerived';
-import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
-import { isOrbitContested } from './orbit';
+import { areFleetsSharingOrbit, isFleetWithinOrbitProximity, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
 import { canonicalizeMessages } from './state/canonicalize';
 
@@ -121,7 +120,7 @@ export class GameEngine {
     }
 
     private isFleetAtSystem(fleet: Fleet, system: StarSystem): boolean {
-        return distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
+        return isFleetWithinOrbitProximity(fleet, system);
     }
 
     private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
@@ -385,7 +384,7 @@ export class GameEngine {
             if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT)
                 return { ok: false, error: 'Fleets must be in orbit to merge' };
 
-            if (distSq(sourceFleet.position, targetFleet.position) > ORBIT_PROXIMITY_RANGE_SQ)
+            if (!areFleetsSharingOrbit(sourceFleet, targetFleet))
                 return { ok: false, error: 'Fleets are too far apart to merge' };
 
             const mergedTarget = withUpdatedFleetDerived({
