@@ -1388,6 +1388,46 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Space battle survivors snap to the contested system position',
+    run: () => {
+      const system = { ...createSystem('sys-position', 'blue'), position: { x: 10, y: -5, z: 3 } };
+      const cruiserStats = SHIP_STATS[ShipType.CRUISER];
+      const blueFleet = {
+        ...createFleet('fleet-position', 'blue', { x: -2, y: -2, z: -2 }, [
+          { id: 'blue-cruiser-position', type: ShipType.CRUISER, hp: cruiserStats.maxHp, maxHp: cruiserStats.maxHp, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT,
+        targetSystemId: system.id,
+        targetPosition: { x: 1, y: 2, z: 3 }
+      };
+
+      const battle: Battle = {
+        id: 'battle-position',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet], seed: 15 });
+
+      const { survivingFleets } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(survivingFleets.length, 1, 'Fleet should persist after uncontested battle resolution');
+      assert.deepStrictEqual(
+        survivingFleets[0].position,
+        system.position,
+        'Surviving fleets must snap to the battle system position when exiting combat'
+      );
+      assert.strictEqual(
+        survivingFleets[0].state,
+        FleetState.ORBIT,
+        'Survivors should return to ORBIT state after combat resolution'
+      );
+    }
+  },
+  {
     name: 'Space battle aggregates faction ammunition usage with conserved totals',
     run: () => {
       const system = createSystem('sys-ammo', null);

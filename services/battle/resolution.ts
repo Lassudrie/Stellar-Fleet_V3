@@ -204,6 +204,7 @@ export const resolveBattle = (
   // Stats
   let totalMissilesIntercepted = 0;
   let totalProjectilesDestroyedByPd = 0;
+  const battleSystem = state.systems.find(system => system.id === battle.systemId);
 
   const recordKill = (attackerId: string | undefined, target: BattleShipState | undefined, method: string) => {
     if (!attackerId || !target) return;
@@ -441,6 +442,7 @@ export const resolveBattle = (
 
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];
+    const orbitPosition = battleSystem?.position ?? oldFleet.targetPosition ?? oldFleet.position;
     oldFleet.ships.forEach(oldShip => {
         // Optimized O(1) Lookup
         const battleState = shipMap.get(oldShip.id);
@@ -468,6 +470,7 @@ export const resolveBattle = (
         const updatedFleet = withUpdatedFleetDerived({
             ...oldFleet,
             ships: newShips,
+            position: { ...orbitPosition },
             state: FleetState.ORBIT,
             stateStartTurn: turn // Correctly update state timestamp to current turn
         });
