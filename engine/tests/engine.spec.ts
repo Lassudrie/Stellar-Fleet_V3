@@ -181,6 +181,38 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Battle winner is decided before post-combat attrition',
+    run: () => {
+      const system = createSystem('sys-attrition-winner', 'blue');
+      const fragileBlueShip: ShipEntity = {
+        id: 'blue-fragile',
+        type: ShipType.CRUISER,
+        maxHp: 20,
+        hp: 10,
+        carriedArmyId: null
+      };
+
+      const blueFleet = createFleet('fleet-attrition-blue', 'blue', { ...baseVec }, [fragileBlueShip]);
+
+      const battle: Battle = {
+        id: 'battle-attrition-winner',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet], battles: [battle] });
+
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 0);
+
+      assert.strictEqual(updatedBattle.winnerFactionId, 'blue', 'Solo combat should still mark the owner as winner before attrition.');
+      assert.strictEqual(updatedBattle.survivorShipIds.length, 0, 'Attrition can eliminate remaining ships after victory calculation.');
+      assert.strictEqual(survivingFleets.length, 0, 'No fleets should persist if attrition destroys the last ship.');
+    }
+  },
+  {
     name: 'Astro payload survives save/load and regenerates when absent',
     run: () => {
       const systemWithAstro = { ...createSystem('sys-astro', null), astro: generateStellarSystem({ worldSeed: 7, systemId: 'sys-astro' }) };
