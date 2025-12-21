@@ -33,6 +33,8 @@ interface SideMenuProps {
 
 type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 const SideMenu: React.FC<SideMenuProps> = ({ 
     isOpen, onClose, logs, messages, blueFleets, systems, 
     onRestart, onSelectFleet, onSave, onOpenMessage, onDismissMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages,
@@ -355,7 +357,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
             if (turnDiff !== 0) return turnDiff;
             const priorityDiff = b.priority - a.priority;
             if (priorityDiff !== 0) return priorityDiff;
-            return b.id.localeCompare(a.id);
+            return compareIds(b.id, a.id);
         });
 
       const filteredMessages = sortedMessages.filter(msg => {

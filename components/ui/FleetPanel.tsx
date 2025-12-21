@@ -4,6 +4,8 @@ import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../
 import { shortId, fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 export interface AvailableArmy {
   army: Army;
   planetId: string;
@@ -87,7 +89,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
     if (!currentSystem) return [];
     return currentSystem.planets
       .filter(planet => planet.isSolid)
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .sort((a, b) => compareIds(a.id, b.id));
   }, [currentSystem]);
 
   // Reset selection when fleet changes

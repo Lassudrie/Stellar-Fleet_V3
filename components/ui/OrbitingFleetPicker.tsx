@@ -4,6 +4,8 @@ import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { calculateFleetPower } from '../../engine/world';
 
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
 interface OrbitingFleetPickerProps {
   system: StarSystem;
   fleets: Fleet[];
@@ -20,7 +22,7 @@ const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleet
           if (sizeDiff !== 0) return sizeDiff;
           const powerDiff = calculateFleetPower(b) - calculateFleetPower(a);
           if (powerDiff !== 0) return powerDiff;
-          return a.id.localeCompare(b.id);
+          return compareIds(a.id, b.id);
       });
   }, [fleets]);
 
