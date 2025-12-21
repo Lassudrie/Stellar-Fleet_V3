@@ -4,7 +4,23 @@ import { Fleet, StarSystem, FleetState, ShipType } from '../../types';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
-import { dist } from '../../engine/math/vec3';
+import { distSq } from '../../engine/math/vec3';
+import { CAPTURE_RANGE_SQ } from '../../data/static';
+
+export const isFleetEligibleForMode = (
+  fleet: Fleet,
+  mode: FleetPickerProps['mode'],
+  targetPosition: StarSystem['position']
+): boolean => {
+  const distanceSq = distSq(fleet.position, targetPosition);
+
+  if (mode === 'MOVE' || mode === 'ATTACK') {
+      return distanceSq > CAPTURE_RANGE_SQ;
+  }
+
+  const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
+  return hasTransport;
+};
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
@@ -22,20 +38,13 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
       const targetPos = targetSystem.position;
 
       const availableFleets = blueFleets.filter(fleet => {
-          const distance = dist(fleet.position, targetPos);
-
-          if (mode === 'MOVE' || mode === 'ATTACK') {
-              return distance > 1.0;
-          }
-
-          const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
-          return hasTransport;
+          return isFleetEligibleForMode(fleet, mode, targetPos);
       });
 
       return availableFleets.sort((a, b) => {
-          const distA = dist(a.position, targetPos);
-          const distB = dist(b.position, targetPos);
-          return distA - distB;
+          const distASq = distSq(a.position, targetPos);
+          const distBSq = distSq(b.position, targetPos);
+          return distASq - distBSq;
       });
   }, [blueFleets, mode, targetSystem]);
 
@@ -79,7 +88,8 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
                     sortedFleets.map(fleet => {
                         const fleetPos = fleet.position;
                         const targetPos = targetSystem.position;
-                        const rawDist = dist(fleetPos, targetPos);
+                        const rawDistSq = distSq(fleetPos, targetPos);
+                        const rawDist = Math.sqrt(rawDistSq);
 
                         const d = Math.round(rawDist);
 

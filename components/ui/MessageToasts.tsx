@@ -10,7 +10,16 @@ interface MessageToastsProps {
 }
 
 const AUTO_DISMISS_MS = 8000;
+const safeSetTimeout = typeof window !== 'undefined' && window.setTimeout ? window.setTimeout : setTimeout;
+const safeClearTimeout = typeof window !== 'undefined' && window.clearTimeout ? window.clearTimeout : clearTimeout;
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
+export const computeHiddenToastState = (previous: Set<string>, messageId: string): { next: Set<string>; changed: boolean } => {
+  if (previous.has(messageId)) return { next: previous, changed: false };
+  const next = new Set(previous);
+  next.add(messageId);
+  return { next, changed: true };
+};
 
 const MessageToasts: React.FC<MessageToastsProps> = ({
   messages,
@@ -20,20 +29,21 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 }) => {
   const { t } = useI18n();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const timersRef = useRef<Record<string, number>>({});
+  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [hiddenToastIds, setHiddenToastIds] = useState<Set<string>>(new Set());
 
   const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
     setHiddenToastIds(prev => {
-        const next = new Set(prev);
-        next.add(messageId);
+        const { next, changed } = computeHiddenToastState(prev, messageId);
+        if (!changed) return prev;
+
+        if (options?.markRead) {
+            onMarkRead(messageId, true);
+        }
+        onDismissMessage(messageId);
         return next;
     });
-
-    if (options?.markRead) {
-        onMarkRead(messageId, true);
-    }
-  }, [onMarkRead]);
+  }, [onDismissMessage, onMarkRead]);
 
   useEffect(() => {
     const knownIds = new Set(messages.map(msg => msg.id));
@@ -60,14 +70,14 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
     activeMessages.forEach(message => {
       if (hoveredId === message.id) {
         if (timersRef.current[message.id]) {
-          clearTimeout(timersRef.current[message.id]);
+          safeClearTimeout(timersRef.current[message.id]);
           delete timersRef.current[message.id];
         }
         return;
       }
 
       if (!timersRef.current[message.id]) {
-        timersRef.current[message.id] = window.setTimeout(() => {
+        timersRef.current[message.id] = safeSetTimeout(() => {
           hideToast(message.id, { markRead: true });
           delete timersRef.current[message.id];
         }, AUTO_DISMISS_MS);
@@ -76,13 +86,13 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 
     Object.keys(timersRef.current).forEach(id => {
       if (!activeMessages.find(msg => msg.id === id)) {
-        clearTimeout(timersRef.current[id]);
+        safeClearTimeout(timersRef.current[id]);
         delete timersRef.current[id];
       }
     });
 
     return () => {
-      Object.values(timersRef.current).forEach(timer => clearTimeout(timer));
+      Object.values(timersRef.current).forEach(timer => safeClearTimeout(timer));
       timersRef.current = {};
     };
   }, [activeMessages, hideToast, hoveredId, onDismissMessage]);
