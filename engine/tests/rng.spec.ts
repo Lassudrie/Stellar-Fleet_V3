@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { RNG } from '../rng';
 import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
+import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
 
 interface TestCase {
   name: string;
@@ -14,6 +15,14 @@ const tests: TestCase[] = [
       const rng = new RNG(1);
       const outputs = Array.from({ length: RNG_SEED_1_SEQUENCE.length }, () => rng.nextUint32());
       assert.deepStrictEqual(outputs, RNG_SEED_1_SEQUENCE);
+    }
+  },
+  {
+    name: 'Gaussian approximation remains stable for seed 1',
+    run: () => {
+      const rng = new RNG(1);
+      const outputs = Array.from({ length: RNG_GAUSSIAN_SEED_1_SEQUENCE.length }, () => rng.gaussian());
+      assert.deepStrictEqual(outputs, RNG_GAUSSIAN_SEED_1_SEQUENCE);
     }
   },
   {
