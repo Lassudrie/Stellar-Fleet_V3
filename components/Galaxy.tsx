@@ -52,8 +52,11 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
         return null;
     }, [armyInfo]);
 
+    // Optimization: Cache vector to avoid GC in loop
+    const systemPos = useMemo(() => new Vector3(system.position.x, system.position.y, system.position.z), [system.position]);
+
     useFrame(({ camera }) => {
-        const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
+        const dist = camera.position.distanceTo(systemPos);
         const maxDist = isOwned ? 135 : 90;
         const fadeRange = 30;
         const fadeStart = maxDist - fadeRange;
