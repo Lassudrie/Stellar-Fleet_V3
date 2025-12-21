@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { applyFogOfWar } from '../fogOfWar';
+import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../fogOfWar';
 import { FleetState, FactionState, GameState } from '../../types';
 
 interface TestCase {
@@ -101,6 +101,50 @@ const tests: TestCase[] = [
       const fleetIds = new Set(view.fleets.map(fleet => fleet.id));
       assert.ok(fleetIds.has('blue-1'), 'Player fleets stay visible');
       assert.ok(!fleetIds.has('red-1'), 'Unobserved enemy fleets stay hidden');
+    }
+  },
+  {
+    name: 'Custom sensor can reveal fleets independently of defaults',
+    run: () => {
+      const stealthFleet = {
+        ...baseState.fleets[1],
+        id: 'red-stealth',
+        position: { x: 500, y: 0, z: 0 }
+      };
+
+      const state: GameState = { ...baseState, fleets: [...baseState.fleets, stealthFleet] };
+
+      const alwaysOnSensor = {
+        id: 'omniscient',
+        isVisible: () => true
+      };
+
+      const visible = isFleetVisibleToViewer(
+        stealthFleet,
+        state,
+        'blue',
+        new Set(state.systems.map(system => system.id)),
+        [...defaultFleetSensors, alwaysOnSensor]
+      );
+
+      assert.ok(visible, 'Custom sensor should reveal stealth fleet regardless of range');
+    }
+  },
+  {
+    name: 'Observed systems are cached inside visibility context for efficiency',
+    run: () => {
+      const observedIds = new Set<string>(['alpha']);
+      const state: GameState = { ...baseState };
+
+      const visible = isFleetVisibleToViewer(
+        baseState.fleets[0],
+        state,
+        'blue',
+        observedIds
+      );
+
+      assert.ok(visible, 'Viewer fleet remains visible when observed systems are precomputed');
+      assert.ok(observedIds.has('alpha'), 'Precomputed observed IDs are reused unchanged');
     }
   }
 ];
