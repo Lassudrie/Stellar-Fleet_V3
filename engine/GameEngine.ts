@@ -124,8 +124,12 @@ export class GameEngine {
         return distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
     }
 
+    private isFleetInOrbit(fleet: Fleet, system: StarSystem): boolean {
+        return fleet.state === FleetState.ORBIT && this.isFleetAtSystem(fleet, system);
+    }
+
     private tryImmediateLoad(fleet: Fleet, system: StarSystem): boolean {
-        if (!this.isFleetAtSystem(fleet, system)) return false;
+        if (!this.isFleetInOrbit(fleet, system)) return false;
 
         const loadResult = computeLoadOps({
             fleet,
@@ -149,7 +153,7 @@ export class GameEngine {
     }
 
     private tryImmediateUnload(fleet: Fleet, system: StarSystem): boolean {
-        if (!this.isFleetAtSystem(fleet, system)) return false;
+        if (!this.isFleetInOrbit(fleet, system)) return false;
 
         const targetPlanet = getDefaultSolidPlanet(system);
         if (!targetPlanet) return false;
