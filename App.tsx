@@ -607,6 +607,7 @@ const App: React.FC = () => {
                 systemDetailSystem={systemDetailSystem}
                 onCloseSystemDetails={handleCloseSystemDetails}
                 onSelectFleet={setSelectedFleetId}
+                onInspectFleet={handleFleetInspect}
                 onCloseShipDetail={() => handleCloseMenu()}
 
                 onOpenBattle={(id) => {

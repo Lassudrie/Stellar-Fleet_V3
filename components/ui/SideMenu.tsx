@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LogEntry, Fleet, StarSystem, FactionId, GameMessage } from '../../types';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
@@ -13,6 +13,7 @@ interface SideMenuProps {
   systems: StarSystem[];
   onRestart: () => void;
   onSelectFleet: (fleetId: string) => void;
+  onInspectFleet?: (fleetId: string) => void;
   onSave: () => void;
   onOpenMessage: (message: GameMessage) => void;
   onDismissMessage: (messageId: string) => void;
@@ -37,14 +38,14 @@ const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { 
 
 const SideMenu: React.FC<SideMenuProps> = ({ 
     isOpen, onClose, logs, messages, blueFleets, systems, 
-    onRestart, onSelectFleet, onSave, onOpenMessage, onDismissMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages,
+    onRestart, onSelectFleet, onInspectFleet, onSave, onOpenMessage, onDismissMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
     playerFactionId
 }) => {
   const { t, locale, setLocale } = useI18n();
   const [view, setView] = useState<MenuView>('MAIN');
-  
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [aiDebug, setAiDebug] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>('ALL');
 
@@ -54,6 +55,46 @@ const SideMenu: React.FC<SideMenuProps> = ({
         return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const coarseQuery = window.matchMedia('(pointer: coarse)');
+    const narrowQuery = window.matchMedia('(max-width: 768px)');
+    const computeIsMobile = () => {
+        const hasTouchPoints = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+        setIsMobileDevice(coarseQuery.matches || narrowQuery.matches || hasTouchPoints);
+    };
+
+    computeIsMobile();
+
+    const addListener = (query: MediaQueryList) => {
+        if ('addEventListener' in query) {
+            query.addEventListener('change', computeIsMobile);
+        } else {
+            // Fallback for older browsers
+            query.addListener(computeIsMobile);
+        }
+    };
+
+    const removeListener = (query: MediaQueryList) => {
+        if ('removeEventListener' in query) {
+            query.removeEventListener('change', computeIsMobile);
+        } else {
+            query.removeListener(computeIsMobile);
+        }
+    };
+
+    addListener(coarseQuery);
+    addListener(narrowQuery);
+    window.addEventListener('resize', computeIsMobile);
+
+    return () => {
+        removeListener(coarseQuery);
+        removeListener(narrowQuery);
+        window.removeEventListener('resize', computeIsMobile);
+    };
+  }, []);
 
   const mySystems = useMemo(() => systems.filter(s => s.ownerFactionId === playerFactionId), [systems, playerFactionId]);
   const unreadMessages = useMemo(() => messages.filter(msg => !msg.read && !msg.dismissed).length, [messages]);
@@ -195,6 +236,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
                   key={fleet.id} 
                   onClick={() => {
                       onSelectFleet(fleet.id);
+                      if (isMobileDevice && onInspectFleet) {
+                          onInspectFleet(fleet.id);
+                      }
                       onClose();
                   }}
                   className="w-full text-left bg-slate-800/30 border border-slate-700/50 p-3 rounded hover:bg-slate-700 hover:border-blue-500/50 transition-all group"
