@@ -2,7 +2,7 @@
 import { ArmyState, GameState } from '../../../types';
 import { TurnContext } from '../types';
 import { pruneBattles } from '../../../services/battle/detection';
-import { sanitizeArmyLinks } from '../../army';
+import { sanitizeArmies } from '../../army';
 
 const LOG_RETENTION_LIMIT = 2000;
 
@@ -27,7 +27,7 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     
     // 2. Sanitize Armies (Remove orphans, fix references)
     // Note: We use a temp state with pruned battles to ensure army logic has fresh context
-    const { state: sanitizedArmyState, logs: sanitizationLogs } = sanitizeArmyLinks({
+    const { state: sanitizedArmyState, logs: sanitizationLogs } = sanitizeArmies({
         ...state,
         armies: armiesAfterFleetLoss,
         battles: activeBattles

@@ -97,70 +97,8 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
  * 
  * @returns Cleaned army list and a list of log messages describing fixes.
  */
-export const sanitizeArmies = (state: GameState): { armies: Army[], logs: string[] } => {
-    const validArmies: Army[] = [];
+export const sanitizeArmies = (state: GameState): { state: GameState, logs: string[] } => {
     const logs: string[] = [];
-    const claimedArmyIds = new Map<string, string[]>(); // ArmyID -> ShipID[]
-
-    // 1. O(F*S) Pre-calculation: Map all ship-army references
-    state.fleets.forEach(fleet => {
-        fleet.ships.forEach(ship => {
-            if (ship.carriedArmyId) {
-                const list = claimedArmyIds.get(ship.carriedArmyId) || [];
-                list.push(`${ship.id} (${fleet.id})`);
-                claimedArmyIds.set(ship.carriedArmyId, list);
-            }
-        });
-    });
-
-    // 2. Iterate Armies
-    for (const army of state.armies) {
-        let isValid = true;
-
-        // Check A: Local Integrity (Standard Validation)
-        if (!validateArmyState(army, state)) {
-            logs.push(`Army ${army.id} failed validation (Orphaned or Invalid State). Removed.`);
-            isValid = false;
-        }
-
-        // Check B: Reference Integrity (for Embarked armies)
-        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
-            const carriers = claimedArmyIds.get(army.id);
-            
-            if (!carriers || carriers.length === 0) {
-                // Should have been caught by validateArmyState usually, but double check reverse link
-                logs.push(`Army ${army.id} is Embarked but no ship claims it. Removed.`);
-                isValid = false;
-            } else if (carriers.length > 1) {
-                // CRITICAL: Duplication Glitch
-                logs.push(`CRITICAL: Army ${army.id} claim conflict. Carried by multiple ships: [${carriers.join(', ')}]. Army destroyed to prevent paradox.`);
-                // We destroy the army. The ships will point to a non-existent army ID, 
-                // which is "safer" than cloning the army, or we could auto-clean the ships here.
-                // For now, removing the army is the safest state convergence.
-                isValid = false;
-            }
-        }
-
-        // Check C: Destruction threshold
-        if (isValid) {
-            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
-            if (army.strength <= destructionThreshold) {
-                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
-                isValid = false;
-            }
-        }
-
-        if (isValid) {
-            validArmies.push(army);
-        }
-    }
-
-    return { armies: validArmies, logs };
-};
-
-export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: string[] } => {
-    const logs: string[] = [];
-
     const fleets: Fleet[] = state.fleets.map(fleet => ({
         ...fleet,
         ships: fleet.ships.map(ship => ({ ...ship }))
@@ -209,18 +147,18 @@ export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: s
 
     for (const army of armies) {
         let isValid = true;
+        const carriers = carrierMap.get(army.id) || [];
 
-        if (!validateArmyState(army, validationState)) {
-            logs.push(`Army ${army.id} failed validation (missing container or location). Removed.`);
-            isValid = false;
-        }
-
-        if (isValid && (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT)) {
-            const carriers = carrierMap.get(army.id);
-            if (!carriers || carriers.length === 0) {
+        if (army.state === ArmyState.EMBARKED || army.state === ArmyState.IN_TRANSIT) {
+            if (carriers.length === 0) {
                 logs.push(`Army ${army.id} had no transport ship. Removed to restore consistency.`);
                 isValid = false;
             }
+        }
+
+        if (isValid && !validateArmyState(army, validationState)) {
+            logs.push(`Army ${army.id} failed validation (missing container or location). Removed.`);
+            isValid = false;
         }
 
         if (isValid) {
@@ -232,7 +170,6 @@ export const sanitizeArmyLinks = (state: GameState): { state: GameState, logs: s
         }
 
         if (!isValid) {
-            const carriers = carrierMap.get(army.id) || [];
             carriers.forEach(({ ship }) => {
                 if (ship.carriedArmyId === army.id) {
                     ship.carriedArmyId = null;
