@@ -6,8 +6,9 @@ import { RNG } from './rng';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
-import { CAPTURE_RANGE, ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { CAPTURE_RANGE } from '../data/static';
 import { getDefaultSolidPlanet } from './planets';
+import { isFleetOrbitingSystem } from './orbit';
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
 
@@ -888,11 +889,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     if (solidPlanets.length < 2) return;
 
     const availableTransports = state.fleets
-      .filter(fleet =>
-        fleet.factionId === factionId &&
-        fleet.state === FleetState.ORBIT &&
-        distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ
-      )
+      .filter(fleet => fleet.factionId === factionId && isFleetOrbitingSystem(fleet, system))
       .reduce((count, fleet) => {
         const freeTransports = fleet.ships.filter(ship =>
           ship.type === ShipType.TROOP_TRANSPORT &&

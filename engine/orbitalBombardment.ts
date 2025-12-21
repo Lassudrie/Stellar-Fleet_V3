@@ -1,7 +1,5 @@
 import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, ShipType, StarSystem } from '../types';
-import { distSq } from './math/vec3';
 import {
-  ORBIT_PROXIMITY_RANGE_SQ,
   ORBITAL_BOMBARDMENT_POWER_PER_SHIP,
   ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
   ORBITAL_BOMBARDMENT_MAX_STRENGTH_LOSS_FRACTION,
@@ -11,6 +9,7 @@ import {
   ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER
 } from '../data/static';
 import { ARMY_DESTROY_THRESHOLD } from './army';
+import { isFleetWithinOrbitProximity } from './orbit';
 
 export interface OrbitalBombardmentTarget {
   systemId: string;
@@ -34,7 +33,7 @@ const getFactionLabel = (state: GameState, factionId: FactionId): string => {
 };
 
 const isFleetInSystem = (fleet: Fleet, system: StarSystem): boolean =>
-  distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
+  isFleetWithinOrbitProximity(fleet, system);
 
 const countBombardmentShips = (fleet: Fleet): number =>
   fleet.ships.filter(ship => ship.type !== ShipType.TROOP_TRANSPORT).length;

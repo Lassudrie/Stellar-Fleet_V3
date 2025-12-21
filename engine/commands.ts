@@ -2,11 +2,10 @@
 import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
-import { clone, distSq } from './math/vec3';
+import { clone } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
-import { isOrbitContested } from './orbit';
-import { ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { isFleetOrbitingSystem, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
 
@@ -29,10 +28,8 @@ const getAvailableTransportsInOrbit = (
     const system = getSystemById(state.systems, systemId);
     if (!system) return [];
 
-    const inOrbit = state.fleets.filter(fleet =>
-        fleet.factionId === factionId &&
-        fleet.state === FleetState.ORBIT &&
-        distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ
+    const inOrbit = state.fleets.filter(
+        fleet => fleet.factionId === factionId && isFleetOrbitingSystem(fleet, system)
     );
 
     const candidates: Array<{ fleet: Fleet; shipIndex: number }> = [];
@@ -218,9 +215,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!system || !fleet || !army) return state;
 
-            const inOrbit =
-                fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
-            if (!inOrbit) return state;
+            if (!isFleetOrbitingSystem(fleet, system)) return state;
 
             const ship = fleet.ships.find(s => s.id === command.shipId && !s.carriedArmyId);
             if (!ship) return state;
@@ -265,9 +260,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (!system || !fleet || !army || !targetPlanet) return state;
             if (targetPlanet.system.id !== system.id || !targetPlanet.planet.isSolid) return state;
 
-            const inOrbit =
-                fleet.state === FleetState.ORBIT && distSq(fleet.position, system.position) <= ORBIT_PROXIMITY_RANGE_SQ;
-            if (!inOrbit) return state;
+            if (!isFleetOrbitingSystem(fleet, system)) return state;
 
             const ship = fleet.ships.find(s => s.id === command.shipId && s.carriedArmyId === command.armyId);
             if (!ship) return state;

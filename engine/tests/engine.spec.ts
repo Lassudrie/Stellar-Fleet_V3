@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import path from 'node:path';
 import { resolveGroundConflict } from '../conquest';
 import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
-import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
+import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
@@ -36,7 +36,7 @@ import { resolveBattleOutcome, FactionRegistry } from '../battle/outcome';
 import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../../services/movement/movementPhase';
-import { isOrbitContested } from '../orbit';
+import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../../services/world/stellar';
 
 interface TestCase {
@@ -526,6 +526,39 @@ const tests: TestCase[] = [
         isOrbitContested(system, stateWithEmptyFleet),
         false,
         'Fleets without ships should not contribute to contesting'
+      );
+    }
+  },
+  {
+    name: 'Orbit proximity helpers enforce distance and state invariants',
+    run: () => {
+      const system = createSystem('sys-orbit-helpers', 'blue');
+      const sharedShip: ShipEntity = { id: 'orbit-helper', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null };
+
+      const orbitingFleet = createFleet('fleet-orbiting-helpers', 'blue', { ...baseVec }, [sharedShip]);
+      const movingFleet: Fleet = { ...orbitingFleet, id: 'fleet-moving-helpers', state: FleetState.MOVING };
+      const offset = Math.sqrt(ORBIT_PROXIMITY_RANGE_SQ) + 1;
+      const distantFleet = createFleet(
+        'fleet-distant-helpers',
+        'blue',
+        { x: offset, y: 0, z: 0 },
+        [{ ...sharedShip, id: 'orbit-helper-distant' }]
+      );
+
+      assert.ok(isFleetWithinOrbitProximity(orbitingFleet, system), 'Orbit proximity should be true at system position');
+      assert.ok(
+        !isFleetWithinOrbitProximity(distantFleet, system),
+        'Orbit proximity should fail once outside the threshold'
+      );
+      assert.ok(isFleetOrbitingSystem(orbitingFleet, system), 'Orbiting state is required alongside proximity');
+      assert.ok(!isFleetOrbitingSystem(movingFleet, system), 'Non-orbiting fleets should fail the orbiting check');
+      assert.ok(
+        areFleetsSharingOrbit(orbitingFleet, orbitingFleet),
+        'Co-located orbiting fleets should share the same orbit envelope'
+      );
+      assert.ok(
+        !areFleetsSharingOrbit(orbitingFleet, distantFleet),
+        'Separated fleets should not be treated as sharing orbit'
       );
     }
   },
