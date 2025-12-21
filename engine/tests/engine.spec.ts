@@ -949,6 +949,60 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Arriving at a gas system logs the aborted invasion and clears the order',
+    run: () => {
+      const gasSystem: StarSystem = {
+        ...createSystem('sys-gas', 'blue'),
+        planets: [
+          {
+            id: 'gas-only-planet',
+            systemId: 'sys-gas',
+            name: 'Gas Haven',
+            bodyType: 'planet',
+            class: 'gas_giant',
+            ownerFactionId: 'blue',
+            size: 10,
+            isSolid: false
+          }
+        ],
+        position: { x: 0, y: 0, z: 0 }
+      };
+
+      const transport: ShipEntity = {
+        id: 'transport-gas',
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 2000,
+        maxHp: 2000,
+        carriedArmyId: 'army-gas'
+      };
+
+      const embarkedArmy = createArmy(transport.carriedArmyId!, 'blue', 5000, ArmyState.EMBARKED, 'fleet-gas');
+      const movingFleet: Fleet = {
+        ...createFleet('fleet-gas', 'blue', { x: -1, y: 0, z: 0 }, [transport]),
+        state: FleetState.MOVING,
+        targetSystemId: gasSystem.id,
+        targetPosition: { ...gasSystem.position },
+        invasionTargetSystemId: gasSystem.id
+      };
+
+      const rng = new RNG(11);
+      const arrival = resolveFleetMovement(movingFleet, [gasSystem], [embarkedArmy], 0, rng, [movingFleet]);
+
+      assert.strictEqual(
+        arrival.nextFleet.invasionTargetSystemId,
+        null,
+        'Invasion order should be cleared even when no solid planet is available'
+      );
+
+      const failureLog = arrival.logs.find(log => log.text.includes('no solid bodies to land on'));
+      assert.ok(
+        failureLog,
+        'Arrival on a gas-only system should emit a clear business log about the aborted invasion'
+      );
+      assert.strictEqual(arrival.armyUpdates.length, 0, 'Armies should remain unchanged when invasion cannot proceed');
+    }
+  },
+  {
     name: 'Multi-faction ground battle with a defender uses the attacker coalition rule',
     run: () => {
       const system = createSystem('sys-coalition-hold', 'red');
