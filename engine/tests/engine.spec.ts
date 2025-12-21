@@ -20,6 +20,7 @@ import {
   GameState,
   LogEntry,
   PlanetBody,
+  AIState,
   ShipEntity,
   ShipType,
   StarSystem
@@ -1896,6 +1897,63 @@ const tests: TestCase[] = [
         '#ffffff',
         'Neutral systems should default to white when missing an explicit color'
       );
+    }
+  },
+  {
+    name: 'AI planning remains deterministic after save/load',
+    run: () => {
+      const greenHome: StarSystem = { ...createSystem('sys-green-core', 'green'), position: { x: 0, y: 0, z: 0 } };
+      const greenOutpost: StarSystem = { ...createSystem('sys-green-outpost', 'green'), position: { x: 50, y: 0, z: 0 } };
+      const redFront: StarSystem = { ...createSystem('sys-red-front', 'red'), position: { x: 100, y: 0, z: 0 } };
+
+      const greenFleet = createFleet('fleet-green-det', 'green', { ...greenHome.position }, [
+        { id: 'ship-green-1', type: ShipType.FIGHTER, hp: 100, maxHp: 100, carriedArmyId: null }
+      ]);
+
+      const redFleet = createFleet('fleet-red-det', 'red', { ...redFront.position }, [
+        { id: 'ship-red-1', type: ShipType.FIGHTER, hp: 100, maxHp: 100, carriedArmyId: null }
+      ]);
+
+      const aiState: AIState = {
+        ...createEmptyAIState(),
+        holdUntilTurnBySystemId: {
+          [greenOutpost.id]: 4,
+          [greenHome.id]: 3
+        },
+        targetPriorities: {
+          [redFront.id]: 200,
+          [greenOutpost.id]: 110
+        },
+        systemLastSeen: {
+          [greenHome.id]: 0,
+          [greenOutpost.id]: 0,
+          [redFront.id]: 0
+        },
+        lastOwnerBySystemId: {
+          [greenHome.id]: 'green',
+          [greenOutpost.id]: 'green',
+          [redFront.id]: 'red'
+        }
+      };
+
+      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false };
+
+      const state = createBaseState({
+        day: 2,
+        systems: [greenHome, greenOutpost, redFront],
+        fleets: [greenFleet, redFleet],
+        aiStates: { green: aiState },
+        rules
+      });
+
+      const seed = 99;
+      const commandsBefore = planAiTurn(state, 'green', aiState, new RNG(seed));
+
+      const restored = deserializeGameState(serializeGameState(state));
+      assert.ok(restored.aiStates?.green, 'Restored AI state should be preserved after serialization');
+      const commandsAfter = planAiTurn(restored, 'green', restored.aiStates?.green, new RNG(seed));
+
+      assert.deepStrictEqual(commandsAfter, commandsBefore, 'AI commands should remain stable after serialization round-trip');
     }
   },
   {
