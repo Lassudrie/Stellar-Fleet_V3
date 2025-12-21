@@ -48,6 +48,8 @@ const formatAmmunitionLine = (totals: BattleAmmunitionBreakdown): string => {
 };
 
 export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameState => {
+    const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
+
     // 1. Identify Scheduled Battles
     const scheduledBattles = state.battles.filter(b => b.status === 'scheduled');
     
@@ -72,7 +74,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
     // 2. Resolve Each Battle
     scheduledBattles.forEach(battle => {
         const fleetsInBattle = nextFleets.filter(fleet => battle.involvedFleetIds.includes(fleet.id));
-        const result = resolveBattle(battle, { ...state, fleets: nextFleets }, ctx.turn);
+        const result = resolveBattle(battle, { ...currentTurnState, fleets: nextFleets }, ctx.turn);
 
         // Update Battle in list (Mark as resolved, add logs, stats)
         nextBattles = nextBattles.map(b => b.id === battle.id ? result.updatedBattle : b);
@@ -122,7 +124,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         
         // Global Notification
         if (result.updatedBattle.winnerFactionId) {
-             const sysName = state.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+            const sysName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
              nextLogs.push({
                  id: ctx.rng.id('log'),
                  day: ctx.turn,
@@ -134,14 +136,14 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         // Battle Message
         const involvedFactionIdsSet = new Set<FactionId>();
         battle.involvedFleetIds.forEach(fleetId => {
-            const fleet = state.fleets.find(f => f.id === fleetId) || nextFleets.find(f => f.id === fleetId);
+            const fleet = currentTurnState.fleets.find(f => f.id === fleetId) || nextFleets.find(f => f.id === fleetId);
             if (fleet) involvedFactionIdsSet.add(fleet.factionId as FactionId);
         });
         Object.keys(result.updatedBattle.shipsLost ?? {}).forEach(factionId => involvedFactionIdsSet.add(factionId as FactionId));
         const involvedFactionIds = Array.from(involvedFactionIdsSet).sort((a, b) => a.localeCompare(b));
 
-        const systemName = state.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
-        const isPlayerInvolved = involvedFactionIds.includes(state.playerFactionId);
+        const systemName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+        const isPlayerInvolved = involvedFactionIds.includes(currentTurnState.playerFactionId);
         const ammunitionTotals = aggregateAmmunitionTotals(result.updatedBattle.ammunitionByFaction);
         const battleSystemName = systemName || battle.systemId;
 
@@ -183,7 +185,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
     });
 
     return {
-        ...state,
+        ...currentTurnState,
         battles: nextBattles,
         fleets: nextFleets,
         armies: nextArmies,

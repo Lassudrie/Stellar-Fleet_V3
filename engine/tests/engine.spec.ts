@@ -182,6 +182,60 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Battle resolution uses the context turn for dating effects',
+    run: () => {
+      const system = createSystem('sys-turn-sync', null);
+      const attackerShip: ShipEntity = {
+        id: 'attacker-sync',
+        type: ShipType.CRUISER,
+        hp: 120,
+        maxHp: 120,
+        carriedArmyId: null
+      };
+      const defenderShip: ShipEntity = {
+        id: 'defender-sync',
+        type: ShipType.FIGHTER,
+        hp: 1,
+        maxHp: 1,
+        carriedArmyId: null
+      };
+
+      const attackerFleet = createFleet('fleet-turn-attacker', 'blue', { ...baseVec }, [attackerShip]);
+      const defenderFleet = createFleet('fleet-turn-defender', 'red', { ...baseVec }, [defenderShip]);
+
+      const battle: Battle = {
+        id: 'battle-turn-sync',
+        systemId: system.id,
+        turnCreated: 2,
+        status: 'scheduled',
+        involvedFleetIds: [attackerFleet.id, defenderFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        day: 2,
+        seed: 12,
+        systems: [system],
+        fleets: [attackerFleet, defenderFleet],
+        battles: [battle]
+      });
+
+      const ctx = { rng: new RNG(42), turn: 5 };
+      const resolved = phaseBattleResolution(state, ctx);
+      const survivingFleet = resolved.fleets.find(fleet => fleet.id === attackerFleet.id);
+      const survivingShip = survivingFleet?.ships.find(ship => ship.id === attackerShip.id);
+
+      assert.ok(survivingShip, 'Attacking ship should survive the combat');
+
+      const killHistory = survivingShip?.killHistory ?? [];
+      assert.ok(killHistory.length > 0, 'Kill history should record the destroyed defender');
+      killHistory.forEach(record => {
+        assert.strictEqual(record.day, ctx.turn, 'Kill day must match the context turn');
+        assert.strictEqual(record.turn, ctx.turn, 'Kill turn must match the context turn');
+      });
+    }
+  },
+  {
     name: 'Battle winner is decided before post-combat attrition',
     run: () => {
       const system = createSystem('sys-attrition-winner', 'blue');

@@ -24,7 +24,7 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
 
   // --- CANONICALIZE INPUT STATE ---
   // Ensures consistent iteration order for deterministic RNG consumption
-  let nextState = canonicalizeState(state);
+  let nextState = canonicalizeState({ ...state, day: turn });
 
   // --- PIPELINE EXECUTION ---
   // Each phase takes (state, ctx) and returns nextState.
