@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { resolveGroundConflict } from '../conquest';
 import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
@@ -1623,6 +1624,61 @@ const tests: TestCase[] = [
       assert.strictEqual(redTotals!.offensiveMissiles.remaining, 0, 'Destroyed ships should not retain remaining stock');
       assert.strictEqual(redTotals!.torpedoes.remaining, 0, 'Destroyed ships should lose torpedoes alongside hulls');
       assert.strictEqual(redTotals!.interceptors.remaining, 0, 'Destroyed ships should lose interceptors alongside hulls');
+    }
+  },
+  {
+    name: 'Massive space battles resolve within expected time using pre-indexed targets',
+    run: () => {
+      const system = createSystem('sys-massive', null);
+      const createShips = (prefix: string, type: ShipType, count: number): ShipEntity[] => {
+        const stats = SHIP_STATS[type];
+        return Array.from({ length: count }, (_, idx) => ({
+          id: `${prefix}-${idx}`,
+          type,
+          hp: stats.maxHp,
+          maxHp: stats.maxHp,
+          carriedArmyId: null
+        }));
+      };
+
+      const blueFleet = createFleet('fleet-blue-massive', 'blue', { ...baseVec }, [
+        ...createShips('blue-fighter', ShipType.FIGHTER, 80),
+        ...createShips('blue-destroyer', ShipType.DESTROYER, 40)
+      ]);
+      const redFleet = createFleet('fleet-red-massive', 'red', { ...baseVec }, [
+        ...createShips('red-bomber', ShipType.BOMBER, 60),
+        ...createShips('red-cruiser', ShipType.CRUISER, 50)
+      ]);
+      const greenFleet = createFleet('fleet-green-massive', 'green', { ...baseVec }, [
+        ...createShips('green-frigate', ShipType.FRIGATE, 50),
+        ...createShips('green-carrier', ShipType.CARRIER, 20)
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-massive',
+        systemId: system.id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id, redFleet.id, greenFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet, redFleet, greenFleet],
+        day: 12,
+        seed: 2025
+      });
+
+      const start = performance.now();
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 1);
+      const duration = performance.now() - start;
+
+      assert.ok(duration < 3000, `Large-scale battle should resolve quickly (took ${duration.toFixed(2)}ms)`);
+      assert.ok(updatedBattle.roundsPlayed > 0, 'Large battle should play at least one round');
+      assert.ok(updatedBattle.logs.length > 0, 'Large battle should produce combat logs');
+      assert.ok(updatedBattle.ammunitionByFaction?.blue, 'Ammunition summary should remain available for large battles');
+      assert.ok(survivingFleets.length > 0, 'At least one fleet should exit the battle to validate survivor handling');
     }
   },
   {

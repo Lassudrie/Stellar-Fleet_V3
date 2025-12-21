@@ -242,13 +242,52 @@ export const resolveBattle = (
 
     // Identify active participants (Array iteration is fine here as we need to process all)
     const activeShips = battleShips.filter(s => s.currentHp > 0);
+    const activeByFaction = new Map<FactionId, BattleShipState[]>();
+
+    for (const ship of activeShips) {
+      const list = activeByFaction.get(ship.faction);
+      if (list) {
+        list.push(ship);
+      } else {
+        activeByFaction.set(ship.faction, [ship]);
+      }
+    }
+
+    const activeFactions = Array.from(activeByFaction.keys()).sort();
+    const enemiesByFaction = new Map<FactionId, BattleShipState[]>();
+    const enemiesByFactionAndType = new Map<FactionId, Map<ShipType, BattleShipState[]>>();
+
+    for (const faction of activeFactions) {
+      const enemies: BattleShipState[] = [];
+      const byType = new Map<ShipType, BattleShipState[]>();
+
+      for (const otherFaction of activeFactions) {
+        if (otherFaction === faction) continue;
+
+        const hostileShips = activeByFaction.get(otherFaction) ?? [];
+        for (const ship of hostileShips) {
+          enemies.push(ship);
+
+          const shipsOfType = byType.get(ship.type);
+          if (shipsOfType) {
+            shipsOfType.push(ship);
+          } else {
+            byType.set(ship.type, [ship]);
+          }
+        }
+      }
+
+      enemiesByFaction.set(faction, enemies);
+      enemiesByFactionAndType.set(faction, byType);
+    }
 
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
-      const enemies = battleShips.filter(
-        s => s.currentHp > 0 && s.faction !== ship.faction
-      );
-      ship.targetId = selectTarget(ship, enemies, rng.next());
+      const enemies = enemiesByFaction.get(ship.faction) ?? [];
+      ship.targetId = selectTarget(ship, enemies, rng.next(), {
+        enemiesByType: enemiesByFactionAndType.get(ship.faction),
+        shipLookup: shipMap
+      });
     }
 
     // --- PHASE 3: MANEUVER ---
@@ -310,39 +349,47 @@ export const resolveBattle = (
     }
 
     // --- PHASE 5: INTERCEPTION (Soft Kill) ---
-    // Optimization: Build a ThreatQueue to avoid repeated filters
-    const interceptionThreats = new Map<string, Projectile[]>();
-    
-    // Filter potential threats (ETA 0 or 1) and group by target
-    for (const p of projectiles) {
-        if ((p.eta === 0 || p.eta === 1) && p.hp > 0) {
-            if (!interceptionThreats.has(p.targetId)) interceptionThreats.set(p.targetId, []);
-            interceptionThreats.get(p.targetId)!.push(p);
-        }
+    type ProjectileBuckets = { interceptable: Projectile[]; pd: Projectile[] };
+    const projectileThreats = new Map<string, ProjectileBuckets>();
+    const ensureBuckets = (targetId: string): ProjectileBuckets => {
+      const existing = projectileThreats.get(targetId);
+      if (existing) return existing;
+      const buckets: ProjectileBuckets = { interceptable: [], pd: [] };
+      projectileThreats.set(targetId, buckets);
+      return buckets;
+    };
+
+    for (const projectile of projectiles) {
+      if (projectile.hp <= 0) continue;
+      if (projectile.eta === 0 || projectile.eta === 1) {
+        ensureBuckets(projectile.targetId).interceptable.push(projectile);
+      }
+      if (projectile.eta === 0) {
+        ensureBuckets(projectile.targetId).pd.push(projectile);
+      }
     }
 
-    // Deterministic Iteration: Sort Target IDs
-    const interceptionTargets = Array.from(interceptionThreats.keys()).sort();
+    const threatTargets = Array.from(projectileThreats.keys()).sort();
 
-    for (const targetId of interceptionTargets) {
-        const defender = shipMap.get(targetId);
-        if (!defender || defender.currentHp <= 0) continue;
+    for (const targetId of threatTargets) {
+      const defender = shipMap.get(targetId);
+      if (!defender || defender.currentHp <= 0) continue;
 
-        const incoming = interceptionThreats.get(targetId)!;
+      const incoming = projectileThreats.get(targetId)!;
 
-        // Try to intercept each incoming missile
-        for (const p of incoming) {
-            if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
+      // Try to intercept each incoming missile
+      for (const p of incoming.interceptable) {
+        if (p.hp <= 0) continue; // Already destroyed by another interceptor (rare in 1v1 mapping but possible in future)
 
-            if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
-                defender.interceptorsLeft--;
-                if (rng.next() < INTERCEPTION_BASE_CHANCE) {
-                    p.hp = 0;
-                    logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
-                    totalMissilesIntercepted++;
-                }
+        if (defender.interceptorsLeft > 0 && rng.next() > 0.5) {
+            defender.interceptorsLeft--;
+            if (rng.next() < INTERCEPTION_BASE_CHANCE) {
+                p.hp = 0;
+                logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
+                totalMissilesIntercepted++;
             }
         }
+      }
     }
 
     // Cleanup dead projectiles
@@ -357,25 +404,17 @@ export const resolveBattle = (
 
     // --- PHASE 6: PD (Hard Kill) ---
     // Only affects projectiles hitting THIS round (ETA 0)
-    const pdThreats = new Map<string, Projectile[]>();
-    for (const p of projectiles) {
-        if (p.eta === 0 && p.hp > 0) {
-            if (!pdThreats.has(p.targetId)) pdThreats.set(p.targetId, []);
-            pdThreats.get(p.targetId)!.push(p);
-        }
-    }
-
-    const pdTargets = Array.from(pdThreats.keys()).sort();
-
-    for (const targetId of pdTargets) {
+    for (const targetId of threatTargets) {
         const defender = shipMap.get(targetId);
         if (!defender || defender.currentHp <= 0) continue;
 
         let pdOutput = defender.pdStrength * PD_DAMAGE_PER_POINT;
-        const incoming = pdThreats.get(targetId)!;
+        const incoming = projectileThreats.get(targetId)!.pd;
+        if (incoming.length === 0) continue;
 
         for (const threat of incoming) {
             if (pdOutput <= 0) break;
+            if (threat.hp <= 0) continue;
 
             const dmg = Math.min(threat.hp, pdOutput);
             threat.hp -= dmg;
