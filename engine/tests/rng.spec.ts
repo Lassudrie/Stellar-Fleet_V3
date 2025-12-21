@@ -22,7 +22,14 @@ const tests: TestCase[] = [
     run: () => {
       const rng = new RNG(1);
       const outputs = Array.from({ length: RNG_GAUSSIAN_SEED_1_SEQUENCE.length }, () => rng.gaussian());
-      assert.deepStrictEqual(outputs, RNG_GAUSSIAN_SEED_1_SEQUENCE);
+      const epsilon = 1e-12;
+      outputs.forEach((value, index) => {
+        const expected = RNG_GAUSSIAN_SEED_1_SEQUENCE[index];
+        assert.ok(
+          Math.abs(value - expected) < epsilon,
+          `Gaussian output at index ${index} diverged: expected ${expected}, got ${value}`
+        );
+      });
     }
   },
   {

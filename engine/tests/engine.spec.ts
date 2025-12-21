@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { resolveGroundConflict } from '../conquest';
 import { ARMY_DESTROY_THRESHOLD, sanitizeArmies } from '../army';
@@ -264,7 +265,8 @@ const tests: TestCase[] = [
       const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 0);
 
       assert.strictEqual(updatedBattle.winnerFactionId, 'blue', 'Solo combat should still mark the owner as winner before attrition.');
-      assert.strictEqual(updatedBattle.survivorShipIds.length, 0, 'Attrition can eliminate remaining ships after victory calculation.');
+      const survivorIds = updatedBattle.survivorShipIds ?? [];
+      assert.strictEqual(survivorIds.length, 0, 'Attrition can eliminate remaining ships after victory calculation.');
       assert.strictEqual(survivingFleets.length, 0, 'No fleets should persist if attrition destroys the last ship.');
     }
   },
@@ -447,7 +449,7 @@ const tests: TestCase[] = [
   {
     name: 'Battle outcome reports non-player faction victories by name',
     run: () => {
-      const translate = (key: string, params?: Record<string, string>) => {
+      const translate = (key: string, params?: Record<string, string | number | undefined>) => {
         if (key === 'battle.victory') return `${params?.winner} VICTORY`;
         if (key === 'battle.draw') return 'DRAW';
         return 'RESULT UNKNOWN';
@@ -537,7 +539,8 @@ const tests: TestCase[] = [
   {
     name: 'Battle outcome handles draws without faction assumptions',
     run: () => {
-      const translate = (key: string) => (key === 'battle.draw' ? 'DRAW' : 'RESULT UNKNOWN');
+      const translate = (key: string, _params?: Record<string, string | number | undefined>) =>
+        (key === 'battle.draw' ? 'DRAW' : 'RESULT UNKNOWN');
 
       const registry: FactionRegistry = {
         blue: { name: 'Alliance Navy', color: '#3b82f6' }
@@ -1612,7 +1615,7 @@ const tests: TestCase[] = [
         'Survivors must leave combat needing repairs instead of staying at full strength'
       );
       assert.deepStrictEqual(
-        updatedBattle.survivorShipIds,
+        updatedBattle.survivorShipIds ?? [],
         [blueFleet.ships[0].id],
         'Survivor metrics should list ships that remain operational after attrition'
       );
@@ -1785,7 +1788,7 @@ const tests: TestCase[] = [
       const duration = performance.now() - start;
 
       assert.ok(duration < 3000, `Large-scale battle should resolve quickly (took ${duration.toFixed(2)}ms)`);
-      assert.ok(updatedBattle.roundsPlayed > 0, 'Large battle should play at least one round');
+      assert.ok((updatedBattle.roundsPlayed ?? 0) > 0, 'Large battle should play at least one round');
       assert.ok(updatedBattle.logs.length > 0, 'Large battle should produce combat logs');
       assert.ok(updatedBattle.ammunitionByFaction?.blue, 'Ammunition summary should remain available for large battles');
       assert.ok(survivingFleets.length > 0, 'At least one fleet should exit the battle to validate survivor handling');
@@ -1816,7 +1819,7 @@ const tests: TestCase[] = [
   {
     name: 'Conquest exports remain referenced outside their module',
     run: () => {
-      const projectRoot = path.resolve(new URL('../..', import.meta.url).pathname);
+      const projectRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
       const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
       const tsConfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
       const parsedConfig = ts.parseJsonConfigFileContent(tsConfig.config, ts.sys, projectRoot);
@@ -1842,8 +1845,12 @@ const tests: TestCase[] = [
 
       assert.ok(program, 'Unable to create TypeScript program for orphan helper detection');
 
-      const conquestPath = path.join(projectRoot, 'engine', 'conquest.ts');
-      const conquestSource = program!.getSourceFile(conquestPath);
+      const conquestPathSuffix = '/engine/conquest.ts';
+      const conquestPath = fileNames.find(file =>
+        file.replace(/\\/g, '/').toLowerCase().endsWith(conquestPathSuffix)
+      );
+      assert.ok(conquestPath, 'Conquest source should be part of the TypeScript program');
+      const conquestSource = program!.getSourceFile(conquestPath!);
       assert.ok(conquestSource, 'Conquest source should be part of the TypeScript program');
 
       const checker = program!.getTypeChecker();
@@ -2165,8 +2172,8 @@ const tests: TestCase[] = [
       const enemyFaction: FactionState = { id: 'enemy', name: 'Enemy', color: '#ff0000', isPlayable: true };
 
       const systems: StarSystem[] = [
-        { ...createSystem('ai-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' },
-        { ...createSystem('frontier', enemyFaction.id), position: { x: 150, y: 0, z: 0 }, resourceType: 'gas' }
+        { ...createSystem('ai-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' as const },
+        { ...createSystem('frontier', enemyFaction.id), position: { x: 150, y: 0, z: 0 }, resourceType: 'gas' as const }
       ];
 
       const idleFleet = createFleet('ai-idle', aiFaction.id, { ...systems[0].position }, [
@@ -2224,8 +2231,8 @@ const tests: TestCase[] = [
       const enemyFaction: FactionState = { id: 'enemy-retreat', name: 'Enemy Retreat', color: '#ff0000', isPlayable: true };
 
       const systems: StarSystem[] = [
-        { ...createSystem('retreat-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' },
-        { ...createSystem('retreat-frontier', enemyFaction.id), position: { x: 200, y: 0, z: 0 }, resourceType: 'gas' }
+        { ...createSystem('retreat-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' as const },
+        { ...createSystem('retreat-frontier', enemyFaction.id), position: { x: 200, y: 0, z: 0 }, resourceType: 'gas' as const }
       ];
 
       const retreatingFleet: Fleet = {
@@ -2269,8 +2276,8 @@ const tests: TestCase[] = [
       const aiFaction: FactionState = { id: 'ai-ground', name: 'AI Ground', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
       const enemyFaction: FactionState = { id: 'enemy-ground', name: 'Enemy Ground', color: '#ff0000', isPlayable: true };
 
-      const homeSystem = { ...createSystem('ground-home', aiFaction.id), resourceType: 'gas' };
-      const targetSystem = { ...createSystem('ground-target', enemyFaction.id), resourceType: 'gas' };
+      const homeSystem = { ...createSystem('ground-home', aiFaction.id), resourceType: 'gas' as const };
+      const targetSystem = { ...createSystem('ground-target', enemyFaction.id), resourceType: 'gas' as const };
       const fighterShip: ShipEntity = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
 
       const createAssaultFleet = (id: string): Fleet =>

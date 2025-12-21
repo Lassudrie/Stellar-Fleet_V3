@@ -86,7 +86,8 @@ export class SpatialIndex<T extends PositionedEntity> {
 
     const center = this.getCellCoords(position);
     const maxRadius = Math.max(this.maxCell.x - this.minCell.x, this.maxCell.z - this.minCell.z, 0) + 1;
-    let best: { item: T; distanceSq: number } | null = null;
+    let bestItem: T | null = null;
+    let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
       const cells = this.getCellsInRadius(center, cellRadius);
@@ -98,13 +99,14 @@ export class SpatialIndex<T extends PositionedEntity> {
         bucket.forEach(item => {
           if (predicate && !predicate(item)) return;
           const distanceSq = distSq(item.position, position);
-          if (!best || distanceSq < best.distanceSq) {
-            best = { item, distanceSq };
+          if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestItem = item;
           }
         });
       });
 
-      if (best) {
+      if (bestItem) {
         const bounds = this.getSearchBounds(center, cellRadius);
         const minBoundary = Math.min(
           position.x - bounds.minX,
@@ -112,12 +114,12 @@ export class SpatialIndex<T extends PositionedEntity> {
           position.z - bounds.minZ,
           bounds.maxZ - position.z
         );
-        if (minBoundary > 0 && best.distanceSq <= minBoundary * minBoundary) {
+        if (minBoundary > 0 && bestDistanceSq <= minBoundary * minBoundary) {
           break;
         }
       }
     }
 
-    return best;
+    return bestItem ? { item: bestItem, distanceSq: bestDistanceSq } : null;
   }
 }

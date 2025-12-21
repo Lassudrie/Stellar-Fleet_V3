@@ -352,7 +352,7 @@ const generateTasks = (
   memory: AIState,
   minDistanceBySystemId: Record<string, number>,
   myFleets: Fleet[],
-  mySystems: GameState['systems'],
+  mySystems: StarSystem[],
   planetSystemMap: Map<string, string>,
   totalMyPower: number,
   rng: RNG,
@@ -384,7 +384,7 @@ const generateTasks = (
     return basePriority * proximityWeight;
   };
 
-  const findNearestOwnedSystem = (targetSystemId: string) => {
+  const findNearestOwnedSystem = (targetSystemId: string): { systemId: string; distanceSq: number } | null => {
     const targetSystem = state.systems.find(sys => sys.id === targetSystemId);
     if (!targetSystem) return null;
 
@@ -545,7 +545,7 @@ const assignFleets = (
   cfg: AiConfig,
   tasks: Task[],
   myFleets: Fleet[],
-  mySystems: GameState['systems'],
+  mySystems: StarSystem[],
   embarkedFriendlyArmies: Set<string>
 ) => {
   const availableFleetObjs = myFleets.map(f => ({
@@ -556,19 +556,21 @@ const assignFleets = (
 
   const assignments: FleetAssignment[] = [];
 
-  const findStagingSystemId = (targetSystemId: string) => {
+  const findStagingSystemId = (targetSystemId: string): string | null => {
     const targetSystem = getSystemById(state.systems, targetSystemId);
     if (!targetSystem) return null;
 
-    let best: { systemId: string; distanceSq: number } | null = null;
+    let bestSystemId: string | null = null;
+    let bestDistanceSq = Infinity;
     mySystems.forEach(sys => {
       const distanceSq = distSq(sys.position, targetSystem.position);
-      if (!best || distanceSq < best.distanceSq) {
-        best = { systemId: sys.id, distanceSq };
+      if (distanceSq < bestDistanceSq) {
+        bestSystemId = sys.id;
+        bestDistanceSq = distanceSq;
       }
     });
 
-    return best?.systemId || null;
+    return bestSystemId;
   };
 
   if (aiDebugger.getEnabled()) {

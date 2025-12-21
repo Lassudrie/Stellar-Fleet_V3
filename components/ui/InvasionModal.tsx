@@ -1,10 +1,10 @@
 
 import React, { useMemo } from 'react';
-import { Fleet, StarSystem, ShipType, FactionId, FleetState } from '../../types';
+import { Fleet, StarSystem, ShipType } from '../../types';
 import { fleetLabel, shortId } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
-import { distSq } from '../../engine/math/vec3';
+import { dist, distSq } from '../../engine/math/vec3';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 
 interface InvasionModalProps {

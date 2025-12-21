@@ -5,7 +5,6 @@ import { Fleet, FleetState, ShipType } from '../../types';
 
 const buildFleet = (overrides: Partial<Fleet>): Fleet => ({
   id: overrides.id ?? 'f-1',
-  name: 'Test Fleet',
   factionId: 'blue',
   ships: overrides.ships ?? [],
   position: overrides.position ?? { x: 0, y: 0, z: 0 },
@@ -49,7 +48,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
 {
   const transportFleet = buildFleet({
     id: 'f-transport',
-    ships: [{ id: 's1', name: 'Carrier', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, carriedArmyId: 'army-1', missiles: 0, torpedoes: 0, interceptors: 0, pdStrength: 0, damage: 0, evasion: 0, speed: 1, maneuverability: 0, role: 'transport' }],
+    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
     isFleetEligibleForMode(transportFleet, 'UNLOAD', targetPosition),
@@ -61,7 +60,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
 {
   const noTransportFleet = buildFleet({
     id: 'f-no-transport',
-    ships: [{ id: 's1', name: 'Frigate', type: ShipType.FRIGATE, hp: 1, maxHp: 1, carriedArmyId: null, missiles: 0, torpedoes: 0, interceptors: 0, pdStrength: 0, damage: 0, evasion: 0, speed: 1, maneuverability: 0, role: 'screen' }],
+    ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, carriedArmyId: null }],
   });
   assert.strictEqual(
     isFleetEligibleForMode(noTransportFleet, 'LOAD', targetPosition),

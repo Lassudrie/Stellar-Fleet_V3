@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { Vector3 } from 'three';
 import { performance } from 'node:perf_hooks';
-import { clampCameraToBounds, createClampScratch, ClampBounds } from './GameCamera';
+import { clampCameraToBounds, createClampScratch, ClampBounds } from './GameCameraClamp';
 
 const bounds: ClampBounds = {
   minX: -50,

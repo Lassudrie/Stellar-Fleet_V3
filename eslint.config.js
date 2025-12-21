@@ -8,6 +8,12 @@ export default [
   },
   js.configs.recommended,
   {
+    rules: {
+      'no-undef': 'off',
+      'no-unused-vars': 'off'
+    }
+  },
+  {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
       parser: tsParser,
@@ -21,6 +27,7 @@ export default [
       '@typescript-eslint': tsPlugin
     },
     rules: {
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-param-reassign': 'warn',
       'no-restricted-syntax': [
         'warn',

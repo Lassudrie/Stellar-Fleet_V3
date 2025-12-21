@@ -15,6 +15,7 @@ import {
   GameplayRules,
   FactionState,
   FactionId,
+  ShipEntity,
   ShipConsumables,
   ShipKillRecord,
   LogEntry,
@@ -539,34 +540,36 @@ export const deserializeGameState = (json: string): GameState => {
         throw new Error(`Fleet '${f.id}' references unknown faction '${factionId}'.`);
       }
 
-      const ships = Array.isArray(f.ships) ? f.ships : [];
+      const ships: unknown[] = Array.isArray(f.ships) ? f.ships : [];
       const sanitizedShips = ships
-        .map((s: any) => {
-          if (typeof s?.id !== 'string') return null;
-          if (!isEnumValue(SHIP_TYPES, s.type)) return null;
+        .map((entry: unknown): ShipEntity | null => {
+          const ship = entry as any;
+          if (typeof ship?.id !== 'string') return null;
+          if (!isEnumValue(SHIP_TYPES, ship.type)) return null;
 
-          const fallbackMaxHp = SHIP_STATS[s.type]?.maxHp ?? 100;
-          const maxHp = Number.isFinite(s.maxHp) ? s.maxHp : fallbackMaxHp;
-          const hp = Number.isFinite(s.hp) ? Math.min(Math.max(s.hp, 0), maxHp) : maxHp;
+          const shipType = ship.type as ShipType;
+          const fallbackMaxHp = SHIP_STATS[shipType]?.maxHp ?? 100;
+          const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
+          const hp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
 
-          const consumables = extractConsumables(s, s.type);
-          const killHistory = sanitizeKillHistory(s.killHistory);
+          const consumables = extractConsumables(ship, shipType);
+          const killHistory = sanitizeKillHistory(ship.killHistory);
 
           return {
-            id: s.id,
-            type: s.type,
+            id: ship.id,
+            type: shipType,
             hp,
             maxHp,
-            carriedArmyId: typeof s.carriedArmyId === 'string' ? s.carriedArmyId : null,
-            transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
+            carriedArmyId: typeof ship.carriedArmyId === 'string' ? ship.carriedArmyId : null,
+            transferBusyUntilDay: Number.isFinite(ship.transferBusyUntilDay) ? ship.transferBusyUntilDay : undefined,
             consumables,
-            offensiveMissilesLeft: s.offensiveMissilesLeft ?? consumables.offensiveMissiles,
-            torpedoesLeft: s.torpedoesLeft ?? consumables.torpedoes,
-            interceptorsLeft: s.interceptorsLeft ?? consumables.interceptors,
+            offensiveMissilesLeft: ship.offensiveMissilesLeft ?? consumables.offensiveMissiles,
+            torpedoesLeft: ship.torpedoesLeft ?? consumables.torpedoes,
+            interceptorsLeft: ship.interceptorsLeft ?? consumables.interceptors,
             killHistory
           };
         })
-        .filter((ship): ship is NonNullable<typeof ship> => Boolean(ship));
+        .filter((ship): ship is ShipEntity => Boolean(ship));
 
       const fleetState = isEnumValue(FLEET_STATES, f.state) ? f.state : FleetState.ORBIT;
       const targetSystemId = typeof f.targetSystemId === 'string' ? f.targetSystemId : null;
@@ -652,95 +655,93 @@ export const deserializeGameState = (json: string): GameState => {
     // Battles
     const battlesDto = Array.isArray(dto.battles) ? dto.battles : [];
     const clampedBattlesDto = clampArray(battlesDto, MAX_BATTLE_ENTRIES, 'battles');
-    const battles: Battle[] = clampedBattlesDto
-      .map((b: any, index: number) => {
-        if (typeof b?.id !== 'string') {
-          console.warn(`[Serialization] Battle entry at index ${index} missing id; skipping.`);
-          return null;
-        }
-        if (typeof b.systemId !== 'string') return null;
-        if (!isEnumValue(BATTLE_STATUSES, b.status)) return null;
+    const battles: Battle[] = [];
 
-        const involvedFleetIds = Array.isArray(b.involvedFleetIds)
-          ? b.involvedFleetIds.filter((id: unknown) => typeof id === 'string' && fleetIds.has(id))
-          : [];
-        if (involvedFleetIds.length === 0) return null;
+    clampedBattlesDto.forEach((b: any, index: number) => {
+      if (typeof b?.id !== 'string') {
+        console.warn(`[Serialization] Battle entry at index ${index} missing id; skipping.`);
+        return;
+      }
+      if (typeof b.systemId !== 'string') return;
+      if (!isEnumValue(BATTLE_STATUSES, b.status)) return;
 
-        const logs = Array.isArray(b.logs)
-          ? b.logs
-              .map((entry: unknown) => clampText(entry, MAX_LOG_TEXT_LENGTH, ''))
-              .filter(Boolean)
-          : [];
-        const clampedLogs = clampArray(logs, MAX_BATTLE_LOGS, `battle logs for ${b.id}`, true);
+      const involvedFleetIds = Array.isArray(b.involvedFleetIds)
+        ? b.involvedFleetIds.filter((id: unknown) => typeof id === 'string' && fleetIds.has(id))
+        : [];
+      if (involvedFleetIds.length === 0) return;
 
-        const turnCreated = isFiniteNumber(b.turnCreated) ? b.turnCreated : 0;
-        const rawTurnResolved = isFiniteNumber(b.turnResolved) ? b.turnResolved : undefined;
-        const turnResolved = b.status === 'resolved' ? (rawTurnResolved ?? turnCreated) : rawTurnResolved;
+      const rawLogs: unknown[] = Array.isArray(b.logs) ? b.logs : [];
+      const logs: string[] = rawLogs
+        .map((entry: unknown) => clampText(entry, MAX_LOG_TEXT_LENGTH, ''))
+        .filter((entry): entry is string => Boolean(entry));
+      const clampedLogs = clampArray(logs, MAX_BATTLE_LOGS, `battle logs for ${b.id}`, true);
 
-        const winnerRaw = b.winnerFactionId !== undefined ? b.winnerFactionId : b.winner;
-        const winnerFactionId =
-          winnerRaw === 'draw'
-            ? 'draw'
-            : typeof winnerRaw === 'string' && (!validFactionIds || validFactionIds.has(winnerRaw))
-              ? winnerRaw
-              : undefined;
+      const turnCreated = isFiniteNumber(b.turnCreated) ? b.turnCreated : 0;
+      const rawTurnResolved = isFiniteNumber(b.turnResolved) ? b.turnResolved : undefined;
+      const turnResolved = b.status === 'resolved' ? (rawTurnResolved ?? turnCreated) : rawTurnResolved;
 
-        const initialShips = Array.isArray(b.initialShips)
-          ? b.initialShips
-              .map((s: any) => {
-                if (typeof s?.shipId !== 'string' || typeof s?.fleetId !== 'string') return null;
-                const factionId = typeof s.factionId === 'string' ? s.factionId : s.faction;
-                if (typeof factionId !== 'string') return null;
-                if (validFactionIds && !validFactionIds.has(factionId)) return null;
-                if (!isEnumValue(SHIP_TYPES, s.type)) return null;
-                if (!isFiniteNumber(s.maxHp) || !isFiniteNumber(s.startingHp)) return null;
-                return {
-                  shipId: s.shipId,
-                  fleetId: s.fleetId,
-                  factionId,
-                  type: s.type,
-                  maxHp: s.maxHp,
-                  startingHp: s.startingHp
-                };
-              })
-              .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-          : undefined;
+      const winnerRaw = b.winnerFactionId !== undefined ? b.winnerFactionId : b.winner;
+      const winnerFactionId =
+        winnerRaw === 'draw'
+          ? 'draw'
+          : typeof winnerRaw === 'string' && (!validFactionIds || validFactionIds.has(winnerRaw))
+            ? winnerRaw
+            : undefined;
 
-        const survivorShipIds = Array.isArray(b.survivorShipIds)
-          ? b.survivorShipIds.filter((id: unknown) => typeof id === 'string')
-          : undefined;
+      const rawInitialShips: unknown[] = Array.isArray(b.initialShips) ? b.initialShips : [];
+      const initialShips = rawInitialShips
+        .map((entry: unknown) => {
+          const snapshot = entry as any;
+          if (typeof snapshot?.shipId !== 'string' || typeof snapshot?.fleetId !== 'string') return null;
+          const factionId = typeof snapshot.factionId === 'string' ? snapshot.factionId : snapshot.faction;
+          if (typeof factionId !== 'string') return null;
+          if (validFactionIds && !validFactionIds.has(factionId)) return null;
+          if (!isEnumValue(SHIP_TYPES, snapshot.type)) return null;
+          if (!isFiniteNumber(snapshot.maxHp) || !isFiniteNumber(snapshot.startingHp)) return null;
+          return {
+            shipId: snapshot.shipId,
+            fleetId: snapshot.fleetId,
+            factionId,
+            type: snapshot.type,
+            maxHp: snapshot.maxHp,
+            startingHp: snapshot.startingHp
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+      const normalizedInitialShips = initialShips.length > 0 ? initialShips : undefined;
 
-        const shipsLostRaw = sanitizeNumberRecord(b.shipsLost);
-        const shipsLost = Object.keys(shipsLostRaw).length > 0 ? shipsLostRaw : undefined;
+      const survivorShipIds = Array.isArray(b.survivorShipIds)
+        ? b.survivorShipIds.filter((id: unknown) => typeof id === 'string')
+        : undefined;
 
-        return {
-          id: b.id,
-          systemId: b.systemId,
-          turnCreated,
-          turnResolved,
-          status: b.status as BattleStatus,
-          involvedFleetIds,
-          logs: clampedLogs,
-          initialShips: initialShips && initialShips.length > 0 ? initialShips : undefined,
-          survivorShipIds,
-          winnerFactionId,
-          roundsPlayed: isFiniteNumber(b.roundsPlayed) ? b.roundsPlayed : undefined,
-          shipsLost,
-          missilesIntercepted: isFiniteNumber(b.missilesIntercepted) ? b.missilesIntercepted : undefined,
-          projectilesDestroyedByPd: isFiniteNumber(b.projectilesDestroyedByPd) ? b.projectilesDestroyedByPd : undefined
-        };
-      })
-      .filter((battle): battle is Battle => Boolean(battle));
+      const shipsLostRaw = sanitizeNumberRecord(b.shipsLost);
+      const shipsLost = Object.keys(shipsLostRaw).length > 0 ? shipsLostRaw : undefined;
 
-    const logsDto = Array.isArray(dto.logs) ? dto.logs : [];
-    const sanitizedLogs = clampArray(
-      logsDto
-        .map(sanitizeLogEntry)
-        .filter((entry): entry is LogEntry => Boolean(entry)),
-      MAX_LOG_ENTRIES,
-      'logs',
-      true
-    );
+      const battle: Battle = {
+        id: b.id,
+        systemId: b.systemId,
+        turnCreated,
+        turnResolved,
+        status: b.status as BattleStatus,
+        involvedFleetIds,
+        logs: clampedLogs,
+        initialShips: normalizedInitialShips,
+        survivorShipIds,
+        winnerFactionId,
+        roundsPlayed: isFiniteNumber(b.roundsPlayed) ? b.roundsPlayed : undefined,
+        shipsLost,
+        missilesIntercepted: isFiniteNumber(b.missilesIntercepted) ? b.missilesIntercepted : undefined,
+        projectilesDestroyedByPd: isFiniteNumber(b.projectilesDestroyedByPd) ? b.projectilesDestroyedByPd : undefined
+      };
+
+      battles.push(battle);
+    });
+
+    const logsDto: unknown[] = Array.isArray(dto.logs) ? dto.logs : [];
+    const normalizedLogs = logsDto
+      .map((entry: unknown, index: number) => sanitizeLogEntry(entry, index))
+      .filter((entry): entry is LogEntry => Boolean(entry));
+    const sanitizedLogs = clampArray<LogEntry>(normalizedLogs, MAX_LOG_ENTRIES, 'logs', true);
 
     const messagesDto = Array.isArray(dto.messages) ? dto.messages : [];
     const clampedMessagesDto = clampArray(messagesDto, MAX_MESSAGE_ENTRIES, 'messages', true);

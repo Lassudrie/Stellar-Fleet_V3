@@ -24,9 +24,11 @@ let currentLevel: LogLevel = parseLogLevel(envMeta?.env?.VITE_LOG_LEVEL) ?? defa
 
 const shouldLog = (level: LogLevel) => LEVEL_ORDER[level] <= LEVEL_ORDER[currentLevel];
 
+type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug';
+
 const logWithLevel =
-  <T extends keyof Console>(level: LogLevel, method: T) =>
-  (...args: Parameters<Console[T]>) => {
+  (level: LogLevel, method: ConsoleMethod) =>
+  (...args: unknown[]) => {
     if (shouldLog(level)) {
       // Some environments may not implement console.debug explicitly.
       const fallbackMethod = console[method] ?? console.log;

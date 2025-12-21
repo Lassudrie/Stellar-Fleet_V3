@@ -196,7 +196,10 @@ export const resolveBattle = (
         projectilesDestroyedByPd: 0,
         ammunitionByFaction: {}
       },
-      survivingFleets: involvedFleets // Return fleets unchanged
+      survivingFleets: involvedFleets, // Return fleets unchanged
+      destroyedShipIds: [],
+      destroyedFleetIds: [],
+      destroyedArmyIds: []
     };
   }
 

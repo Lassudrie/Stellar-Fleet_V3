@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "typecheck:watch": "tsc --noEmit --watch",
