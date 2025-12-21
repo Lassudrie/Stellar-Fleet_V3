@@ -6,7 +6,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
 import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
@@ -1983,6 +1983,111 @@ const tests: TestCase[] = [
         ok: false,
         error: 'Fleet is in combat and cannot receive commands.'
       });
+    }
+  },
+  {
+    name: 'AI ignores fleets in combat when scheduling commands',
+    run: () => {
+      const aiFaction: FactionState = { id: 'ai', name: 'AI', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
+      const enemyFaction: FactionState = { id: 'enemy', name: 'Enemy', color: '#ff0000', isPlayable: true };
+
+      const systems: StarSystem[] = [
+        { ...createSystem('ai-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' },
+        { ...createSystem('frontier', enemyFaction.id), position: { x: 150, y: 0, z: 0 }, resourceType: 'gas' }
+      ];
+
+      const idleFleet = createFleet('ai-idle', aiFaction.id, { ...systems[0].position }, [
+        { id: 'ai-idle-1', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null },
+        { id: 'ai-idle-2', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+      ]);
+      const combatFleet: Fleet = {
+        ...createFleet('ai-combat', aiFaction.id, { ...systems[0].position }, [
+          { id: 'ai-combat-1', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT
+      };
+
+      const enemyBattleFleet: Fleet = {
+        ...createFleet('enemy-raid', enemyFaction.id, { ...systems[0].position }, [
+          { id: 'enemy-raid-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT
+      };
+      const battle: Battle = {
+        id: 'battle-frontier',
+        systemId: systems[0].id,
+        turnCreated: 0,
+        status: 'scheduled',
+        involvedFleetIds: [combatFleet.id, enemyBattleFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        factions: [aiFaction, enemyFaction],
+        systems,
+        fleets: [idleFleet, combatFleet, enemyBattleFleet],
+        battles: [battle],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        playerFactionId: enemyFaction.id
+      });
+
+      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(99));
+      const moveCommands = commands.filter(cmd => cmd.type === 'MOVE_FLEET');
+
+      assert.strictEqual(moveCommands.length, 1, 'AI should issue one move toward the frontier system');
+      assert.strictEqual(moveCommands[0].fleetId, idleFleet.id, 'Only commandable fleets should be moved');
+      assert.ok(
+        !commands.some(
+          cmd => cmd.type !== 'AI_UPDATE_STATE' && 'fleetId' in cmd && (cmd as { fleetId?: string }).fleetId === combatFleet.id
+        ),
+        'Combat fleets must be ignored'
+      );
+    }
+  },
+  {
+    name: 'AI ignores retreating fleets when scheduling commands',
+    run: () => {
+      const aiFaction: FactionState = { id: 'ai-retreat', name: 'AI Retreat', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
+      const enemyFaction: FactionState = { id: 'enemy-retreat', name: 'Enemy Retreat', color: '#ff0000', isPlayable: true };
+
+      const systems: StarSystem[] = [
+        { ...createSystem('retreat-home', aiFaction.id), position: { x: 0, y: 0, z: 0 }, resourceType: 'gas' },
+        { ...createSystem('retreat-frontier', enemyFaction.id), position: { x: 200, y: 0, z: 0 }, resourceType: 'gas' }
+      ];
+
+      const retreatingFleet: Fleet = {
+        ...createFleet('ai-retreating', aiFaction.id, { ...systems[0].position }, [
+          { id: 'ai-retreating-1', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+        ]),
+        retreating: true
+      };
+      const readyFleet = createFleet('ai-ready', aiFaction.id, { ...systems[0].position }, [
+        { id: 'ai-ready-1', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+      ]);
+
+      const enemyFrontierFleet = createFleet('enemy-retreat-frontier', enemyFaction.id, { ...systems[1].position }, [
+        { id: 'enemy-retreat-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({
+        factions: [aiFaction, enemyFaction],
+        systems,
+        fleets: [retreatingFleet, readyFleet, enemyFrontierFleet],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        playerFactionId: enemyFaction.id
+      });
+
+      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(7));
+      const moveCommands = commands.filter(cmd => cmd.type === 'MOVE_FLEET');
+
+      assert.strictEqual(moveCommands.length, 1, 'AI should still act with available fleets');
+      assert.strictEqual(moveCommands[0].fleetId, readyFleet.id, 'Only non-retreating fleets should move');
+      assert.ok(
+        !commands.some(
+          cmd => cmd.type !== 'AI_UPDATE_STATE' && 'fleetId' in cmd && (cmd as { fleetId?: string }).fleetId === retreatingFleet.id
+        ),
+        'Retreating fleets must be ignored'
+      );
     }
   }
 ];
