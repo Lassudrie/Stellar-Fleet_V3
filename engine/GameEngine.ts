@@ -34,20 +34,22 @@ export class GameEngine {
     }
 
     private commitState(nextState: GameState) {
-        this.state = nextState;
-        this.syncRngState();
+        this.state = this.withSyncedRngState(nextState);
         this.notify();
     }
 
-    private syncRngState() {
+    private withSyncedRngState(state: GameState): GameState {
         // Persist current RNG cursor to state so next save/load continues correctly
-        this.state.rngState = this.rng.getState();
+        const syncedState: GameState = {
+            ...state,
+            rngState: this.rng.getState()
+        };
 
         // DEV Assertion: Check for duplicate Log IDs
         if ((import.meta as any).env && (import.meta as any).env.DEV) {
             const seen = new Set<string>();
             let duplicates = 0;
-            for (const log of this.state.logs) {
+            for (const log of syncedState.logs) {
                 if (seen.has(log.id)) {
                     console.error(`[GameEngine] CRITICAL: Duplicate Log ID detected: ${log.id}`);
                     duplicates++;
@@ -58,6 +60,8 @@ export class GameEngine {
                 console.error(`[GameEngine] Found ${duplicates} duplicate IDs in logs. RNG Determinism broken.`);
             }
         }
+
+        return syncedState;
     }
 
     notify() {
