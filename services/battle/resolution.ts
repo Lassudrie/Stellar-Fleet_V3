@@ -122,6 +122,9 @@ export const resolveBattle = (
   state: GameState,
   turn: number
 ): BattleResolutionResult => {
+  const logReference = `[Turn ${turn}]`;
+  const formatLog = (message: string) => `${logReference} ${message}`;
+
   // 1. SETUP - Isolate Determinism
   let seedHash = 0;
   const seedString = `${battle.id}_${battle.turnCreated}`;
@@ -184,7 +187,7 @@ export const resolveBattle = (
         turnResolved: turn,
         status: 'resolved',
         initialShips: [],
-        logs: [...battle.logs, 'Battle resolved as draw - no valid combatants.'],
+        logs: [...battle.logs, formatLog('Battle resolved as draw - no valid combatants.')],
         winnerFactionId: 'draw',
         roundsPlayed: 0,
         shipsLost: {},
@@ -199,6 +202,7 @@ export const resolveBattle = (
 
   const projectiles: Projectile[] = [];
   const logs: string[] = [];
+  const appendLog = (message: string) => logs.push(formatLog(message));
   let roundsPlayed = 0;
 
   // Stats
@@ -214,14 +218,14 @@ export const resolveBattle = (
 
     attacker.killHistory.push({
       id: rng.id('kill'),
-      day: state.day,
+      day: turn,
       turn,
       targetId: target.shipId,
       targetType: target.type,
       targetFactionId: target.faction
     });
 
-    logs.push(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
+    appendLog(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
   };
 
   // 3. ROUND LOOP
@@ -232,7 +236,7 @@ export const resolveBattle = (
     const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
     if (aliveFactions.size <= 1) break;
 
-    logs.push(`--- ROUND ${round} ---`);
+    appendLog(`--- ROUND ${round} ---`);
     
     // --- PHASE 1: FLIGHT UPDATES ---
     // Update ETA for EXISTING projectiles. 
@@ -344,7 +348,7 @@ export const resolveBattle = (
         if (missileCount > 0) {
           firedParts.push(`${missileCount} missiles [ETA:${ETA_MISSILE}]`);
         }
-        logs.push(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
+        appendLog(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
       }
     }
 
@@ -385,7 +389,7 @@ export const resolveBattle = (
             defender.interceptorsLeft--;
             if (rng.next() < INTERCEPTION_BASE_CHANCE) {
                 p.hp = 0;
-                logs.push(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
+                appendLog(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
                 totalMissilesIntercepted++;
             }
         }
@@ -421,7 +425,7 @@ export const resolveBattle = (
             pdOutput -= dmg;
 
             if (threat.hp <= 0) {
-                 logs.push(`>> PD from ${short(defender.shipId)} destroyed ${threat.type}.`);
+                 appendLog(`>> PD from ${short(defender.shipId)} destroyed ${threat.type}.`);
                  totalProjectilesDestroyedByPd++;
             }
         }
@@ -441,7 +445,7 @@ export const resolveBattle = (
                 if (target && target.currentHp > 0) {
                     const previousHp = target.currentHp;
                     target.currentHp -= p.damage;
-                    logs.push(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
+                    appendLog(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
 
                     if (previousHp > 0 && target.currentHp <= 0) {
                       recordKill(p.sourceId, target, p.type);
@@ -465,7 +469,7 @@ export const resolveBattle = (
             const dmg = attacker.damage;
             const previousHp = target.currentHp;
             target.currentHp -= dmg;
-            logs.push(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
+            appendLog(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
 
             if (previousHp > 0 && target.currentHp <= 0) {
               recordKill(attacker.shipId, target, 'kinetic');
@@ -529,7 +533,7 @@ export const resolveBattle = (
   const attritionAdjustedFleets: Fleet[] = [];
 
   survivingFleets.forEach(fleet => {
-    const penalizedShips: ShipEntity[] = [];
+        const penalizedShips: ShipEntity[] = [];
 
     fleet.ships.forEach(ship => {
       const attritionDamage = Math.max(
@@ -546,9 +550,9 @@ export const resolveBattle = (
       if (remainingHp > 0) {
         penalizedShips.push({ ...ship, hp: remainingHp });
         adjustedSurvivorIds.push(ship.id);
-        attritionLogs.push(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`);
+        attritionLogs.push(formatLog(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`));
       } else {
-        attritionLogs.push(`xx ${short(ship.id)} was lost to post-battle failures.`);
+        attritionLogs.push(formatLog(`xx ${short(ship.id)} was lost to post-battle failures.`));
       }
     });
 
@@ -567,7 +571,7 @@ export const resolveBattle = (
 
   logs.push(...attritionLogs);
 
-  logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
+  appendLog(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
   const destroyedShipIds = battleShips.filter(s => s.currentHp <= 0).map(s => s.shipId);
   const survivingFleetIds = new Set(survivingFleets.map(fleet => fleet.id));

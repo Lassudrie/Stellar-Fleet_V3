@@ -1,5 +1,5 @@
 import React from 'react';
-import { Army, FactionState, Fleet, ShipEntity, ShipConsumables } from '../../types';
+import { Army, FactionState, Fleet, ShipEntity, ShipConsumables, ShipKillRecord } from '../../types';
 import { SHIP_STATS } from '../../data/static';
 import { fleetLabel } from '../../engine/idUtils';
 
@@ -22,7 +22,8 @@ const getAmmoFromConsumables = (
 const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies }) => {
   const stats = SHIP_STATS[ship.type];
   const carriedArmy = armies.find(a => a.id === ship.carriedArmyId);
-  const kills = [...(ship.killHistory ?? [])].sort((a, b) => a.turn - b.turn || a.day - b.day);
+  const killTurn = (entry: ShipKillRecord) => entry.turn ?? entry.day ?? 0;
+  const kills = [...(ship.killHistory ?? [])].sort((a, b) => killTurn(a) - killTurn(b));
 
   const missileCount = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
   const torpedoCount = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
@@ -72,14 +73,14 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
       )}
 
       <div className="bg-slate-900/60 border border-slate-700 rounded-md p-3 text-sm">
-        <div className="font-semibold mb-2">Kill log</div>
-        {kills.length === 0 ? (
-          <div className="text-slate-400">No confirmed kills.</div>
-        ) : (
-          <ul className="space-y-1">
-            {kills.map(entry => (
-              <li key={entry.id} className="flex justify-between gap-2">
-                <div className="text-slate-300">Day {entry.day} (Turn {entry.turn})</div>
+          <div className="font-semibold mb-2">Kill log</div>
+          {kills.length === 0 ? (
+            <div className="text-slate-400">No confirmed kills.</div>
+          ) : (
+            <ul className="space-y-1">
+              {kills.map(entry => (
+                <li key={entry.id} className="flex justify-between gap-2">
+                <div className="text-slate-300">Turn {killTurn(entry)}</div>
                 <div className="font-semibold text-slate-100 text-right">
                   {entry.targetType} — {entry.targetId}
                 </div>
