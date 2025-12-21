@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { RNG } from '../rng';
+import { shortId } from '../idUtils';
 import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
 import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
 
@@ -7,6 +8,8 @@ interface TestCase {
   name: string;
   run: () => void;
 }
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const tests: TestCase[] = [
   {
@@ -51,6 +54,60 @@ const tests: TestCase[] = [
       assert.strictEqual(rng.getState(), 0, 'State should preserve zero');
       rng.setState(rng.getState());
       assert.strictEqual(rng.getState(), 0, 'State round-trip should be idempotent');
+    }
+  },
+  {
+    name: 'id() returns RFC4122 UUID v4 with deterministic prefix',
+    run: () => {
+      const rng = new RNG(1);
+      const ids = Array.from({ length: 3 }, () => rng.id('fleet'));
+      const expected = [
+        'fleet_f3ea87a0-c949-4300-abc4-0687fd2726fb',
+        'fleet_2b9de7f7-3066-4647-b001-e39c5c9f82b8',
+        'fleet_7007016d-71b7-4cfe-8aa6-8c742e3b217d'
+      ];
+      assert.deepStrictEqual(ids, expected, 'UUID sequence for seed 1 should remain stable');
+      ids.forEach(id => {
+        const [, uuid] = id.split('_');
+        assert.ok(UUID_V4_REGEX.test(uuid), `ID ${id} must include a valid UUID v4`);
+      });
+    }
+  },
+  {
+    name: 'id() remains deterministic for identical seeds',
+    run: () => {
+      const rngA = new RNG(12345);
+      const rngB = new RNG(12345);
+      const sequenceA = Array.from({ length: 5 }, () => rngA.id('ship'));
+      const sequenceB = Array.from({ length: 5 }, () => rngB.id('ship'));
+      assert.deepStrictEqual(sequenceA, sequenceB, 'ID sequences should match for identical seeds');
+    }
+  },
+  {
+    name: 'id() generates unique UUIDs over a reasonable sequence',
+    run: () => {
+      const rng = new RNG(99);
+      const count = 10_000;
+      const seen = new Set<string>();
+
+      for (let i = 0; i < count; i++) {
+        const id = rng.id('x');
+        const [, uuid] = id.split('_');
+        if (seen.has(id)) {
+          throw new Error(`Duplicate ID generated at iteration ${i}: ${id}`);
+        }
+        assert.ok(UUID_V4_REGEX.test(uuid), `Generated ID does not match UUID v4 format: ${id}`);
+        seen.add(id);
+      }
+
+      assert.strictEqual(seen.size, count, 'All generated IDs should be unique');
+    }
+  },
+  {
+    name: 'shortId() returns a stable truncated segment for UUID-based IDs',
+    run: () => {
+      const id = 'fleet_550e8400-e29b-41d4-a716-446655440000';
+      assert.strictEqual(shortId(id), '550E8400', 'shortId should return the first UUID segment in uppercase');
     }
   }
 ];

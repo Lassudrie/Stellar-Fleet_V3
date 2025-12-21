@@ -5,8 +5,16 @@
 export const shortId = (id: string): string => {
   if (!id) return '???';
   const parts = id.split('_');
-  // Return the last segment (the hash), uppercase for better visibility
-  return parts[parts.length - 1].toUpperCase();
+  const suffix = parts[parts.length - 1];
+  if (!suffix) return '???';
+
+  const uuidSegment = suffix.includes('-') ? suffix.split('-')[0] : suffix;
+  if (!uuidSegment) return '???';
+
+  const normalized = uuidSegment.replace(/[^a-zA-Z0-9]/g, '');
+  if (!normalized) return '???';
+
+  return normalized.slice(0, 8).toUpperCase();
 };
 
 /**

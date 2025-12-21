@@ -3,6 +3,7 @@ import React, { useMemo, useEffect, useRef } from 'react';
 import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../types';
 import { useI18n } from '../../i18n';
 import { BattleOutcome, FactionRegistry, resolveBattleOutcome } from '../../engine/battle/outcome';
+import { shortId } from '../../engine/idUtils';
 
 interface BattleScreenProps {
   battleId?: string;
@@ -85,11 +86,11 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       const buildSide = (targetFactionId: string) => {
           const snaps = initialShips.filter(s => s.factionId === targetFactionId);
           const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
-          const fleetsFromSnapshots = snaps.map(s => s.fleetId.split('_').pop()?.toUpperCase() || '???');
+          const fleetsFromSnapshots = snaps.map(s => shortId(s.fleetId));
           const fleetsFromInvolved = (battle.involvedFleetIds || [])
               .map(id => gameState.fleets?.find(f => f.id === id))
               .filter((fleet): fleet is Fleet => fleet?.factionId === targetFactionId)
-              .map(fleet => fleet.id.split('_').pop()?.toUpperCase() || fleet.id.toUpperCase());
+              .map(fleet => shortId(fleet.id));
           const fleets = Array.from(new Set([...fleetsFromSnapshots, ...fleetsFromInvolved]));
 
           const composition: Record<string, { engaged: number; lost: number }> = {};
