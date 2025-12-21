@@ -78,9 +78,15 @@ export class RNG {
 
   // Gaussian / Normal distribution approximation
   public gaussian(): number {
-    let u = 0, v = 0;
-    while(u === 0) u = this.next();
-    while(v === 0) v = this.next();
-    return Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+    // Irwin-Hall approximation using 6 uniform samples.
+    // This avoids platform-dependent Math implementations (sin/cos/log)
+    // while keeping a zero-mean, unit-variance shape suitable for gameplay noise.
+    let sum = 0;
+    for (let i = 0; i < 6; i += 1) {
+      sum += this.next();
+    }
+    const centered = sum - 3; // mean = samples / 2
+    const invStdDev = 1.4142135623730951; // 1 / sqrt(0.5)
+    return centered * invStdDev;
   }
 }

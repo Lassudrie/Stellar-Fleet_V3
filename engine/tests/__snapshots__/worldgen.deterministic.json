@@ -1,0 +1,117 @@
+{
+  "systems": [
+    {
+      "name": "Omipi",
+      "position": {
+        "x": -35.606,
+        "y": 0.856,
+        "z": 1.193
+      },
+      "ownerFactionId": "draco",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Upslon",
+      "position": {
+        "x": -32.099,
+        "y": -0.128,
+        "z": -23.254
+      },
+      "ownerFactionId": "lyra",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Pini",
+      "position": {
+        "x": -35.567,
+        "y": -0.739,
+        "z": -17.722
+      },
+      "ownerFactionId": "lyra",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Rhopi",
+      "position": {
+        "x": 4.973,
+        "y": 0.198,
+        "z": -13.539
+      },
+      "ownerFactionId": "lyra",
+      "isHomeworld": true,
+      "resourceType": "gas"
+    },
+    {
+      "name": "Psinus",
+      "position": {
+        "x": -33.851,
+        "y": -0.323,
+        "z": 16.89
+      },
+      "ownerFactionId": "draco",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Xima",
+      "position": {
+        "x": -29.802,
+        "y": 0.454,
+        "z": -10.652
+      },
+      "ownerFactionId": "lyra",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Nuphi",
+      "position": {
+        "x": -33.64,
+        "y": 0.786,
+        "z": 22.508
+      },
+      "ownerFactionId": "draco",
+      "isHomeworld": true,
+      "resourceType": "none"
+    },
+    {
+      "name": "Thetau",
+      "position": {
+        "x": -43.824,
+        "y": 0.541,
+        "z": 6.567
+      },
+      "ownerFactionId": "draco",
+      "isHomeworld": false,
+      "resourceType": "gas"
+    },
+    {
+      "name": "Thechi",
+      "position": {
+        "x": 13.993,
+        "y": 0.326,
+        "z": -27.821
+      },
+      "ownerFactionId": "lyra",
+      "isHomeworld": false,
+      "resourceType": "none"
+    },
+    {
+      "name": "Signi",
+      "position": {
+        "x": -37.327,
+        "y": 0.352,
+        "z": 8.218
+      },
+      "ownerFactionId": "draco",
+      "isHomeworld": false,
+      "resourceType": "none"
+    }
+  ],
+  "fleetCount": 0,
+  "armyCount": 14,
+  "rngState": 393786651132
+}

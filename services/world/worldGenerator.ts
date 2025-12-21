@@ -125,6 +125,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           const angle = armOffset + (d / radius) * twist + rng.range(-0.3, 0.3); // Add scatter to angle
           
           // Add scatter to radius (width of arm)
+          // Deterministic Gaussian approximation keeps cross-runtime reproducibility
           const scatter = rng.gaussian() * (radius * 0.05);
 
           return vec3(
