@@ -6,7 +6,7 @@ import { RNG } from './rng';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
 import { distSq, dist } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
-import { CAPTURE_RANGE } from '../data/static';
+import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
 
@@ -178,7 +178,7 @@ const updateMemory = (
     f => f.factionId !== factionId && isCommandableFleet(f)
   );
   const refreshedSightings = new Set<string>();
-  const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
+  const captureSq = CAPTURE_RANGE_SQ;
 
   visibleEnemyFleets.forEach(fleet => {
     let closestSystemId: string | null = null;
@@ -276,7 +276,7 @@ const evaluateSystems = (
 
       const visibleFleetsHere = perceivedState.fleets
         .filter(f => f.factionId !== factionId && isCommandableFleet(f))
-        .filter(f => distSq(f.position, sys.position) <= (CAPTURE_RANGE * CAPTURE_RANGE));
+        .filter(f => distSq(f.position, sys.position) <= CAPTURE_RANGE_SQ);
 
       const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
 

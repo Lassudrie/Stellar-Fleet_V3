@@ -1,4 +1,4 @@
-import { CAPTURE_RANGE, ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
+import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../data/static';
 import { Fleet, FleetState, GameState, StarSystem } from '../types';
 import { Vec3, distSq } from './math/vec3';
 
@@ -39,7 +39,7 @@ export const areFleetsSharingOrbit = (a: Fleet, b: Fleet): boolean =>
  */
 export const isOrbitContested = (system: StarSystem, fleetsOrState: Fleet[] | GameState): boolean => {
     const fleets = Array.isArray(fleetsOrState) ? fleetsOrState : fleetsOrState.fleets;
-    const captureSq = CAPTURE_RANGE * CAPTURE_RANGE;
+    const captureSq = CAPTURE_RANGE_SQ;
     const factionsInRange = new Set(
         fleets
             .filter(fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= captureSq)

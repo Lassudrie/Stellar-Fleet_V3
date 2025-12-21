@@ -1,6 +1,6 @@
 
 import { GameState, FactionId, Fleet } from '../types';
-import { CAPTURE_RANGE, SENSOR_RANGE } from '../data/static';
+import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, SENSOR_RANGE } from '../data/static';
 import { getTerritoryOwner } from './territory';
 import { Vec3, distSq } from './math/vec3';
 
@@ -30,7 +30,7 @@ export interface FleetVisibilitySensor {
 }
 
 // Performance optimization: squared distances
-const CAPTURE_SQ = CAPTURE_RANGE * CAPTURE_RANGE;
+const CAPTURE_SQ = CAPTURE_RANGE_SQ;
 const SENSOR_SQ = SENSOR_RANGE * SENSOR_RANGE;
 
 /**
