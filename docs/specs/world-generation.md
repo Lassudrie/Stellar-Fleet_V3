@@ -54,3 +54,7 @@ Tous les systèmes possédés reçoivent des armées déployées sur les planèt
 - Les systèmes non affectés après allocation demeurent neutres ; la part neutre cible est pilotée par `neutralShare`.  
 - Un log d’initialisation documente le seed et la topologie (`[WorldGen] Generated …`).  
 - Les systèmes générés conservent `ownerFactionId = null` lorsque laissés neutres, tout en exposant leurs ressources et corps planétaires.
+
+## 9. Déterminisme multi-runtime
+- `RNG.gaussian()` utilise une approximation rationnelle de l’inverse de la loi normale (Acklam) pour éviter les divergences trigonométriques entre moteurs JS. Les échantillons sont bornés par un epsilon pour exclure 0 et 1.
+- Un snapshot de génération (`spiral_convergence` avec seed `4242`) valide les positions, propriétaires et échantillons de systèmes afin de détecter toute dérive cross-runtime.

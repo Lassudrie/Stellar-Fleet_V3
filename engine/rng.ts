@@ -6,6 +6,43 @@ import { logger } from '../tools/devLogger';
 export class RNG {
   private state: number;
 
+  private static readonly GAUSSIAN_EPSILON = 1e-12;
+
+  // Coefficients for Acklam's rational approximation of the probit (inverse normal CDF).
+  // Source: https://web.archive.org/web/20150910002615/http://home.online.no/~pjacklam/notes/invnorm/
+  private static readonly PROBIT_A = [
+    -3.969683028665376e+01,
+    2.209460984245205e+02,
+    -2.759285104469687e+02,
+    1.38357751867269e+02,
+    -3.066479806614716e+01,
+    2.506628277459239e+00
+  ];
+
+  private static readonly PROBIT_B = [
+    -5.447609879822406e+01,
+    1.615858368580409e+02,
+    -1.556989798598866e+02,
+    6.680131188771972e+01,
+    -1.328068155288572e+01
+  ];
+
+  private static readonly PROBIT_C = [
+    -7.784894002430293e-03,
+    -3.223964580411365e-01,
+    -2.400758277161838e+00,
+    -2.549732539343734e+00,
+    4.374664141464968e+00,
+    2.938163982698783e+00
+  ];
+
+  private static readonly PROBIT_D = [
+    7.784695709041462e-03,
+    3.224671290700398e-01,
+    2.445134137142996e+00,
+    3.754408661907416e+00
+  ];
+
   constructor(seed: number) {
     this.state = this.normalizeState(seed);
   }
@@ -80,10 +117,42 @@ export class RNG {
   }
 
   // Gaussian / Normal distribution approximation
+  // Deterministic across runtimes thanks to a rational approximation of the inverse CDF (Acklam).
   public gaussian(): number {
-    let u = 0, v = 0;
-    while(u === 0) u = this.next();
-    while(v === 0) v = this.next();
-    return Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+    // Clamp the uniform sample to avoid infinities at 0/1 boundaries across runtimes.
+    const u = Math.min(
+      1 - RNG.GAUSSIAN_EPSILON,
+      Math.max(RNG.GAUSSIAN_EPSILON, this.next())
+    );
+    return this.inverseNormalProbit(u);
+  }
+
+  private inverseNormalProbit(p: number): number {
+    const plow = 0.02425;
+    const phigh = 1 - plow;
+
+    if (p < plow) {
+      const q = Math.sqrt(-2 * Math.log(p));
+      return -this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
+    }
+
+    if (p > phigh) {
+      const q = Math.sqrt(-2 * Math.log(1 - p));
+      return this.evaluateProbit(q, RNG.PROBIT_C, RNG.PROBIT_D);
+    }
+
+    const q = p - 0.5;
+    const r = q * q;
+    return (
+      this.evaluateProbit(r, RNG.PROBIT_A, RNG.PROBIT_B) * q
+    );
+  }
+
+  private evaluateProbit(x: number, numerator: number[], denominator: number[]): number {
+    const num =
+      (((((numerator[0] * x + numerator[1]) * x + numerator[2]) * x + numerator[3]) * x + numerator[4]) * x + numerator[5]);
+    const den =
+      ((((denominator[0] * x + denominator[1]) * x + denominator[2]) * x + denominator[3]) * x + 1);
+    return num / den;
   }
 }
