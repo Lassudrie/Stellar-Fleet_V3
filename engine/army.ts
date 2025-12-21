@@ -1,7 +1,7 @@
 
 import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody } from '../types';
 import { RNG } from './rng';
-import { devLog } from '../tools/devLogger';
+import { logger } from '../tools/devLogger';
 import { getPlanetById } from './planets';
 
 export const MIN_ARMY_CREATION_STRENGTH = 10000;
@@ -28,13 +28,13 @@ export const createArmy = (
   
   // Rule Check: Minimum Strength
   if (strength < MIN_ARMY_CREATION_STRENGTH) {
-    console.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
+    logger.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
     return null;
   }
 
   // Rule Check: Valid Container ID (Basic check)
   if (!containerId) {
-    console.error(`[Army] Creation Failed: No container ID provided.`);
+    logger.error('[Army] Creation Failed: No container ID provided.');
     return null;
   }
 
@@ -48,7 +48,7 @@ export const createArmy = (
     containerId
   };
 
-  devLog(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
+  logger.debug(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
   return army;
 };
 
@@ -275,17 +275,17 @@ export const canLoadArmy = (ship: ShipEntity): boolean => {
  */
 export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
     if (!canLoadArmy(ship)) {
-        console.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
+        logger.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
         return false;
     }
     
     if (army.factionId !== fleet.factionId) {
-        console.error(`[Army] Load Failed: Faction mismatch.`);
+        logger.error('[Army] Load Failed: Faction mismatch.');
         return false;
     }
 
     if (army.state !== ArmyState.DEPLOYED) {
-        console.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
+        logger.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
         return false;
     }
 
@@ -294,7 +294,7 @@ export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): bo
     army.containerId = fleet.id;
     army.state = ArmyState.EMBARKED;
     
-    console.log(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
+    logger.debug(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
     return true;
 };
 
@@ -305,7 +305,7 @@ export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): bo
  */
 export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): boolean => {
     if (ship.carriedArmyId !== army.id) {
-        console.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
+        logger.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
         return false;
     }
 
@@ -313,7 +313,7 @@ export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetB
     army.state = ArmyState.DEPLOYED;
     army.containerId = planet.id;
     
-    console.log(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
+    logger.info(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
     return true;
 };
 
@@ -324,9 +324,9 @@ export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetB
 export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
     if (ship.carriedArmyId === army.id) {
         ship.carriedArmyId = null;
-        console.log(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
+        logger.info(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
     } else {
-        console.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
+        logger.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
     }
 };
 
