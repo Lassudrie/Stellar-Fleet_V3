@@ -34,15 +34,18 @@ export class GameEngine {
         }
     }
 
-    private syncRngState() {
+    private syncRngState(state: GameState): GameState {
         // Persist current RNG cursor to state so next save/load continues correctly
-        this.state.rngState = this.rng.getState();
+        const nextState: GameState = {
+            ...state,
+            rngState: this.rng.getState()
+        };
 
         // DEV Assertion: Check for duplicate Log IDs
         if ((import.meta as any).env && (import.meta as any).env.DEV) {
             const seen = new Set<string>();
             let duplicates = 0;
-            for (const log of this.state.logs) {
+            for (const log of nextState.logs) {
                 if (seen.has(log.id)) {
                     console.error(`[GameEngine] CRITICAL: Duplicate Log ID detected: ${log.id}`);
                     duplicates++;
@@ -53,6 +56,8 @@ export class GameEngine {
                 console.error(`[GameEngine] Found ${duplicates} duplicate IDs in logs. RNG Determinism broken.`);
             }
         }
+
+        return nextState;
     }
 
     notify() {
@@ -65,23 +70,20 @@ export class GameEngine {
     }
 
     advanceTurn() {
-        this.state = runTurn(this.state, this.rng);
-        this.syncRngState();
+        this.state = this.syncRngState(runTurn(this.state, this.rng));
         this.notify();
     }
 
     dispatchCommand(cmd: GameCommand) {
-        this.state = applyCommand(this.state, cmd, this.rng);
-        this.syncRngState();
+        this.state = this.syncRngState(applyCommand(this.state, cmd, this.rng));
         this.notify();
     }
 
     private updateMessages(updater: (messages: GameMessage[]) => GameMessage[]) {
-        this.state = {
+        this.state = this.syncRngState({
             ...this.state,
             messages: canonicalizeMessages(updater(this.state.messages))
-        };
-        this.syncRngState();
+        });
         this.notify();
     }
 
@@ -138,12 +140,12 @@ export class GameEngine {
 
         if (loadResult.count === 0) return false;
 
-        this.state = {
+        this.state = this.syncRngState({
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? loadResult.fleet : f)),
             armies: loadResult.armies,
             logs: [...this.state.logs, ...loadResult.logs]
-        };
+        });
 
         return true;
     }
@@ -183,12 +185,12 @@ export class GameEngine {
             updatedLogs = [...updatedLogs, ...riskOutcome.logs];
         }
 
-        this.state = {
+        this.state = this.syncRngState({
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
             armies: updatedArmies,
             logs: [...this.state.logs, ...updatedLogs]
-        };
+        });
 
         return true;
     }
@@ -206,13 +208,12 @@ export class GameEngine {
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
 
-            this.state = applyCommand(this.state, {
+            this.state = this.syncRngState(applyCommand(this.state, {
                 type: 'MOVE_FLEET',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
-            
-            this.syncRngState();
+            }, this.rng));
+
             this.notify();
             return { ok: true };
         }
@@ -229,13 +230,12 @@ export class GameEngine {
                 army.state === ArmyState.EMBARKED
             ).length;
 
-            this.state = applyCommand(this.state, {
+            this.state = this.syncRngState(applyCommand(this.state, {
                 type: 'ORDER_INVASION_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
+            }, this.rng));
 
-            this.syncRngState();
             this.notify();
             return { ok: true, deployedArmies: embarkedArmies };
         }
@@ -261,18 +261,16 @@ export class GameEngine {
 
             const loadedImmediately = this.tryImmediateLoad(fleet, system);
             if (loadedImmediately) {
-                this.syncRngState();
                 this.notify();
                 return { ok: true };
             }
 
-            this.state = applyCommand(this.state, {
+            this.state = this.syncRngState(applyCommand(this.state, {
                 type: 'ORDER_LOAD_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
+            }, this.rng));
 
-            this.syncRngState();
             this.notify();
             return { ok: true };
         }
@@ -292,18 +290,16 @@ export class GameEngine {
 
             const unloadedImmediately = this.tryImmediateUnload(fleet, system);
             if (unloadedImmediately) {
-                this.syncRngState();
                 this.notify();
                 return { ok: true };
             }
 
-            this.state = applyCommand(this.state, {
+            this.state = this.syncRngState(applyCommand(this.state, {
                 type: 'ORDER_UNLOAD_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
+            }, this.rng));
 
-            this.syncRngState();
             this.notify();
             return { ok: true };
         }
@@ -354,7 +350,7 @@ export class GameEngine {
                 type: 'info' as const
             };
 
-            this.state = {
+            this.state = this.syncRngState({
                 ...this.state,
                 fleets: this.state.fleets
                     .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
@@ -362,9 +358,8 @@ export class GameEngine {
                 armies: updatedArmies,
                 logs: [...this.state.logs, splitLog],
                 selectedFleetId: newFleet.id
-            };
+            });
 
-            this.syncRngState();
             this.notify();
             return { ok: true };
         }
@@ -405,7 +400,7 @@ export class GameEngine {
                 type: 'info' as const
             };
 
-            this.state = {
+            this.state = this.syncRngState({
                 ...this.state,
                 fleets: this.state.fleets
                     .filter(f => f.id !== sourceFleet.id)
@@ -413,9 +408,8 @@ export class GameEngine {
                 armies: updatedArmies,
                 logs: [...this.state.logs, mergeLog],
                 selectedFleetId: mergedTarget.id
-            };
+            });
 
-            this.syncRngState();
             this.notify();
             return { ok: true };
         }
