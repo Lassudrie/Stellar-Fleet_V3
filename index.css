@@ -1,141 +1,57 @@
-/* Safe Area Management */
-.safe-area {
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #050510;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #root {
+    width: 100vw;
+    height: 100vh;
+  }
+
+  canvas {
+    touch-action: none;
+  }
 }
 
-/* Custom Scrollbar */
-.custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: #475569 #0f172a; /* Slate-600 Slate-900 */
-}
+@layer utilities {
+  /* Safe Area Management */
+  .safe-area {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+  /* Custom Scrollbar */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #475569 #0f172a; /* Slate-600 Slate-900 */
+  }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: #0f172a; 
-}
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #475569;
-  border-radius: 3px;
-}
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: #64748b;
-}
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #475569;
+    border-radius: 3px;
+  }
 
-/* Animations (Mimicking tailwindcss-animate) */
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes zoomIn95 {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes slideInFromLeft {
-  from { opacity: 0; transform: translateX(-12px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes slideInFromBottom {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-in {
-  animation-fill-mode: forwards;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); /* Ease Out */
-}
-
-.fade-in {
-  animation-name: fadeIn;
-}
-
-.zoom-in-95 {
-  animation-name: zoomIn95;
-}
-
-.slide-in-from-left {
-  animation-name: slideInFromLeft;
-}
-
-.slide-in-from-bottom {
-  animation-name: slideInFromBottom;
-}
-
-/* Animation Durations */
-.duration-100 {
-  animation-duration: 100ms;
-}
-
-.duration-200 {
-  animation-duration: 200ms;
-}
-
-.duration-300 {
-  animation-duration: 300ms;
-}
-
-/* --- COMBAT ANIMATIONS --- */
-
-@keyframes damageFloat {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-30px) scale(1.2); opacity: 0; }
-}
-
-.animate-damage-float {
-  animation: damageFloat 0.8s ease-out forwards;
-}
-
-@keyframes beamFire {
-  0% { transform: scaleX(0); opacity: 0.8; }
-  20% { transform: scaleX(1); opacity: 1; }
-  100% { transform: scaleX(1); opacity: 0; }
-}
-
-.animate-beam {
-  animation: beamFire 0.4s ease-out forwards;
-  transform-origin: left;
-}
-
-.animate-beam-reverse {
-  animation: beamFire 0.4s ease-out forwards;
-  transform-origin: right;
-}
-
-@keyframes hitFlash {
-  0% { background-color: rgba(239, 68, 68, 0); }
-  10% { background-color: rgba(239, 68, 68, 0.5); }
-  100% { background-color: rgba(239, 68, 68, 0); }
-}
-
-.animate-hit {
-  animation: hitFlash 0.3s ease-out;
-}
-
-@keyframes shake {
-  0% { transform: translate(1px, 1px) rotate(0deg); }
-  10% { transform: translate(-1px, -2px) rotate(-1deg); }
-  20% { transform: translate(-3px, 0px) rotate(1deg); }
-  30% { transform: translate(3px, 2px) rotate(0deg); }
-  40% { transform: translate(1px, -1px) rotate(1deg); }
-  50% { transform: translate(-1px, 2px) rotate(-1deg); }
-  60% { transform: translate(-3px, 1px) rotate(0deg); }
-  70% { transform: translate(3px, 1px) rotate(-1deg); }
-  80% { transform: translate(-1px, -1px) rotate(1deg); }
-  90% { transform: translate(1px, 2px) rotate(0deg); }
-  100% { transform: translate(1px, -2px) rotate(-1deg); }
-}
-
-.animate-shake {
-  animation: shake 0.5s;
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+  }
 }
