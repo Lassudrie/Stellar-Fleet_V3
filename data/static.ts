@@ -11,7 +11,8 @@ export const ENABLE_V1_COMBAT = true;
 export const BASE_FLEET_SPEED = 25; 
 export const COMBAT_RANGE = 8;
 export const SENSOR_RANGE = 15;
-export const CAPTURE_RANGE = 5; 
+export const CAPTURE_RANGE = 5;
+export const CAPTURE_RANGE_SQ = CAPTURE_RANGE * CAPTURE_RANGE;
 
 // New: Territorial Control Radius (Matches Visuals)
 export const TERRITORY_RADIUS = 28;
