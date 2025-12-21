@@ -1106,6 +1106,44 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Combat fleets ignore split and merge commands in AI/replay flows',
+    run: () => {
+      const combatFleet: Fleet = {
+        ...createFleet('fleet-combat-split', 'blue', { ...baseVec }, [
+          { id: 'split-ship-1', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null },
+          { id: 'split-ship-2', type: ShipType.CRUISER, hp: 100, maxHp: 100, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT,
+        targetSystemId: 'enemy-system'
+      };
+
+      const mergeTarget: Fleet = createFleet('fleet-merge-target', 'blue', { ...baseVec }, [
+        { id: 'merge-ship-1', type: ShipType.FRIGATE, hp: 80, maxHp: 80, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({
+        systems: [createSystem('sys-combat-merge', null)],
+        fleets: [combatFleet, mergeTarget]
+      });
+
+      const splitResult = applyCommand(
+        state,
+        { type: 'SPLIT_FLEET', originalFleetId: combatFleet.id, shipIds: ['split-ship-1'] },
+        new RNG(12)
+      );
+
+      assert.strictEqual(splitResult, state, 'SPLIT_FLEET should be ignored for combat-locked fleets');
+
+      const mergeResult = applyCommand(
+        state,
+        { type: 'MERGE_FLEETS', sourceFleetId: combatFleet.id, targetFleetId: mergeTarget.id },
+        new RNG(13)
+      );
+
+      assert.strictEqual(mergeResult, state, 'MERGE_FLEETS should be ignored when either fleet is in combat');
+    }
+  },
+  {
     name: 'Invasion movement deploys embarked armies and logs the landing on arrival',
     run: () => {
       const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
