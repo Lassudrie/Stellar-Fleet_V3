@@ -414,33 +414,34 @@ const generateTasks = (
       });
     } else if (!sysData.isOwner && sysData.value > 20) {
       if (sysData.threat < totalMyPower * 0.8) {
-          const defenders = state.armies.filter(a => {
-              if (a.state !== ArmyState.DEPLOYED) return false;
-              const systemId = planetSystemMap.get(a.containerId);
+          const defenderArmies = state.armies.filter(army => {
+              if (army.state !== ArmyState.DEPLOYED) return false;
+              const systemId = planetSystemMap.get(army.containerId);
               if (systemId !== sysData.id) return false;
-              return a.factionId !== factionId;
-          }).length;
+              return army.factionId !== factionId;
+          });
+          const defenderCount = defenderArmies.length;
 
           const hasEmbarkedArmies = myFleets.some(f =>
               f.ships.some(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
           );
 
-          let type: TaskType = 'ATTACK';
+          const needsGroundAssault = defenderCount > 0;
+          const type: TaskType = needsGroundAssault || hasEmbarkedArmies ? 'INVADE' : 'ATTACK';
           const distanceWeightedPriority = applyDistanceWeight(sysData.id, 500 + sysData.value);
           let basePriority = applyFog(distanceWeightedPriority) + inertia;
 
-          if (hasEmbarkedArmies) {
-               type = 'INVADE';
-               basePriority += 200;
+          if (type === 'INVADE') {
+               basePriority += 200 + defenderCount * 25;
           }
 
           tasks.push({
             type,
             systemId: sysData.id,
             priority: applyTaskPreference(type, basePriority),
-            requiredPower: Math.max(50, sysData.threat * cfg.attackRatio),
+            requiredPower: Math.max(50, (sysData.threat + defenderCount * 25) * cfg.attackRatio),
             distanceToClosestFleet: minDistanceBySystemId[sysData.id] ?? Infinity,
-            reason: 'Expansion opportunity'
+            reason: needsGroundAssault ? 'Invasion opportunity (ground defenders present)' : 'Expansion opportunity'
           });
       } else {
           const staging = findNearestOwnedSystem(sysData.id);

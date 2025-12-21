@@ -6,7 +6,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, planAiTurn } from '../ai';
 import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
@@ -1211,6 +1211,43 @@ const tests: TestCase[] = [
         'Arrival on a gas-only system should emit a clear business log about the aborted invasion'
       );
       assert.strictEqual(arrival.armyUpdates.length, 0, 'Armies should remain unchanged when invasion cannot proceed');
+    }
+  },
+  {
+    name: 'AI plans an invasion move when enemy ground forces defend a target',
+    run: () => {
+      const attackerSystem: StarSystem = {
+        ...createSystem('sys-ai-attack', 'green'),
+        position: { x: 0, y: 0, z: 0 }
+      };
+      const targetSystem: StarSystem = {
+        ...createSystem('sys-ai-target', 'red'),
+        position: { x: 80, y: 0, z: 0 },
+        resourceType: 'metal'
+      };
+
+      const aiFleet = createFleet('fleet-ai', 'green', { ...attackerSystem.position }, [
+        { id: 'ai-ship', type: ShipType.CRUISER, hp: 200, maxHp: 200, carriedArmyId: null }
+      ]);
+
+      const defendingArmy = createArmy('army-defender', 'red', 4000, ArmyState.DEPLOYED, targetSystem.planets[0].id);
+
+      const state = createBaseState({
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        factions,
+        systems: [attackerSystem, targetSystem],
+        fleets: [aiFleet],
+        armies: [defendingArmy]
+      });
+
+      const commands = planAiTurn(state, 'green', undefined, new RNG(17));
+
+      assert.ok(
+        commands.some(
+          command => command.type === 'ORDER_INVASION_MOVE' && command.targetSystemId === targetSystem.id
+        ),
+        'AI should issue an invasion order when ground defenders are detected in the target system'
+      );
     }
   },
   {
