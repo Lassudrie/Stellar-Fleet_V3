@@ -175,7 +175,7 @@ const tests: TestCase[] = [
         factions: [alpha, beta],
         systems: [createSystem(battle.systemId, null)],
         fleets: [alphaFleet, betaFleet],
-        seed: 42
+        seed: 1
       });
 
       const { updatedBattle } = resolveBattle(battle, state, 0);
@@ -1024,7 +1024,7 @@ const tests: TestCase[] = [
       );
 
       const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], armies: [blueArmy] });
-      const rng = new RNG(7); // Deterministic roll below threshold to trigger losses
+      const rng = new RNG(4); // Deterministic roll below threshold to trigger losses
 
       const updated = applyCommand(
         state,

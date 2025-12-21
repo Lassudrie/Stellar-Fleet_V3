@@ -25,6 +25,7 @@ import {
 } from './constants';
 import { withUpdatedFleetDerived } from '../../engine/fleetDerived';
 import { devWarn } from '../../tools/devLogger';
+import { shortId } from '../../engine/idUtils';
 
 const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
@@ -103,8 +104,6 @@ const createBattleShip = (ship: ShipEntity, fleetId: string, faction: FactionId)
     killHistory: [...(ship.killHistory ?? [])]
   };
 };
-
-const short = (id: string) => id.split('_').pop()?.toUpperCase() || '???';
 
 export interface BattleResolutionResult {
   updatedBattle: Battle;
@@ -228,7 +227,7 @@ export const resolveBattle = (
       targetFactionId: target.faction
     });
 
-    appendLog(`XX ${short(target.shipId)} destroyed by ${short(attacker.shipId)} [${method}].`);
+    appendLog(`XX ${shortId(target.shipId)} destroyed by ${shortId(attacker.shipId)} [${method}].`);
   };
 
   // 3. ROUND LOOP
@@ -351,7 +350,7 @@ export const resolveBattle = (
         if (missileCount > 0) {
           firedParts.push(`${missileCount} missiles [ETA:${ETA_MISSILE}]`);
         }
-        appendLog(`${short(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
+        appendLog(`${shortId(ship.shipId)} (${ship.type}) fired ${firedParts.join(' and ')}.`);
       }
     }
 
@@ -392,7 +391,7 @@ export const resolveBattle = (
             defender.interceptorsLeft--;
             if (rng.next() < INTERCEPTION_BASE_CHANCE) {
                 p.hp = 0;
-                appendLog(`>> ${short(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
+                appendLog(`>> ${shortId(defender.shipId)} launched an interceptor and neutralized incoming ${p.type}.`);
                 totalMissilesIntercepted++;
             }
         }
@@ -428,7 +427,7 @@ export const resolveBattle = (
             pdOutput -= dmg;
 
             if (threat.hp <= 0) {
-                 appendLog(`>> PD from ${short(defender.shipId)} destroyed ${threat.type}.`);
+                 appendLog(`>> PD from ${shortId(defender.shipId)} destroyed ${threat.type}.`);
                  totalProjectilesDestroyedByPd++;
             }
         }
@@ -448,7 +447,7 @@ export const resolveBattle = (
                 if (target && target.currentHp > 0) {
                     const previousHp = target.currentHp;
                     target.currentHp -= p.damage;
-                    appendLog(`!! ${short(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
+                    appendLog(`!! ${shortId(target.shipId)} hit by ${p.type} for ${p.damage} dmg.`);
 
                     if (previousHp > 0 && target.currentHp <= 0) {
                       recordKill(p.sourceId, target, p.type);
@@ -472,7 +471,7 @@ export const resolveBattle = (
             const dmg = attacker.damage;
             const previousHp = target.currentHp;
             target.currentHp -= dmg;
-            appendLog(`  ${short(attacker.shipId)} guns hit ${short(target.shipId)} [${dmg} dmg]`);
+            appendLog(`  ${shortId(attacker.shipId)} guns hit ${shortId(target.shipId)} [${dmg} dmg]`);
 
             if (previousHp > 0 && target.currentHp <= 0) {
               recordKill(attacker.shipId, target, 'kinetic');
@@ -553,9 +552,9 @@ export const resolveBattle = (
       if (remainingHp > 0) {
         penalizedShips.push({ ...ship, hp: remainingHp });
         adjustedSurvivorIds.push(ship.id);
-        attritionLogs.push(formatLog(`-- ${short(ship.id)} is undergoing repairs (-${attritionDamage} hp).`));
+        attritionLogs.push(formatLog(`-- ${shortId(ship.id)} is undergoing repairs (-${attritionDamage} hp).`));
       } else {
-        attritionLogs.push(formatLog(`xx ${short(ship.id)} was lost to post-battle failures.`));
+        attritionLogs.push(formatLog(`xx ${shortId(ship.id)} was lost to post-battle failures.`));
       }
     });
 
