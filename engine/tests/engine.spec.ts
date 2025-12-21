@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import path from 'node:path';
 import { resolveGroundConflict } from '../conquest';
-import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
+import { ARMY_DESTROY_THRESHOLD, sanitizeArmies } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
@@ -1354,7 +1354,7 @@ const tests: TestCase[] = [
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [] });
 
-      const { state: sanitized, logs } = sanitizeArmyLinks(state);
+      const { state: sanitized, logs } = sanitizeArmies(state);
       const cleanedShip = sanitized.fleets[0].ships[0];
 
       assert.strictEqual(cleanedShip.carriedArmyId, null, 'Transport should drop orphaned army reference');
@@ -1374,13 +1374,53 @@ const tests: TestCase[] = [
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
 
-      const { state: sanitized, logs } = sanitizeArmyLinks(state);
+      const { state: sanitized, logs } = sanitizeArmies(state);
       const [shipA, shipB] = sanitized.fleets[0].ships;
 
       assert.strictEqual(shipA.carriedArmyId, army.id, 'Canonical carrier should retain the army');
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'Embarked army without carrier is reassigned to an available transport',
+    run: () => {
+      const system = createSystem('sys-5', 'blue');
+      const army = createArmy('army-drifting', 'blue', 15000, ArmyState.EMBARKED, 'fleet-reassign');
+
+      const fleet = createFleet('fleet-reassign', 'blue', baseVec, [
+        { id: 'transport-reassign-1', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: null },
+        { id: 'transport-reassign-2', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
+
+      const { state: sanitized, logs } = sanitizeArmies(state);
+      const [shipA, shipB] = sanitized.fleets[0].ships;
+
+      assert.strictEqual(sanitized.armies.length, 1, 'Army should persist after reassignment');
+      assert.strictEqual(shipA.carriedArmyId, army.id, 'First available transport should pick up the army');
+      assert.strictEqual(shipB.carriedArmyId, null, 'Only one transport should carry the army');
+      assert.ok(logs.some(entry => entry.includes('was embarked without a carrier')), 'Reassignment should be logged');
+    }
+  },
+  {
+    name: 'Embarked army without transport is destroyed during cleanup',
+    run: () => {
+      const system = createSystem('sys-6', 'blue');
+      const army = createArmy('army-stranded', 'blue', 15000, ArmyState.EMBARKED, 'fleet-stranded');
+
+      const fleet = createFleet('fleet-stranded', 'blue', baseVec, [
+        { id: 'fighter-stranded', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
+
+      const { state: sanitized, logs } = sanitizeArmies(state);
+
+      assert.strictEqual(sanitized.armies.length, 0, 'Stranded embarked army should be destroyed');
+      assert.ok(logs.some(entry => entry.includes('had no available carrier')), 'Destruction should be logged when no carrier exists');
     }
   },
   {

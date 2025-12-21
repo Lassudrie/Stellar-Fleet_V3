@@ -93,7 +93,7 @@
 - **Entrée** : état post‑objectifs (et post garde‑fou de batailles).
 - **Traitement** :
   - `pruneBattles` purge les rapports trop anciens (retention 5 tours).
-  - `sanitizeArmyLinks` retire/recorrige les références d’armées orphelines, produisant des logs système.
+  - `sanitizeArmies` retire/recorrige les références d’armées orphelines, produisant des logs système.
   - Tronque `logs` à 2000 entrées max, en conservant les plus récentes.
 - **Sortie** : état prêt à être canonicalisé puis à incrémenter `day`.
 - **Invariants** : aucune bataille `scheduled` ne subsiste; les logs système ajoutés sont préfixés `[SYSTEM]`.
