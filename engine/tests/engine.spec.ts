@@ -6,7 +6,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, planAiTurn } from '../ai';
 import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
@@ -528,6 +528,93 @@ const tests: TestCase[] = [
         nearest?.id,
         'alpha-near',
         'Near ties should pick the lexicographically smaller ID when within the epsilon'
+      );
+    }
+  },
+  {
+    name: 'AI memory ordering stays deterministic after serialization',
+    run: () => {
+      const alphaSystem = createSystem('sys-alpha-memory', 'green');
+      const betaSystem = createSystem('sys-beta-memory', 'green');
+
+      const state = createBaseState({
+        systems: [alphaSystem, betaSystem],
+        day: 5,
+        seed: 77,
+        aiStates: {
+          green: {
+            sightings: {},
+            targetPriorities: { [betaSystem.id]: 200, [alphaSystem.id]: 200 },
+            systemLastSeen: {},
+            lastOwnerBySystemId: {},
+            holdUntilTurnBySystemId: { [betaSystem.id]: 12, [alphaSystem.id]: 12 }
+          }
+        }
+      });
+
+      const commands = planAiTurn(state, 'green', state.aiStates?.green, new RNG(state.seed));
+      const aiUpdate = commands.find(
+        (command): command is Extract<GameCommand, { type: 'AI_UPDATE_STATE' }> => command.type === 'AI_UPDATE_STATE'
+      );
+
+      assert.ok(aiUpdate, 'AI planning should emit an AI update command');
+      assert.deepStrictEqual(
+        Object.keys(aiUpdate.newState.holdUntilTurnBySystemId),
+        [alphaSystem.id, betaSystem.id],
+        'Hold schedule keys should be sorted for deterministic saves'
+      );
+      assert.deepStrictEqual(
+        Object.keys(aiUpdate.newState.targetPriorities),
+        [alphaSystem.id, betaSystem.id],
+        'Target priorities should be sorted for deterministic saves'
+      );
+
+      const serialized = serializeGameState(state);
+      const roundTripped = deserializeGameState(serialized);
+      const roundTrippedGreen = roundTripped.aiStates?.green;
+      assert.ok(roundTrippedGreen, 'Round-tripped AI state should persist entries');
+
+      roundTripped.aiStates = {
+        ...roundTripped.aiStates,
+        green: {
+          ...roundTrippedGreen,
+          holdUntilTurnBySystemId: {
+            [betaSystem.id]: roundTrippedGreen.holdUntilTurnBySystemId[betaSystem.id],
+            [alphaSystem.id]: roundTrippedGreen.holdUntilTurnBySystemId[alphaSystem.id]
+          },
+          targetPriorities: {
+            [betaSystem.id]: roundTrippedGreen.targetPriorities[betaSystem.id] ?? 0,
+            [alphaSystem.id]: roundTrippedGreen.targetPriorities[alphaSystem.id] ?? 0
+          }
+        }
+      };
+
+      const commandsAfterRoundTrip = planAiTurn(
+        roundTripped,
+        'green',
+        roundTripped.aiStates?.green,
+        new RNG(roundTripped.seed)
+      );
+      const aiUpdateAfterRoundTrip = commandsAfterRoundTrip.find(
+        (command): command is Extract<GameCommand, { type: 'AI_UPDATE_STATE' }> => command.type === 'AI_UPDATE_STATE'
+      );
+
+      assert.ok(aiUpdateAfterRoundTrip, 'Round-tripped planning should still emit an AI update');
+      assert.deepStrictEqual(
+        Object.keys(aiUpdateAfterRoundTrip.newState.holdUntilTurnBySystemId),
+        [alphaSystem.id, betaSystem.id],
+        'Hold keys should remain sorted after deserialization'
+      );
+      assert.deepStrictEqual(
+        Object.keys(aiUpdateAfterRoundTrip.newState.targetPriorities),
+        [alphaSystem.id, betaSystem.id],
+        'Target priority keys should remain sorted after deserialization'
+      );
+
+      assert.deepStrictEqual(
+        commandsAfterRoundTrip,
+        commands,
+        'AI planning should remain deterministic after serialization round-trip'
       );
     }
   },

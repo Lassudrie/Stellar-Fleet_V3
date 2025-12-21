@@ -62,6 +62,18 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
 });
 
 const compareStrings = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+const sortedEntries = <T>(record: Record<string, T>): [string, T][] =>
+  Object.keys(record)
+    .sort(compareStrings)
+    .map(key => [key, record[key]]);
+
+const sortRecord = <T>(record: Record<string, T>): Record<string, T> => {
+  const sorted: Record<string, T> = {};
+  sortedEntries(record).forEach(([key, value]) => {
+    sorted[key] = value;
+  });
+  return sorted;
+};
 
 export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
   factions
@@ -157,7 +169,7 @@ const updateMemory = (
 
   // Hold expirations are inclusive of the stored day: systems remain on hold
   // while the current day is less than or equal to the recorded turn.
-  Object.entries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
+  sortedEntries(memory.holdUntilTurnBySystemId).forEach(([systemId, holdUntil]) => {
     const system = state.systems.find(s => s.id === systemId);
 
     if (!system || system.ownerFactionId !== factionId || holdUntil < state.day) {
@@ -236,6 +248,11 @@ const updateMemory = (
       memory.lastOwnerBySystemId[id] = observedSystem.ownerFactionId;
     }
   });
+
+  memory.holdUntilTurnBySystemId = sortRecord(memory.holdUntilTurnBySystemId);
+  memory.systemLastSeen = sortRecord(memory.systemLastSeen);
+  memory.lastOwnerBySystemId = sortRecord(memory.lastOwnerBySystemId);
+  memory.targetPriorities = sortRecord(memory.targetPriorities);
 
   return { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory };
 };
@@ -376,7 +393,7 @@ const generateTasks = (
     return best;
   };
 
-  Object.entries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
+  sortedEntries(activeHoldSystems).forEach(([systemId, holdUntil]) => {
     const sysData = analysisArray.find(data => data.id === systemId);
     const fogAge = sysData?.fogAge ?? 0;
     const fogFactor = 1 / (1 + fogAge * 0.1);
@@ -842,24 +859,27 @@ const generateCommands = (
 
   const targetPriorities: Record<string, number> = {};
 
-  Object.entries(memory.targetPriorities).forEach(([systemId, priority]) => {
-      const decayedPriority = priority * cfg.targetInertiaDecay;
-      if (decayedPriority >= cfg.targetInertiaMin) {
-          targetPriorities[systemId] = decayedPriority;
-      }
+  sortedEntries(memory.targetPriorities).forEach(([systemId, priority]) => {
+    const decayedPriority = priority * cfg.targetInertiaDecay;
+    if (decayedPriority >= cfg.targetInertiaMin) {
+      targetPriorities[systemId] = decayedPriority;
+    }
   });
 
   assignments.forEach(({ task }) => {
-      const discountedPriority = task.priority * cfg.targetInertiaDecay;
-      const existing = targetPriorities[task.systemId] || 0;
-      const updatedPriority = Math.max(existing, discountedPriority);
+    const discountedPriority = task.priority * cfg.targetInertiaDecay;
+    const existing = targetPriorities[task.systemId] || 0;
+    const updatedPriority = Math.max(existing, discountedPriority);
 
-      if (updatedPriority >= cfg.targetInertiaMin) {
-          targetPriorities[task.systemId] = updatedPriority;
-      }
+    if (updatedPriority >= cfg.targetInertiaMin) {
+      targetPriorities[task.systemId] = updatedPriority;
+    }
   });
 
-  memory.targetPriorities = targetPriorities;
+  memory.targetPriorities = sortRecord(targetPriorities);
+  memory.holdUntilTurnBySystemId = sortRecord(memory.holdUntilTurnBySystemId);
+  memory.systemLastSeen = sortRecord(memory.systemLastSeen);
+  memory.lastOwnerBySystemId = sortRecord(memory.lastOwnerBySystemId);
 
   commands.push({
       type: 'AI_UPDATE_STATE',
