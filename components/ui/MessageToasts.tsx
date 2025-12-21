@@ -32,7 +32,8 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
     if (options?.markRead) {
         onMarkRead(messageId, true);
     }
-  }, [onMarkRead]);
+    onDismissMessage(messageId);
+  }, [onDismissMessage, onMarkRead]);
 
   useEffect(() => {
     const knownIds = new Set(messages.map(msg => msg.id));

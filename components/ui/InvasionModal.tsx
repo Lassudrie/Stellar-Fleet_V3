@@ -5,6 +5,7 @@ import { fleetLabel, shortId } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { dist } from '../../engine/math/vec3';
+import { ORBIT_PROXIMITY_RANGE } from '../../data/static';
 
 interface InvasionModalProps {
   targetSystem: StarSystem;
@@ -70,7 +71,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
               const fleetPos = fleet.position;
               const targetPos = targetSystem.position;
               const d = dist(fleetPos, targetPos);
-              const isHere = d < 2.0;
+              const isHere = d < ORBIT_PROXIMITY_RANGE;
               
               // ETA Calc
               const speed = getFleetSpeed(fleet);

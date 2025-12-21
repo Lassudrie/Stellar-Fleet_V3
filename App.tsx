@@ -19,6 +19,7 @@ import { serializeGameState, deserializeGameState } from './engine/serialization
 import { useButtonClickSound } from './services/audio/useButtonClickSound';
 import { aiDebugger } from './engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
+import { processCommandResult } from './services/ui/commandResult';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -42,6 +43,8 @@ const App: React.FC = () => {
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const commandErrorTimerRef = useRef<number | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -89,6 +92,38 @@ const App: React.FC = () => {
   useEffect(() => {
       inspectedFleetIdRef.current = inspectedFleetId;
   }, [inspectedFleetId]);
+
+  const showCommandError = useCallback((message: string) => {
+      if (commandErrorTimerRef.current) {
+          window.clearTimeout(commandErrorTimerRef.current);
+      }
+      setCommandError(message);
+      commandErrorTimerRef.current = window.setTimeout(() => setCommandError(null), 5000);
+  }, []);
+
+  const formatCommandError = useCallback(
+      (error?: string) => t('msg.commandFailed', { error: error ?? t('msg.unknownError', { defaultValue: 'Unknown error' }) }),
+      [t]
+  );
+
+  const handleCommandResult = useCallback(
+      (result: { ok: boolean; error?: string }, onSuccess?: () => void) => {
+          return processCommandResult(result, {
+              onSuccess,
+              onError: showCommandError,
+              formatError: formatCommandError
+          });
+      },
+      [formatCommandError, showCommandError]
+  );
+
+  useEffect(() => {
+      return () => {
+          if (commandErrorTimerRef.current) {
+              window.clearTimeout(commandErrorTimerRef.current);
+          }
+      };
+  }, []);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -285,25 +320,29 @@ const App: React.FC = () => {
 
   const handleMoveCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          handleCommandResult(result, () => {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          });
       }
   };
 
   const handleAttackCommand = (fleetId: string) => {
       if (engine && targetSystem) {
-          engine.dispatchPlayerCommand({
+          const result = engine.dispatchPlayerCommand({
               type: 'MOVE_FLEET',
               fleetId,
               targetSystemId: targetSystem.id
           });
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          handleCommandResult(result, () => {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          });
       }
   };
 
@@ -314,12 +353,10 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
-          }
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          handleCommandResult(result, () => {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          });
       }
   };
 
@@ -330,12 +367,10 @@ const App: React.FC = () => {
               fleetId,
               targetSystemId: targetSystem.id
           });
-          if (!result.ok) {
-              alert(t('msg.commandFailed', { error: result.error }));
-              return;
-          }
-          setFleetPickerMode(null);
-          setUiMode('NONE');
+          handleCommandResult(result, () => {
+              setFleetPickerMode(null);
+              setUiMode('NONE');
+          });
       }
   };
 
@@ -389,7 +424,7 @@ const App: React.FC = () => {
           targetSystemId: targetSystem.id
       });
 
-      if (result.ok) {
+      const handled = handleCommandResult(result, () => {
           if (typeof result.deployedArmies === 'number') {
               engine.dispatchCommand({
                   type: 'ADD_LOG',
@@ -397,11 +432,11 @@ const App: React.FC = () => {
                   logType: 'move'
               });
           }
-      } else {
-          alert(t('msg.commandFailed', { error: result.error }));
-      }
+      });
 
-      handleCloseMenu();
+      if (handled) {
+          handleCloseMenu();
+      }
   };
 
   const handleSplitFleet = (shipIds: string[]) => {
@@ -547,6 +582,13 @@ const App: React.FC = () => {
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
+            {commandError && (
+                <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-50">
+                    <div className="pointer-events-auto bg-red-900/80 border border-red-500/70 text-red-100 px-4 py-2 rounded-lg shadow-lg">
+                        {commandError}
+                    </div>
+                </div>
+            )}
             <GameScene
                 gameState={viewGameState}
                 enemySightings={enemySightings}

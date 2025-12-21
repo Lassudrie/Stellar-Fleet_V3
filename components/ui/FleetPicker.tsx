@@ -5,6 +5,7 @@ import { getFleetSpeed } from '../../services/movement/fleetSpeed';
 import { fleetLabel } from '../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { dist } from '../../engine/math/vec3';
+import { ORBIT_PROXIMITY_RANGE } from '../../data/static';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
@@ -25,7 +26,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
           const distance = dist(fleet.position, targetPos);
 
           if (mode === 'MOVE' || mode === 'ATTACK') {
-              return distance > 1.0;
+              return distance > ORBIT_PROXIMITY_RANGE;
           }
 
           const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
