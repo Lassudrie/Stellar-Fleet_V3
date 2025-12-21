@@ -22,7 +22,7 @@ const getAmmoFromConsumables = (
 const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies }) => {
   const stats = SHIP_STATS[ship.type];
   const carriedArmy = armies.find(a => a.id === ship.carriedArmyId);
-  const kills = [...(ship.killHistory ?? [])].sort((a, b) => a.turn - b.turn || a.day - b.day);
+  const kills = [...(ship.killHistory ?? [])].sort((a, b) => a.turn - b.turn);
 
   const missileCount = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
   const torpedoCount = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
@@ -79,7 +79,7 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
           <ul className="space-y-1">
             {kills.map(entry => (
               <li key={entry.id} className="flex justify-between gap-2">
-                <div className="text-slate-300">Day {entry.day} (Turn {entry.turn})</div>
+                <div className="text-slate-300">Turn {entry.turn}</div>
                 <div className="font-semibold text-slate-100 text-right">
                   {entry.targetType} — {entry.targetId}
                 </div>

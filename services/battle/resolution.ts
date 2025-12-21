@@ -202,10 +202,12 @@ export const resolveBattle = (
     const attacker = shipMap.get(attackerId);
     if (!attacker) return;
 
+    const battleTurn = turn;
+
     attacker.killHistory.push({
       id: rng.id('kill'),
-      day: state.day,
-      turn,
+      day: battleTurn,
+      turn: battleTurn,
       targetId: target.shipId,
       targetType: target.type,
       targetFactionId: target.faction

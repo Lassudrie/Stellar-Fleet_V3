@@ -1133,6 +1133,44 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Kill history timestamps follow the battle turn reference',
+    run: () => {
+      const system = createSystem('sys-kill-history', null);
+      const cruiserStats = SHIP_STATS[ShipType.CRUISER];
+      const fighterStats = SHIP_STATS[ShipType.FIGHTER];
+
+      const blueFleet = createFleet('fleet-kill-blue', 'blue', { ...baseVec }, [
+        { id: 'blue-cruiser-kill', type: ShipType.CRUISER, hp: cruiserStats.maxHp, maxHp: cruiserStats.maxHp, carriedArmyId: null }
+      ]);
+
+      const redFleet = createFleet('fleet-kill-red', 'red', { ...baseVec }, [
+        { id: 'red-fighter-kill', type: ShipType.FIGHTER, hp: 1, maxHp: fighterStats.maxHp, carriedArmyId: null }
+      ]);
+
+      const battle: Battle = {
+        id: 'battle-kill-history',
+        systemId: system.id,
+        turnCreated: 4,
+        status: 'scheduled',
+        involvedFleetIds: [blueFleet.id, redFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], day: 4, seed: 3 });
+
+      const { survivingFleets } = resolveBattle(battle, state, 5);
+
+      const survivor = survivingFleets.find(fleet => fleet.id === blueFleet.id);
+      const killer = survivor?.ships.find(ship => ship.id === 'blue-cruiser-kill');
+
+      assert.ok(killer?.killHistory?.length, 'Killer ship should record at least one kill');
+      const killEntry = killer!.killHistory[0];
+
+      assert.strictEqual(killEntry.day, 5, 'Kill day should reflect battle turn');
+      assert.strictEqual(killEntry.turn, 5, 'Kill turn should match battle turn reference');
+    }
+  },
+  {
     name: 'Space battle survivors exit combat needing repairs and updated metrics',
     run: () => {
       const system = createSystem('sys-repair', 'blue');
