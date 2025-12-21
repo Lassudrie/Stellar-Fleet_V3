@@ -59,6 +59,7 @@
 - **Invariants** :
   - Toutes les batailles `scheduled` doivent ressortir résolues. Si des `scheduled` persistent après la phase (ou par erreur en aval), un garde‑fou force la résolution en « draw » avant le cleanup.
   - Les résultats de RNG sont isolés par bataille (seed propre dans `resolveBattle`).
+  - Le `winnerFactionId` est fixé avant l’attrition post‑combat : les réparations forcées ou pannes fatales peuvent vider les survivants mais ne renversent jamais le vainqueur déjà déterminé.
 
 ### 2.5. Phase Bombardement orbital (`phaseOrbitalBombardment`)
 

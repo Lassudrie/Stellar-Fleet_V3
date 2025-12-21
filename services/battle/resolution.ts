@@ -430,6 +430,12 @@ export const resolveBattle = (
   const survivingFleets: Fleet[] = [];
   const survivorShipIds: string[] = [];
 
+  const aliveFactionsBeforeAttrition = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+  // Winner is locked in before post-battle attrition so repairs/failures cannot flip the outcome.
+  const winnerFactionId: FactionId | 'draw' = aliveFactionsBeforeAttrition.size === 1
+    ? (Array.from(aliveFactionsBeforeAttrition)[0] as FactionId)
+    : 'draw';
+
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];
     oldFleet.ships.forEach(oldShip => {
@@ -509,11 +515,6 @@ export const resolveBattle = (
   survivingFleets.push(...attritionAdjustedFleets);
 
   logs.push(...attritionLogs);
-
-  const aliveFactions = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
-  const winnerFactionId: FactionId | 'draw' = aliveFactions.size === 1
-    ? (Array.from(aliveFactions)[0] as FactionId)
-    : 'draw';
 
   logs.push(`BATTLE ENDED. Winner: ${winnerFactionId.toUpperCase()}`);
 
