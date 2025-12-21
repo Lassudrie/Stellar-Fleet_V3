@@ -5,6 +5,7 @@ import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../../engine/idUtils';
 import { sub, len, normalize, scale, add, clone } from '../../engine/math/vec3';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from '../../engine/armyOps';
+import { CONTESTED_DROP_FAILURE_THRESHOLD, CONTESTED_DROP_LOSS_FRACTION } from '../../engine/constants/armyOps';
 import { isOrbitContested } from '../../engine/orbit';
 import { getDefaultSolidPlanet } from '../../engine/planets';
 
@@ -138,11 +139,11 @@ const applyContestedDeploymentRisk = (
         if (!carrierShip || carrierShip.carriedArmyId !== army.id) return army;
 
         const dropRoll = contested ? rng.next() : 1;
-        const dropFailed = contested && dropRoll < 0.35;
+        const dropFailed = contested && dropRoll < CONTESTED_DROP_FAILURE_THRESHOLD;
 
         if (dropFailed) {
             failedCount++;
-            const strengthLoss = Math.max(1, Math.floor(army.strength * 0.35));
+            const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_DROP_LOSS_FRACTION));
             const remainingStrength = Math.max(0, army.strength - strengthLoss);
 
             logs.push({

@@ -2,9 +2,7 @@ import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../types
 import { shortId } from './idUtils';
 import { RNG } from './rng';
 import { getDefaultSolidPlanet } from './planets';
-
-const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
-const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
+import { CONTESTED_DROP_FAILURE_THRESHOLD, CONTESTED_DROP_LOSS_FRACTION } from './constants/armyOps';
 
 export interface ArmyOpsOptions {
     fleetLabel?: string;
@@ -200,14 +198,14 @@ export const applyContestedUnloadRisk = (
         logs: LogEntry[];
     }>((outcome, targetArmyId) => {
         const roll = rng.next();
-        const success = roll >= CONTESTED_UNLOAD_FAILURE_THRESHOLD;
+        const success = roll >= CONTESTED_DROP_FAILURE_THRESHOLD;
         const logs: LogEntry[] = [];
 
         if (!success) {
             let appliedLoss = 0;
             const updatedArmies = outcome.armies.map(army => {
                 if (army.id !== targetArmyId) return army;
-                const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION));
+                const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_DROP_LOSS_FRACTION));
                 appliedLoss = strengthLoss;
                 return { ...army, strength: Math.max(0, army.strength - strengthLoss) };
             });
