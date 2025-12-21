@@ -152,7 +152,7 @@ const updateMemory = (
   const activeHoldSystems: Record<string, number> = {};
 
   const memory: AIState = existingState
-    ? JSON.parse(JSON.stringify(existingState))
+    ? structuredClone(existingState)
     : createEmptyAIState();
 
   // Hold expirations are inclusive of the stored day: systems remain on hold
