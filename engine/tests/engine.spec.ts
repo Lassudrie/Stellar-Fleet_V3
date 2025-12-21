@@ -6,7 +6,7 @@ import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
 import { AI_HOLD_TURNS } from '../ai';
-import { applyCommand } from '../commands';
+import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
   ArmyState,
@@ -1381,6 +1381,74 @@ const tests: TestCase[] = [
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'Player commands delegate through dispatchCommand pipeline',
+    run: () => {
+      const system = createSystem('alpha', 'blue');
+      const fleet = createFleet('fleet-dispatch', 'blue', baseVec, []);
+
+      const engine = new GameEngine(
+        createBaseState({
+          systems: [system],
+          fleets: [fleet],
+          rngState: 3
+        })
+      );
+
+      let delegated = false;
+      const originalDispatch = engine.dispatchCommand.bind(engine);
+      engine.dispatchCommand = (cmd: GameCommand) => {
+        delegated = true;
+        return originalDispatch(cmd);
+      };
+
+      const result = engine.dispatchPlayerCommand({
+        type: 'MOVE_FLEET',
+        fleetId: fleet.id,
+        targetSystemId: system.id
+      });
+
+      const updatedFleet = engine.state.fleets.find(f => f.id === fleet.id);
+
+      assert.deepStrictEqual(result, { ok: true }, 'Player dispatch should succeed');
+      assert.ok(delegated, 'dispatchPlayerCommand should call dispatchCommand for shared handling');
+      assert.strictEqual(updatedFleet?.state, FleetState.MOVING, 'Shared dispatcher should perform the move');
+    }
+  },
+  {
+    name: 'AI command application matches dispatcher results',
+    run: () => {
+      const origin = createSystem('origin', 'blue');
+      const target = { ...createSystem('target', null), position: { x: 10, y: 0, z: 0 } };
+      const fleet = createFleet('fleet-ai', 'blue', baseVec, []);
+
+      const baseState = createBaseState({
+        systems: [origin, target],
+        fleets: [fleet],
+        day: 4,
+        rngState: 5,
+        seed: 99
+      });
+
+      const command: GameCommand = {
+        type: 'MOVE_FLEET',
+        fleetId: fleet.id,
+        targetSystemId: target.id,
+        turn: baseState.day,
+        reason: 'ai-move'
+      };
+
+      const engine = new GameEngine(baseState);
+      engine.dispatchCommand(command);
+
+      const applied = applyCommand(baseState, command, new RNG(baseState.seed));
+
+      const dispatchedFleet = engine.state.fleets.find(f => f.id === fleet.id);
+      const appliedFleet = applied.fleets.find(f => f.id === fleet.id);
+
+      assert.deepStrictEqual(dispatchedFleet, appliedFleet, 'Dispatcher and applyCommand paths should align for AI commands');
     }
   },
   {

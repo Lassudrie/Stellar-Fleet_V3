@@ -34,6 +34,12 @@ export class GameEngine {
         }
     }
 
+    private commitState(nextState: GameState) {
+        this.state = nextState;
+        this.syncRngState();
+        this.notify();
+    }
+
     private syncRngState() {
         // Persist current RNG cursor to state so next save/load continues correctly
         this.state.rngState = this.rng.getState();
@@ -65,24 +71,18 @@ export class GameEngine {
     }
 
     advanceTurn() {
-        this.state = runTurn(this.state, this.rng);
-        this.syncRngState();
-        this.notify();
+        this.commitState(runTurn(this.state, this.rng));
     }
 
     dispatchCommand(cmd: GameCommand) {
-        this.state = applyCommand(this.state, cmd, this.rng);
-        this.syncRngState();
-        this.notify();
+        this.commitState(applyCommand(this.state, cmd, this.rng));
     }
 
     private updateMessages(updater: (messages: GameMessage[]) => GameMessage[]) {
-        this.state = {
+        this.commitState({
             ...this.state,
             messages: canonicalizeMessages(updater(this.state.messages))
-        };
-        this.syncRngState();
-        this.notify();
+        });
     }
 
     markMessageRead(messageId: string, read: boolean) {
@@ -138,12 +138,12 @@ export class GameEngine {
 
         if (loadResult.count === 0) return false;
 
-        this.state = {
+        this.commitState({
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? loadResult.fleet : f)),
             armies: loadResult.armies,
             logs: [...this.state.logs, ...loadResult.logs]
-        };
+        });
 
         return true;
     }
@@ -183,12 +183,12 @@ export class GameEngine {
             updatedLogs = [...updatedLogs, ...riskOutcome.logs];
         }
 
-        this.state = {
+        this.commitState({
             ...this.state,
             fleets: this.state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
             armies: updatedArmies,
             logs: [...this.state.logs, ...updatedLogs]
-        };
+        });
 
         return true;
     }
@@ -206,14 +206,11 @@ export class GameEngine {
             const system = this.state.systems.find(s => s.id === command.targetSystemId);
             if (!system) return { ok: false, error: 'System not found' };
 
-            this.state = applyCommand(this.state, {
+            this.dispatchCommand({
                 type: 'MOVE_FLEET',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
-            
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true };
         }
 
@@ -229,14 +226,11 @@ export class GameEngine {
                 army.state === ArmyState.EMBARKED
             ).length;
 
-            this.state = applyCommand(this.state, {
+            this.dispatchCommand({
                 type: 'ORDER_INVASION_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
-
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true, deployedArmies: embarkedArmies };
         }
 
@@ -261,19 +255,14 @@ export class GameEngine {
 
             const loadedImmediately = this.tryImmediateLoad(fleet, system);
             if (loadedImmediately) {
-                this.syncRngState();
-                this.notify();
                 return { ok: true };
             }
 
-            this.state = applyCommand(this.state, {
+            this.dispatchCommand({
                 type: 'ORDER_LOAD_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
-
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true };
         }
 
@@ -292,19 +281,14 @@ export class GameEngine {
 
             const unloadedImmediately = this.tryImmediateUnload(fleet, system);
             if (unloadedImmediately) {
-                this.syncRngState();
-                this.notify();
                 return { ok: true };
             }
 
-            this.state = applyCommand(this.state, {
+            this.dispatchCommand({
                 type: 'ORDER_UNLOAD_MOVE',
                 fleetId: command.fleetId,
                 targetSystemId: command.targetSystemId
-            }, this.rng);
-
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true };
         }
 
@@ -354,7 +338,7 @@ export class GameEngine {
                 type: 'info' as const
             };
 
-            this.state = {
+            this.commitState({
                 ...this.state,
                 fleets: this.state.fleets
                     .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
@@ -362,10 +346,7 @@ export class GameEngine {
                 armies: updatedArmies,
                 logs: [...this.state.logs, splitLog],
                 selectedFleetId: newFleet.id
-            };
-
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true };
         }
 
@@ -405,7 +386,7 @@ export class GameEngine {
                 type: 'info' as const
             };
 
-            this.state = {
+            this.commitState({
                 ...this.state,
                 fleets: this.state.fleets
                     .filter(f => f.id !== sourceFleet.id)
@@ -413,10 +394,7 @@ export class GameEngine {
                 armies: updatedArmies,
                 logs: [...this.state.logs, mergeLog],
                 selectedFleetId: mergedTarget.id
-            };
-
-            this.syncRngState();
-            this.notify();
+            });
             return { ok: true };
         }
 
