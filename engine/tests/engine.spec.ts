@@ -1626,10 +1626,15 @@ const tests: TestCase[] = [
 
       const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], seed: 99, day: 5 });
 
-      const { updatedBattle } = resolveBattle(battle, state, 5);
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 5);
 
       assert.strictEqual(updatedBattle.winnerFactionId, 'blue', 'Heavier fleet should secure victory');
       assert.ok(updatedBattle.ammunitionByFaction, 'Ammunition summary should be recorded on the battle result');
+      assert.ok(updatedBattle.logs.length > 0, 'Battle resolution should emit detailed combat logs');
+      assert.ok(
+        updatedBattle.logs.every(entry => entry.startsWith('[Turn 5]')),
+        'All battle logs should be prefixed with the turn reference'
+      );
 
       const blueTotals = updatedBattle.ammunitionByFaction?.blue;
       const redTotals = updatedBattle.ammunitionByFaction?.red;
@@ -1662,6 +1667,15 @@ const tests: TestCase[] = [
       assert.strictEqual(redTotals!.offensiveMissiles.remaining, 0, 'Destroyed ships should not retain remaining stock');
       assert.strictEqual(redTotals!.torpedoes.remaining, 0, 'Destroyed ships should lose torpedoes alongside hulls');
       assert.strictEqual(redTotals!.interceptors.remaining, 0, 'Destroyed ships should lose interceptors alongside hulls');
+
+      const survivingShips = survivingFleets.flatMap(fleet => fleet.ships);
+      const killLogEntries = survivingShips.flatMap(ship => ship.killHistory ?? []);
+
+      assert.ok(killLogEntries.length > 0, 'Survivors should record confirmed kills when defeating opponents');
+      killLogEntries.forEach(entry => {
+        assert.strictEqual(entry.turn, 5, 'Kill log turn should use the active turn reference');
+        assert.strictEqual(entry.day, 5, 'Kill log day should align with the chosen turn reference');
+      });
     }
   },
   {
