@@ -1,3 +1,5 @@
+import { logger } from '../tools/devLogger';
+
 // Deterministic Random Number Generator
 // Algorithm: Mulberry32
 
@@ -26,7 +28,7 @@ export class RNG {
   private normalizeState(value: number): number {
     // Handle invalid values
     if (!Number.isFinite(value)) {
-      console.warn('[RNG] Invalid state value, defaulting to 1');
+      logger.warn('[RNG] Invalid state value, defaulting to 1');
       return 1;
     }
     // Convert to 32-bit unsigned integer (handles negatives and non-integers)
@@ -64,7 +66,7 @@ export class RNG {
   // Returns undefined if array is empty (safe guard against crash)
   public pick<T>(array: T[]): T | undefined {
     if (array.length === 0) {
-      console.warn('[RNG] pick() called on empty array, returning undefined');
+      logger.debug('[RNG] pick() called on empty array, returning undefined');
       return undefined;
     }
     return array[Math.floor(this.next() * array.length)];
