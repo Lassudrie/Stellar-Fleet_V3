@@ -5,29 +5,30 @@
  * This is used to enforce immutability in the Redux-like state management pattern.
  */
 export function deepFreezeDev<T>(obj: T): T {
-    // Check for Vite/Env dev mode safely
-    if ((import.meta as any).env && (import.meta as any).env.DEV) {
-        // Basic type check
-        if (obj === null || typeof obj !== 'object') {
-            return obj;
-        }
+    const importMetaEnv = (import.meta as any)?.env;
+    const isDevEnv = Boolean(importMetaEnv?.DEV);
+    const nodeEnv = typeof process !== 'undefined' ? process.env?.NODE_ENV : undefined;
+    const isTestEnv = nodeEnv === 'test';
+    const shouldFreeze = isDevEnv || isTestEnv;
 
-        // If already frozen, return
-        if (Object.isFrozen(obj)) {
-            return obj;
-        }
-
-        // Retrieve the property names defined on object
-        const propNames = Object.getOwnPropertyNames(obj);
-
-        // Freeze properties before freezing self
-        for (const name of propNames) {
-            const value = (obj as any)[name];
-            deepFreezeDev(value);
-        }
-
-        return Object.freeze(obj);
+    if (!shouldFreeze) {
+        return obj;
     }
-    
-    return obj;
+
+    if (obj === null || typeof obj !== 'object') {
+        return obj;
+    }
+
+    if (Object.isFrozen(obj)) {
+        return obj;
+    }
+
+    const propNames = Object.getOwnPropertyNames(obj);
+
+    for (const name of propNames) {
+        const value = (obj as any)[name];
+        deepFreezeDev(value);
+    }
+
+    return Object.freeze(obj);
 }
