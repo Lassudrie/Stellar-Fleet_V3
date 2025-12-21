@@ -5,7 +5,7 @@ import { ARMY_DESTROY_THRESHOLD, sanitizeArmyLinks } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER } from '../../data/static';
 import { resolveBattle } from '../../services/battle/resolution';
 import { SHIP_STATS } from '../../data/static';
-import { AI_HOLD_TURNS } from '../ai';
+import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
 import { applyCommand } from '../commands';
 import {
   Army,
@@ -1381,6 +1381,75 @@ const tests: TestCase[] = [
       assert.strictEqual(shipB.carriedArmyId, null, 'Secondary carrier should be unlinked');
       assert.ok(logs.some(entry => entry.includes('canonical carrier is ship-a')), 'Cleanup log should cite canonical carrier');
       assert.strictEqual(sanitized.armies.length, 1, 'Army should survive cleanup with a single carrier');
+    }
+  },
+  {
+    name: 'AI skips fleets in combat or retreat when planning during battles',
+    run: () => {
+      const homeSystem: StarSystem = {
+        ...createSystem('sys-ai-home', 'green'),
+        resourceType: 'gas',
+        position: { x: 0, y: 0, z: 0 }
+      };
+      const targetSystem: StarSystem = {
+        ...createSystem('sys-ai-target', null),
+        resourceType: 'gas',
+        position: { x: 40, y: 0, z: 0 }
+      };
+
+      const activeFleet = createFleet('fleet-green-active', 'green', { ...homeSystem.position }, [
+        { id: 'ship-active', type: ShipType.CRUISER, hp: 80, maxHp: 80, carriedArmyId: null }
+      ]);
+      const combatFleet: Fleet = {
+        ...createFleet('fleet-green-combat', 'green', { ...homeSystem.position }, [
+          { id: 'ship-combat', type: ShipType.DESTROYER, hp: 60, maxHp: 60, carriedArmyId: null }
+        ]),
+        state: FleetState.COMBAT
+      };
+      const retreatingFleet: Fleet = {
+        ...createFleet('fleet-green-retreat', 'green', { ...homeSystem.position }, [
+          { id: 'ship-retreat', type: ShipType.FRIGATE, hp: 40, maxHp: 40, carriedArmyId: null }
+        ]),
+        retreating: true
+      };
+
+      const battle: Battle = {
+        id: 'battle-home-green',
+        systemId: homeSystem.id,
+        turnCreated: 3,
+        status: 'scheduled',
+        involvedFleetIds: [combatFleet.id],
+        logs: []
+      };
+
+      const state = createBaseState({
+        day: 3,
+        factions,
+        systems: [homeSystem, targetSystem],
+        fleets: [activeFleet, combatFleet, retreatingFleet],
+        battles: [battle],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false }
+      });
+
+      const commands = planAiTurn(state, 'green', createEmptyAIState(), new RNG(21));
+      const moveCommands = commands.filter(
+        command =>
+          (command.type === 'MOVE_FLEET' || command.type === 'ORDER_INVASION_MOVE') &&
+          'fleetId' in command
+      );
+
+      assert.ok(
+        moveCommands.some(command => 'fleetId' in command && command.fleetId === activeFleet.id),
+        'Active fleets should receive movement orders'
+      );
+      assert.ok(
+        !commands.some(command => 'fleetId' in command && command.fleetId === combatFleet.id),
+        'Fleets in combat must be ignored during AI planning'
+      );
+      assert.ok(
+        !commands.some(command => 'fleetId' in command && command.fleetId === retreatingFleet.id),
+        'Retreating fleets must be ignored during AI planning'
+      );
     }
   },
   {
