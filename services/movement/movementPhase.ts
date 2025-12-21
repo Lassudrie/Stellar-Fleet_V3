@@ -243,7 +243,7 @@ export const executeArrivalOperations = (
             generatedLogs.push({
                 id: rng.id('log'),
                 day,
-                text: `No viable landing zone in ${system.name}; invasion aborted.`,
+                text: `Invasion aborted: Fleet ${shortId(fleet.id)} reached ${system.name}, but the system has no solid bodies to land on. The invasion order has been cleared.`,
                 type: 'combat'
             });
         } else {
