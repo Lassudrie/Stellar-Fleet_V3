@@ -5,6 +5,8 @@ import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
 import { devWarn } from '../tools/devLogger';
 
+const DISTANCE_TOLERANCE = 1e-6;
+
 // --- QUERIES ---
 
 export const getSystemById = (systems: StarSystem[], id: string): StarSystem | undefined => {
@@ -30,9 +32,13 @@ export const findNearestSystem = (systems: StarSystem[], position: Vec3): StarSy
   for (const sys of systems) {
     const d = distSq(position, sys.position);
     // WHY: Strict determinism requirement.
-    // If distances are numerically identical (unlikely with floats but possible),
+    // If distances are numerically identical (or differ only within an epsilon),
     // use system ID as a tie-breaker to ensure consistent results across all runs.
-    if (d < minD || (d === minD && nearest && sys.id < nearest.id)) {
+    const distanceDiff = d - minD;
+    const isCloser = distanceDiff < -DISTANCE_TOLERANCE;
+    const withinTolerance = Math.abs(distanceDiff) <= DISTANCE_TOLERANCE;
+
+    if (!nearest || isCloser || (withinTolerance && sys.id < nearest.id)) {
       minD = d;
       nearest = sys;
     }

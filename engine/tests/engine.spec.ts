@@ -38,6 +38,7 @@ import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../../services/movement/movementPhase';
 import { isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../../services/world/stellar';
+import { findNearestSystem } from '../world';
 
 interface TestCase {
   name: string;
@@ -414,6 +415,21 @@ const tests: TestCase[] = [
       const owner = getTerritoryOwner([blueSystem, redSystem], { x: 0, y: 0, z: 0 });
 
       assert.strictEqual(owner, null, 'Equal influence from different factions should contest the territory');
+    }
+  },
+  {
+    name: 'findNearestSystem uses tolerance to break near ties deterministically',
+    run: () => {
+      const slightlyCloser = { ...createSystem('beta-near', null), position: { x: 1, y: 0, z: 0 } };
+      const almostEqual = { ...createSystem('alpha-near', null), position: { x: 1 + 4e-7, y: 0, z: 0 } };
+
+      const nearest = findNearestSystem([slightlyCloser, almostEqual], { x: 0, y: 0, z: 0 });
+
+      assert.strictEqual(
+        nearest?.id,
+        'alpha-near',
+        'Near ties should pick the lexicographically smaller ID when within the epsilon'
+      );
     }
   },
   {
