@@ -1,5 +1,5 @@
 
-import { Vec3 } from './engine/math/vec3';
+import type { Vec3 } from '../engine/math/vec3';
 
 // Replaces enum Faction
 export type FactionId = string;
