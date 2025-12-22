@@ -1,7 +1,7 @@
 
 import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
+import { BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { StarSystem, Army, ArmyState } from '../../shared/types';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
@@ -53,7 +53,13 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
     }, [armyInfo]);
 
     useFrame(({ camera }) => {
-        const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
+        // OPTIMIZATION: Avoid creating new Vector3 in useFrame
+        // Instead of: const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
+        const dx = camera.position.x - system.position.x;
+        const dy = camera.position.y - system.position.y;
+        const dz = camera.position.z - system.position.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
         const maxDist = isOwned ? 135 : 90;
         const fadeRange = 30;
         const fadeStart = maxDist - fadeRange;
