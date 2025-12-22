@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FactionId, StarSystem } from '../../../shared/types';
 import { useI18n } from '../../i18n';
+import { computeConstrainedMenuPosition, SafeAreaInsets, ViewportRect } from './positioning/computeConstrainedMenuPosition';
 
 type GroundForceStats = {
   count: number;
@@ -40,12 +41,127 @@ interface SystemContextMenuProps {
   onClose: () => void;
 }
 
+const SAFE_PADDING = 8;
+const MENU_OFFSET = 12;
+const OVERLAY_ID = 'ui-overlay';
+
+const readSafeAreaInsets = (): SafeAreaInsets => {
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (!overlay) {
+        return { top: 0, right: 0, bottom: 0, left: 0 };
+    }
+
+    const style = window.getComputedStyle(overlay);
+    const toNumber = (value: string | null) => {
+        const parsed = Number.parseFloat(value ?? '');
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    return {
+        top: toNumber(style.paddingTop),
+        right: toNumber(style.paddingRight),
+        bottom: toNumber(style.paddingBottom),
+        left: toNumber(style.paddingLeft),
+    };
+};
+
+const readViewportRect = (): ViewportRect => {
+    const vv = window.visualViewport;
+
+    if (vv) {
+        return {
+            left: vv.offsetLeft,
+            top: vv.offsetTop,
+            width: vv.width,
+            height: vv.height,
+        };
+    }
+
+    return {
+        left: 0,
+        top: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+    };
+};
+
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption, showGroundOpsOption,
     canSelectFleet, onOpenSystemDetails, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onOpenGroundOps, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [resolvedPosition, setResolvedPosition] = useState(position);
+  const [menuConstraints, setMenuConstraints] = useState<{ maxHeight?: number; maxWidth?: number }>({});
+
+  const recalcPosition = useCallback(() => {
+      const menu = menuRef.current;
+      if (!menu) return;
+
+      const viewport = readViewportRect();
+      const safeInsets = readSafeAreaInsets();
+      const rect = menu.getBoundingClientRect();
+
+      const constrained = computeConstrainedMenuPosition({
+          anchor: position,
+          menuSize: { width: rect.width, height: rect.height },
+          viewport,
+          safeInsets,
+          offset: MENU_OFFSET,
+          padding: SAFE_PADDING,
+      });
+
+      setResolvedPosition(constrained);
+
+      const maxHeight = Math.max(SAFE_PADDING, viewport.height - safeInsets.top - safeInsets.bottom - (SAFE_PADDING * 2));
+      const maxWidth = Math.max(SAFE_PADDING, viewport.width - safeInsets.left - safeInsets.right - (SAFE_PADDING * 2));
+
+      setMenuConstraints({ maxHeight, maxWidth });
+  }, [position]);
+
+  useLayoutEffect(() => {
+      recalcPosition();
+  }, [
+      recalcPosition,
+      groundForces,
+      showGroundOpsOption,
+      showAttackOption,
+      showInvadeOption,
+      showLoadOption,
+      showUnloadOption,
+      canSelectFleet,
+      system,
+  ]);
+
+  useEffect(() => {
+      const menu = menuRef.current;
+      if (!menu) return;
+
+      const observer = new ResizeObserver(() => recalcPosition());
+      observer.observe(menu);
+
+      return () => observer.disconnect();
+  }, [recalcPosition]);
+
+  useEffect(() => {
+      const handleViewportChange = () => recalcPosition();
+
+      window.addEventListener('resize', handleViewportChange);
+      const vv = window.visualViewport;
+      vv?.addEventListener('resize', handleViewportChange);
+      vv?.addEventListener('scroll', handleViewportChange);
+
+      return () => {
+          window.removeEventListener('resize', handleViewportChange);
+          vv?.removeEventListener('resize', handleViewportChange);
+          vv?.removeEventListener('scroll', handleViewportChange);
+      };
+  }, [recalcPosition]);
+
+  useEffect(() => {
+      recalcPosition();
+  }, [position, recalcPosition]);
 
   const renderFactionBlock = (entry: GroundForceSummaryEntry, labelOverride?: string) => {
       const colorStyle = { color: entry.color };
@@ -70,8 +186,14 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
 
   return (
     <div
-      className="absolute z-40 bg-slate-900/95 border border-blue-500/30 text-white p-2 rounded shadow-2xl backdrop-blur min-w-[200px] animate-in fade-in zoom-in-95 duration-100 pointer-events-auto flex flex-col gap-1"
-      style={{ left: position.x, top: position.y }}
+      ref={menuRef}
+      className="fixed z-40 bg-slate-900/95 border border-blue-500/30 text-white p-2 rounded shadow-2xl backdrop-blur min-w-[200px] animate-in fade-in zoom-in-95 duration-100 pointer-events-auto flex flex-col gap-1 overflow-y-auto overscroll-contain"
+      style={{
+          left: resolvedPosition.x,
+          top: resolvedPosition.y,
+          maxHeight: menuConstraints.maxHeight,
+          maxWidth: menuConstraints.maxWidth,
+      }}
     >
       <div className="px-3 py-2 text-xs font-bold text-blue-200 border-b border-slate-700 mb-1 uppercase tracking-wider flex items-center gap-2">
           <span>{system.name}</span>
