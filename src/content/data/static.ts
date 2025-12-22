@@ -190,7 +190,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     role: 'transport',
     fuelCapacity: 5000,
     fuelConsumptionPerLy: 10,
-    fuelExtractionRate: 25
+    fuelExtractionRate: 500
   },
 };
 
