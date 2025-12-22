@@ -51,6 +51,7 @@
 ### 4.2 Flottes
 - Clic simple sur une flotte : sélection (`selectedFleetId`), affichage du panneau flotte si disponible.
 - Double-clic (ou seconde tape rapide) : inspection détaillée (`SHIP_DETAIL_MODAL`) tout en conservant la sélection.
+- Sur smartphone ou écran tactile (pointeur « coarse »), un simple tap ouvre directement l’inspection détaillée afin de réduire la friction.
 - La sélection est nettoyée si la flotte disparaît (brouillard ou destruction) pour éviter les références orphelines.
 
 ---
@@ -89,4 +90,3 @@
 
 ## 7. Référence de test manuel
 - Exécuter systématiquement le test décrit dans `docs/manual-camera-bounds.md` après toute modification affectant la caméra (damping, bornes, métriques de carte, navigation). Il constitue la validation manuelle obligatoire pour cette spécification.
-

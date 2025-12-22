@@ -16,23 +16,23 @@ graph TD
     UI[React UI Layer] --> Engine
     Scene[3D Scene (R3F)] --> State
     
-    subgraph "Engine Layer (engine/)"
+    subgraph "Engine Layer (src/engine/)"
         GameEngine class
         runTurn.ts
         RNG System
         Services (Movement, Battle, World)
     end
 
-    subgraph "Presentation Layer (components/)"
+    subgraph "Presentation Layer (src/ui/components/)"
         UI Overlay (DOM)
         GameScene (Canvas)
         FleetRenderer (Meshes)
     end
 ```
 
-## 3. Le Moteur de Jeu (`engine/`)
+## 3. Le Moteur de Jeu (`src/engine/`)
 Le cœur du jeu est agnostique de l'UI.
-*   **GameEngine** : Classe Singleton (instanciée dans `App.tsx`) qui détient l'état.
+*   **GameEngine** : Classe Singleton (instanciée dans `src/ui/App.tsx`) qui détient l'état.
 *   **Pattern Redux-like** : Les modifications d'état se font via des actions (`GameCommand`) ou le tick (`runTurn`).
 *   **Immutabilité** : L'état n'est jamais muté directement. Chaque tour produit un nouvel objet `GameState`.
 
@@ -46,13 +46,13 @@ Elle orchestre les services séquentiellement :
 5.  Détection de conflits.
 6.  Capture de systèmes.
 
-## 4. Couche de Présentation (`components/`)
-*   **GameScene** : Contient le Canvas Three.js. Gère le rendu 3D.
+## 4. Couche de Présentation (`src/ui/`)
+*   **GameScene** : Contient le Canvas Three.js. Gère le rendu 3D (cf. `src/ui/components/`).
 *   **UI** : Overlay HTML/CSS (Menu, Badges, BattleScreen).
-*   **Synchronisation** : `App.tsx` s'abonne (`subscribe`) aux changements du moteur et force un re-render React à chaque mise à jour de l'état.
-*   **Assets Audio** : Les effets et musiques utilisés par l'UI résident dans `components/audio/` avec deux sous-dossiers dédiés :
-    *   `components/audio/sounds/` pour les effets courts (feedback UI, alertes).
-    *   `components/audio/musics/` pour les ambiances ou musiques de fond.
+*   **Synchronisation** : `src/ui/App.tsx` s'abonne (`subscribe`) aux changements du moteur et force un re-render React à chaque mise à jour de l'état.
+*   **Assets Audio** : Les effets et musiques utilisés par l'UI résident dans `src/content/audio/` avec deux sous-dossiers dédiés :
+    *   `src/content/audio/sounds/` pour les effets courts (feedback UI, alertes).
+    *   `src/content/audio/musics/` pour les ambiances ou musiques de fond.
     *   Ces ressources sont chargées uniquement par la couche UI ; le moteur n'a aucune dépendance vers des assets audio.
 
 ## 5. Rendu 3D Optimisé

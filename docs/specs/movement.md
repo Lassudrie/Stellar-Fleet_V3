@@ -5,7 +5,7 @@
 - Calcul (par tour) : `BASE_FLEET_SPEED * min(ship.speed)` sur l'ensemble des vaisseaux présents.
 - Si la flotte est vide ou si aucune vitesse n'est trouvée, la valeur par défaut `BASE_FLEET_SPEED` est utilisée.
 
-Référence : `getFleetSpeed(fleet)` dans `services/movement/fleetSpeed.ts`.
+Référence : `getFleetSpeed(fleet)` dans `src/engine/movement/fleetSpeed.ts`.
 
 ## Step de déplacement : `moveFleet`
 - Entrées : `fleet`, `systems`, `day`, `rng`.
@@ -21,7 +21,7 @@ Référence : `getFleetSpeed(fleet)` dans `services/movement/fleetSpeed.ts`.
     - Drapeaux de mouvement remis à zéro : `targetPosition`, `targetSystemId`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId`.
     - Journal d'arrivée ajouté si la cible correspond à un système connu (type `move`).
 
-Référence : `moveFleet` dans `services/movement/movementPhase.ts`.
+Référence : `moveFleet` dans `src/engine/movement/movementPhase.ts`.
 
 ## Transition ORBIT ↔ MOVING
 - **Départ** : la mise en mouvement (hors de ce scope) place la flotte en `FleetState.MOVING` avec une `targetPosition` et, le cas échéant, `targetSystemId`.
@@ -45,4 +45,4 @@ Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de
      - Sinon, tentative de déploiement avec risque d'échec en orbite contestée (`applyContestedDeploymentRisk`).
      - Succès partiel ou total génère un log `combat` indiquant le nombre d'armées déposées et un avertissement si l'orbite est contestée.
 
-Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `services/movement/movementPhase.ts`.
+Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `src/engine/movement/movementPhase.ts`.

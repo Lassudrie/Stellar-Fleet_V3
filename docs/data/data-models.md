@@ -1,7 +1,7 @@
 
 # Modèles de Données
 
-Ce document résume les structures décrites dans `types.ts` pour les factions, flottes, armées, combats, objectifs, règles et données astro. Les exemples sont donnés en minuscules pour les valeurs d'enum et utilisent les clés mises à jour (`winnerFactionId`, `ownerFactionId`).
+Ce document résume les structures décrites dans `src/shared/types.ts` pour les factions, flottes, armées, combats, objectifs, règles et données astro. Les exemples sont donnés en minuscules pour les valeurs d'enum et utilisent les clés mises à jour (`winnerFactionId`, `ownerFactionId`).
 
 ## Types de base et identifiants
 
@@ -91,7 +91,7 @@ export interface StarSystemAstro {
 }
 ```
 
-Les types `SpectralType`, `PlanetType`, `MoonType` et `AtmosphereType` sont des littéraux de chaînes décrits dans `types.ts`. Les champs numériques sont directement sérialisables pour les sauvegardes.
+Les types `SpectralType`, `PlanetType`, `MoonType` et `AtmosphereType` sont des littéraux de chaînes décrits dans `src/shared/types.ts`. Les champs numériques sont directement sérialisables pour les sauvegardes.
 
 ## Flottes et vaisseaux
 

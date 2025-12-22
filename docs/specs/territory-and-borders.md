@@ -1,13 +1,13 @@
 # Spécification : Territoire et bordures
 
 ## Objectif
-Cette page décrit comment le moteur calcule l'appartenance territoriale à partir des systèmes stellaires, comment cette information est projetée dans l'interface (`components/TerritoryBorders.tsx`) et en quoi elle se distingue des mécaniques de gameplay qui s'appuient directement sur les champs `ownerFactionId` des systèmes et des planètes.
+Cette page décrit comment le moteur calcule l'appartenance territoriale à partir des systèmes stellaires, comment cette information est projetée dans l'interface (`src/ui/components/TerritoryBorders.tsx`) et en quoi elle se distingue des mécaniques de gameplay qui s'appuient directement sur les champs `ownerFactionId` des systèmes et des planètes.
 
 ## Paramètres clefs
 - **Rayon d'influence** : `TERRITORY_RADIUS = 28` (dans `data/static.ts`). Ce rayon fixe la portée maximale d'un système pour revendiquer de l'espace autour de lui.
 
 ## Calcul du territoire (moteur)
-La fonction `engine/territory.ts#getTerritoryOwner` détermine l'ID de faction qui contrôle un point 3D (`Vec3`), ou `null` si l'espace est neutre.
+La fonction `src/engine/territory.ts#getTerritoryOwner` détermine l'ID de faction qui contrôle un point 3D (`Vec3`), ou `null` si l'espace est neutre.
 
 Étapes :
 1. **Filtrer** les systèmes sans propriétaire (`ownerFactionId === null`). Seuls les systèmes contrôlés projettent une influence.
@@ -23,7 +23,7 @@ Conséquences :
 - La logique moteur ne tient pas compte de la présence de planètes ou d'autres entités : seule la position des systèmes et leur propriétaire importe.
 
 ## Représentation UI des frontières
-Le composant `components/TerritoryBorders.tsx` applique un algorithme visuel dérivé de la logique précédente pour dessiner des polygones par faction :
+Le composant `src/ui/components/TerritoryBorders.tsx` applique un algorithme visuel dérivé de la logique précédente pour dessiner des polygones par faction :
 
 1. **Échantillonnage initial** : chaque système contrôlé génère un disque discretisé (`CIRCLE_SEGMENTS = 64`) de rayon `TERRITORY_RADIUS` autour de sa position (plan XZ).
 2. **Découpage par médiatrices** : pour chaque autre système suffisamment proche, le disque est coupé par le plan médian (principe de Voronoï) afin de conserver uniquement la partie la plus proche du système courant.
@@ -36,6 +36,6 @@ Points d'attention UI :
 - Le rendu est purement visuel : il ne modifie pas la logique de capture ou de déplacement.
 
 ## Distinction avec le gameplay
-- Les systèmes et planètes possèdent leur propre `ownerFactionId` (`types.ts`), utilisé par les mécaniques de capture, d'économie ou d'invasion. Le territoire visuel n'écrase pas ces valeurs.
+- Les systèmes et planètes possèdent leur propre `ownerFactionId` (`src/shared/types.ts`), utilisé par les mécaniques de capture, d'économie ou d'invasion. Le territoire visuel n'écrase pas ces valeurs.
 - Une planète peut appartenir à une faction différente de la zone où elle se trouve visuellement si la logique de gameplay l'autorise ; la superposition sert uniquement d'indication spatiale.
 - Les zones neutres (au-delà du rayon ou en cas d'égalité parfaite) apparaissent sans couleur et n'accordent aucun droit particulier en gameplay.

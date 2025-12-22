@@ -22,13 +22,13 @@ Structure des données.
 
 ## Scénario actif
 
-Le simulateur propose désormais plusieurs scénarios, notamment **Conquest Sandbox** (`scenarios/templates/conquest_sandbox.ts`) et **Spiral Convergence** (`scenarios/templates/spiral_convergence.ts`), tous deux référencés manuellement dans `scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
+Le simulateur propose désormais plusieurs scénarios, notamment **Conquest Sandbox** (`src/content/scenarios/templates/conquest_sandbox.ts`) et **Spiral Convergence** (`src/content/scenarios/templates/spiral_convergence.ts`), tous deux référencés manuellement dans `src/content/scenarios/registry.ts`. Toute nouvelle définition devra être ajoutée au registre pour être exposée à l'UI.
 
 ## Conventions de rédaction des spécifications
 
 - **Indexation** : toute nouvelle spécification doit être ajoutée dans `docs/specs/` et référencée dans la liste ci-dessus pour garantir la découvrabilité.
 - **Convention de nommage** : utiliser le `kebab-case` en anglais pour les fichiers de spécification (ex. `battle-system-v1.md`, `scenario-spec.md`). Inclure une version dans le nom uniquement si plusieurs itérations coexistent.
-- **Source de vérité des types** : décrire les données en s'alignant sur les définitions TypeScript existantes (`types.ts`, `engine/**`, `services/**`). Tout écart doit être explicité, et les sections **Données** et **Constantes** doivent pointer vers les types/constantes correspondants.
+- **Source de vérité des types** : décrire les données en s'alignant sur les définitions TypeScript existantes (`src/shared/types.ts`, `src/engine/**`, `src/content/**`, `src/ui/**`). Tout écart doit être explicité, et les sections **Données** et **Constantes** doivent pointer vers les types/constantes correspondants.
 
 ## Installation & Démarrage
 
