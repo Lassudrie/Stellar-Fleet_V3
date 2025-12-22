@@ -25,7 +25,7 @@ export const useButtonClickSound = () => {
       const instance = audioTemplate.cloneNode(true) as HTMLAudioElement;
       instance.currentTime = 0;
 
-      void instance.play();
+      void instance.play().catch(() => {});
     };
 
     document.addEventListener('click', handleButtonClick);

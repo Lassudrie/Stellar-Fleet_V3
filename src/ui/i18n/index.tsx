@@ -15,14 +15,28 @@ const isDomAvailable =
   typeof document !== 'undefined' &&
   typeof navigator !== 'undefined';
 
-const canUseLocalStorage =
-  typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+const safeGetStorage = (key: string): string | null => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn('[i18n] Failed to read from storage', error);
+    return null;
+  }
+};
+
+const safeSetStorage = (key: string, value: string) => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn('[i18n] Failed to write to storage', error);
+  }
+};
 
 const getInitialLocale = (): Locale => {
-  if (canUseLocalStorage) {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'fr') return saved;
-  }
+  const saved = safeGetStorage(STORAGE_KEY);
+  if (saved === 'en' || saved === 'fr') return saved;
 
   if (isDomAvailable) {
     const nav = navigator.language?.split('-')[0];
@@ -37,9 +51,7 @@ export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setLocale = (lang: Locale) => {
     setLocaleState(lang);
-    if (canUseLocalStorage) {
-      localStorage.setItem(STORAGE_KEY, lang);
-    }
+    safeSetStorage(STORAGE_KEY, lang);
     if (isDomAvailable) {
       document.documentElement.lang = lang;
     }

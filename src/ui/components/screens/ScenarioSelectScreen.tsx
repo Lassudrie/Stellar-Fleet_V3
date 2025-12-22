@@ -11,14 +11,37 @@ interface ScenarioSelectScreenProps {
 
 const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onLaunch }) => {
   const { t } = useI18n();
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(() => SCENARIO_TEMPLATES[0]?.id ?? '');
   const [customSeed, setCustomSeed] = useState<string>('');
 
-  const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) as ScenarioTemplate;
+  const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) ?? null;
+  const activeTemplate = selectedTemplate ?? SCENARIO_TEMPLATES[0];
+
+  if (SCENARIO_TEMPLATES.length === 0) {
+    return (
+      <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950 select-none animate-in fade-in duration-300">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl shadow-2xl p-8 max-w-md w-full text-center space-y-6">
+          <h1 className="text-2xl font-black text-white uppercase tracking-tight">{t('scenario.emptyTitle')}</h1>
+          <p className="text-slate-400 text-sm">{t('scenario.emptyMessage')}</p>
+          <button
+            onClick={onBack}
+            className="w-full py-3 rounded border border-slate-700 text-slate-200 hover:text-white hover:bg-slate-800 transition-colors uppercase font-bold text-xs tracking-widest"
+          >
+            {t('scenario.back')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleLaunch = () => {
+    if (!activeTemplate) {
+      alert(t('scenario.missingSelection'));
+      return;
+    }
+
     const seed = customSeed ? parseInt(customSeed, 10) || Date.now() : Date.now();
-    const scenario = buildScenario(selectedTemplateId, seed);
+    const scenario = buildScenario(activeTemplate.id, seed);
     onLaunch(scenario);
   };
 
@@ -94,18 +117,18 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
            {/* Header Info */}
            <div className="mb-6 md:mb-8">
               <h1 className="text-2xl md:text-4xl font-black text-white uppercase mb-2 tracking-tight">
-                {getScenarioTitle(selectedTemplate)}
+                {getScenarioTitle(activeTemplate)}
               </h1>
               <div className="flex gap-2 mb-4 md:mb-6">
-                 {selectedTemplate.rules.fogOfWar && (
+                 {activeTemplate.rules.fogOfWar && (
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.fog')}</span>
                  )}
-                 {selectedTemplate.rules.aiEnabled && (
+                 {activeTemplate.rules.aiEnabled && (
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.ai')}</span>
                  )}
               </div>
               <p className="text-slate-400 leading-relaxed text-sm max-w-lg border-l-2 border-blue-500/30 pl-4">
-                {getScenarioDesc(selectedTemplate)}
+                {getScenarioDesc(activeTemplate)}
               </p>
            </div>
 
@@ -113,11 +136,11 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
            <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
               <div className="bg-slate-800/30 p-4 rounded border border-slate-700/50">
                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">{t('scenario.size')}</div>
-                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate.generation.systemCount} <span className="text-sm text-slate-600">{t('scenario.stars')}</span></div>
+                 <div className="text-xl md:text-2xl font-mono text-blue-200">{activeTemplate.generation.systemCount} <span className="text-sm text-slate-600">{t('scenario.stars')}</span></div>
               </div>
               <div className="bg-slate-800/30 p-4 rounded border border-slate-700/50">
                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">{t('scenario.radius')}</div>
-                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate.generation.radius} <span className="text-sm text-slate-600">LY</span></div>
+                 <div className="text-xl md:text-2xl font-mono text-blue-200">{activeTemplate.generation.radius} <span className="text-sm text-slate-600">LY</span></div>
               </div>
            </div>
 

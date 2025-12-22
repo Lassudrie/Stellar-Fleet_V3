@@ -138,6 +138,11 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
       const menu = menuRef.current;
       if (!menu) return;
 
+      if (typeof ResizeObserver === 'undefined') {
+          recalcPosition();
+          return;
+      }
+
       const observer = new ResizeObserver(() => recalcPosition());
       observer.observe(menu);
 
