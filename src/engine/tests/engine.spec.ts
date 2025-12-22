@@ -81,10 +81,18 @@ const createSystem = (id: string, ownerFactionId: string | null): StarSystem => 
   planets: [createPlanet(id, ownerFactionId)]
 });
 
-const createFleet = (id: string, factionId: string, position: Vec3, ships: ShipEntity[]): Fleet => ({
+type TestShipInput = Omit<ShipEntity, 'fuel'> & Partial<Pick<ShipEntity, 'fuel'>>;
+
+const withFuel = (ship: TestShipInput): ShipEntity => {
+  const stats = SHIP_STATS[ship.type];
+  const fuel = ship.fuel ?? stats?.fuelCapacity ?? 0;
+  return { ...ship, fuel };
+};
+
+const createFleet = (id: string, factionId: string, position: Vec3, ships: TestShipInput[]): Fleet => ({
   id,
   factionId,
-  ships,
+  ships: ships.map(withFuel),
   position,
   state: FleetState.ORBIT,
   targetSystemId: null,

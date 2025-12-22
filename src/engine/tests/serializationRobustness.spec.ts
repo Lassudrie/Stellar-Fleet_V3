@@ -36,6 +36,7 @@ const createFleet = (id: string, system: StarSystem): Fleet => {
     type: ShipType.FRIGATE,
     hp: 50,
     maxHp: 50,
+    fuel: 50,
     carriedArmyId: null
   };
 

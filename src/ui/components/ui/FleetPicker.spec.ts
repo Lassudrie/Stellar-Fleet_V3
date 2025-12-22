@@ -48,7 +48,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
 {
   const transportFleet = buildFleet({
     id: 'f-transport',
-    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, carriedArmyId: 'army-1' }],
+    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 100, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
     isFleetEligibleForMode(transportFleet, 'UNLOAD', targetPosition),
@@ -60,7 +60,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
 {
   const noTransportFleet = buildFleet({
     id: 'f-no-transport',
-    ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, carriedArmyId: null }],
+    ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, fuel: 50, carriedArmyId: null }],
   });
   assert.strictEqual(
     isFleetEligibleForMode(noTransportFleet, 'LOAD', targetPosition),

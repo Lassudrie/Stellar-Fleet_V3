@@ -96,6 +96,7 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
       type: fallbackType,
       hp: fallbackStats.maxHp,
       maxHp: fallbackStats.maxHp,
+      fuel: fallbackStats.fuelCapacity,
       carriedArmyId: null,
       consumables: {
         offensiveMissiles: fallbackStats.offensiveMissileStock,
@@ -111,6 +112,7 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
     type,
     hp: stats.maxHp,
     maxHp: stats.maxHp,
+    fuel: stats.fuelCapacity,
     carriedArmyId: null, // Default: No army loaded
     consumables: {
       offensiveMissiles: stats.offensiveMissileStock,

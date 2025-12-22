@@ -5,7 +5,8 @@ import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { fleetLabel } from '../../../engine/idUtils';
 import { useI18n } from '../../i18n';
 import { distSq } from '../../../engine/math/vec3';
-import { CAPTURE_RANGE_SQ } from '../../../content/data/static';
+import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
+import { canFleetPayJump } from '../../../engine/logistics/fuel';
 
 export const isFleetEligibleForMode = (
   fleet: Fleet,
@@ -13,8 +14,11 @@ export const isFleetEligibleForMode = (
   targetPosition: StarSystem['position']
 ): boolean => {
   const distanceSq = distSq(fleet.position, targetPosition);
+  const distanceLy = Math.sqrt(distanceSq);
 
   if (mode === 'MOVE' || mode === 'ATTACK') {
+      if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return false;
+      if (!canFleetPayJump(fleet, distanceLy)) return false;
       return distanceSq > CAPTURE_RANGE_SQ;
   }
 
