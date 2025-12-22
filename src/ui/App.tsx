@@ -485,11 +485,6 @@ const App: React.FC = () => {
       processCommandResult(result, notifyCommandError);
   };
 
-  const handleDismissMessage = (messageId: string) => {
-      if (!engine) return;
-      engine.dismissMessage(messageId);
-  };
-
   const handleMarkMessageRead = (messageId: string, read: boolean) => {
       if (!engine) return;
       engine.markMessageRead(messageId, read);
@@ -498,11 +493,6 @@ const App: React.FC = () => {
   const handleMarkAllMessagesRead = () => {
       if (!engine) return;
       engine.markAllMessagesRead();
-  };
-
-  const handleDismissReadMessages = () => {
-      if (!engine) return;
-      engine.dismissReadMessages();
   };
 
   const handleOpenMessage = (message: GameMessage) => {
@@ -630,15 +620,13 @@ const App: React.FC = () => {
                 }}
                 onExportAiLogs={handleExportAiLogs}
                 onClearAiLogs={handleClearAiLogs}
-                onDismissMessage={handleDismissMessage}
                 onOpenMessage={handleOpenMessage}
                 onMarkMessageRead={handleMarkMessageRead}
                 onMarkAllMessagesRead={handleMarkAllMessagesRead}
-                onDismissReadMessages={handleDismissReadMessages}
             />
         </div>
       );
-  }
+}
 
   return null;
 };

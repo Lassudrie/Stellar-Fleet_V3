@@ -15,10 +15,8 @@ interface SideMenuProps {
   onSelectFleet: (fleetId: string) => void;
   onSave: () => void;
   onOpenMessage: (message: GameMessage) => void;
-  onDismissMessage: (messageId: string) => void;
   onMarkMessageRead: (messageId: string, read: boolean) => void;
   onMarkAllMessagesRead: () => void;
-  onDismissReadMessages: () => void;
 
   devMode: boolean;
   godEyes: boolean;
@@ -37,7 +35,7 @@ const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { 
 
 const SideMenu: React.FC<SideMenuProps> = ({ 
     isOpen, onClose, logs, messages, blueFleets, systems, 
-    onRestart, onSelectFleet, onSave, onOpenMessage, onDismissMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages,
+    onRestart, onSelectFleet, onSave, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
     playerFactionId
@@ -394,12 +392,6 @@ const SideMenu: React.FC<SideMenuProps> = ({
                     >
                         {t('sidemenu.markAllRead')}
                     </button>
-                    <button
-                        onClick={onDismissReadMessages}
-                        className="text-[10px] px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-red-500/60"
-                    >
-                        {t('sidemenu.dismissRead')}
-                    </button>
                 </div>
             </div>
             {filteredMessages.length === 0 && (
@@ -423,12 +415,6 @@ const SideMenu: React.FC<SideMenuProps> = ({
                                 className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white"
                             >
                                 {message.read ? t('sidemenu.markUnread') : t('sidemenu.markRead')}
-                            </button>
-                            <button
-                                onClick={() => onDismissMessage(message.id)}
-                                className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-red-300"
-                            >
-                                {t('sidemenu.dismiss')}
                             </button>
                         </div>
                     </div>
