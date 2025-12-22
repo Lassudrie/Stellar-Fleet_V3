@@ -213,7 +213,10 @@ const App: React.FC = () => {
   // --- SAVE / LOAD HANDLERS ---
 
   const handleSave = () => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleSave: Engine not initialized');
+          return;
+      }
       try {
           const json = serializeGameState(engine.state);
           const blob = new Blob([json], { type: 'application/json' });
@@ -359,13 +362,19 @@ const App: React.FC = () => {
   };
 
   const handleOpenGroundOps = () => {
-      if (!targetSystem) return;
+      if (!targetSystem) {
+          console.warn('[App] handleOpenGroundOps: No target system selected');
+          return;
+      }
       setFleetPickerMode(null);
       setUiMode('GROUND_OPS_MODAL');
   };
 
   const handleOpenSystemDetails = () => {
-      if (!targetSystem || !viewGameState) return;
+      if (!targetSystem || !viewGameState) {
+          console.warn('[App] handleOpenSystemDetails: Missing targetSystem or viewGameState');
+          return;
+      }
       const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
       setSystemDetailSystem(latestSystem);
       setUiMode('NONE');
@@ -383,7 +392,10 @@ const App: React.FC = () => {
 
   const handleInvade = (systemId: string) => {
       const system = viewGameState?.systems.find(s => s.id === systemId);
-      if (!system) return;
+      if (!system) {
+          console.warn('[App] handleInvade: System not found', { systemId });
+          return;
+      }
       setTargetSystem(system);
       setFleetPickerMode(null);
       setUiMode('INVASION_MODAL');
@@ -391,7 +403,10 @@ const App: React.FC = () => {
 
   const handleCommitInvasion = (fleetId: string) => {
       const fId = fleetId;
-      if (!targetSystem || !engine) return;
+      if (!targetSystem || !engine) {
+          console.warn('[App] handleCommitInvasion: Missing targetSystem or engine');
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
@@ -433,17 +448,29 @@ const App: React.FC = () => {
   };
 
   const handleDeploySingle = (shipId: string, planetId: string) => {
-      if (!engine || !selectedFleetId) return;
+      if (!engine || !selectedFleetId) {
+          console.warn('[App] handleDeploySingle: Missing engine or selectedFleetId');
+          return;
+      }
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
       const system = findOrbitingSystem(fleet, engine.state.systems);
-      if (!fleet || !system) return;
+      if (!fleet || !system) {
+          console.warn('[App] handleDeploySingle: Fleet or system not found', { selectedFleetId, fleet: !!fleet, system: !!system });
+          return;
+      }
 
       const ship = fleet.ships.find(s => s.id === shipId);
-      if (!ship || !ship.carriedArmyId) return;
+      if (!ship || !ship.carriedArmyId) {
+          console.warn('[App] handleDeploySingle: Ship not found or no carried army', { shipId, ship: !!ship });
+          return;
+      }
 
       const targetPlanet = system.planets.find(planet => planet.id === planetId && planet.isSolid);
-      if (!targetPlanet) return;
+      if (!targetPlanet) {
+          console.warn('[App] handleDeploySingle: Target planet not found', { planetId });
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'UNLOAD_ARMY',
@@ -457,11 +484,17 @@ const App: React.FC = () => {
   };
 
   const handleEmbarkArmy = (shipId: string, armyId: string) => {
-      if (!engine || !selectedFleetId) return;
+      if (!engine || !selectedFleetId) {
+          console.warn('[App] handleEmbarkArmy: Missing engine or selectedFleetId');
+          return;
+      }
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
       const system = findOrbitingSystem(fleet, engine.state.systems);
-      if (!fleet || !system) return;
+      if (!fleet || !system) {
+          console.warn('[App] handleEmbarkArmy: Fleet or system not found', { selectedFleetId });
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'LOAD_ARMY',
@@ -474,7 +507,10 @@ const App: React.FC = () => {
   };
 
   const handleTransferArmy = (systemId: string, armyId: string, fromPlanetId: string, toPlanetId: string) => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleTransferArmy: Engine not initialized');
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'TRANSFER_ARMY_PLANET',
@@ -487,17 +523,26 @@ const App: React.FC = () => {
   };
 
   const handleMarkMessageRead = (messageId: string, read: boolean) => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleMarkMessageRead: Engine not initialized');
+          return;
+      }
       engine.markMessageRead(messageId, read);
   };
 
   const handleMarkAllMessagesRead = () => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleMarkAllMessagesRead: Engine not initialized');
+          return;
+      }
       engine.markAllMessagesRead();
   };
 
   const handleOpenMessage = (message: GameMessage) => {
-      if (!engine || !viewGameState) return;
+      if (!engine || !viewGameState) {
+          console.warn('[App] handleOpenMessage: Engine or viewGameState not initialized');
+          return;
+      }
       engine.markMessageRead(message.id, true);
 
       const payload = message.payload || {};

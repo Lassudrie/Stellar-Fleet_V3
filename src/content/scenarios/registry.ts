@@ -121,12 +121,19 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
 
 // Parse and Load
 const loadedScenarios: ScenarioTemplate[] = [];
+let failedCount = 0;
 
 for (const { data, name } of templatesToLoad) {
     const validated = validateScenarioV1(data, name);
     if (validated) {
         loadedScenarios.push(validated);
+    } else {
+        failedCount++;
     }
+}
+
+if (failedCount > 0) {
+    console.error(`[ScenarioRegistry] ${failedCount} scenario(s) failed to load. Check warnings above for details.`);
 }
 
 // Sort by difficulty then title
