@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import clickSoundUrl from '../content/audio/sounds/Blip_1.ogg';
+import clickSoundUrl from '../../content/audio/sounds/Blip_1.ogg';
 
 export const useButtonClickSound = () => {
   const templateRef = useRef<HTMLAudioElement | null>(null);
