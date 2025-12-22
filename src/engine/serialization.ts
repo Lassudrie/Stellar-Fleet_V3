@@ -125,7 +125,13 @@ const restoreAstro = (
   const sanitized = sanitizeStarSystemAstro(astro);
   if (sanitized) return sanitized;
   if (isFiniteNumber(worldSeed) && typeof systemId === 'string' && systemId.length > 0) {
+    if (astro) {
+      console.warn(`[Serialization] Astro data for system '${systemId}' was invalid; regenerating from seed.`);
+    }
     return generateStellarSystem({ worldSeed, systemId });
+  }
+  if (astro) {
+    console.warn(`[Serialization] Cannot restore astro for system '${systemId}': invalid data and no seed available.`);
   }
   return undefined;
 };
@@ -545,10 +551,16 @@ export const deserializeGameState = (json: string): GameState => {
 
       const ships: unknown[] = Array.isArray(f.ships) ? f.ships : [];
       const sanitizedShips = ships
-        .map((entry: unknown): ShipEntity | null => {
+        .map((entry: unknown, index: number): ShipEntity | null => {
           const ship = entry as any;
-          if (typeof ship?.id !== 'string') return null;
-          if (!isEnumValue(SHIP_TYPES, ship.type)) return null;
+          if (typeof ship?.id !== 'string') {
+            console.warn(`[Serialization] Ship at index ${index} in fleet '${f.id}' has invalid id; skipping.`);
+            return null;
+          }
+          if (!isEnumValue(SHIP_TYPES, ship.type)) {
+            console.warn(`[Serialization] Ship '${ship.id}' has invalid type '${ship.type}'; skipping.`);
+            return null;
+          }
 
           const shipType = ship.type as ShipType;
           const fallbackMaxHp = SHIP_STATS[shipType]?.maxHp ?? 100;
@@ -696,14 +708,29 @@ export const deserializeGameState = (json: string): GameState => {
 
       const rawInitialShips: unknown[] = Array.isArray(b.initialShips) ? b.initialShips : [];
       const initialShips = rawInitialShips
-        .map((entry: unknown) => {
+        .map((entry: unknown, index: number) => {
           const snapshot = entry as any;
-          if (typeof snapshot?.shipId !== 'string' || typeof snapshot?.fleetId !== 'string') return null;
+          if (typeof snapshot?.shipId !== 'string' || typeof snapshot?.fleetId !== 'string') {
+            console.warn(`[Serialization] Battle '${b.id}' initialShips[${index}] has invalid shipId or fleetId; skipping.`);
+            return null;
+          }
           const factionId = typeof snapshot.factionId === 'string' ? snapshot.factionId : snapshot.faction;
-          if (typeof factionId !== 'string') return null;
-          if (validFactionIds && !validFactionIds.has(factionId)) return null;
-          if (!isEnumValue(SHIP_TYPES, snapshot.type)) return null;
-          if (!isFiniteNumber(snapshot.maxHp) || !isFiniteNumber(snapshot.startingHp)) return null;
+          if (typeof factionId !== 'string') {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid factionId; skipping.`);
+            return null;
+          }
+          if (validFactionIds && !validFactionIds.has(factionId)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' references unknown faction '${factionId}'; skipping.`);
+            return null;
+          }
+          if (!isEnumValue(SHIP_TYPES, snapshot.type)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid type '${snapshot.type}'; skipping.`);
+            return null;
+          }
+          if (!isFiniteNumber(snapshot.maxHp) || !isFiniteNumber(snapshot.startingHp)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid HP values; skipping.`);
+            return null;
+          }
           return {
             shipId: snapshot.shipId,
             fleetId: snapshot.fleetId,

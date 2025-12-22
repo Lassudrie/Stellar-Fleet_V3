@@ -161,6 +161,7 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
         const soleFactionResult = armiesByFaction.keys().next();
         if (soleFactionResult.done || !soleFactionResult.value) {
             // Safety guard: should never happen given size === 1, but prevents crash
+            console.error('[Conquest] CRITICAL: armiesByFaction.size === 1 but iterator returned empty. Planet:', planet.id, 'System:', system.id);
             return null;
         }
         const soleFaction = soleFactionResult.value as FactionId;

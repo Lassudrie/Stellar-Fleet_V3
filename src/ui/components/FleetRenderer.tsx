@@ -51,6 +51,7 @@ const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
       dark: `#${darkHighlight.getHexString()}`
     };
   } catch (error) {
+    console.warn('[FleetRenderer] Failed to derive highlight palette from color:', baseColor, error);
     return {
       light: baseColor,
       dark: baseColor
