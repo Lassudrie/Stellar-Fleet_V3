@@ -129,6 +129,10 @@ export const fr = {
   'picker.eta_one': 'ETA 1 TOUR',
   'picker.eta_other': 'ETA {{count}} TOURS',
   'picker.ly': 'AL',
+  'picker.restriction.insufficientFuel': 'Carburant insuffisant pour ce saut',
+  'picker.restriction.outOfRange': 'Destination hors de portée de saut',
+  'picker.restriction.captureRange': 'La flotte est déjà à portée de capture',
+  'picker.restriction.missingTransport': 'Aucun transport de troupes dans cette flotte',
 
   // Orbiting Fleet Picker
   'orbitPicker.title': 'Flottes en orbite',

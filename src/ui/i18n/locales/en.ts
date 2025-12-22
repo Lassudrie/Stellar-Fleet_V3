@@ -130,6 +130,10 @@ export const en = {
   'picker.eta_one': 'ETA 1 TURN',
   'picker.eta_other': 'ETA {{count}} TURNS',
   'picker.ly': 'LY',
+  'picker.restriction.insufficientFuel': 'Insufficient fuel for jump',
+  'picker.restriction.outOfRange': 'Destination is beyond jump range',
+  'picker.restriction.captureRange': 'Fleet is already within capture range',
+  'picker.restriction.missingTransport': 'No troop transports available in this fleet',
 
   // Orbiting Fleet Picker
   'orbitPicker.title': 'Fleets in orbit',
