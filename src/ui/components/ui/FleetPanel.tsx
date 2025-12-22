@@ -212,7 +212,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                 )}
             </div>
             <div className="text-[11px] text-slate-400 ml-7 flex gap-2">
-                <span>Fuel: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
+                <span>He-3: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
                 <span>•</span>
                 <span>Range: <span className="text-white font-mono">{fuelSummary.cappedCurrentReach.toFixed(1)} ly</span></span>
                 <span className="text-slate-600">/</span>

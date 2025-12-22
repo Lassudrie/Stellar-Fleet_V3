@@ -2,15 +2,14 @@
 import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../shared/types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
-import { clone, dist } from './math/vec3';
+import { clone } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
 import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
-import { areFleetsSharingOrbit, getOrbitingSystem, isFleetOrbitingSystem, isOrbitContested } from './orbit';
+import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
-import { applyJumpFuelDebit, canFleetPayJump } from './logistics/fuel';
-import { MAX_HYPERJUMP_DISTANCE_LY } from '../content/data/static';
+import { validateAndDebitJumpOrFail } from './logistics/fuel';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -86,21 +85,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             // Combat-locked fleets must ignore movement orders to preserve engagement lock
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
-            const isAlreadyEnRoute = fleet.state === FleetState.MOVING && fleet.targetSystemId === system.id;
-            let distanceLy = 0;
 
-            if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
-
-                distanceLy = dist(sourceSystem.position, system.position);
-                if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
-                    return fail('Destination is beyond maximum jump distance.');
-                }
-                if (!canFleetPayJump(fleet, distanceLy)) {
-                    return fail('Insufficient fuel for jump.');
-                }
-            }
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            if ('error' in validation) return fail(validation.error);
 
             // Structural Sharing Update
             return ok({
@@ -111,8 +98,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     // Locked fleets cannot move
                     if (fleet.retreating) return fleet;
 
-                    const debitedFleet = isAlreadyEnRoute ? fleet : applyJumpFuelDebit(fleet, distanceLy);
-                    const nextStateStartTurn = isAlreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
 
                     return {
                         ...debitedFleet,
@@ -139,21 +126,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             // Combat-locked fleets must ignore movement orders to preserve engagement lock
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
-            const isAlreadyEnRoute = fleet.state === FleetState.MOVING && fleet.targetSystemId === system.id;
-            let distanceLy = 0;
 
-            if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
-
-                distanceLy = dist(sourceSystem.position, system.position);
-                if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
-                    return fail('Destination is beyond maximum jump distance.');
-                }
-                if (!canFleetPayJump(fleet, distanceLy)) {
-                    return fail('Insufficient fuel for jump.');
-                }
-            }
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
@@ -161,8 +136,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
-                    const debitedFleet = isAlreadyEnRoute ? fleet : applyJumpFuelDebit(fleet, distanceLy);
-                    const nextStateStartTurn = isAlreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
 
                     return {
                         ...debitedFleet,
@@ -189,21 +164,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             // Combat-locked fleets must ignore movement orders to preserve engagement lock
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
-            const isAlreadyEnRoute = fleet.state === FleetState.MOVING && fleet.targetSystemId === system.id;
-            let distanceLy = 0;
 
-            if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
-
-                distanceLy = dist(sourceSystem.position, system.position);
-                if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
-                    return fail('Destination is beyond maximum jump distance.');
-                }
-                if (!canFleetPayJump(fleet, distanceLy)) {
-                    return fail('Insufficient fuel for jump.');
-                }
-            }
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
@@ -211,8 +174,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
-                    const debitedFleet = isAlreadyEnRoute ? fleet : applyJumpFuelDebit(fleet, distanceLy);
-                    const nextStateStartTurn = isAlreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
 
                     return {
                         ...debitedFleet,
@@ -239,21 +202,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             // Combat-locked fleets must ignore movement orders to preserve engagement lock
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
-            const isAlreadyEnRoute = fleet.state === FleetState.MOVING && fleet.targetSystemId === system.id;
-            let distanceLy = 0;
 
-            if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
-
-                distanceLy = dist(sourceSystem.position, system.position);
-                if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
-                    return fail('Destination is beyond maximum jump distance.');
-                }
-                if (!canFleetPayJump(fleet, distanceLy)) {
-                    return fail('Insufficient fuel for jump.');
-                }
-            }
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
@@ -261,8 +212,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
-                    const debitedFleet = isAlreadyEnRoute ? fleet : applyJumpFuelDebit(fleet, distanceLy);
-                    const nextStateStartTurn = isAlreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
 
                     return {
                         ...debitedFleet,

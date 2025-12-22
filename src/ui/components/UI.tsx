@@ -345,6 +345,7 @@ const UI: React.FC<UIProps> = ({
         <FleetPicker
             mode={fleetPickerMode || 'MOVE'}
             targetSystem={targetSystem}
+            systems={systems}
             blueFleets={blueFleets}
             onSelectFleet={(fleetId) => {
                 if (fleetPickerMode === 'LOAD') return onLoadCommand(fleetId);

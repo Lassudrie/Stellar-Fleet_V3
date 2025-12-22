@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { isFleetEligibleForMode } from './FleetPicker';
 import { CAPTURE_RANGE_SQ } from '../../../content/data/static';
-import { Fleet, FleetState, ShipType } from '../../../shared/types';
+import { Fleet, FleetState, ShipType, StarSystem } from '../../../shared/types';
 
 const buildFleet = (overrides: Partial<Fleet>): Fleet => ({
   id: overrides.id ?? 'f-1',
@@ -19,15 +19,34 @@ const buildFleet = (overrides: Partial<Fleet>): Fleet => ({
   retreating: false,
 });
 
-const targetPosition = { x: 0, y: 0, z: 0 };
+const targetSystem: StarSystem = {
+  id: 'target',
+  name: 'Target',
+  position: { x: 50, y: 0, z: 0 },
+  color: '#fff',
+  size: 1,
+  ownerFactionId: null,
+  resourceType: 'none',
+  isHomeworld: false,
+  planets: []
+};
+const systems: StarSystem[] = [
+  targetSystem,
+  {
+    ...targetSystem,
+    id: 'source',
+    name: 'Source',
+    position: { x: 0, y: 0, z: 0 }
+  }
+];
 
 {
   const inRangeFleet = buildFleet({
     id: 'f-near',
-    position: { x: Math.sqrt(CAPTURE_RANGE_SQ) - 0.1, y: 0, z: 0 }
+    position: { x: targetSystem.position.x - (Math.sqrt(CAPTURE_RANGE_SQ) - 0.1), y: 0, z: 0 }
   });
   assert.strictEqual(
-    isFleetEligibleForMode(inRangeFleet, 'MOVE', targetPosition),
+    isFleetEligibleForMode(inRangeFleet, 'MOVE', targetSystem, systems),
     false,
     'Fleets already within capture range should not be selectable for MOVE'
   );
@@ -36,10 +55,10 @@ const targetPosition = { x: 0, y: 0, z: 0 };
 {
   const farFleet = buildFleet({
     id: 'f-far',
-    position: { x: Math.sqrt(CAPTURE_RANGE_SQ) + 1, y: 0, z: 0 }
+    position: systems[1].position
   });
   assert.strictEqual(
-    isFleetEligibleForMode(farFleet, 'ATTACK', targetPosition),
+    isFleetEligibleForMode(farFleet, 'ATTACK', targetSystem, systems),
     true,
     'Fleets outside capture range should be selectable for ATTACK'
   );
@@ -51,7 +70,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
     ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 100, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
-    isFleetEligibleForMode(transportFleet, 'UNLOAD', targetPosition),
+    isFleetEligibleForMode(transportFleet, 'UNLOAD', targetSystem, systems),
     true,
     'Fleets with transports should be allowed for UNLOAD'
   );
@@ -63,7 +82,7 @@ const targetPosition = { x: 0, y: 0, z: 0 };
     ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, fuel: 50, carriedArmyId: null }],
   });
   assert.strictEqual(
-    isFleetEligibleForMode(noTransportFleet, 'LOAD', targetPosition),
+    isFleetEligibleForMode(noTransportFleet, 'LOAD', targetSystem, systems),
     false,
     'Fleets without transports should not be selectable for LOAD'
   );
