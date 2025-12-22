@@ -1,5 +1,5 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../shared/types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType, StarSystem } from '../shared/types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone, dist } from './math/vec3';
@@ -66,6 +66,23 @@ const getAvailableTransportsInOrbit = (
 
 const isCombatLocked = (fleet: Fleet | undefined | null): boolean => fleet?.state === FleetState.COMBAT;
 
+const getMoveDistance = (
+    fleet: Fleet,
+    targetSystem: StarSystem,
+    systems: StarSystem[]
+): { ok: true; distanceLy: number } | { ok: false; error: string } => {
+    const sourceSystem = getOrbitingSystem(fleet, systems);
+    if (sourceSystem) {
+        return { ok: true, distanceLy: dist(sourceSystem.position, targetSystem.position) };
+    }
+
+    if (fleet.state === FleetState.MOVING) {
+        return { ok: true, distanceLy: dist(fleet.position, targetSystem.position) };
+    }
+
+    return { ok: false, error: 'Fleet must be orbiting a system to move.' };
+};
+
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): CommandResult => {
     // Enforce Immutability in Dev
     deepFreezeDev(state);
@@ -90,10 +107,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             let distanceLy = 0;
 
             if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
+                const distanceResult = getMoveDistance(fleet, system, state.systems);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
-                distanceLy = dist(sourceSystem.position, system.position);
+                distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
                     return fail('Destination is beyond maximum jump distance.');
                 }
@@ -143,10 +160,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             let distanceLy = 0;
 
             if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
+                const distanceResult = getMoveDistance(fleet, system, state.systems);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
-                distanceLy = dist(sourceSystem.position, system.position);
+                distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
                     return fail('Destination is beyond maximum jump distance.');
                 }
@@ -193,10 +210,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             let distanceLy = 0;
 
             if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
+                const distanceResult = getMoveDistance(fleet, system, state.systems);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
-                distanceLy = dist(sourceSystem.position, system.position);
+                distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
                     return fail('Destination is beyond maximum jump distance.');
                 }
@@ -243,10 +260,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             let distanceLy = 0;
 
             if (!isAlreadyEnRoute) {
-                const sourceSystem = getOrbitingSystem(fleet, state.systems);
-                if (!sourceSystem) return fail('Fleet must be orbiting a system to move.');
+                const distanceResult = getMoveDistance(fleet, system, state.systems);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
-                distanceLy = dist(sourceSystem.position, system.position);
+                distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
                     return fail('Destination is beyond maximum jump distance.');
                 }
