@@ -8,6 +8,7 @@ A minimalist 3D space battle simulator for mobile.
 - **Engine (`src/engine/`)** : Simulation déterministe (boucle de tour, IA, combat, déplacement, génération).
 - **Content (`src/content/`)** : Données statiques, templates de scénarios et assets audio utilisés par l'UI.
 - **Shared (`src/shared/`)** : Types métier et utilitaires runtime partagés.
+- **Styles** : Tailwind est chargé côté client via le CDN officiel avec une configuration inline dans `index.html`; les styles globaux spécifiques au projet résident dans `src/ui/index.css`.
 - **State** : Immutable updates.
 - **Determinism** : The simulation (world generation, combat, movement logs) is strictly deterministic based on the `seed` in `GameState`. `Math.random` and `Date.now` are prohibited in state-modifying logic. Visual animations (FleetRenderer) may use system time for smooth interpolation but do not affect logic.
 - **Audio assets (UI only)** : stockés sous `src/content/audio/` avec des sous-dossiers `sounds/` (effets) et `musics/` (ambiances). La couche moteur n'en dépend jamais.
