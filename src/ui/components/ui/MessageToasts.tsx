@@ -4,7 +4,6 @@ import { useI18n } from '../../i18n';
 
 interface MessageToastsProps {
   messages: GameMessage[];
-  onDismissMessage: (messageId: string) => void;
   onOpenMessage: (message: GameMessage) => void;
   onMarkRead: (messageId: string, read: boolean) => void;
 }
@@ -36,7 +35,6 @@ export const selectActiveToastMessages = (messages: GameMessage[], hiddenToastId
 
 const MessageToasts: React.FC<MessageToastsProps> = ({
   messages,
-  onDismissMessage,
   onOpenMessage,
   onMarkRead
 }) => {
@@ -59,9 +57,8 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 
   const dismissToast = useCallback((messageId: string) => {
     onMarkRead(messageId, true);
-    onDismissMessage(messageId);
     setHiddenToastIds(prev => computeHiddenToastState(prev, messageId).next);
-  }, [onDismissMessage, onMarkRead]);
+  }, [onMarkRead]);
 
   useEffect(() => {
     const knownIds = new Set(messages.map(msg => msg.id));
@@ -145,13 +142,6 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
                 className="text-[10px] text-blue-300 hover:text-blue-100 px-2 py-1 rounded bg-blue-900/30 border border-blue-800/50 transition-colors"
               >
                 {message.read ? t('messages.markUnread') : t('messages.markRead')}
-              </button>
-              <button
-                aria-label={t('messages.dismiss')}
-                onClick={(e) => { e.stopPropagation(); dismissToast(message.id); }}
-                className="text-[10px] text-rose-300 hover:text-rose-100 px-2 py-1 rounded bg-rose-900/30 border border-rose-800/50 transition-colors"
-              >
-                {t('messages.dismiss')}
               </button>
               <button
                 aria-label={t('messages.hideToast')}

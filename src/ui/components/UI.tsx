@@ -73,11 +73,9 @@ interface UIProps {
   godEyes: boolean;
   onSetUiSettings: (settings: { devMode: boolean, godEyes: boolean, aiDebug?: boolean }) => void;
 
-  onDismissMessage: (messageId: string) => void;
   onOpenMessage: (message: GameMessage) => void;
   onMarkMessageRead: (messageId: string, read: boolean) => void;
   onMarkAllMessagesRead: () => void;
-  onDismissReadMessages: () => void;
 }
 
 const UI: React.FC<UIProps> = ({
@@ -90,7 +88,7 @@ const UI: React.FC<UIProps> = ({
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
     devMode, godEyes, onSetUiSettings,
-    onDismissMessage, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead, onDismissReadMessages
+    onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
 }) => {
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
@@ -307,10 +305,8 @@ const UI: React.FC<UIProps> = ({
         onSelectFleet={onSelectFleet}
         onSave={onSave}
         onOpenMessage={onOpenMessage}
-        onDismissMessage={onDismissMessage}
         onMarkMessageRead={onMarkMessageRead}
         onMarkAllMessagesRead={onMarkAllMessagesRead}
-        onDismissReadMessages={onDismissReadMessages}
         
         devMode={devMode}
         godEyes={godEyes}
@@ -443,7 +439,6 @@ const UI: React.FC<UIProps> = ({
 
       <MessageToasts
         messages={messages}
-        onDismissMessage={onDismissMessage}
         onOpenMessage={onOpenMessage}
         onMarkRead={onMarkMessageRead}
       />
