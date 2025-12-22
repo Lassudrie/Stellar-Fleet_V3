@@ -6,6 +6,7 @@ import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { dist } from '../../../engine/math/vec3';
 import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
+import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 
 interface SideMenuProps {
   isOpen: boolean;
@@ -253,6 +254,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
               const progress = inTransit ? clamp01(totalDistance > 0 ? distanceTraveled / totalDistance : 0) : 1;
               const etaTurns = inTransit && speed > 0 ? Math.max(1, Math.ceil(remainingDistance / speed)) : 0;
               const safeEta = etaTurns > 0 ? etaTurns : 1;
+              const fuelSummary = computeFleetFuelSummary(fleet);
+              const fuelPercentLabel = `${Math.round(fuelSummary.fuelPercentage)}% (${Math.round(fuelSummary.totalFuel).toLocaleString()})`;
 
               const etaLabel = inTransit
                 ? etaTurns === 1
@@ -319,6 +322,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
                   <div className="mt-4 flex flex-wrap items-center gap-3 text-slate-200">
                       <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
                           {t('orbitPicker.shipCount', { count: fleet.ships.length })}
+                      </span>
+                      <span className="px-3 py-1 rounded-full bg-amber-900/40 border border-amber-700/40 text-sm font-semibold text-amber-100">
+                          Fuel {fuelPercentLabel}
                       </span>
                       <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
                       <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>

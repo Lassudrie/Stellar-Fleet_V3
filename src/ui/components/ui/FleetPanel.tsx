@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../../shared/types';
 import { shortId, fleetLabel } from '../../../engine/idUtils';
 import { useI18n } from '../../i18n';
-import { SHIP_STATS, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
+import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -100,37 +100,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
   const { t } = useI18n();
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
 
-  const fuelSummary = useMemo(() => {
-    let totalFuel = 0;
-    let totalCapacity = 0;
-    let currentReach = Infinity;
-    let fullReach = Infinity;
-
-    fleet.ships.forEach(ship => {
-      const stats = SHIP_STATS[ship.type];
-      if (!stats) return;
-      totalFuel += ship.fuel;
-      totalCapacity += stats.fuelCapacity;
-      const consumption = stats.fuelConsumptionPerLy;
-      if (consumption > 0) {
-        currentReach = Math.min(currentReach, ship.fuel / consumption);
-        fullReach = Math.min(fullReach, stats.fuelCapacity / consumption);
-      }
-    });
-
-    if (!Number.isFinite(currentReach)) currentReach = 0;
-    if (!Number.isFinite(fullReach)) fullReach = 0;
-
-    const cappedCurrentReach = Math.min(currentReach, MAX_HYPERJUMP_DISTANCE_LY);
-    const cappedFullReach = Math.min(fullReach, MAX_HYPERJUMP_DISTANCE_LY);
-
-    return {
-      totalFuel,
-      totalCapacity,
-      cappedCurrentReach,
-      cappedFullReach
-    };
-  }, [fleet]);
+  const fuelSummary = useMemo(() => computeFleetFuelSummary(fleet), [fleet]);
 
   const solidPlanets = useMemo(() => {
     if (!currentSystem) return [];
