@@ -108,7 +108,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!isAlreadyEnRoute) {
                 const distanceResult = getMoveDistance(fleet, system, state.systems);
-                if (!distanceResult.ok) return fail(distanceResult.error);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
                 distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
@@ -161,7 +161,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!isAlreadyEnRoute) {
                 const distanceResult = getMoveDistance(fleet, system, state.systems);
-                if (!distanceResult.ok) return fail(distanceResult.error);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
                 distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
@@ -211,7 +211,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!isAlreadyEnRoute) {
                 const distanceResult = getMoveDistance(fleet, system, state.systems);
-                if (!distanceResult.ok) return fail(distanceResult.error);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
                 distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
@@ -261,7 +261,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             if (!isAlreadyEnRoute) {
                 const distanceResult = getMoveDistance(fleet, system, state.systems);
-                if (!distanceResult.ok) return fail(distanceResult.error);
+                if ('error' in distanceResult) return fail(distanceResult.error);
 
                 distanceLy = distanceResult.distanceLy;
                 if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
