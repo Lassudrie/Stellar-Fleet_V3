@@ -51,7 +51,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 0,
     interceptorStock: 0,
     role: 'capital',
-    fuelCapacity: 2400,
+    fuelCapacity: 5000,
     fuelConsumptionPerLy: 12
   },
   [ShipType.CRUISER]: {
@@ -68,7 +68,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 150,
     interceptorStock: 12,
     role: 'capital',
-    fuelCapacity: 1600,
+    fuelCapacity: 3000,
     fuelConsumptionPerLy: 8
   },
   [ShipType.DESTROYER]: {
@@ -85,7 +85,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 0,
     interceptorStock: 8,
     role: 'screen',
-    fuelCapacity: 900,
+    fuelCapacity: 2000,
     fuelConsumptionPerLy: 6
   },
   [ShipType.FRIGATE]: {
@@ -102,7 +102,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 100,
     interceptorStock: 4,
     role: 'screen',
-    fuelCapacity: 440,
+    fuelCapacity: 1500,
     fuelConsumptionPerLy: 4
   },
   [ShipType.FIGHTER]: {
@@ -153,7 +153,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 0,
     interceptorStock: 0,
     role: 'transport',
-    fuelCapacity: 2200,
+    fuelCapacity: 3000,
     fuelConsumptionPerLy: 10
   },
   [ShipType.TANKER]: {
@@ -170,8 +170,8 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 0,
     interceptorStock: 0,
     role: 'transport',
-    fuelCapacity: 6400,
-    fuelConsumptionPerLy: 5,
+    fuelCapacity: 12000,
+    fuelConsumptionPerLy: 10,
     fuelTransferRate: 400
   },
   [ShipType.EXTRACTOR]: {
@@ -188,8 +188,8 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoDamage: 0,
     interceptorStock: 0,
     role: 'transport',
-    fuelCapacity: 1300,
-    fuelConsumptionPerLy: 6,
+    fuelCapacity: 5000,
+    fuelConsumptionPerLy: 10,
     fuelExtractionRate: 25
   },
 };
