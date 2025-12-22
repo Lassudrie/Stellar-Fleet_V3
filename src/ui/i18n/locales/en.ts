@@ -21,6 +21,9 @@ export const en = {
   'scenario.launch': 'Launch Simulation',
   'scenario.launch_short': 'Launch',
   'scenario.back': 'Back to Menu',
+  'scenario.emptyTitle': 'No scenarios available',
+  'scenario.emptyMessage': 'The scenario registry is empty. Please return to the main menu and try again later.',
+  'scenario.missingSelection': 'No scenario is selected. Please choose a scenario or return to the menu.',
   'scenario.conquest_sandbox.title': 'Conquest Sandbox',
   'scenario.conquest_sandbox.desc': 'An open-ended sandbox scenario focused on territorial expansion and fleet warfare. No scripted events.',
   'scenario.spiral_convergence.title': 'Spiral Convergence',
@@ -250,4 +253,5 @@ export const en = {
   'msg.invalidSave': 'Invalid save file.',
   'msg.logsCleared': 'AI Logs Cleared',
   'msg.exportFail': 'Failed to export logs',
+  'msg.launchFail': 'Unable to launch the selected scenario. Returning to the main menu.',
 };

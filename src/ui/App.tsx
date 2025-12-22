@@ -192,21 +192,28 @@ const App: React.FC = () => {
 
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
-    setEnemySightings({}); 
-    setTimeout(() => {
-        // Handle both simple seed (number) and full Scenario object
-        let scenario;
-        if (typeof scenarioArg === 'number') {
-             scenario = buildScenario('conquest_sandbox', scenarioArg);
-        } else {
-             scenario = scenarioArg;
-        }
+    setEnemySightings({});
 
-        const { state } = generateWorld(scenario);
-        const newEngine = new GameEngine(state);
-        setEngine(newEngine);
-        setScreen('GAME');
-        setLoading(false);
+    setTimeout(() => {
+        try {
+            let scenario;
+            if (typeof scenarioArg === 'number') {
+                scenario = buildScenario('conquest_sandbox', scenarioArg);
+            } else {
+                scenario = scenarioArg;
+            }
+
+            const { state } = generateWorld(scenario);
+            const newEngine = new GameEngine(state);
+            setEngine(newEngine);
+            setScreen('GAME');
+        } catch (error) {
+            console.error('[App] Failed to launch scenario', error);
+            alert(t('msg.launchFail'));
+            setScreen('MENU');
+        } finally {
+            setLoading(false);
+        }
     }, 500);
   };
 

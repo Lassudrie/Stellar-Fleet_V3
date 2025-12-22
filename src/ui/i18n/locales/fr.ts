@@ -20,6 +20,9 @@ export const fr = {
   'scenario.launch': 'Lancer Simulation',
   'scenario.launch_short': 'Lancer',
   'scenario.back': 'Retour Menu',
+  'scenario.emptyTitle': 'Aucun scénario disponible',
+  'scenario.emptyMessage': 'Le registre des scénarios est vide. Merci de revenir au menu principal et de réessayer plus tard.',
+  'scenario.missingSelection': 'Aucun scénario sélectionné. Choisissez un scénario ou retournez au menu.',
   'scenario.conquest_sandbox.title': 'Conquête Bac à Sable',
   'scenario.conquest_sandbox.desc': 'Un scénario ouvert axé sur l\'expansion territoriale et la guerre de flottes. Aucun événement scripté.',
   'scenario.spiral_convergence.title': 'Convergence Spiralée',
@@ -249,4 +252,5 @@ export const fr = {
   'msg.invalidSave': 'Fichier de sauvegarde invalide.',
   'msg.logsCleared': 'Logs IA effacés',
   'msg.exportFail': 'Échec export logs',
+  'msg.launchFail': 'Impossible de lancer le scénario sélectionné. Retour au menu principal.',
 };
