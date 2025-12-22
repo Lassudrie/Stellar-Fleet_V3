@@ -10,6 +10,8 @@ const PRIORITIES: Record<ShipType, ShipType[]> = {
   [ShipType.FIGHTER]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER],
   [ShipType.BOMBER]: [ShipType.CARRIER, ShipType.CRUISER, ShipType.DESTROYER, ShipType.FRIGATE],
   [ShipType.TROOP_TRANSPORT]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER],
+  [ShipType.TANKER]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER],
+  [ShipType.EXTRACTOR]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER],
 };
 
 export const selectTarget = (
