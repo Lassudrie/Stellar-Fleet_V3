@@ -24,7 +24,7 @@ type FleetComposition = Partial<Record<ShipType, number>>;
 
 type FleetSpec =
   | { mode: 'counts'; counts: FleetComposition }
-  | { mode: 'budget'; budget: number; weights: Record<ShipType, number> };
+  | { mode: 'budget'; budget: number; weights: Partial<Record<ShipType, number>> };
 
 interface SimulationPreset {
   description: string;
@@ -231,8 +231,8 @@ const parseCounts = (value: string): FleetComposition => {
   return counts;
 };
 
-const parseWeights = (value: string): Record<ShipType, number> => {
-  const weights: Record<ShipType, number> = {} as Record<ShipType, number>;
+const parseWeights = (value: string): Partial<Record<ShipType, number>> => {
+  const weights: Partial<Record<ShipType, number>> = {};
   if (!value.trim()) return weights;
 
   const entries = value.split(',');
@@ -386,16 +386,22 @@ const createShip = (type: ShipType, index: number, prefix: string): ShipEntity =
   };
 };
 
-const buildCountsFromBudget = (budget: number, weights: Record<ShipType, number>): FleetComposition => {
-  const entries = Object.entries(weights).map(([type, weight]) => {
-    const typed = type as ShipType;
-    const stats = SHIP_STATS[typed];
-    const cost = stats?.cost ?? 0;
-    if (cost <= 0) {
-      throw new Error(`Missing or zero cost for ship type "${typed}" in SHIP_STATS.`);
-    }
-    return { type: typed, weight, cost };
-  });
+const buildCountsFromBudget = (budget: number, weights: Partial<Record<ShipType, number>>): FleetComposition => {
+  const entries = Object.entries(weights)
+    .filter(([, weight]) => typeof weight === 'number' && weight > 0)
+    .map(([type, weight]) => {
+      const typed = type as ShipType;
+      const stats = SHIP_STATS[typed];
+      const cost = stats?.cost ?? 0;
+      if (cost <= 0) {
+        throw new Error(`Missing or zero cost for ship type "${typed}" in SHIP_STATS.`);
+      }
+      return { type: typed, weight: weight as number, cost };
+    });
+
+  if (entries.length === 0) {
+    throw new Error('Budget specs require at least one positive weight entry.');
+  }
 
   const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
   if (totalWeight <= 0) {
