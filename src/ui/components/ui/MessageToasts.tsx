@@ -21,6 +21,19 @@ export const computeHiddenToastState = (previous: Set<string>, messageId: string
   return { next, changed: true };
 };
 
+export const selectActiveToastMessages = (messages: GameMessage[], hiddenToastIds: Set<string>): GameMessage[] => {
+  return messages
+    .filter(msg => !msg.dismissed && !hiddenToastIds.has(msg.id))
+    .sort((a, b) => {
+      const turnDiff = b.createdAtTurn - a.createdAtTurn;
+      if (turnDiff !== 0) return turnDiff;
+      const priorityDiff = b.priority - a.priority;
+      if (priorityDiff !== 0) return priorityDiff;
+      return compareIds(b.id, a.id);
+    })
+    .slice(0, 6);
+};
+
 const MessageToasts: React.FC<MessageToastsProps> = ({
   messages,
   onDismissMessage,
@@ -34,15 +47,20 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
 
   const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
     setHiddenToastIds(prev => {
-        const { next, changed } = computeHiddenToastState(prev, messageId);
-        if (!changed) return prev;
+      const { next, changed } = computeHiddenToastState(prev, messageId);
+      if (!changed) return prev;
 
-        if (options?.markRead) {
-            onMarkRead(messageId, true);
-        }
-        onDismissMessage(messageId);
-        return next;
+      if (options?.markRead) {
+        onMarkRead(messageId, true);
+      }
+      return next;
     });
+  }, [onMarkRead]);
+
+  const dismissToast = useCallback((messageId: string) => {
+    onMarkRead(messageId, true);
+    onDismissMessage(messageId);
+    setHiddenToastIds(prev => computeHiddenToastState(prev, messageId).next);
   }, [onDismissMessage, onMarkRead]);
 
   useEffect(() => {
@@ -54,16 +72,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
   }, [messages]);
 
   const activeMessages = useMemo(() => {
-    return messages
-      .filter(msg => !msg.dismissed && !hiddenToastIds.has(msg.id))
-      .sort((a, b) => {
-        const turnDiff = b.createdAtTurn - a.createdAtTurn;
-        if (turnDiff !== 0) return turnDiff;
-        const priorityDiff = b.priority - a.priority;
-        if (priorityDiff !== 0) return priorityDiff;
-        return compareIds(b.id, a.id);
-      })
-      .slice(0, 6);
+    return selectActiveToastMessages(messages, hiddenToastIds);
   }, [messages, hiddenToastIds]);
 
   useEffect(() => {
@@ -95,7 +104,7 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
       Object.values(timersRef.current).forEach(timer => safeClearTimeout(timer));
       timersRef.current = {};
     };
-  }, [activeMessages, hideToast, hoveredId, onDismissMessage]);
+  }, [activeMessages, hideToast, hoveredId]);
 
   if (activeMessages.length === 0) return null;
 
@@ -139,6 +148,13 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
               </button>
               <button
                 aria-label={t('messages.dismiss')}
+                onClick={(e) => { e.stopPropagation(); dismissToast(message.id); }}
+                className="text-[10px] text-rose-300 hover:text-rose-100 px-2 py-1 rounded bg-rose-900/30 border border-rose-800/50 transition-colors"
+              >
+                {t('messages.dismiss')}
+              </button>
+              <button
+                aria-label={t('messages.hideToast')}
                 onClick={(e) => { e.stopPropagation(); hideToast(message.id, { markRead: true }); }}
                 className="text-slate-400 hover:text-white transition-colors"
               >

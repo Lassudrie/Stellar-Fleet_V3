@@ -221,6 +221,7 @@ export const en = {
   'messages.markRead': 'Mark read',
   'messages.markUnread': 'Mark unread',
   'messages.dismiss': 'Dismiss',
+  'messages.hideToast': 'Hide toast',
 
   // Victory
   'victory.victory': 'VICTORY',

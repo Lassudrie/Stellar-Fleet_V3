@@ -220,6 +220,7 @@ export const fr = {
   'messages.markRead': 'Marquer lu',
   'messages.markUnread': 'Marquer non lu',
   'messages.dismiss': 'Ignorer',
+  'messages.hideToast': 'Masquer le toast',
 
   // Victory
   'victory.victory': 'VICTOIRE',
