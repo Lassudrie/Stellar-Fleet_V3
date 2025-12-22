@@ -87,4 +87,4 @@ Chaque résolution (ou annulation) crée un `BombardmentLog` persistant 5 tours 
 ## 9. Données et équilibrage
 * **Constantes** : `IMPACT_THRESHOLD`, `MAX_STRIKES_PER_TARGET`, `MIN/MAX_STRENGTH_LOSS`, `MIN/MAX_MORALE_LOSS`, `OVERKILL_THRESHOLD`.
 * **Sources** : les stats navales proviennent de `SHIP_STATS`, les stats surface et morale de `GROUND_UNIT_STATS`.
-* **Synchronisation** : toute modification d'une constante doit être répercutée dans les tests du moteur (`engine/tests/`) pour maintenir le déterminisme.
+* **Synchronisation** : toute modification d'une constante doit être répercutée dans les tests du moteur (`src/engine/tests/`) pour maintenir le déterminisme.

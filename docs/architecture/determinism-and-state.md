@@ -13,7 +13,7 @@ Stellar Fleet est conçu pour être strictement déterministe.
 
 ### Règle #1 : Isolation de la RNG
 *   Interdiction totale d'utiliser `Math.random()`.
-*   Utilisation exclusive de la classe `RNG` (`engine/rng.ts`), basée sur l'algorithme Mulberry32.
+*   Utilisation exclusive de la classe `RNG` (`src/engine/rng.ts`), basée sur l'algorithme Mulberry32.
 *   L'instance `RNG` est passée dans toute la chaîne d'appel de `runTurn`.
 
 ### Règle #2 : Pas de temps système dans la logique

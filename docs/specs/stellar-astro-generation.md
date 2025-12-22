@@ -16,7 +16,7 @@ Chaque système stellaire possède un bloc `StarSystemAstro` décrivant son cont
   - La présence du namespace fixe `'astro'` évite les collisions avec d’autres dérivations utilisant le même couple.
 
 ## 3. Contenu du payload `StarSystemAstro`
-Le payload est structuré selon `types.ts` et suit les règles suivantes :
+Le payload est structuré selon `src/shared/types.ts` et suit les règles suivantes :
 - **Racine** :
   - `seed` : seed dérivée spécifique au système (debug / reproductibilité).
   - `primarySpectralType`, `starCount`, `metallicityFeH` : données globales sur le système.

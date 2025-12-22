@@ -16,23 +16,23 @@ graph TD
     UI[React UI Layer] --> Engine
     Scene[3D Scene (R3F)] --> State
     
-    subgraph "Engine Layer (engine/)"
+    subgraph "Engine Layer (src/engine/)"
         GameEngine class
         runTurn.ts
         RNG System
         Services (Movement, Battle, World)
     end
 
-    subgraph "Presentation Layer (components/)"
+    subgraph "Presentation Layer (src/ui/components/)"
         UI Overlay (DOM)
         GameScene (Canvas)
         FleetRenderer (Meshes)
     end
 ```
 
-## 3. Le Moteur de Jeu (`engine/`)
+## 3. Le Moteur de Jeu (`src/engine/`)
 Le cœur du jeu est agnostique de l'UI.
-*   **GameEngine** : Classe Singleton (instanciée dans `App.tsx`) qui détient l'état.
+*   **GameEngine** : Classe Singleton (instanciée dans `src/ui/App.tsx`) qui détient l'état.
 *   **Pattern Redux-like** : Les modifications d'état se font via des actions (`GameCommand`) ou le tick (`runTurn`).
 *   **Immutabilité** : L'état n'est jamais muté directement. Chaque tour produit un nouvel objet `GameState`.
 

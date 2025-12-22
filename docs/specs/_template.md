@@ -10,7 +10,7 @@
 
 ## Définitions
 - Énumérer les termes et acronymes clés.
-- S'aligner sur les types et constantes existants dans les sources TypeScript (ex. `types.ts`, `engine/**`).
+- S'aligner sur les types et constantes existants dans les sources TypeScript (ex. `src/shared/types.ts`, `src/engine/**`, `src/content/**`, `src/ui/**`).
 
 ## Données
 - Lister les structures de données impliquées avec leurs champs obligatoires/facultatifs.

@@ -12,7 +12,7 @@
 ### 1.1 Objet
 Le **ScenarioDefinitionV1** est la source unique pour initialiser une partie de *Stellar Fleet*. Le format est pensé pour :
 
-* **Templates TypeScript** dans `scenarios/templates/*.ts` (export d'un `const` typé `ScenarioDefinitionV1`).
+* **Templates TypeScript** dans `src/content/scenarios/templates/*.ts` (export d'un `const` typé `ScenarioDefinitionV1`).
 * **JSON sérialisable** sans logique (même forme que le template, utilisable par des mods ou des outils).
 
 Le moteur consomme ces données, instancie l'état initial et ne dépend d'aucune fonction définie dans le scénario.
@@ -193,7 +193,7 @@ Structure :
 ### 11.1 Template TypeScript minimal (1v1)
 
 ```ts
-import { ScenarioDefinitionV1 } from "../../scenarios/schemaV1";
+import { ScenarioDefinitionV1 } from "../schemaV1";
 
 const skirmishStd1v1: ScenarioDefinitionV1 = {
   schemaVersion: 1,
@@ -257,7 +257,7 @@ export default skirmishStd1v1;
 ### 11.3 Exemple avancé (statique + domination)
 
 ```ts
-import { ScenarioDefinitionV1 } from "../../scenarios/schemaV1";
+import { ScenarioDefinitionV1 } from "../schemaV1";
 
 const spiralConvergence: ScenarioDefinitionV1 = {
   schemaVersion: 1,
