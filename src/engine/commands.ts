@@ -87,7 +87,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
             const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
-            if (!validation.ok) return fail(validation.error);
+            if ('error' in validation) return fail(validation.error);
 
             // Structural Sharing Update
             return ok({
@@ -128,7 +128,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
             const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
-            if (!validation.ok) return fail(validation.error);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
@@ -166,7 +166,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
             const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
-            if (!validation.ok) return fail(validation.error);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
@@ -204,7 +204,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
             const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
-            if (!validation.ok) return fail(validation.error);
+            if ('error' in validation) return fail(validation.error);
 
             return ok({
                 ...state,
