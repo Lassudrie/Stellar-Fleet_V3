@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { isFleetEligibleForMode } from './FleetPicker';
+import { getFleetEligibility, isFleetEligibleForMode } from './FleetPicker';
 import { CAPTURE_RANGE_SQ } from '../../../content/data/static';
 import { Fleet, FleetState, ShipType, StarSystem } from '../../../shared/types';
 
@@ -46,9 +46,9 @@ const systems: StarSystem[] = [
     position: { x: targetSystem.position.x - (Math.sqrt(CAPTURE_RANGE_SQ) - 0.1), y: 0, z: 0 }
   });
   assert.strictEqual(
-    isFleetEligibleForMode(inRangeFleet, 'MOVE', targetSystem, systems),
-    false,
-    'Fleets already within capture range should not be selectable for MOVE'
+    getFleetEligibility(inRangeFleet, 'MOVE', targetSystem, systems).reason,
+    'captureRange',
+    'Fleets already within capture range should be flagged for captureRange'
   );
 }
 
@@ -67,12 +67,13 @@ const systems: StarSystem[] = [
 {
   const transportFleet = buildFleet({
     id: 'f-transport',
+    position: { x: targetSystem.position.x - 5, y: 0, z: 0 },
     ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 100, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
-    isFleetEligibleForMode(transportFleet, 'UNLOAD', targetSystem, systems),
+    getFleetEligibility(transportFleet, 'UNLOAD', targetSystem, systems).eligible,
     true,
-    'Fleets with transports should be allowed for UNLOAD'
+    'Fleets with transports should be allowed for UNLOAD when in range'
   );
 }
 
@@ -82,9 +83,35 @@ const systems: StarSystem[] = [
     ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, fuel: 50, carriedArmyId: null }],
   });
   assert.strictEqual(
-    isFleetEligibleForMode(noTransportFleet, 'LOAD', targetSystem, systems),
-    false,
-    'Fleets without transports should not be selectable for LOAD'
+    getFleetEligibility(noTransportFleet, 'LOAD', targetSystem, systems).reason,
+    'missingTransport',
+    'Fleets without transports should be rejected for LOAD'
+  );
+}
+
+{
+  const lowFuelFleet = buildFleet({
+    id: 'f-low-fuel',
+    position: { x: 0, y: 0, z: 0 },
+    ships: [{ id: 's1', type: ShipType.FRIGATE, hp: 1, maxHp: 1, fuel: 0.05, carriedArmyId: null }],
+  });
+  assert.strictEqual(
+    getFleetEligibility(lowFuelFleet, 'MOVE', targetSystem, systems).reason,
+    'insufficientFuel',
+    'Fleets without enough fuel should show an insufficientFuel restriction'
+  );
+}
+
+{
+  const distantFleet = buildFleet({
+    id: 'f-out-of-range',
+    position: { x: targetSystem.position.x + 500, y: 0, z: 0 },
+    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 999, carriedArmyId: 'army-1' }],
+  });
+  assert.strictEqual(
+    getFleetEligibility(distantFleet, 'UNLOAD', targetSystem, systems).reason,
+    'outOfRange',
+    'Fleets beyond jump range should be flagged as outOfRange'
   );
 }
 
