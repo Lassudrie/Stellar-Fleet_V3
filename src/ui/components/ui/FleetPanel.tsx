@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../../shared/types';
 import { shortId, fleetLabel } from '../../../engine/idUtils';
 import { useI18n } from '../../i18n';
+import { SHIP_STATS, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -73,6 +74,20 @@ const ShipIcon: React.FC<{ type: string; className?: string }> = ({ type, classN
            <path d="M12 2l8.5 5v10L12 22l-8.5-5V7L12 2z" />
         </svg>
       );
+    case ShipType.TANKER:
+      return (
+        <svg {...props}>
+          <path d="M4 6h16v12H4z" />
+          <path d="M7 9h10v6H7z" fill="currentColor" />
+        </svg>
+      );
+    case ShipType.EXTRACTOR:
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="6" />
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+        </svg>
+      );
     default:
       return <div className={className} />;
   }
@@ -84,6 +99,38 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
 }) => {
   const { t } = useI18n();
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
+
+  const fuelSummary = useMemo(() => {
+    let totalFuel = 0;
+    let totalCapacity = 0;
+    let currentReach = Infinity;
+    let fullReach = Infinity;
+
+    fleet.ships.forEach(ship => {
+      const stats = SHIP_STATS[ship.type];
+      if (!stats) return;
+      totalFuel += ship.fuel;
+      totalCapacity += stats.fuelCapacity;
+      const consumption = stats.fuelConsumptionPerLy;
+      if (consumption > 0) {
+        currentReach = Math.min(currentReach, ship.fuel / consumption);
+        fullReach = Math.min(fullReach, stats.fuelCapacity / consumption);
+      }
+    });
+
+    if (!Number.isFinite(currentReach)) currentReach = 0;
+    if (!Number.isFinite(fullReach)) fullReach = 0;
+
+    const cappedCurrentReach = Math.min(currentReach, MAX_HYPERJUMP_DISTANCE_LY);
+    const cappedFullReach = Math.min(fullReach, MAX_HYPERJUMP_DISTANCE_LY);
+
+    return {
+      totalFuel,
+      totalCapacity,
+      cappedCurrentReach,
+      cappedFullReach
+    };
+  }, [fleet]);
 
   const solidPlanets = useMemo(() => {
     if (!currentSystem) return [];
@@ -127,6 +174,8 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
   // Sort order: Capital first, but put transports high if they have actions
   const sortOrder = [
     ShipType.TROOP_TRANSPORT,
+    ShipType.TANKER,
+    ShipType.EXTRACTOR,
     ShipType.CARRIER, 
     ShipType.CRUISER, 
     ShipType.DESTROYER, 
@@ -161,6 +210,13 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                         <span className="text-emerald-400">{t('fleet.orbiting', { system: currentSystem.name })}</span>
                     </>
                 )}
+            </div>
+            <div className="text-[11px] text-slate-400 ml-7 flex gap-2">
+                <span>Fuel: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
+                <span>•</span>
+                <span>Range: <span className="text-white font-mono">{fuelSummary.cappedCurrentReach.toFixed(1)} ly</span></span>
+                <span className="text-slate-600">/</span>
+                <span className="text-slate-300">{fuelSummary.cappedFullReach.toFixed(1)} ly</span>
             </div>
         </div>
         

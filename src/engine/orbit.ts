@@ -32,6 +32,15 @@ export const areFleetsSharingOrbit = (a: Fleet, b: Fleet): boolean =>
     b.state === FleetState.ORBIT &&
     isWithinOrbitProximity(a.position, b.position);
 
+export const getOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
+    for (const system of systems) {
+        if (isFleetOrbitingSystem(fleet, system)) {
+            return system;
+        }
+    }
+    return null;
+};
+
 /**
  * Detects whether multiple factions with active ships are within capture range of a system.
  *

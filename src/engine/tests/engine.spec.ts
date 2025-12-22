@@ -81,10 +81,18 @@ const createSystem = (id: string, ownerFactionId: string | null): StarSystem => 
   planets: [createPlanet(id, ownerFactionId)]
 });
 
-const createFleet = (id: string, factionId: string, position: Vec3, ships: ShipEntity[]): Fleet => ({
+type TestShipInput = Omit<ShipEntity, 'fuel'> & Partial<Pick<ShipEntity, 'fuel'>>;
+
+const withFuel = (ship: TestShipInput): ShipEntity => {
+  const stats = SHIP_STATS[ship.type];
+  const fuel = ship.fuel ?? stats?.fuelCapacity ?? 0;
+  return { ...ship, fuel };
+};
+
+const createFleet = (id: string, factionId: string, position: Vec3, ships: TestShipInput[]): Fleet => ({
   id,
   factionId,
-  ships,
+  ships: ships.map(withFuel),
   position,
   state: FleetState.ORBIT,
   targetSystemId: null,
@@ -187,14 +195,14 @@ const tests: TestCase[] = [
     name: 'Battle resolution uses the context turn for dating effects',
     run: () => {
       const system = createSystem('sys-turn-sync', null);
-      const attackerShip: ShipEntity = {
+      const attackerShip: TestShipInput = {
         id: 'attacker-sync',
         type: ShipType.CRUISER,
         hp: 120,
         maxHp: 120,
         carriedArmyId: null
       };
-      const defenderShip: ShipEntity = {
+      const defenderShip: TestShipInput = {
         id: 'defender-sync',
         type: ShipType.FIGHTER,
         hp: 1,
@@ -241,7 +249,7 @@ const tests: TestCase[] = [
     name: 'Battle winner is decided before post-combat attrition',
     run: () => {
       const system = createSystem('sys-attrition-winner', 'blue');
-      const fragileBlueShip: ShipEntity = {
+      const fragileBlueShip: TestShipInput = {
         id: 'blue-fragile',
         type: ShipType.CRUISER,
         maxHp: 20,
@@ -297,7 +305,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD_MOVE applique le chargement après un runTurn',
     run: () => {
       const system = createSystem('sys-load-runturn', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-runturn',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -342,7 +350,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD ignore le chargement immédiat pour une flotte en transit',
     run: () => {
       const system = createSystem('sys-load-transit', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-transit',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -642,7 +650,7 @@ const tests: TestCase[] = [
     name: 'Orbit proximity helpers enforce distance and state invariants',
     run: () => {
       const system = createSystem('sys-orbit-helpers', 'blue');
-      const sharedShip: ShipEntity = { id: 'orbit-helper', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null };
+      const sharedShip: TestShipInput = { id: 'orbit-helper', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null };
 
       const orbitingFleet = createFleet('fleet-orbiting-helpers', 'blue', { ...baseVec }, [sharedShip]);
       const movingFleet: Fleet = { ...orbitingFleet, id: 'fleet-moving-helpers', state: FleetState.MOVING };
@@ -877,14 +885,14 @@ const tests: TestCase[] = [
     name: 'LOAD_ARMY respecte le ciblage du vaisseau imposé',
     run: () => {
       const system = createSystem('sys-load-targeted', null);
-      const allowedTransport: ShipEntity = {
+      const allowedTransport: TestShipInput = {
         id: 'blue-transport-allowed',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
         maxHp: 50,
         carriedArmyId: null
       };
-      const blockedTransport: ShipEntity = {
+      const blockedTransport: TestShipInput = {
         id: 'blue-transport-blocked',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -918,7 +926,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD_MOVE charge une armée alliée à l’arrivée',
     run: () => {
       const system = createSystem('sys-load-move-arrival', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-move-load',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -965,7 +973,7 @@ const tests: TestCase[] = [
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1006,7 +1014,7 @@ const tests: TestCase[] = [
     name: 'Contested orbit applies deterministic risk to unloading armies',
     run: () => {
       const system = createSystem('sys-unload-risk', null);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-risk-transport',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1066,7 +1074,7 @@ const tests: TestCase[] = [
       const toPlanet = system.planets[1];
 
       const army = createArmy('army-transfer', 'blue', 6000, ArmyState.DEPLOYED, fromPlanet.id);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transfer-ship',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1209,7 +1217,7 @@ const tests: TestCase[] = [
     run: () => {
       const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
 
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transport-invasion',
         type: ShipType.TROOP_TRANSPORT,
         hp: 2000,
@@ -1278,7 +1286,7 @@ const tests: TestCase[] = [
         position: { x: 0, y: 0, z: 0 }
       };
 
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transport-gas',
         type: ShipType.TROOP_TRANSPORT,
         hp: 2000,
@@ -1743,7 +1751,7 @@ const tests: TestCase[] = [
     name: 'Massive space battles resolve within expected time using pre-indexed targets',
     run: () => {
       const system = createSystem('sys-massive', null);
-      const createShips = (prefix: string, type: ShipType, count: number): ShipEntity[] => {
+      const createShips = (prefix: string, type: ShipType, count: number): TestShipInput[] => {
         const stats = SHIP_STATS[type];
         return Array.from({ length: count }, (_, idx) => ({
           id: `${prefix}-${idx}`,
@@ -2278,7 +2286,7 @@ const tests: TestCase[] = [
 
       const homeSystem = { ...createSystem('ground-home', aiFaction.id), resourceType: 'gas' as const };
       const targetSystem = { ...createSystem('ground-target', enemyFaction.id), resourceType: 'gas' as const };
-      const fighterShip: ShipEntity = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const fighterShip: TestShipInput = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
 
       const createAssaultFleet = (id: string): Fleet =>
         createFleet(id, aiFaction.id, { ...homeSystem.position }, [

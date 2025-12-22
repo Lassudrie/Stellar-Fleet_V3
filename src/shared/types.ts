@@ -32,6 +32,8 @@ export enum ShipType {
   FIGHTER = 'fighter',
   BOMBER = 'bomber',
   TROOP_TRANSPORT = 'troop_transport',
+  TANKER = 'tanker',
+  EXTRACTOR = 'extractor',
 }
 
 export type ResourceType = 'none' | 'gas';
@@ -164,6 +166,10 @@ export interface ShipStats {
   torpedoDamage: number;
   interceptorStock: number;
   role: 'capital' | 'screen' | 'striker' | 'transport';
+  fuelCapacity: number;
+  fuelConsumptionPerLy: number;
+  fuelExtractionRate?: number;
+  fuelTransferRate?: number;
 }
 
 export interface ShipConsumables {
@@ -186,6 +192,7 @@ export interface ShipEntity {
   type: ShipType;
   hp: number;
   maxHp: number;
+  fuel: number;
   carriedArmyId: string | null;
   transferBusyUntilDay?: number;
   consumables?: ShipConsumables;

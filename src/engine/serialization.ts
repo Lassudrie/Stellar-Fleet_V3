@@ -78,6 +78,8 @@ const MAX_MESSAGE_TITLE_LENGTH = 200;
 const MAX_MESSAGE_SUBTITLE_LENGTH = 200;
 const MAX_MESSAGE_TYPE_LENGTH = 64;
 
+const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
+
 const ARMY_STATES = new Set(Object.values(ArmyState));
 const FLEET_STATES = new Set(Object.values(FleetState));
 const SHIP_TYPES = new Set(Object.values(ShipType));
@@ -361,6 +363,7 @@ export const serializeGameState = (state: GameState): string => {
           type: s.type,
           hp: s.hp,
           maxHp: s.maxHp,
+          fuel: s.fuel,
           carriedArmyId: s.carriedArmyId || null,
           transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
           consumables: extractConsumables(s, s.type),
@@ -551,6 +554,8 @@ export const deserializeGameState = (json: string): GameState => {
           const fallbackMaxHp = SHIP_STATS[shipType]?.maxHp ?? 100;
           const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
           const hp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
+          const capacity = getFuelCapacity(shipType);
+          const fuel = Number.isFinite(ship.fuel) ? Math.min(Math.max(ship.fuel, 0), capacity || ship.fuel) : capacity;
 
           const consumables = extractConsumables(ship, shipType);
           const killHistory = sanitizeKillHistory(ship.killHistory);
@@ -560,6 +565,7 @@ export const deserializeGameState = (json: string): GameState => {
             type: shipType,
             hp,
             maxHp,
+            fuel,
             carriedArmyId: typeof ship.carriedArmyId === 'string' ? ship.carriedArmyId : null,
             transferBusyUntilDay: Number.isFinite(ship.transferBusyUntilDay) ? ship.transferBusyUntilDay : undefined,
             consumables,
