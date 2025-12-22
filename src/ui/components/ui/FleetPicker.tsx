@@ -7,13 +7,17 @@ import { useI18n } from '../../i18n';
 import { distSq } from '../../../engine/math/vec3';
 import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
 import { canFleetPayJump } from '../../../engine/logistics/fuel';
+import { getOrbitingSystem } from '../../../engine/orbit';
 
 export const isFleetEligibleForMode = (
   fleet: Fleet,
   mode: FleetPickerProps['mode'],
-  targetPosition: StarSystem['position']
+  targetSystem: StarSystem,
+  systems: StarSystem[]
 ): boolean => {
-  const distanceSq = distSq(fleet.position, targetPosition);
+  const sourceSystem = getOrbitingSystem(fleet, systems);
+  const targetPosition = targetSystem.position;
+  const distanceSq = sourceSystem ? distSq(sourceSystem.position, targetPosition) : distSq(fleet.position, targetPosition);
   const distanceLy = Math.sqrt(distanceSq);
 
   if (mode === 'MOVE' || mode === 'ATTACK') {
@@ -29,12 +33,13 @@ export const isFleetEligibleForMode = (
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
   targetSystem: StarSystem;
+  systems: StarSystem[];
   blueFleets: Fleet[];
   onSelectFleet: (fleetId: string) => void;
   onClose: () => void;
 }
 
-const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleets, onSelectFleet, onClose }) => {
+const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, blueFleets, onSelectFleet, onClose }) => {
   const { t } = useI18n();
 
   // Sort fleets by distance to target system and filter based on mode
@@ -42,15 +47,19 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
       const targetPos = targetSystem.position;
 
       const availableFleets = blueFleets.filter(fleet => {
-          return isFleetEligibleForMode(fleet, mode, targetPos);
+          return isFleetEligibleForMode(fleet, mode, targetSystem, systems);
       });
 
       return availableFleets.sort((a, b) => {
-          const distASq = distSq(a.position, targetPos);
-          const distBSq = distSq(b.position, targetPos);
+          const sourceA = getOrbitingSystem(a, systems);
+          const sourceB = getOrbitingSystem(b, systems);
+          const originA = sourceA?.position ?? a.position;
+          const originB = sourceB?.position ?? b.position;
+          const distASq = distSq(originA, targetPos);
+          const distBSq = distSq(originB, targetPos);
           return distASq - distBSq;
       });
-  }, [blueFleets, mode, targetSystem]);
+  }, [blueFleets, mode, systems, targetSystem]);
 
   const titleKey = mode === 'LOAD'
       ? 'picker.titleLoad'
@@ -90,9 +99,10 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
                     </div>
                 ) : (
                     sortedFleets.map(fleet => {
-                        const fleetPos = fleet.position;
+                        const sourceSystem = getOrbitingSystem(fleet, systems);
+                        const origin = sourceSystem?.position ?? fleet.position;
                         const targetPos = targetSystem.position;
-                        const rawDistSq = distSq(fleetPos, targetPos);
+                        const rawDistSq = distSq(origin, targetPos);
                         const rawDist = Math.sqrt(rawDistSq);
 
                         const d = Math.round(rawDist);
