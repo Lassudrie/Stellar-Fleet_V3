@@ -39,6 +39,18 @@ const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { 
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
+const SHIP_TRIGRAM: Record<ShipType, string> = {
+  [ShipType.CARRIER]: 'CAR',
+  [ShipType.CRUISER]: 'CRU',
+  [ShipType.DESTROYER]: 'DST',
+  [ShipType.FRIGATE]: 'FRI',
+  [ShipType.FIGHTER]: 'FTR',
+  [ShipType.BOMBER]: 'BMB',
+  [ShipType.TROOP_TRANSPORT]: 'TRN',
+  [ShipType.TANKER]: 'TNK',
+  [ShipType.EXTRACTOR]: 'EXT',
+};
+
 const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
   return fleet.ships.reduce<Record<ShipType, number>>((acc, ship) => {
       if (ship?.type) {
@@ -70,6 +82,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   
   const [aiDebug, setAiDebug] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>('ALL');
+  const [expandedFleets, setExpandedFleets] = useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -215,6 +228,14 @@ const SideMenu: React.FC<SideMenuProps> = ({
       <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
           {blueFleets.map(fleet => {
               const composition = getFleetComposition(fleet);
+              const compositionEntries = Object.entries(composition)
+                .filter(([, count]) => count > 0)
+                .map(([type, count]) => ({ label: SHIP_TRIGRAM[type as ShipType], count }));
+              const isExpanded = expandedFleets.has(fleet.id);
+              const maxVisibleChips = 4;
+              const visibleChips = isExpanded ? compositionEntries : compositionEntries.slice(0, maxVisibleChips);
+              const hasOverflow = compositionEntries.length > maxVisibleChips;
+
               const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
               const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
               const orbitingSystem = findOrbitingSystem(fleet, systems);
@@ -300,19 +321,43 @@ const SideMenu: React.FC<SideMenuProps> = ({
                           {t('orbitPicker.shipCount', { count: fleet.ships.length })}
                       </span>
                       <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
-                      <div className="flex flex-wrap gap-2 text-sm text-slate-100">
-                          {[
-                              { label: 'DST', value: composition[ShipType.DESTROYER] },
-                              { label: 'CRU', value: composition[ShipType.CRUISER] },
-                              { label: 'TRN', value: composition[ShipType.TROOP_TRANSPORT] },
-                          ].filter(item => item.value > 0).map(item => (
+                      <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
+                          {visibleChips.map(item => (
                               <span
                                 key={item.label}
-                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold"
+                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
                               >
-                                  {item.label} {item.value}
+                                  {item.label} {item.count}
                               </span>
                           ))}
+                          {hasOverflow && !isExpanded && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.add(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold"
+                              >
+                                  ...
+                              </button>
+                          )}
+                          {hasOverflow && isExpanded && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.delete(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap"
+                              >
+                                  ×
+                              </button>
+                          )}
                       </div>
                   </div>
                 </button>
