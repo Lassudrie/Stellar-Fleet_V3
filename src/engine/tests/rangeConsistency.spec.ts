@@ -34,7 +34,8 @@ const rules: GameplayRules = {
   fogOfWar: false,
   useAdvancedCombat: true,
   aiEnabled: false,
-  totalWar: false
+  totalWar: false,
+  unlimitedFuel: false
 };
 
 const objectives: GameObjectives = { conditions: [] };

@@ -1,7 +1,8 @@
 
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem, ShipType } from '../../../shared/types';
-import { fleetLabel, shortId } from '../../../engine/idUtils';
+import { shortId } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { dist, distSq } from '../../../engine/math/vec3';
@@ -17,6 +18,7 @@ interface InvasionModalProps {
 
 const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
 
   // Filter fleets: Blue + Contains Loaded Troop Transport
   // Sort by: Distance to system
@@ -87,7 +89,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
                 >
                   <div className="px-3 py-2 flex justify-between items-center">
                     <div>
-                        <div className="text-blue-300 font-bold text-sm group-hover:text-red-300 transition-colors">{fleetLabel(fleet.id)}</div>
+                        <div className="text-blue-300 font-bold text-sm group-hover:text-red-300 transition-colors">{getFleetName(fleet.id)}</div>
                         <div className="text-[10px] text-slate-500 uppercase flex gap-2">
                             <span>{t('fleet.status.' + fleet.state.toLowerCase(), {defaultValue: fleet.state})}</span>
                             {isHere && <span className="text-emerald-500 font-bold">IN RANGE</span>}

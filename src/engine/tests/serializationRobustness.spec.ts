@@ -75,7 +75,7 @@ const createBaseState = (): GameState => {
     selectedFleetId: null,
     winnerFactionId: null,
     objectives: { conditions: [] },
-    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false }
+    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
   };
 };
 

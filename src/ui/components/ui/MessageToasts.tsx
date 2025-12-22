@@ -44,15 +44,10 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
   const [hiddenToastIds, setHiddenToastIds] = useState<Set<string>>(new Set());
 
   const hideToast = useCallback((messageId: string, options?: { markRead?: boolean }) => {
-    setHiddenToastIds(prev => {
-      const { next, changed } = computeHiddenToastState(prev, messageId);
-      if (!changed) return prev;
-
-      if (options?.markRead) {
-        onMarkRead(messageId, true);
-      }
-      return next;
-    });
+    if (options?.markRead) {
+      onMarkRead(messageId, true);
+    }
+    setHiddenToastIds(prev => computeHiddenToastState(prev, messageId).next);
   }, [onMarkRead]);
 
   const dismissToast = useCallback((messageId: string) => {

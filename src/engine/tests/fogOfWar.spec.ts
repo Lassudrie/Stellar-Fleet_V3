@@ -76,7 +76,7 @@ const baseState: GameState = {
   selectedFleetId: null,
   winnerFactionId: null,
   objectives: { conditions: [] },
-  rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true }
+  rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
 };
 
 const tests: TestCase[] = [

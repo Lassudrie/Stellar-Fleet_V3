@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem, FleetState, ShipType } from '../../../shared/types';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
-import { fleetLabel } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { distSq } from '../../../engine/math/vec3';
 import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
@@ -14,6 +14,7 @@ interface FleetPickerProps {
   targetSystem: StarSystem;
   systems: StarSystem[];
   blueFleets: Fleet[];
+  unlimitedFuel?: boolean;
   onSelectFleet: (fleetId: string) => void;
   onClose: () => void;
 }
@@ -24,7 +25,8 @@ export const getFleetEligibility = (
   fleet: Fleet,
   mode: FleetPickerProps['mode'],
   targetSystem: StarSystem,
-  systems: StarSystem[]
+  systems: StarSystem[],
+  unlimitedFuel?: boolean
 ): { eligible: boolean; reason: FleetEligibilityReason | null; distanceLy: number; distanceSq: number } => {
   const sourceSystem = getOrbitingSystem(fleet, systems);
   const targetPosition = targetSystem.position;
@@ -33,7 +35,7 @@ export const getFleetEligibility = (
 
   if (mode === 'MOVE' || mode === 'ATTACK') {
       if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };
-      if (!canFleetPayJump(fleet, distanceLy)) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
+      if (!canFleetPayJump(fleet, distanceLy, { unlimitedFuel })) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
       if (distanceSq <= CAPTURE_RANGE_SQ) return { eligible: false, reason: 'captureRange', distanceLy, distanceSq };
       return { eligible: true, reason: null, distanceLy, distanceSq };
   }
@@ -41,7 +43,7 @@ export const getFleetEligibility = (
   const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
   if (!hasTransport) return { eligible: false, reason: 'missingTransport', distanceLy, distanceSq };
   if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };
-  if (!canFleetPayJump(fleet, distanceLy)) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
+  if (!canFleetPayJump(fleet, distanceLy, { unlimitedFuel })) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
 
   return { eligible: true, reason: null, distanceLy, distanceSq };
 };
@@ -50,18 +52,20 @@ export const isFleetEligibleForMode = (
   fleet: Fleet,
   mode: FleetPickerProps['mode'],
   targetSystem: StarSystem,
-  systems: StarSystem[]
+  systems: StarSystem[],
+  unlimitedFuel?: boolean
 ): boolean => {
-  return getFleetEligibility(fleet, mode, targetSystem, systems).eligible;
+  return getFleetEligibility(fleet, mode, targetSystem, systems, unlimitedFuel).eligible;
 };
 
-const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, blueFleets, onSelectFleet, onClose }) => {
+const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, blueFleets, unlimitedFuel, onSelectFleet, onClose }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
 
   const fleetOptions = useMemo(() => {
       return blueFleets
           .map(fleet => {
-              const eligibility = getFleetEligibility(fleet, mode, targetSystem, systems);
+              const eligibility = getFleetEligibility(fleet, mode, targetSystem, systems, unlimitedFuel);
               const { distanceLy, distanceSq } = eligibility;
               const speed = getFleetSpeed(fleet);
               const eta = Math.max(1, Math.ceil(distanceLy / speed));
@@ -74,7 +78,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, 
               }
               return a.distanceSq - b.distanceSq;
           });
-  }, [blueFleets, mode, systems, targetSystem]);
+  }, [blueFleets, mode, systems, targetSystem, unlimitedFuel]);
 
   const titleKey = mode === 'LOAD'
       ? 'picker.titleLoad'
@@ -137,7 +141,7 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, 
                             >
                                 <div className="text-left">
                                     <div className="text-white font-bold group-hover:text-blue-200">
-                                        {fleetLabel(fleet.id)}
+                                        {getFleetName(fleet.id)}
                                     </div>
                                     <div className="text-xs text-slate-400 flex gap-2 mt-1">
                                         <span>{fleet.ships.length} Ships</span>

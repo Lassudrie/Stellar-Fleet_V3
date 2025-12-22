@@ -4,6 +4,7 @@ import { GameEngine } from '../engine/GameEngine';
 import { GameMessage, GameState, StarSystem, EnemySighting } from '../shared/types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
+import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
 import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
@@ -593,83 +594,85 @@ const App: React.FC = () => {
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
-            <GameScene
-                gameState={viewGameState}
-                enemySightings={enemySightings}
-                selectedFleetId={selectedFleetId}
-                onFleetSelect={handleFleetSelect}
-                onFleetInspect={handleFleetInspect}
-                onSystemClick={handleSystemClick}
-                onBackgroundClick={() => {
-                    handleCloseMenu();
-                    setSelectedFleetId(null);
-                }}
-            />
-            <UI
-                startYear={viewGameState.startYear}
-                day={viewGameState.day}
-                selectedFleet={selectedFleet}
-                inspectedFleet={inspectedFleet}
-                logs={viewGameState.logs}
-                messages={viewGameState.messages}
-                
-                uiMode={uiMode}
-                menuPosition={menuPosition}
-                targetSystem={targetSystem}
-                systems={viewGameState.systems}
-                blueFleets={blueFleets}
-                battles={viewGameState.battles}
-                selectedBattleId={selectedBattleId}
-                gameState={viewGameState}
-                
-                onSplit={handleSplitFleet}
-                onMerge={handleMergeFleet}
-                onDeploy={handleDeploySingle}
-                onEmbark={handleEmbarkArmy}
-                onTransferArmy={handleTransferArmy}
-                winner={viewGameState.winnerFactionId}
-                onRestart={() => setScreen('MENU')}
-                onNextTurn={handleNextTurn}
-                onMoveCommand={handleMoveCommand}
-                onAttackCommand={handleAttackCommand}
-                onLoadCommand={handleLoadCommand}
-                onUnloadCommand={handleUnloadCommand}
-                onOpenFleetPicker={handleOpenFleetPicker}
-                onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
-                onOpenGroundOps={handleOpenGroundOps}
-                onCloseMenu={handleCloseMenu}
-                fleetPickerMode={fleetPickerMode}
-                onOpenSystemDetails={handleOpenSystemDetails}
-                systemDetailSystem={systemDetailSystem}
-                onCloseSystemDetails={handleCloseSystemDetails}
-                onSelectFleet={setSelectedFleetId}
-                onCloseShipDetail={() => handleCloseMenu()}
+            <FleetNameProvider fleets={viewGameState.fleets}>
+                <GameScene
+                    gameState={viewGameState}
+                    enemySightings={enemySightings}
+                    selectedFleetId={selectedFleetId}
+                    onFleetSelect={handleFleetSelect}
+                    onFleetInspect={handleFleetInspect}
+                    onSystemClick={handleSystemClick}
+                    onBackgroundClick={() => {
+                        handleCloseMenu();
+                        setSelectedFleetId(null);
+                    }}
+                />
+                <UI
+                    startYear={viewGameState.startYear}
+                    day={viewGameState.day}
+                    selectedFleet={selectedFleet}
+                    inspectedFleet={inspectedFleet}
+                    logs={viewGameState.logs}
+                    messages={viewGameState.messages}
+                    
+                    uiMode={uiMode}
+                    menuPosition={menuPosition}
+                    targetSystem={targetSystem}
+                    systems={viewGameState.systems}
+                    blueFleets={blueFleets}
+                    battles={viewGameState.battles}
+                    selectedBattleId={selectedBattleId}
+                    gameState={viewGameState}
+                    
+                    onSplit={handleSplitFleet}
+                    onMerge={handleMergeFleet}
+                    onDeploy={handleDeploySingle}
+                    onEmbark={handleEmbarkArmy}
+                    onTransferArmy={handleTransferArmy}
+                    winner={viewGameState.winnerFactionId}
+                    onRestart={() => setScreen('MENU')}
+                    onNextTurn={handleNextTurn}
+                    onMoveCommand={handleMoveCommand}
+                    onAttackCommand={handleAttackCommand}
+                    onLoadCommand={handleLoadCommand}
+                    onUnloadCommand={handleUnloadCommand}
+                    onOpenFleetPicker={handleOpenFleetPicker}
+                    onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
+                    onOpenGroundOps={handleOpenGroundOps}
+                    onCloseMenu={handleCloseMenu}
+                    fleetPickerMode={fleetPickerMode}
+                    onOpenSystemDetails={handleOpenSystemDetails}
+                    systemDetailSystem={systemDetailSystem}
+                    onCloseSystemDetails={handleCloseSystemDetails}
+                    onSelectFleet={setSelectedFleetId}
+                    onCloseShipDetail={() => handleCloseMenu()}
 
-                onOpenBattle={(id) => {
-                    setSelectedBattleId(id);
-                    setFleetPickerMode(null);
-                    setUiMode('BATTLE_SCREEN');
-                }}
-                onInvade={handleInvade}
-                onCommitInvasion={handleCommitInvasion}
+                    onOpenBattle={(id) => {
+                        setSelectedBattleId(id);
+                        setFleetPickerMode(null);
+                        setUiMode('BATTLE_SCREEN');
+                    }}
+                    onInvade={handleInvade}
+                    onCommitInvasion={handleCommitInvasion}
 
-                onSave={handleSave}
+                    onSave={handleSave}
 
-                devMode={devMode}
-                godEyes={godEyes}
-                onSetUiSettings={(s) => {
-                    setDevMode(s.devMode);
-                    setGodEyes(s.godEyes);
-                    const enableAiDebug = s.aiDebug || false;
-                    setAiDebug(enableAiDebug);
-                    aiDebugger.setEnabled(enableAiDebug);
-                }}
-                onExportAiLogs={handleExportAiLogs}
-                onClearAiLogs={handleClearAiLogs}
-                onOpenMessage={handleOpenMessage}
-                onMarkMessageRead={handleMarkMessageRead}
-                onMarkAllMessagesRead={handleMarkAllMessagesRead}
-            />
+                    devMode={devMode}
+                    godEyes={godEyes}
+                    onSetUiSettings={(s) => {
+                        setDevMode(s.devMode);
+                        setGodEyes(s.godEyes);
+                        const enableAiDebug = s.aiDebug || false;
+                        setAiDebug(enableAiDebug);
+                        aiDebugger.setEnabled(enableAiDebug);
+                    }}
+                    onExportAiLogs={handleExportAiLogs}
+                    onClearAiLogs={handleClearAiLogs}
+                    onOpenMessage={handleOpenMessage}
+                    onMarkMessageRead={handleMarkMessageRead}
+                    onMarkAllMessagesRead={handleMarkAllMessagesRead}
+                />
+            </FleetNameProvider>
         </div>
       );
 }

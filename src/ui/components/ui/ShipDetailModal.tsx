@@ -1,7 +1,7 @@
 import React from 'react';
 import { Army, FactionState, Fleet, ShipEntity, ShipConsumables, ShipKillRecord } from '../../../shared/types';
 import { SHIP_STATS } from '../../../content/data/static';
-import { fleetLabel } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 
 interface ShipDetailModalProps {
   fleet: Fleet;
@@ -94,13 +94,14 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
 };
 
 const ShipDetailModal: React.FC<ShipDetailModalProps> = ({ fleet, faction, armies, onClose }) => {
+  const getFleetName = useFleetName();
   return (
     <div className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
       <div className="bg-slate-900 text-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden border border-slate-700">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>
             <div className="text-sm text-slate-300">{faction?.name ?? 'Unknown faction'}</div>
-            <div className="text-2xl font-bold">{fleetLabel(fleet.id)} — {fleet.ships.length} ships</div>
+            <div className="text-2xl font-bold">{getFleetName(fleet.id)} — {fleet.ships.length} ships</div>
           </div>
           <button
             className="text-slate-300 hover:text-white transition-colors"

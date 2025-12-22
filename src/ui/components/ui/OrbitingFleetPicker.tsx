@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem } from '../../../shared/types';
-import { fleetLabel } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { calculateFleetPower } from '../../../engine/world';
 
@@ -15,6 +15,7 @@ interface OrbitingFleetPickerProps {
 
 const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleets, onSelect, onClose }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
 
   const sortedFleets = useMemo(() => {
       return [...fleets].sort((a, b) => {
@@ -51,7 +52,7 @@ const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleet
                         >
                             <div className="text-left">
                                 <div className="text-white font-bold group-hover:text-blue-200">
-                                    {fleetLabel(fleet.id)}
+                                    {getFleetName(fleet.id)}
                                 </div>
                                 <div className="text-xs text-slate-400 flex gap-3 mt-1">
                                     <span>{t('orbitPicker.shipCount', { count: fleet.ships.length })}</span>

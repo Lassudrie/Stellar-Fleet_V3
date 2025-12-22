@@ -837,6 +837,14 @@ export const deserializeGameState = (json: string): GameState => {
     const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
     const day = Number.isFinite(dto.day) ? dto.day : 0;
 
+    const defaultRules: GameplayRules = {
+      fogOfWar: true,
+      aiEnabled: true,
+      useAdvancedCombat: true,
+      totalWar: true,
+      unlimitedFuel: false
+    };
+
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
@@ -858,7 +866,7 @@ export const deserializeGameState = (json: string): GameState => {
       aiStates: migratedAiStates,
       aiState: primaryAiState,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
-      rules: dto.rules || { fogOfWar: true, aiEnabled: true, useAdvancedCombat: true, totalWar: true }
+      rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
 
     return state;

@@ -1,4 +1,4 @@
-import { Fleet, ShipType, StarSystem, FleetState } from '../../shared/types';
+import { Fleet, ShipType, StarSystem, FleetState, GameplayRules } from '../../shared/types';
 import { MAX_HYPERJUMP_DISTANCE_LY, SHIP_STATS } from '../../content/data/static';
 import { dist } from '../math/vec3';
 import { getOrbitingSystem } from '../orbit';
@@ -7,8 +7,11 @@ const FUEL_PRECISION = 0.01;
 const roundFuel = (value: number): number => Math.max(0, Math.round(value / FUEL_PRECISION) * FUEL_PRECISION);
 const ceilFuel = (value: number): number => Math.max(0, Math.ceil(value / FUEL_PRECISION) * FUEL_PRECISION);
 
+type FuelRules = Pick<GameplayRules, 'unlimitedFuel'> | undefined;
+
 const getFuelConsumption = (type: ShipType): number => SHIP_STATS[type]?.fuelConsumptionPerLy ?? 0;
 const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
+const hasUnlimitedFuel = (rules?: FuelRules): boolean => Boolean(rules?.unlimitedFuel);
 
 export const computeShipJumpCost = (type: ShipType, distanceLy: number): number => {
   const consumption = getFuelConsumption(type);
@@ -26,15 +29,16 @@ export const getFleetMaxReachLy = (fleet: Fleet): number => {
   }, MAX_HYPERJUMP_DISTANCE_LY);
 };
 
-export const canFleetPayJump = (fleet: Fleet, distanceLy: number): boolean => {
+export const canFleetPayJump = (fleet: Fleet, distanceLy: number, rules?: FuelRules): boolean => {
+  if (hasUnlimitedFuel(rules)) return true;
   return fleet.ships.every(ship => {
     const cost = computeShipJumpCost(ship.type, distanceLy);
     return roundFuel(ship.fuel) >= cost;
   });
 };
 
-export const applyJumpFuelDebit = (fleet: Fleet, distanceLy: number): Fleet => {
-  if (distanceLy <= 0) return fleet;
+export const applyJumpFuelDebit = (fleet: Fleet, distanceLy: number, rules?: FuelRules): Fleet => {
+  if (distanceLy <= 0 || hasUnlimitedFuel(rules)) return fleet;
 
   return {
     ...fleet,
@@ -55,7 +59,8 @@ export const applyJumpFuelDebit = (fleet: Fleet, distanceLy: number): Fleet => {
 export const validateAndDebitJumpOrFail = (
   fleet: Fleet,
   targetSystem: StarSystem,
-  systems: StarSystem[]
+  systems: StarSystem[],
+  rules?: FuelRules
 ): { ok: true; updatedFleet: Fleet; distanceLy: number; alreadyEnRoute: boolean } | { ok: false; error: string } => {
   const alreadyEnRoute = fleet.state === FleetState.MOVING && fleet.targetSystemId === targetSystem.id;
 
@@ -70,13 +75,13 @@ export const validateAndDebitJumpOrFail = (
   if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) {
     return { ok: false, error: 'Destination is beyond maximum jump distance.' };
   }
-  if (!canFleetPayJump(fleet, distanceLy)) {
+  if (!canFleetPayJump(fleet, distanceLy, rules)) {
     return { ok: false, error: 'Insufficient fuel for jump.' };
   }
 
   return {
     ok: true,
-    updatedFleet: applyJumpFuelDebit(fleet, distanceLy),
+    updatedFleet: applyJumpFuelDebit(fleet, distanceLy, rules),
     distanceLy,
     alreadyEnRoute: false
   };

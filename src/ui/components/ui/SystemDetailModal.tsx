@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n } from '../../i18n';
 import { MoonData, PlanetData, StarSystem } from '../../../shared/types';
 import { formatAu, formatCelsius, formatGravity } from '../../format/units';
+import { GAS_GIANT_ICON } from '../../constants/icons';
 
 interface SystemDetailModalProps {
   system: StarSystem | null;
@@ -167,7 +168,7 @@ const SystemDetailModal: React.FC<SystemDetailModalProps> = ({ system, onClose }
             <div className="text-xs text-slate-400 uppercase tracking-wide">{t('system.modal.systemLabel')}</div>
             <div className="text-2xl font-bold">{system.name}</div>
             {system.resourceType === 'gas' && (
-              <div className="text-sm text-amber-300 mt-1 font-semibold">Resource: He-3</div>
+              <div className="text-sm text-amber-300 mt-1 font-semibold">Resource: {GAS_GIANT_ICON}</div>
             )}
             {astro && (
               <div className="text-sm text-slate-300 mt-1">

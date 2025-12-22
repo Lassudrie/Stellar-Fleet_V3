@@ -86,7 +86,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
-            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
             if ('error' in validation) return fail(validation.error);
 
             // Structural Sharing Update
@@ -127,7 +127,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
-            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
             if ('error' in validation) return fail(validation.error);
 
             return ok({
@@ -165,7 +165,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
-            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
             if ('error' in validation) return fail(validation.error);
 
             return ok({
@@ -203,7 +203,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
-            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems);
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
             if ('error' in validation) return fail(validation.error);
 
             return ok({

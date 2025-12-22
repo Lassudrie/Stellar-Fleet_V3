@@ -15,6 +15,7 @@ export const fr = {
   'scenario.size': 'Taille Galaxie',
   'scenario.stars': 'Étoiles',
   'scenario.radius': 'Rayon Carte',
+  'scenario.unlimited_fuel': 'Carburant illimit\u00e9',
   'scenario.seed': 'Graine (Optionnel)',
   'scenario.random': 'Aléatoire',
   'scenario.launch': 'Lancer Simulation',

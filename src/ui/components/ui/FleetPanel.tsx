@@ -1,9 +1,11 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../../shared/types';
-import { shortId, fleetLabel } from '../../../engine/idUtils';
+import { shortId } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
+import { GAS_GIANT_ICON } from '../../constants/icons';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -98,6 +100,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
     onSplit, onMerge, onDeploy, onEmbark, playerFactionId 
 }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
 
   const fuelSummary = useMemo(() => computeFleetFuelSummary(fleet), [fleet]);
@@ -168,7 +171,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={`w-5 h-5 ${factionColor}`}>
                   <path fillRule="evenodd" d="M14.615 1.595a.75.75 0 01.359.852L12.981 9.75h5.527a.75.75 0 01.625 1.072l-12 14a.75.75 0 01-1.196-.86l4.634-11.492h-5.91a.75.75 0 01-.662-1.006l6.635-9.28a.75.75 0 01.98-.189z" clipRule="evenodd" />
                 </svg>
-                {isPlayer ? fleetLabel(fleet.id) : `ENEMY CONTACT ${shortId(fleet.id)}`}
+                {isPlayer ? getFleetName(fleet.id) : `ENEMY CONTACT ${shortId(fleet.id)}`}
             </h2>
             <div className="text-xs text-slate-400 ml-7 flex gap-2">
                 <span>Ships: {fleet.ships.length}</span>
@@ -182,7 +185,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                 )}
             </div>
             <div className="text-[11px] text-slate-400 ml-7 flex gap-2">
-                <span>He-3: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
+                <span>{GAS_GIANT_ICON}: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
                 <span>•</span>
                 <span>Range: <span className="text-white font-mono">{fuelSummary.cappedCurrentReach.toFixed(1)} ly</span></span>
                 <span className="text-slate-600">/</span>
@@ -225,7 +228,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                           onClick={() => onMerge(other.id)}
                           className="px-2 py-1 bg-blue-800/60 hover:bg-blue-600 text-white text-[10px] rounded border border-blue-500/40 flex items-center gap-1 transition-colors"
                       >
-                          <span>{t('fleet.mergeWith', { fleet: fleetLabel(other.id) })}</span>
+                          <span>{t('fleet.mergeWith', { fleet: getFleetName(other.id) })}</span>
                           <span className="opacity-50">({other.ships.length})</span>
                       </button>
                   ))}

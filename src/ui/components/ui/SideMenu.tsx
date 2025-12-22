@@ -1,16 +1,18 @@
 
 import React, { useState, useMemo } from 'react';
-import { FleetState, LogEntry, Fleet, StarSystem, FactionId, GameMessage, ShipType } from '../../../shared/types';
-import { fleetLabel } from '../../../engine/idUtils';
+import { FleetState, LogEntry, Fleet, StarSystem, FactionId, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
+import { useFleetName } from '../../context/FleetNames';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { dist } from '../../../engine/math/vec3';
 import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
+import { SHIP_STATS } from '../../../content/data/static';
 
 interface SideMenuProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenFleetRegistry: () => void;
   logs: LogEntry[];
   messages: GameMessage[];
   blueFleets: Fleet[];
@@ -38,7 +40,18 @@ type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES'
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
-const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+const getAmmoFromConsumables = (
+  ship: ShipEntity,
+  key: keyof ShipConsumables,
+  fallback: number,
+  legacy?: number
+) => ship.consumables?.[key] ?? legacy ?? fallback;
+
+const getBadgeTone = (percentage: number): string => {
+  if (percentage >= 90) return 'bg-emerald-900/40 border border-emerald-700/40 text-white';
+  if (percentage >= 50) return 'bg-amber-900/40 border border-amber-700/40 text-white';
+  return 'bg-red-900/40 border border-red-700/40 text-white';
+};
 
 const SHIP_TRIGRAM: Record<ShipType, string> = {
   [ShipType.CARRIER]: 'CAR',
@@ -71,8 +84,212 @@ const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
   });
 };
 
+type FleetRegistryListProps = {
+  blueFleets: Fleet[];
+  systems: StarSystem[];
+  day: number;
+  onSelectFleet: (fleetId: string) => void;
+  onClose?: () => void;
+};
+
+export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
+  blueFleets,
+  systems,
+  day,
+  onSelectFleet,
+  onClose
+}) => {
+  const { t } = useI18n();
+  const getFleetName = useFleetName();
+  const [expandedFleets, setExpandedFleets] = useState<Set<string>>(new Set());
+
+  return (
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+          {blueFleets.map(fleet => {
+              const composition = getFleetComposition(fleet);
+              const compositionEntries = Object.entries(composition)
+                .filter(([, count]) => count > 0)
+                .map(([type, count]) => ({ label: SHIP_TRIGRAM[type as ShipType], count }));
+              const isExpanded = expandedFleets.has(fleet.id);
+              const maxVisibleChips = 4;
+              const visibleChips = isExpanded ? compositionEntries : compositionEntries.slice(0, maxVisibleChips);
+              const hasOverflow = compositionEntries.length > maxVisibleChips;
+
+              const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
+              const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
+              const orbitingSystem = findOrbitingSystem(fleet, systems);
+              const originLabel = orbitingSystem?.name ?? 'Deep space';
+              const routeLabel = !inTransit && !orbitingSystem
+                ? 'Deep space patrol'
+                : null;
+
+              const speed = getFleetSpeed(fleet);
+              const remainingDistance = inTransit && fleet.targetPosition ? dist(fleet.position, fleet.targetPosition) : 0;
+              const etaTurns = inTransit && speed > 0 ? Math.max(1, Math.ceil(remainingDistance / speed)) : 0;
+              const etaLabel = inTransit
+                ? etaTurns === 1
+                  ? t('picker.eta_one')
+                  : t('picker.eta_other', { count: etaTurns })
+                : null;
+              const distanceLabel = inTransit
+                ? `${Math.round(Math.max(0, remainingDistance))} ${t('picker.ly')}`
+                : null;
+              const fuelSummary = computeFleetFuelSummary(fleet);
+              const fuelPercentLabel = `${Math.round(fuelSummary.fuelPercentage)}% (${Math.round(fuelSummary.totalFuel).toLocaleString()})`;
+              const fuelBadgeTone = getBadgeTone(fuelSummary.fuelPercentage);
+
+              const ammoTotals = fleet.ships.reduce(
+                (acc, ship) => {
+                  const stats = SHIP_STATS[ship.type];
+                  if (!stats) return acc;
+                  const missiles = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
+                  const torpedoes = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
+                  const interceptors = getAmmoFromConsumables(ship, 'interceptors', stats.interceptorStock, ship.interceptorsLeft);
+                  acc.current += missiles + torpedoes + interceptors;
+                  acc.capacity += stats.offensiveMissileStock + stats.torpedoStock + stats.interceptorStock;
+                  return acc;
+                },
+                { current: 0, capacity: 0 }
+              );
+              const ammoPercentage = ammoTotals.capacity > 0
+                ? Math.min(100, Math.max(0, (ammoTotals.current / ammoTotals.capacity) * 100))
+                : 0;
+              const ammoBadgeTone = getBadgeTone(ammoPercentage);
+
+              const statusTone = fleet.state === FleetState.COMBAT
+                ? 'bg-red-900/40 text-red-200 border border-red-700/40'
+                : fleet.state === FleetState.MOVING
+                  ? 'bg-amber-900/30 text-amber-100 border border-amber-700/30'
+                  : 'bg-emerald-900/30 text-emerald-100 border border-emerald-700/30';
+
+              return (
+                <button
+                  key={fleet.id}
+                  onClick={() => {
+                      onSelectFleet(fleet.id);
+                      onClose?.();
+                  }}
+                  className="relative w-full text-left bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-800/60 border border-slate-700/60 p-4 rounded-2xl shadow-lg hover:border-blue-500/50 hover:shadow-blue-900/30 transition-all group overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+                  <div className="flex items-start justify-between gap-3">
+                      <div>
+                          <div className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
+                              {getFleetName(fleet.id)}
+                              <span className={`text-[10px] px-2 py-1 rounded-full uppercase font-bold ${statusTone}`}>
+                                  {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
+                              </span>
+                          </div>
+                          {!inTransit && orbitingSystem && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                {t('fleet.orbiting', { system: orbitingSystem.name })}
+                            </div>
+                          )}
+                          {inTransit && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                From {originLabel} to {targetSystem?.name ?? t('ctx.systemDetails')}
+                            </div>
+                          )}
+                          {inTransit && (distanceLabel || etaLabel) && (
+                            <div className="text-xs text-slate-500 mt-1 flex gap-3">
+                                {distanceLabel && <span>Remaining {distanceLabel}</span>}
+                                {etaLabel && <span>{etaLabel}</span>}
+                            </div>
+                          )}
+                          {routeLabel && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                {routeLabel}
+                            </div>
+                          )}
+                      </div>
+                      <div className="h-12 w-12 rounded-xl border border-slate-700 flex items-center justify-center bg-slate-800/60 text-slate-300">
+                          <div className="flex flex-col gap-1 items-center" aria-hidden="true">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                          </div>
+                          <span className="sr-only">Fleet options</span>
+                      </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3 text-slate-200">
+                      <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
+                          {t('orbitPicker.shipCount', { count: fleet.ships.length })}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${fuelBadgeTone}`}>
+                          Fuel {fuelPercentLabel}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${ammoBadgeTone}`}>
+                          Munitions {Math.round(ammoPercentage)}%
+                      </span>
+                      <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
+                      <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
+                          {visibleChips.map(item => (
+                              <span
+                                key={item.label}
+                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
+                              >
+                                  {item.label} {item.count}
+                              </span>
+                          ))}
+                          {hasOverflow && !isExpanded && (
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.add(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.add(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold cursor-pointer"
+                              >
+                                  ...
+                              </span>
+                          )}
+                          {hasOverflow && isExpanded && (
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.delete(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    const next = new Set(expandedFleets);
+                                    next.delete(fleet.id);
+                                    setExpandedFleets(next);
+                                }}
+                                className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap cursor-pointer"
+                              >
+                                  ??-
+                              </span>
+                          )}
+                      </div>
+                  </div>
+                </button>
+              );
+          })}
+      </div>
+  );
+};
+
 const SideMenu: React.FC<SideMenuProps> = ({ 
-    isOpen, onClose, logs, messages, blueFleets, systems, day,
+    isOpen, onClose, onOpenFleetRegistry, logs, messages, blueFleets, systems, day,
     onRestart, onSelectFleet, onSave, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
@@ -83,7 +300,6 @@ const SideMenu: React.FC<SideMenuProps> = ({
   
   const [aiDebug, setAiDebug] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>('ALL');
-  const [expandedFleets, setExpandedFleets] = useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -151,7 +367,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
              </svg>
         </button>
 
-        <button onClick={() => setView('FLEETS')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
+        <button onClick={onOpenFleetRegistry} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
                  <span className="text-blue-200 font-bold tracking-wider uppercase">{t('sidemenu.registry')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.activeUnits', { count: blueFleets.length })}</span>
@@ -226,150 +442,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
   );
 
   const renderFleets = () => (
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-          {blueFleets.map(fleet => {
-              const composition = getFleetComposition(fleet);
-              const compositionEntries = Object.entries(composition)
-                .filter(([, count]) => count > 0)
-                .map(([type, count]) => ({ label: SHIP_TRIGRAM[type as ShipType], count }));
-              const isExpanded = expandedFleets.has(fleet.id);
-              const maxVisibleChips = 4;
-              const visibleChips = isExpanded ? compositionEntries : compositionEntries.slice(0, maxVisibleChips);
-              const hasOverflow = compositionEntries.length > maxVisibleChips;
-
-              const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
-              const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
-              const orbitingSystem = findOrbitingSystem(fleet, systems);
-              const routeLabel = inTransit
-                ? `Transit → ${targetSystem?.name ?? t('ctx.systemDetails')}`
-                : orbitingSystem
-                  ? t('fleet.orbiting', { system: orbitingSystem.name })
-                  : 'Deep space patrol';
-
-              const speed = getFleetSpeed(fleet);
-              const remainingDistance = inTransit && fleet.targetPosition ? dist(fleet.position, fleet.targetPosition) : 0;
-              const elapsedTurns = inTransit ? Math.max(0, day - fleet.stateStartTurn) : 0;
-              const distanceTraveled = inTransit ? Math.max(0, elapsedTurns * speed) : 0;
-              const totalDistance = inTransit ? remainingDistance + distanceTraveled : 0;
-              const progress = inTransit ? clamp01(totalDistance > 0 ? distanceTraveled / totalDistance : 0) : 1;
-              const etaTurns = inTransit && speed > 0 ? Math.max(1, Math.ceil(remainingDistance / speed)) : 0;
-              const safeEta = etaTurns > 0 ? etaTurns : 1;
-              const fuelSummary = computeFleetFuelSummary(fleet);
-              const fuelPercentLabel = `${Math.round(fuelSummary.fuelPercentage)}% (${Math.round(fuelSummary.totalFuel).toLocaleString()})`;
-
-              const etaLabel = inTransit
-                ? etaTurns === 1
-                  ? t('picker.eta_one')
-                  : t('picker.eta_other', { count: safeEta })
-                : t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state });
-
-              const remainingLabel = inTransit
-                ? `${Math.round(Math.max(0, remainingDistance))} / ${Math.round(Math.max(remainingDistance, totalDistance))} ${t('picker.ly')}`
-                : t('orbitPicker.shipCount', { count: fleet.ships.length });
-
-              const statusTone = fleet.state === FleetState.COMBAT
-                ? 'bg-red-900/40 text-red-200 border border-red-700/40'
-                : fleet.state === FleetState.MOVING
-                  ? 'bg-amber-900/30 text-amber-100 border border-amber-700/30'
-                  : 'bg-emerald-900/30 text-emerald-100 border border-emerald-700/30';
-
-              return (
-                <button
-                  key={fleet.id}
-                  onClick={() => {
-                      onSelectFleet(fleet.id);
-                      onClose();
-                  }}
-                  className="relative w-full text-left bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-800/60 border border-slate-700/60 p-4 rounded-2xl shadow-lg hover:border-blue-500/50 hover:shadow-blue-900/30 transition-all group overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-
-                  <div className="flex items-start justify-between gap-3">
-                      <div>
-                          <div className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
-                              {fleetLabel(fleet.id)}
-                              <span className={`text-[10px] px-2 py-1 rounded-full uppercase font-bold ${statusTone}`}>
-                                  {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
-                              </span>
-                          </div>
-                          <div className="text-sm text-slate-400 mt-1">
-                              {routeLabel}
-                          </div>
-                      </div>
-                      <div className="h-12 w-12 rounded-xl border border-slate-700 flex items-center justify-center bg-slate-800/60 text-slate-300">
-                          <div className="flex flex-col gap-1 items-center" aria-hidden="true">
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
-                          </div>
-                          <span className="sr-only">Fleet options</span>
-                      </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-4 text-slate-400 text-sm">
-                      <span className="font-semibold text-slate-200">{etaLabel}</span>
-                      <span>{remainingLabel}</span>
-                  </div>
-
-                  <div className="mt-2 h-3 w-full bg-slate-800/80 rounded-full overflow-hidden shadow-inner border border-slate-800">
-                      <div
-                        className="h-full bg-gradient-to-r from-slate-100 via-blue-200 to-blue-400 rounded-full transition-all"
-                        style={{ width: `${Math.max(8, Math.round(progress * 100))}%` }}
-                        aria-label={t('ctx.moveTo')}
-                      />
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-3 text-slate-200">
-                      <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
-                          {t('orbitPicker.shipCount', { count: fleet.ships.length })}
-                      </span>
-                      <span className="px-3 py-1 rounded-full bg-amber-900/40 border border-amber-700/40 text-sm font-semibold text-amber-100">
-                          Fuel {fuelPercentLabel}
-                      </span>
-                      <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
-                      <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
-                          {visibleChips.map(item => (
-                              <span
-                                key={item.label}
-                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
-                              >
-                                  {item.label} {item.count}
-                              </span>
-                          ))}
-                          {hasOverflow && !isExpanded && (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.add(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold"
-                              >
-                                  ...
-                              </button>
-                          )}
-                          {hasOverflow && isExpanded && (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.delete(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap"
-                              >
-                                  ×
-                              </button>
-                          )}
-                      </div>
-                  </div>
-                </button>
-              );
-          })}
-      </div>
+      <FleetRegistryList
+        blueFleets={blueFleets}
+        systems={systems}
+        day={day}
+        onSelectFleet={onSelectFleet}
+        onClose={onClose}
+      />
   );
 
   const renderSystems = () => (

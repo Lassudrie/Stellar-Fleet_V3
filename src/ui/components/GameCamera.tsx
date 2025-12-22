@@ -15,6 +15,7 @@ interface GameCameraProps {
 const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
   const hasInitialized = useRef(false);
+  const isClampingRef = useRef(false);
   const clampScratchRef = useRef<ClampScratch>(createClampScratch());
 
   const targetArray = useMemo<[number, number, number]>(() => {
@@ -39,25 +40,30 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     return { minDistance, maxDistance };
   }, [mapRadius]);
 
-  const clampControls = useCallback(() => {
+  const clampControls = useCallback((options?: { skipUpdate?: boolean }) => {
     if (!controlsRef.current || !mapBounds) return;
+    if (isClampingRef.current) return;
+    isClampingRef.current = true;
+    try {
+      const { object: camera, target, minDistance, maxDistance } = controlsRef.current;
+      const distanceLimits = {
+        min: minDistance ?? distanceConfig.minDistance,
+        max: maxDistance ?? distanceConfig.maxDistance
+      };
 
-    const { object: camera, target, minDistance, maxDistance } = controlsRef.current;
-    const distanceLimits = {
-      min: minDistance ?? distanceConfig.minDistance,
-      max: maxDistance ?? distanceConfig.maxDistance
-    };
+      const result = clampCameraToBounds(
+        camera.position,
+        target,
+        mapBounds,
+        distanceLimits,
+        clampScratchRef.current
+      );
 
-    const result = clampCameraToBounds(
-      camera.position,
-      target,
-      mapBounds,
-      distanceLimits,
-      clampScratchRef.current
-    );
-
-    if (result.targetChanged || result.positionChanged) {
-      controlsRef.current.update();
+      if (!options?.skipUpdate && (result.targetChanged || result.positionChanged)) {
+        controlsRef.current.update();
+      }
+    } finally {
+      isClampingRef.current = false;
     }
   }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
 
@@ -111,7 +117,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}
         screenSpacePanning={false}
-        onChange={clampControls}
+        onChange={() => clampControls({ skipUpdate: true })}
       />
     </>
   );

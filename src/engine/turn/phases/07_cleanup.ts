@@ -1,8 +1,11 @@
 
-import { ArmyState, GameState } from '../../../shared/types';
+import { ArmyState, GameState, ShipType, Fleet, StarSystem } from '../../../shared/types';
 import { TurnContext } from '../types';
 import { pruneBattles } from '../../battle/detection';
 import { sanitizeArmies } from '../../army';
+import { SHIP_STATS } from '../../../content/data/static';
+import { getOrbitingSystem } from '../../orbit';
+import { quantizeFuel } from '../../logistics/fuel';
 
 const LOG_RETENTION_LIMIT = 2000;
 const MESSAGE_RETENTION_LIMIT = 500;
@@ -15,6 +18,63 @@ const trimLogs = (logs: GameState['logs']): GameState['logs'] => {
 const trimMessages = (messages: GameState['messages']): GameState['messages'] => {
     if (messages.length <= MESSAGE_RETENTION_LIMIT) return messages;
     return messages.slice(-MESSAGE_RETENTION_LIMIT);
+};
+
+const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
+const getExtractorRate = (): number => SHIP_STATS[ShipType.EXTRACTOR]?.fuelExtractionRate ?? 0;
+
+const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null): Fleet => {
+    if (!system || system.resourceType !== 'gas') return fleet;
+
+    const extractorRate = getExtractorRate();
+    if (extractorRate <= 0) return fleet;
+
+    const extractorCount = fleet.ships.filter(ship => ship.type === ShipType.EXTRACTOR).length;
+    if (extractorCount === 0) return fleet;
+
+    let remaining = extractorCount * extractorRate;
+    if (remaining <= 0) return fleet;
+
+    const ships = fleet.ships.map(ship => ({ ...ship }));
+    const targets = ships
+        .map((ship, index) => {
+            const capacity = getFuelCapacity(ship.type);
+            const missing = Math.max(0, capacity - ship.fuel);
+            return { index, capacity, missing };
+        })
+        .filter(target => target.capacity > 0 && target.missing > 0);
+
+    if (targets.length === 0) return fleet;
+
+    let remainingTargets = targets.length;
+    for (const target of targets) {
+        const share = remaining / remainingTargets;
+        const delta = Math.min(target.missing, share);
+        if (delta > 0) {
+            const ship = ships[target.index];
+            const nextFuel = Math.min(target.capacity, ship.fuel + delta);
+            ship.fuel = quantizeFuel(nextFuel);
+        }
+        remaining -= delta;
+        remainingTargets -= 1;
+    }
+
+    return { ...fleet, ships };
+};
+
+const applyGasExtraction = (state: GameState): GameState => {
+    if (state.rules?.unlimitedFuel) return state;
+
+    let fleetsChanged = false;
+    const fleets = state.fleets.map(fleet => {
+        const system = getOrbitingSystem(fleet, state.systems);
+        const updated = applyGasExtractionToFleet(fleet, system);
+        if (updated !== fleet) fleetsChanged = true;
+        return updated;
+    });
+
+    if (!fleetsChanged) return state;
+    return { ...state, fleets };
 };
 
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
@@ -39,8 +99,11 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
         battles: activeBattles
     });
 
-    // 3. Add Tech Logs
-    const newLogs = [...sanitizedArmyState.logs];
+    // 3. Apply passive gas extraction before final log trim
+    const extractedState = applyGasExtraction(sanitizedArmyState);
+
+    // 4. Add Tech Logs
+    const newLogs = [...extractedState.logs];
     [...carrierLossLogs, ...sanitizationLogs].forEach(txt => {
         newLogs.push({
             id: ctx.rng.id('log'),
@@ -51,9 +114,9 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     return {
-        ...sanitizedArmyState,
+        ...extractedState,
         battles: activeBattles,
         logs: trimLogs(newLogs),
-        messages: trimMessages(sanitizedArmyState.messages)
+        messages: trimMessages(extractedState.messages)
     };
 };

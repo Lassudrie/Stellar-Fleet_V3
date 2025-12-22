@@ -349,6 +349,7 @@ export interface GameplayRules {
   useAdvancedCombat: boolean;
   aiEnabled: boolean;
   totalWar: boolean;
+  unlimitedFuel: boolean;
 }
 
 export interface GameState {

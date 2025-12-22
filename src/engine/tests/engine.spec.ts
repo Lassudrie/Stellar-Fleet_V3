@@ -122,7 +122,8 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     fogOfWar: false,
     useAdvancedCombat: true,
     aiEnabled: false,
-    totalWar: false
+    totalWar: false,
+    unlimitedFuel: false
   };
 
   const defaultObjectives: GameObjectives = {
@@ -1954,7 +1955,7 @@ const tests: TestCase[] = [
         }
       };
 
-      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false };
+      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false };
 
       const state = createBaseState({
         day: 2,
@@ -2215,7 +2216,7 @@ const tests: TestCase[] = [
         systems,
         fleets: [idleFleet, combatFleet, enemyBattleFleet],
         battles: [battle],
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 
@@ -2261,7 +2262,7 @@ const tests: TestCase[] = [
         factions: [aiFaction, enemyFaction],
         systems,
         fleets: [retreatingFleet, readyFleet, enemyFrontierFleet],
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 
@@ -2308,7 +2309,7 @@ const tests: TestCase[] = [
         systems: [homeSystem, targetSystem],
         fleets: [assaultFleetA, assaultFleetB],
         armies: defenders,
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 

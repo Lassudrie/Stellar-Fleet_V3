@@ -5,7 +5,7 @@ import { applyCommand, GameCommand, CommandResult } from './commands';
 import { runTurn } from './runTurn';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
-import { canonicalizeMessages } from './state/canonicalize';
+import { canonicalizeMessages, canonicalizeState } from './state/canonicalize';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -24,17 +24,18 @@ export class GameEngine {
     private listeners: Set<() => void> = new Set();
 
     constructor(initialState: GameState) {
-        this.state = initialState;
-        this.rng = new RNG(initialState.seed);
+        const canonicalState = canonicalizeState(initialState);
+        this.state = canonicalState;
+        this.rng = new RNG(canonicalState.seed);
         
         // Fix: Restore RNG state to ensure determinism and prevent ID collisions
-        if (initialState.rngState !== undefined) {
-            this.rng.setState(initialState.rngState);
+        if (canonicalState.rngState !== undefined) {
+            this.rng.setState(canonicalState.rngState);
         }
     }
 
     private commitState(nextState: GameState) {
-        this.state = this.withSyncedRngState(nextState);
+        this.state = this.withSyncedRngState(canonicalizeState(nextState));
         this.notify();
     }
 

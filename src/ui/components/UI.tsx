@@ -8,6 +8,7 @@ import SystemContextMenu, { GroundForceSummaryEntry } from './ui/SystemContextMe
 import FleetPicker from './ui/FleetPicker';
 import FleetPanel, { AvailableArmy } from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
+import FleetRegistryScreen from './ui/FleetRegistryScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
@@ -93,6 +94,7 @@ const UI: React.FC<UIProps> = ({
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [isFleetRegistryOpen, setIsFleetRegistryOpen] = useState(false);
 
   // Helper to check ownership against current player
   const playerFactionId = gameState.playerFactionId;
@@ -297,6 +299,10 @@ const UI: React.FC<UIProps> = ({
       <SideMenu 
         isOpen={isSideMenuOpen}
         onClose={() => setIsSideMenuOpen(false)}
+        onOpenFleetRegistry={() => {
+          setIsSideMenuOpen(false);
+          setIsFleetRegistryOpen(true);
+        }}
         logs={logs}
         messages={messages}
         blueFleets={blueFleets}
@@ -317,6 +323,18 @@ const UI: React.FC<UIProps> = ({
         
         // Pass PlayerID for ownership checks
         playerFactionId={playerFactionId}
+      />
+
+      <FleetRegistryScreen
+        isOpen={isFleetRegistryOpen}
+        blueFleets={blueFleets}
+        systems={systems}
+        day={day}
+        onSelectFleet={(fleetId) => {
+          onSelectFleet(fleetId);
+          setIsFleetRegistryOpen(false);
+        }}
+        onClose={() => setIsFleetRegistryOpen(false)}
       />
 
       {uiMode === 'SYSTEM_MENU' && menuPosition && targetSystem && (
@@ -348,6 +366,7 @@ const UI: React.FC<UIProps> = ({
             targetSystem={targetSystem}
             systems={systems}
             blueFleets={blueFleets}
+            unlimitedFuel={gameState.rules.unlimitedFuel}
             onSelectFleet={(fleetId) => {
                 if (fleetPickerMode === 'LOAD') return onLoadCommand(fleetId);
                 if (fleetPickerMode === 'UNLOAD') return onUnloadCommand(fleetId);

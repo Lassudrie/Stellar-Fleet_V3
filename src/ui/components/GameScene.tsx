@@ -243,6 +243,8 @@ const GameScene: React.FC<GameSceneProps> = ({
 
                 <Galaxy 
                   systems={gameState.systems} 
+                  fleets={gameState.fleets}
+                  factions={gameState.factions}
                   armies={gameState.armies}
                   battlingSystemIds={battlingSystemIds}
                   onSystemClick={onSystemClick} 

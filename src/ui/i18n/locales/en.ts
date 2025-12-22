@@ -16,6 +16,7 @@ export const en = {
   'scenario.size': 'Galaxy Size',
   'scenario.stars': 'Stars',
   'scenario.radius': 'Map Radius',
+  'scenario.unlimited_fuel': 'Unlimited Fuel',
   'scenario.seed': 'Generation Seed (Optional)',
   'scenario.random': 'Random',
   'scenario.launch': 'Launch Simulation',

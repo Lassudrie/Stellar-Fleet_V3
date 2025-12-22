@@ -3,11 +3,15 @@ import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
 import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
-import { StarSystem, Army, ArmyState } from '../../shared/types';
+import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem } from '../../shared/types';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
+import { findOrbitingSystem } from './ui/orbiting';
+import { GAS_GIANT_ICON } from '../constants/icons';
 
 interface GalaxyProps {
   systems: StarSystem[];
+  fleets: Fleet[];
+  factions: FactionState[];
   armies?: Army[];
   battlingSystemIds?: Set<string>;
   onSystemClick: (system: StarSystem, event: ThreeEvent<MouseEvent>) => void;
@@ -20,7 +24,7 @@ interface ArmyInfo {
     hasConflict: boolean;
 }
 
-const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ system, armyInfo }) => {
+const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor?: string }> = ({ system, armyInfo, iconColor }) => {
     const textRef = useRef<any>(null);
     const iconRef = useRef<any>(null);
     const armyIconRef = useRef<any>(null);
@@ -28,7 +32,7 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
     
     const resourceIcon = useMemo(() => {
         if (system.resourceType !== 'gas') return null;
-        return 'He-3';
+        return GAS_GIANT_ICON;
     }, [system.resourceType]);
 
     const armyVisual = useMemo(() => {
@@ -94,6 +98,7 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
                         ref={iconRef}
                         position={[0, 1.3, 0]}
                         fontSize={1.2}
+                        color={iconColor}
                         anchorX="center"
                         anchorY="bottom"
                         outlineWidth={0.02}
@@ -141,7 +146,7 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo }> = ({ sy
     );
 };
 
-const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSystemIds, onSystemClick, playerFactionId }) => {
+const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, armies, battlingSystemIds, onSystemClick, playerFactionId }) => {
   const armyMap = useMemo(() => {
       const map = new Map<string, ArmyInfo>();
       if (!armies) return map;
@@ -170,6 +175,34 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
       });
       return map;
   }, [armies, playerFactionId, systems]);
+
+  const extractingBySystem = useMemo(() => {
+      const map = new Map<string, Set<string>>();
+      fleets.forEach(fleet => {
+          if (!fleet.ships.some(ship => ship.type === ShipType.EXTRACTOR)) return;
+          const system = findOrbitingSystem(fleet, systems);
+          if (!system || system.resourceType !== 'gas') return;
+          if (!map.has(system.id)) {
+              map.set(system.id, new Set());
+          }
+          map.get(system.id)!.add(fleet.factionId);
+      });
+      return map;
+  }, [fleets, systems]);
+
+  const factionColorById = useMemo(() => {
+      const map = new Map<string, string>();
+      factions.forEach(faction => map.set(faction.id, faction.color));
+      return map;
+  }, [factions]);
+
+  const resolveGasIconColor = (system: StarSystem): string => {
+      if (system.resourceType !== 'gas') return '#ffffff';
+      if (!system.ownerFactionId) return '#ffffff';
+      const extractingFactions = extractingBySystem.get(system.id);
+      if (extractingFactions?.has(system.ownerFactionId)) return '#22c55e';
+      return factionColorById.get(system.ownerFactionId) ?? '#ffffff';
+  };
 
   const lineGeometry = useMemo(() => {
     if (!systems || systems.length === 0) return new BufferGeometry();
@@ -246,7 +279,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, armies, battlingSys
 
         {systems.map((sys) => (
             <group key={`label-${sys.id}`} position={[sys.position.x, sys.position.y, sys.position.z]}>
-                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} />
+                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} iconColor={resolveGasIconColor(sys)} />
             </group>
         ))}
     </group>
