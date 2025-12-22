@@ -1,0 +1,5 @@
+{
+  "name": "autoprefixer",
+  "version": "10.4.20",
+  "main": "index.js"
+}
