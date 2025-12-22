@@ -28,10 +28,10 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "autoprefixer": "^10.4.20",
+    "autoprefixer": "file:vendor/autoprefixer",
     "eslint": "^8.57.0",
     "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "file:vendor/tailwindcss",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
