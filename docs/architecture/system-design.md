@@ -46,13 +46,13 @@ Elle orchestre les services séquentiellement :
 5.  Détection de conflits.
 6.  Capture de systèmes.
 
-## 4. Couche de Présentation (`components/`)
-*   **GameScene** : Contient le Canvas Three.js. Gère le rendu 3D.
+## 4. Couche de Présentation (`src/ui/`)
+*   **GameScene** : Contient le Canvas Three.js. Gère le rendu 3D (cf. `src/ui/components/`).
 *   **UI** : Overlay HTML/CSS (Menu, Badges, BattleScreen).
-*   **Synchronisation** : `App.tsx` s'abonne (`subscribe`) aux changements du moteur et force un re-render React à chaque mise à jour de l'état.
-*   **Assets Audio** : Les effets et musiques utilisés par l'UI résident dans `components/audio/` avec deux sous-dossiers dédiés :
-    *   `components/audio/sounds/` pour les effets courts (feedback UI, alertes).
-    *   `components/audio/musics/` pour les ambiances ou musiques de fond.
+*   **Synchronisation** : `src/ui/App.tsx` s'abonne (`subscribe`) aux changements du moteur et force un re-render React à chaque mise à jour de l'état.
+*   **Assets Audio** : Les effets et musiques utilisés par l'UI résident dans `src/content/audio/` avec deux sous-dossiers dédiés :
+    *   `src/content/audio/sounds/` pour les effets courts (feedback UI, alertes).
+    *   `src/content/audio/musics/` pour les ambiances ou musiques de fond.
     *   Ces ressources sont chargées uniquement par la couche UI ; le moteur n'a aucune dépendance vers des assets audio.
 
 ## 5. Rendu 3D Optimisé
