@@ -55,6 +55,7 @@ interface UIProps {
   onOpenGroundOps: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
+  onInspectFleet: (fleetId: string) => void;
   onOpenSystemDetails: () => void;
   systemDetailSystem: StarSystem | null;
   onCloseSystemDetails: () => void;
@@ -86,6 +87,7 @@ const UI: React.FC<UIProps> = ({
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
+    onInspectFleet,
     onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
@@ -305,6 +307,7 @@ const UI: React.FC<UIProps> = ({
         systems={systems}
         onRestart={onRestart}
         onSelectFleet={onSelectFleet}
+        onInspectFleet={onInspectFleet}
         onSave={onSave}
         onOpenMessage={onOpenMessage}
         onDismissMessage={onDismissMessage}
