@@ -284,7 +284,7 @@ const UI: React.FC<UIProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 pointer-events-none safe-area">
+    <div id="ui-overlay" className="absolute inset-0 pointer-events-none safe-area">
       
       <TopBar 
         startYear={startYear}
