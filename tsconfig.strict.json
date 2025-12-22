@@ -6,6 +6,6 @@
     "noImplicitAny": true
   },
   "include": [
-    "engine/**/*"
+    "src/engine/**/*"
   ]
 }
