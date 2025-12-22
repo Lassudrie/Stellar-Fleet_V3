@@ -1,7 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
-import { LogEntry, Fleet, StarSystem, FactionId, GameMessage } from '../../../shared/types';
+import { FleetState, LogEntry, Fleet, StarSystem, FactionId, GameMessage, ShipType } from '../../../shared/types';
 import { fleetLabel } from '../../../engine/idUtils';
+import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
+import { dist } from '../../../engine/math/vec3';
+import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
 
 interface SideMenuProps {
@@ -11,6 +14,7 @@ interface SideMenuProps {
   messages: GameMessage[];
   blueFleets: Fleet[];
   systems: StarSystem[];
+  day: number;
   onRestart: () => void;
   onSelectFleet: (fleetId: string) => void;
   onSave: () => void;
@@ -33,8 +37,29 @@ type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES'
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
+  return fleet.ships.reduce<Record<ShipType, number>>((acc, ship) => {
+      if (ship?.type) {
+          acc[ship.type as ShipType] = (acc[ship.type as ShipType] ?? 0) + 1;
+      }
+      return acc;
+  }, {
+      [ShipType.CARRIER]: 0,
+      [ShipType.CRUISER]: 0,
+      [ShipType.DESTROYER]: 0,
+      [ShipType.FRIGATE]: 0,
+      [ShipType.FIGHTER]: 0,
+      [ShipType.BOMBER]: 0,
+      [ShipType.TROOP_TRANSPORT]: 0,
+      [ShipType.TANKER]: 0,
+      [ShipType.EXTRACTOR]: 0,
+  });
+};
+
 const SideMenu: React.FC<SideMenuProps> = ({ 
-    isOpen, onClose, logs, messages, blueFleets, systems, 
+    isOpen, onClose, logs, messages, blueFleets, systems, day,
     onRestart, onSelectFleet, onSave, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
@@ -187,31 +212,112 @@ const SideMenu: React.FC<SideMenuProps> = ({
   );
 
   const renderFleets = () => (
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-          {blueFleets.map(fleet => (
-              <button 
-                  key={fleet.id} 
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+          {blueFleets.map(fleet => {
+              const composition = getFleetComposition(fleet);
+              const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
+              const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
+              const orbitingSystem = findOrbitingSystem(fleet, systems);
+              const routeLabel = inTransit
+                ? `Transit → ${targetSystem?.name ?? t('ctx.systemDetails')}`
+                : orbitingSystem
+                  ? t('fleet.orbiting', { system: orbitingSystem.name })
+                  : 'Deep space patrol';
+
+              const speed = getFleetSpeed(fleet);
+              const remainingDistance = inTransit && fleet.targetPosition ? dist(fleet.position, fleet.targetPosition) : 0;
+              const elapsedTurns = inTransit ? Math.max(0, day - fleet.stateStartTurn) : 0;
+              const distanceTraveled = inTransit ? Math.max(0, elapsedTurns * speed) : 0;
+              const totalDistance = inTransit ? remainingDistance + distanceTraveled : 0;
+              const progress = inTransit ? clamp01(totalDistance > 0 ? distanceTraveled / totalDistance : 0) : 1;
+              const etaTurns = inTransit && speed > 0 ? Math.max(1, Math.ceil(remainingDistance / speed)) : 0;
+              const safeEta = etaTurns > 0 ? etaTurns : 1;
+
+              const etaLabel = inTransit
+                ? etaTurns === 1
+                  ? t('picker.eta_one')
+                  : t('picker.eta_other', { count: safeEta })
+                : t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state });
+
+              const remainingLabel = inTransit
+                ? `${Math.round(Math.max(0, remainingDistance))} / ${Math.round(Math.max(remainingDistance, totalDistance))} ${t('picker.ly')}`
+                : t('orbitPicker.shipCount', { count: fleet.ships.length });
+
+              const statusTone = fleet.state === FleetState.COMBAT
+                ? 'bg-red-900/40 text-red-200 border border-red-700/40'
+                : fleet.state === FleetState.MOVING
+                  ? 'bg-amber-900/30 text-amber-100 border border-amber-700/30'
+                  : 'bg-emerald-900/30 text-emerald-100 border border-emerald-700/30';
+
+              return (
+                <button
+                  key={fleet.id}
                   onClick={() => {
                       onSelectFleet(fleet.id);
                       onClose();
                   }}
-                  className="w-full text-left bg-slate-800/30 border border-slate-700/50 p-3 rounded hover:bg-slate-700 hover:border-blue-500/50 transition-all group"
-              >
-                  <div className="flex justify-between items-start mb-1">
-                      <span className="text-blue-300 font-bold text-sm group-hover:text-blue-100 transition-colors">{fleetLabel(fleet.id)}</span>
-                      <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300 uppercase">
-                        {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
+                  className="relative w-full text-left bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-800/60 border border-slate-700/60 p-4 rounded-2xl shadow-lg hover:border-blue-500/50 hover:shadow-blue-900/30 transition-all group overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+                  <div className="flex items-start justify-between gap-3">
+                      <div>
+                          <div className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
+                              {fleetLabel(fleet.id)}
+                              <span className={`text-[10px] px-2 py-1 rounded-full uppercase font-bold ${statusTone}`}>
+                                  {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
+                              </span>
+                          </div>
+                          <div className="text-sm text-slate-400 mt-1">
+                              {routeLabel}
+                          </div>
+                      </div>
+                      <div className="h-12 w-12 rounded-xl border border-slate-700 flex items-center justify-center bg-slate-800/60 text-slate-300">
+                          <div className="flex flex-col gap-1 items-center" aria-hidden="true">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                          </div>
+                          <span className="sr-only">Fleet options</span>
+                      </div>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4 text-slate-400 text-sm">
+                      <span className="font-semibold text-slate-200">{etaLabel}</span>
+                      <span>{remainingLabel}</span>
+                  </div>
+
+                  <div className="mt-2 h-3 w-full bg-slate-800/80 rounded-full overflow-hidden shadow-inner border border-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-slate-100 via-blue-200 to-blue-400 rounded-full transition-all"
+                        style={{ width: `${Math.max(8, Math.round(progress * 100))}%` }}
+                        aria-label={t('ctx.moveTo')}
+                      />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3 text-slate-200">
+                      <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
+                          {t('orbitPicker.shipCount', { count: fleet.ships.length })}
                       </span>
+                      <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
+                      <div className="flex flex-wrap gap-2 text-sm text-slate-100">
+                          {[
+                              { label: 'DST', value: composition[ShipType.DESTROYER] },
+                              { label: 'CRU', value: composition[ShipType.CRUISER] },
+                              { label: 'TRN', value: composition[ShipType.TROOP_TRANSPORT] },
+                          ].filter(item => item.value > 0).map(item => (
+                              <span
+                                key={item.label}
+                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold"
+                              >
+                                  {item.label} {item.value}
+                              </span>
+                          ))}
+                      </div>
                   </div>
-                  <div className="text-xs text-slate-500 group-hover:text-slate-400">Ships: {fleet.ships.length}</div>
-                  <div className="flex gap-1 mt-2 flex-wrap">
-                     {fleet.ships.slice(0, 10).map((_, i) => (
-                         <div key={i} className="w-1 h-1 bg-blue-500 rounded-full"></div>
-                     ))}
-                     {fleet.ships.length > 10 && <span className="text-[10px] text-slate-600">+</span>}
-                  </div>
-              </button>
-          ))}
+                </button>
+              );
+          })}
       </div>
   );
 

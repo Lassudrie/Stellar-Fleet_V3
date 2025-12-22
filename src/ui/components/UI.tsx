@@ -301,6 +301,7 @@ const UI: React.FC<UIProps> = ({
         messages={messages}
         blueFleets={blueFleets}
         systems={systems}
+        day={day}
         onRestart={onRestart}
         onSelectFleet={onSelectFleet}
         onSave={onSave}
