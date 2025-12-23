@@ -6,6 +6,7 @@ import { runTurn } from './runTurn';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
 import { canonicalizeMessages, canonicalizeState } from './state/canonicalize';
+import { FuelShortageError } from './logistics/fuel';
 
 type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
@@ -129,7 +130,7 @@ export class GameEngine {
 
     dispatchPlayerCommand(command: PlayerCommand): CommandResult & { deployedArmies?: number } {
         const playerFactionId = this.state.playerFactionId;
-        const fail = (error: string): CommandResult => ({ ok: false, state: this.state, error });
+        const fail = (error: string | FuelShortageError): CommandResult => ({ ok: false, state: this.state, error });
 
         const getPlayerFleet = (fleetId: string) => {
             const fleet = this.state.fleets.find(f => f.id === fleetId);

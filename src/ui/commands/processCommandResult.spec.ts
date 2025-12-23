@@ -25,6 +25,19 @@ const createNotifier = () => {
 
 {
   const { calls, notify } = createNotifier();
+  const result = processCommandResult(
+    {
+      ok: false,
+      error: { code: 'INSUFFICIENT_FUEL', message: 'Insufficient fuel details', shortages: [] }
+    },
+    notify
+  );
+  assert.strictEqual(result, false, 'processCommandResult should return false on structured errors');
+  assert.deepStrictEqual(calls, ['Insufficient fuel details'], 'Structured error messages should be forwarded');
+}
+
+{
+  const { calls, notify } = createNotifier();
   const mockEngine = {
     dispatchPlayerCommand: () => ({ ok: false, error: 'Out of range', state: {} as any })
   };

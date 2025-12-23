@@ -44,6 +44,7 @@ import { resolveFleetMovement } from '../movement/movementPhase';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../worldgen/stellar';
 import { findNearestSystem } from '../world';
+import { FuelShortageError } from '../logistics/fuel';
 
 interface TestCase {
   name: string;
@@ -1196,6 +1197,46 @@ const tests: TestCase[] = [
         invasionFleet?.stateStartTurn,
         customTurn,
         'Movement commands should respect an explicit turn override'
+      );
+    }
+  },
+  {
+    name: 'Fleet movement errors report per-ship fuel shortages',
+    run: () => {
+      const sourceSystem = createSystem('sys-fuel-source', null);
+      const targetSystem = { ...createSystem('sys-fuel-target', null), position: { x: 1, y: 0, z: 0 } };
+
+      const ship: TestShipInput = {
+        id: 'fuel-poor-1',
+        type: ShipType.FIGHTER,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null,
+        fuel: 1
+      };
+
+      const fleet = createFleet('fleet-fuel', 'blue', { ...baseVec }, [ship]);
+      const state = createBaseState({ systems: [sourceSystem, targetSystem], fleets: [fleet] });
+
+      const result = applyCommand(
+        state,
+        { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: targetSystem.id },
+        new RNG(13)
+      );
+
+      assert.strictEqual(result.ok, false, 'Movement should fail when fuel is insufficient');
+      assert.ok(result.error && typeof result.error !== 'string', 'Fuel shortage should return structured error details');
+      const error = result.error as FuelShortageError;
+
+      assert.strictEqual(error.code, 'INSUFFICIENT_FUEL', 'Error code should identify insufficient fuel');
+      assert.ok(error.shortages.length > 0, 'Shortage list should include affected ships');
+      const shortage = error.shortages[0];
+      assert.strictEqual(shortage.shipId, ship.id, 'Shortage should reference the ship ID');
+      assert.strictEqual(shortage.shipType, ship.type, 'Shortage should include the ship type');
+      assert.ok(shortage.missingFuel > 0, 'Missing fuel should be greater than zero');
+      assert.ok(
+        error.message.includes(ship.id) && error.message.includes(shortage.missingFuel.toFixed(2)),
+        'Error message should summarize the missing fuel per ship'
       );
     }
   },

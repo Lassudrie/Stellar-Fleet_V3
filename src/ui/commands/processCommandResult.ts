@@ -3,13 +3,19 @@ import { CommandResult } from '../../engine/commands';
 
 export type ErrorNotifier = (message: string) => void;
 
+const formatErrorMessage = (error: CommandResult['error']): string => {
+  if (!error) return 'Unknown error';
+  if (typeof error === 'string') return error;
+  return error.message || 'Unknown error';
+};
+
 export const processCommandResult = (
   result: Pick<CommandResult, 'ok' | 'error'>,
   notifyError: ErrorNotifier
 ): boolean => {
   if (result.ok) return true;
 
-  notifyError(result.error ?? 'Unknown error');
+  notifyError(formatErrorMessage(result.error));
   return false;
 };
 

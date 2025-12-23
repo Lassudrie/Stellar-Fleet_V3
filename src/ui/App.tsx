@@ -55,7 +55,6 @@ const App: React.FC = () => {
   const [aiDebug, setAiDebug] = useState(false);
   const notifyCommandError = useCallback((error: string) => {
       const detail = error || 'Unknown error';
-      if (detail === 'Insufficient fuel for jump.') return;
       alert(t('msg.commandFailed', { error: detail }));
   }, [t]);
 
