@@ -9,7 +9,7 @@ import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from '
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
-import { validateAndDebitJumpOrFail } from './logistics/fuel';
+import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -29,7 +29,7 @@ export type GameCommand =
 export interface CommandResult {
     ok: boolean;
     state: GameState;
-    error?: string;
+    error?: string | FuelShortageError;
     events?: string[];
 }
 
@@ -69,7 +69,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
     // Enforce Immutability in Dev
     deepFreezeDev(state);
 
-    const fail = (error: string): CommandResult => ({ ok: false, state, error });
+    const fail = (error: string | FuelShortageError): CommandResult => ({ ok: false, state, error });
     const ok = (nextState: GameState, events?: string[]): CommandResult => ({ ok: true, state: nextState, events });
 
     switch (command.type) {
