@@ -38,6 +38,13 @@ const createNotifier = () => {
 
 {
   const { calls, notify } = createNotifier();
+  const result = processCommandResult({ ok: false }, notify);
+  assert.strictEqual(result, false, 'processCommandResult should return false when error is missing');
+  assert.deepStrictEqual(calls, ['Unknown error'], 'Missing errors should fall back to a generic message');
+}
+
+{
+  const { calls, notify } = createNotifier();
   const mockEngine = {
     dispatchPlayerCommand: () => ({ ok: false, error: 'Out of range', state: {} as any })
   };
