@@ -95,6 +95,7 @@
 - **Traitement** :
   - `pruneBattles` purge les rapports trop anciens (retention 5 tours).
   - `sanitizeArmies` retire/recorrige les références d’armées orphelines, produisant des logs système.
+  - Extraction passive du gaz : chaque flotte orbitant un système gazeux tente de siphonner du carburant avec ses Extractors, mais l’opération est bloquée si l’orbite est contestée ou si une flotte ennemie est dans le rayon de capture.
   - Tronque `logs` à 2000 entrées max, en conservant les plus récentes.
 - **Sortie** : état prêt à être canonicalisé puis à incrémenter `day`.
 - **Invariants** : aucune bataille `scheduled` ne subsiste; les logs système ajoutés sont préfixés `[SYSTEM]`.

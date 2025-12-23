@@ -3,9 +3,10 @@ import { ArmyState, GameState, ShipType, Fleet, StarSystem } from '../../../shar
 import { TurnContext } from '../types';
 import { pruneBattles } from '../../battle/detection';
 import { sanitizeArmies } from '../../army';
-import { SHIP_STATS } from '../../../content/data/static';
-import { getOrbitingSystem } from '../../orbit';
+import { CAPTURE_RANGE_SQ, SHIP_STATS } from '../../../content/data/static';
+import { getOrbitingSystem, isOrbitContested } from '../../orbit';
 import { quantizeFuel } from '../../logistics/fuel';
+import { distSq } from '../../math/vec3';
 
 const LOG_RETENTION_LIMIT = 2000;
 const MESSAGE_RETENTION_LIMIT = 500;
@@ -23,7 +24,24 @@ const trimMessages = (messages: GameState['messages']): GameState['messages'] =>
 const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
 const getExtractorRate = (): number => SHIP_STATS[ShipType.EXTRACTOR]?.fuelExtractionRate ?? 0;
 
-const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null): Fleet => {
+const getFleetsInCaptureRangeBySystem = (systems: StarSystem[], fleets: Fleet[]): Map<string, Fleet[]> => {
+    const gasSystems = systems.filter(system => system.resourceType === 'gas');
+    const bySystem = new Map<string, Fleet[]>();
+
+    for (const system of gasSystems) {
+        const fleetsInRange = fleets.filter(
+            fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= CAPTURE_RANGE_SQ
+        );
+
+        if (fleetsInRange.length > 0) {
+            bySystem.set(system.id, fleetsInRange);
+        }
+    }
+
+    return bySystem;
+};
+
+const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null, fleetsInRange: Fleet[]): Fleet => {
     if (!system || system.resourceType !== 'gas') return fleet;
 
     const extractorRate = getExtractorRate();
@@ -31,6 +49,9 @@ const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null): Fle
 
     const extractorCount = fleet.ships.filter(ship => ship.type === ShipType.EXTRACTOR).length;
     if (extractorCount === 0) return fleet;
+
+    const hasEnemyInRange = fleetsInRange.some(otherFleet => otherFleet.factionId !== fleet.factionId);
+    if (hasEnemyInRange || isOrbitContested(system, fleetsInRange)) return fleet;
 
     let remaining = extractorCount * extractorRate;
     if (remaining <= 0) return fleet;
@@ -65,10 +86,13 @@ const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null): Fle
 const applyGasExtraction = (state: GameState): GameState => {
     if (state.rules?.unlimitedFuel) return state;
 
+    const fleetsBySystem = getFleetsInCaptureRangeBySystem(state.systems, state.fleets);
+
     let fleetsChanged = false;
     const fleets = state.fleets.map(fleet => {
         const system = getOrbitingSystem(fleet, state.systems);
-        const updated = applyGasExtractionToFleet(fleet, system);
+        const fleetsInRange = system ? fleetsBySystem.get(system.id) ?? [] : [];
+        const updated = applyGasExtractionToFleet(fleet, system, fleetsInRange);
         if (updated !== fleet) fleetsChanged = true;
         return updated;
     });
