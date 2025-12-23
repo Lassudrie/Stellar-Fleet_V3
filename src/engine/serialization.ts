@@ -42,6 +42,7 @@ import {
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
+import { quantizeFuel } from './logistics/fuel';
 
 // --- HELPERS ---
 
@@ -567,7 +568,11 @@ export const deserializeGameState = (json: string): GameState => {
           const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
           const hp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
           const capacity = getFuelCapacity(shipType);
-          const fuel = Number.isFinite(ship.fuel) ? Math.min(Math.max(ship.fuel, 0), capacity || ship.fuel) : capacity;
+          const fallbackFuel = Number.isFinite(capacity) ? capacity : 0;
+          const rawFuel = Number.isFinite(ship.fuel) ? ship.fuel : fallbackFuel;
+          const upperBound = capacity > 0 ? capacity : Math.max(rawFuel, 0);
+          const clampedFuel = Math.min(Math.max(rawFuel, 0), upperBound);
+          const fuel = quantizeFuel(clampedFuel);
 
           const consumables = extractConsumables(ship, shipType);
           const killHistory = sanitizeKillHistory(ship.killHistory);
