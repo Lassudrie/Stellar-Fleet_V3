@@ -10,6 +10,7 @@ import { distSq } from '../../math/vec3';
 
 const LOG_RETENTION_LIMIT = 2000;
 const MESSAGE_RETENTION_LIMIT = 500;
+const MIN_TANKER_RESERVE_RATIO = 0.1;
 
 const trimLogs = (logs: GameState['logs']): GameState['logs'] => {
     if (logs.length <= LOG_RETENTION_LIMIT) return logs;
@@ -23,6 +24,7 @@ const trimMessages = (messages: GameState['messages']): GameState['messages'] =>
 
 const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
 const getExtractorRate = (): number => SHIP_STATS[ShipType.EXTRACTOR]?.fuelExtractionRate ?? 0;
+const getFuelTransferRate = (type: ShipType): number => SHIP_STATS[type]?.fuelTransferRate ?? 0;
 
 const getFleetsInCaptureRangeBySystem = (systems: StarSystem[], fleets: Fleet[]): Map<string, Fleet[]> => {
     const gasSystems = systems.filter(system => system.resourceType === 'gas');
@@ -103,6 +105,99 @@ const applyGasExtraction = (state: GameState): GameState => {
     return { ...state, fleets };
 };
 
+const applyTankerTransfersToFleet = (fleet: Fleet): Fleet => {
+    const transferBudget = fleet.ships.reduce((total, ship) => {
+        if (ship.type !== ShipType.TANKER) return total;
+        return total + getFuelTransferRate(ship.type);
+    }, 0);
+
+    if (transferBudget <= 0) return fleet;
+
+    const tankers = fleet.ships
+        .map((ship, index) => ({ ship, index }))
+        .filter(({ ship }) => ship.type === ShipType.TANKER)
+        .map(({ ship, index }) => {
+            const capacity = getFuelCapacity(ship.type);
+            const reserve = capacity * MIN_TANKER_RESERVE_RATIO;
+            const available = quantizeFuel(Math.max(0, ship.fuel - reserve));
+            return { index, available };
+        })
+        .filter(tanker => tanker.available > 0);
+
+    if (tankers.length === 0) return fleet;
+
+    const targets = fleet.ships
+        .map((ship, index) => ({ ship, index }))
+        .filter(({ ship }) => ship.type !== ShipType.TANKER)
+        .map(({ ship, index }) => {
+            const capacity = getFuelCapacity(ship.type);
+            const missing = Math.max(0, capacity - ship.fuel);
+            return { index, capacity, missing };
+        })
+        .filter(target => target.capacity > 0 && target.missing > 0);
+
+    if (targets.length === 0) return fleet;
+
+    const ships = fleet.ships.map(ship => ({ ...ship }));
+    let remainingBudget = transferBudget;
+    let remainingAvailable = tankers.reduce((total, tanker) => total + tanker.available, 0);
+    let changed = false;
+
+    for (const target of targets) {
+        if (remainingBudget <= 0 || remainingAvailable <= 0) break;
+
+        let missing = target.capacity - ships[target.index].fuel;
+        for (const tanker of tankers) {
+            if (missing <= 0 || remainingBudget <= 0 || remainingAvailable <= 0) break;
+            if (tanker.available <= 0) continue;
+
+            const transferable = Math.min(missing, tanker.available, remainingBudget);
+            const transfer = quantizeFuel(transferable);
+            if (transfer <= 0) continue;
+
+            const tankerShip = ships[tanker.index];
+            const recipient = ships[target.index];
+
+            const updatedRecipientFuel = Math.min(target.capacity, quantizeFuel(recipient.fuel + transfer));
+            const updatedTankerFuel = quantizeFuel(tankerShip.fuel - transfer);
+
+            if (updatedRecipientFuel !== recipient.fuel) {
+                ships[target.index] = { ...recipient, fuel: updatedRecipientFuel };
+                missing = target.capacity - updatedRecipientFuel;
+                changed = true;
+            } else {
+                missing = target.capacity - recipient.fuel;
+            }
+
+            if (updatedTankerFuel !== tankerShip.fuel) {
+                ships[tanker.index] = { ...tankerShip, fuel: updatedTankerFuel };
+                changed = true;
+            }
+
+            tanker.available = quantizeFuel(tanker.available - transfer);
+            remainingBudget = quantizeFuel(remainingBudget - transfer);
+            remainingAvailable = quantizeFuel(remainingAvailable - transfer);
+        }
+    }
+
+    if (!changed) return fleet;
+    return { ...fleet, ships };
+};
+
+const applyTankerTransfers = (state: GameState): GameState => {
+    if (state.rules?.unlimitedFuel) return state;
+
+    let fleetsChanged = false;
+    const fleets = state.fleets.map(fleet => {
+        const updated = applyTankerTransfersToFleet(fleet);
+        if (updated !== fleet) fleetsChanged = true;
+        return updated;
+    });
+
+    if (!fleetsChanged) return state;
+    return { ...state, fleets };
+};
+
 export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     // 1. Prune Old Battles
     const activeBattles = pruneBattles(state.battles, ctx.turn);
@@ -127,9 +222,10 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
 
     // 3. Apply passive gas extraction before final log trim
     const extractedState = applyGasExtraction(sanitizedArmyState);
+    const refueledState = applyTankerTransfers(extractedState);
 
     // 4. Add Tech Logs
-    const newLogs = [...extractedState.logs];
+    const newLogs = [...refueledState.logs];
     [...carrierLossLogs, ...sanitizationLogs].forEach(txt => {
         newLogs.push({
             id: ctx.rng.id('log'),
@@ -140,9 +236,9 @@ export const phaseCleanup = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     return {
-        ...extractedState,
+        ...refueledState,
         battles: activeBattles,
         logs: trimLogs(newLogs),
-        messages: trimMessages(extractedState.messages)
+        messages: trimMessages(refueledState.messages)
     };
 };
