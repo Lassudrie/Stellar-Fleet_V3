@@ -1,9 +1,8 @@
 
-import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { BufferGeometry, BufferAttribute } from 'three';
 import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../../shared/types';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
@@ -12,6 +11,7 @@ import GameCamera from './GameCamera';
 import IntelGhosts from './IntelGhosts';
 import { Vec3 } from '../../engine/math/vec3';
 import { useMapMetrics } from './hooks/useMapMetrics';
+import BatchedLines, { LineData } from './BatchedLines';
 
 interface GameSceneProps {
   gameState: GameState;
@@ -26,80 +26,55 @@ interface GameSceneProps {
 const resolveFactionColor = (factions: GameState['factions'], id: string) =>
   factions.find(faction => faction.id === id)?.color || '#999';
 
-const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
-  const lineRef = useRef<any>(null);
-  
-  const geometry = useMemo(() => {
-    const geo = new BufferGeometry();
-    const positions = new Float32Array(6); 
-    geo.setAttribute('position', new BufferAttribute(positions, 3));
-    return geo;
-  }, []);
-
-  useLayoutEffect(() => {
-    const posAttribute = geometry.attributes.position;
-    const arr = posAttribute.array as Float32Array;
-    arr[0] = start.x; arr[1] = start.y; arr[2] = start.z;
-    arr[3] = end.x;   arr[4] = end.y;   arr[5] = end.z;
-    posAttribute.needsUpdate = true;
-    geometry.computeBoundingSphere();
-    if (dashed && lineRef.current) {
-        lineRef.current.computeLineDistances();
-    }
-  }); 
-
-  return (
-    <lineSegments ref={lineRef} geometry={geometry}>
-      {dashed ? (
-          <lineDashedMaterial color={color} dashSize={1.5} gapSize={1.0} transparent opacity={0.6} />
-      ) : (
-          <lineBasicMaterial color={color} transparent opacity={0.6} linewidth={1} />
-      )}
-    </lineSegments>
-  );
-};
-
 const LaserRenderer: React.FC<{ lasers: LaserShot[] }> = React.memo(({ lasers }) => {
-  return (
-    <group>
-      {lasers.map((laser) => (
-        <SimpleLine
-          key={laser.id}
-          start={laser.start}
-          end={laser.end}
-          color={laser.color}
-        />
-      ))}
-    </group>
-  );
+  const lines = useMemo(() => {
+    return lasers.map(laser => ({
+        start: laser.start,
+        end: laser.end,
+        color: laser.color
+    }));
+  }, [lasers]);
+
+  return <BatchedLines lines={lines} />;
 });
 
-// TrajectoryRenderer - Now uses playerFactionId check for coloring
+// TrajectoryRenderer - Now uses BatchedLines
 const TrajectoryRenderer: React.FC<{
   fleets: GameState['fleets'];
   factions: GameState['factions'];
   day: number;
   playerFactionId: string;
 }> = React.memo(({ fleets, factions, day, playerFactionId }) => {
+
+    const { solidLines, dashedLines } = useMemo(() => {
+        const solid: LineData[] = [];
+        const dashed: LineData[] = [];
+
+        fleets.forEach(fleet => {
+            if (fleet.state === FleetState.MOVING && fleet.targetPosition) {
+                const isPlayer = fleet.factionId === playerFactionId;
+                const color = resolveFactionColor(factions, fleet.factionId);
+                const line = {
+                    start: fleet.position,
+                    end: fleet.targetPosition,
+                    color: color
+                };
+
+                if (!isPlayer) {
+                    dashed.push(line);
+                } else {
+                    solid.push(line);
+                }
+            }
+        });
+
+        return { solidLines: solid, dashedLines: dashed };
+    }, [fleets, factions, playerFactionId]);
+
     return (
         <group>
-            {fleets.map(fleet => {
-                if (fleet.state === FleetState.MOVING && fleet.targetPosition) {
-                    const isPlayer = fleet.factionId === playerFactionId;
-                    const color = resolveFactionColor(factions, fleet.factionId);
-
-                    return (
-                        <SimpleLine
-                            key={`traj-${fleet.id}`}
-                            start={fleet.position}
-                            end={fleet.targetPosition}
-                            color={color}
-                            dashed={!isPlayer}
-                        />
-                    );
-                }
-                return null;
-            })}
+            {solidLines.length > 0 && <BatchedLines lines={solidLines} dashed={false} />}
+            {dashedLines.length > 0 && <BatchedLines lines={dashedLines} dashed={true} />}
         </group>
     );
 });
