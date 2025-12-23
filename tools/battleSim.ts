@@ -506,7 +506,8 @@ const createBaseState = (
     fogOfWar: false,
     useAdvancedCombat: true,
     aiEnabled: false,
-    totalWar: true
+    totalWar: true,
+    unlimitedFuel: false
   };
 
   const objectives: GameObjectives = {

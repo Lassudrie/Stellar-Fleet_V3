@@ -47,10 +47,84 @@ const getAmmoFromConsumables = (
   legacy?: number
 ) => ship.consumables?.[key] ?? legacy ?? fallback;
 
-const getBadgeTone = (percentage: number): string => {
-  if (percentage >= 90) return 'bg-emerald-900/40 border border-emerald-700/40 text-white';
-  if (percentage >= 50) return 'bg-amber-900/40 border border-amber-700/40 text-white';
-  return 'bg-red-900/40 border border-red-700/40 text-white';
+const getGaugeTone = (percentage: number): string => {
+  if (percentage >= 90) return 'bg-emerald-500/80';
+  if (percentage >= 50) return 'bg-amber-400/80';
+  return 'bg-red-500/80';
+};
+
+type AmmunitionSummary = {
+  current: number;
+  capacity: number;
+  percentage: number;
+};
+
+const computeFleetAmmoSummary = (fleet: Fleet): AmmunitionSummary => {
+  const totals = fleet.ships.reduce(
+    (acc, ship) => {
+      const stats = SHIP_STATS[ship.type];
+      if (!stats) return acc;
+
+      const missiles = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
+      const torpedoes = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
+      const interceptors = getAmmoFromConsumables(ship, 'interceptors', stats.interceptorStock, ship.interceptorsLeft);
+
+      acc.current += missiles + torpedoes + interceptors;
+      acc.capacity += stats.offensiveMissileStock + stats.torpedoStock + stats.interceptorStock;
+      return acc;
+    },
+    { current: 0, capacity: 0 }
+  );
+
+  const percentage = totals.capacity > 0
+    ? Math.min(100, Math.max(0, (totals.current / totals.capacity) * 100))
+    : 0;
+
+  return {
+    current: totals.current,
+    capacity: totals.capacity,
+    percentage
+  };
+};
+
+type GaugeBarProps = {
+  label: string;
+  current: number;
+  capacity: number;
+  tone: string;
+};
+
+const GaugeBar: React.FC<GaugeBarProps> = ({ label, current, capacity, tone }) => {
+  const safeCapacity = Math.max(0, capacity);
+  const safeCurrent = Math.max(0, current);
+  const percentage = safeCapacity > 0 ? Math.min(100, Math.max(0, (safeCurrent / safeCapacity) * 100)) : 0;
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <div className="flex items-center justify-between text-xs text-slate-200">
+        <div className="flex items-center gap-2 font-semibold uppercase tracking-tight text-slate-100">
+          {label}
+        </div>
+        <span className="font-mono text-slate-100">{Math.round(safeCurrent).toLocaleString()} / {Math.round(safeCapacity).toLocaleString()}</span>
+      </div>
+      <div
+        className="relative h-3 rounded-full bg-slate-800/80 border border-slate-700 overflow-hidden"
+        role="img"
+        aria-label={`${label} ${Math.round(percentage)}%`}
+      >
+        <div
+          className={`h-full ${tone} transition-all duration-300`}
+          style={{ width: `${percentage}%` }}
+          aria-hidden="true"
+        />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[10px] font-bold text-white drop-shadow-sm">
+            {Math.round(percentage)}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const SHIP_TRIGRAM: Record<ShipType, string> = {
@@ -135,26 +209,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                 ? `${Math.round(Math.max(0, remainingDistance))} ${t('picker.ly')}`
                 : null;
               const fuelSummary = computeFleetFuelSummary(fleet);
-              const fuelPercentLabel = `${Math.round(fuelSummary.fuelPercentage)}% (${Math.round(fuelSummary.totalFuel).toLocaleString()})`;
-              const fuelBadgeTone = getBadgeTone(fuelSummary.fuelPercentage);
-
-              const ammoTotals = fleet.ships.reduce(
-                (acc, ship) => {
-                  const stats = SHIP_STATS[ship.type];
-                  if (!stats) return acc;
-                  const missiles = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
-                  const torpedoes = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
-                  const interceptors = getAmmoFromConsumables(ship, 'interceptors', stats.interceptorStock, ship.interceptorsLeft);
-                  acc.current += missiles + torpedoes + interceptors;
-                  acc.capacity += stats.offensiveMissileStock + stats.torpedoStock + stats.interceptorStock;
-                  return acc;
-                },
-                { current: 0, capacity: 0 }
-              );
-              const ammoPercentage = ammoTotals.capacity > 0
-                ? Math.min(100, Math.max(0, (ammoTotals.current / ammoTotals.capacity) * 100))
-                : 0;
-              const ammoBadgeTone = getBadgeTone(ammoPercentage);
+              const ammoSummary = computeFleetAmmoSummary(fleet);
 
               const statusTone = fleet.state === FleetState.COMBAT
                 ? 'bg-red-900/40 text-red-200 border border-red-700/40'
@@ -213,72 +268,83 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                       </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap items-center gap-3 text-slate-200">
-                      <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
-                          {t('orbitPicker.shipCount', { count: fleet.ships.length })}
-                      </span>
-                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${fuelBadgeTone}`}>
-                          Fuel {fuelPercentLabel}
-                      </span>
-                      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${ammoBadgeTone}`}>
-                          Munitions {Math.round(ammoPercentage)}%
-                      </span>
-                      <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
-                      <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
-                          {visibleChips.map(item => (
-                              <span
-                                key={item.label}
-                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
-                              >
-                                  {item.label} {item.count}
-                              </span>
-                          ))}
-                          {hasOverflow && !isExpanded && (
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.add(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                onKeyDown={(event) => {
-                                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.add(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold cursor-pointer"
-                              >
-                                  ...
-                              </span>
-                          )}
-                          {hasOverflow && isExpanded && (
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.delete(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                onKeyDown={(event) => {
-                                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    const next = new Set(expandedFleets);
-                                    next.delete(fleet.id);
-                                    setExpandedFleets(next);
-                                }}
-                                className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap cursor-pointer"
-                              >
-                                  ??-
-                              </span>
-                          )}
+                  <div className="mt-4 space-y-3 text-slate-200">
+                      <div className="flex flex-col gap-2 w-full">
+                          <GaugeBar
+                            label={t('sidemenu.fuelGauge')}
+                            current={fuelSummary.totalFuel}
+                            capacity={fuelSummary.totalCapacity}
+                            tone={getGaugeTone(fuelSummary.fuelPercentage)}
+                          />
+                          <GaugeBar
+                            label={t('sidemenu.magazinesGauge')}
+                            current={ammoSummary.current}
+                            capacity={ammoSummary.capacity}
+                            tone={getGaugeTone(ammoSummary.percentage)}
+                          />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-slate-200">
+                          <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
+                              {t('orbitPicker.shipCount', { count: fleet.ships.length })}
+                          </span>
+                          <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
+                          <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
+                              {visibleChips.map(item => (
+                                  <span
+                                    key={item.label}
+                                    className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
+                                  >
+                                      {item.label} {item.count}
+                                  </span>
+                              ))}
+                              {hasOverflow && !isExpanded && (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        const next = new Set(expandedFleets);
+                                        next.add(fleet.id);
+                                        setExpandedFleets(next);
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        const next = new Set(expandedFleets);
+                                        next.add(fleet.id);
+                                        setExpandedFleets(next);
+                                    }}
+                                    className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold cursor-pointer"
+                                  >
+                                      ...
+                                  </span>
+                              )}
+                              {hasOverflow && isExpanded && (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        const next = new Set(expandedFleets);
+                                        next.delete(fleet.id);
+                                        setExpandedFleets(next);
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        const next = new Set(expandedFleets);
+                                        next.delete(fleet.id);
+                                        setExpandedFleets(next);
+                                    }}
+                                    className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap cursor-pointer"
+                                  >
+                                      ??-
+                                  </span>
+                              )}
+                          </div>
                       </div>
                   </div>
                 </button>
