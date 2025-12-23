@@ -9,7 +9,11 @@ export const processCommandResult = (
 ): boolean => {
   if (result.ok) return true;
 
-  notifyError(result.error ?? 'Unknown error');
+  if (!result.ok && 'error' in result && result.error) {
+    notifyError(result.error);
+  } else {
+    notifyError('Unknown error');
+  }
   return false;
 };
 
