@@ -681,6 +681,63 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Gas extraction refuels fleets in safe orbit',
+    run: () => {
+      const gasSystem: StarSystem = { ...createSystem('sys-gas-safe', null), resourceType: 'gas' };
+      const extractor: TestShipInput = {
+        id: 'extractor-safe',
+        type: ShipType.EXTRACTOR,
+        hp: 50,
+        maxHp: 50,
+        fuel: 0,
+        carriedArmyId: null
+      };
+
+      const blueFleet = createFleet('fleet-blue-extract', 'blue', { ...baseVec }, [extractor]);
+      const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet] });
+      const ctx = { turn: state.day + 1, rng: new RNG(29) };
+
+      const nextState = phaseCleanup(state, ctx);
+      const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+
+      assert.ok(updatedExtractor, 'Extractor ship should persist after cleanup');
+      assert.ok(updatedExtractor?.fuel > extractor.fuel, 'Extractor should gain fuel when orbit is safe');
+    }
+  },
+  {
+    name: 'Gas extraction is blocked when enemies share gas orbit',
+    run: () => {
+      const gasSystem: StarSystem = { ...createSystem('sys-gas-block', null), resourceType: 'gas' };
+      const extractor: TestShipInput = {
+        id: 'extractor-block',
+        type: ShipType.EXTRACTOR,
+        hp: 50,
+        maxHp: 50,
+        fuel: 0,
+        carriedArmyId: null
+      };
+      const blueFleet = createFleet('fleet-blue-block', 'blue', { ...baseVec }, [extractor]);
+      const redFleet = createFleet('fleet-red-block', 'red', { ...baseVec }, [
+        { id: 'red-ship-block', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet, redFleet] });
+      const ctx = { turn: state.day + 1, rng: new RNG(31) };
+
+      const nextState = phaseCleanup(state, ctx);
+      const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+
+      assert.ok(updatedExtractor, 'Extractor ship should persist after contested cleanup');
+      assert.strictEqual(
+        updatedExtractor?.fuel,
+        extractor.fuel,
+        'Extraction should not add fuel when enemy fleets contest the orbit'
+      );
+    }
+  },
+  {
     name: 'Orbital bombardment applies to all enemy planets in a secured system',
     run: () => {
       const system = createSystem('sys-bombard', 'blue');
