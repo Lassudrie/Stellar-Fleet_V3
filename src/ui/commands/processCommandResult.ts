@@ -10,12 +10,16 @@ const formatErrorMessage = (error: CommandResult['error']): string => {
 };
 
 export const processCommandResult = (
-  result: Pick<CommandResult, 'ok' | 'error'>,
+  res: Pick<CommandResult, 'ok'> & Partial<Pick<CommandResult, 'error'>>,
   notifyError: ErrorNotifier
 ): boolean => {
-  if (result.ok) return true;
+  if (res.ok) return true;
 
-  notifyError(formatErrorMessage(result.error));
+  if (!res.ok && 'error' in res && res.error) {
+    notifyError(formatErrorMessage(res.error));
+  } else {
+    notifyError('Unknown error');
+  }
   return false;
 };
 
