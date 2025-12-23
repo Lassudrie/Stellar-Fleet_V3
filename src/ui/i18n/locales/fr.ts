@@ -69,6 +69,8 @@ export const fr = {
   'sidemenu.godEyes': 'Vue Divine',
   'sidemenu.aiDebugger': 'Debug IA',
   'sidemenu.language': 'Langue',
+  'sidemenu.fuelGauge': 'Carburant',
+  'sidemenu.magazinesGauge': 'Chargeurs',
 
   // Context Menu
   'ctx.groundForces': 'Forces au Sol',

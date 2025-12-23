@@ -92,10 +92,9 @@ type GaugeBarProps = {
   current: number;
   capacity: number;
   tone: string;
-  icon?: React.ReactNode;
 };
 
-const GaugeBar: React.FC<GaugeBarProps> = ({ label, current, capacity, tone, icon }) => {
+const GaugeBar: React.FC<GaugeBarProps> = ({ label, current, capacity, tone }) => {
   const safeCapacity = Math.max(0, capacity);
   const safeCurrent = Math.max(0, current);
   const percentage = safeCapacity > 0 ? Math.min(100, Math.max(0, (safeCurrent / safeCapacity) * 100)) : 0;
@@ -103,9 +102,8 @@ const GaugeBar: React.FC<GaugeBarProps> = ({ label, current, capacity, tone, ico
   return (
     <div className="flex flex-col gap-1 w-full">
       <div className="flex items-center justify-between text-xs text-slate-200">
-        <div className="flex items-center gap-2 font-semibold uppercase tracking-tight">
-          {icon && <span className="text-base" aria-hidden="true">{icon}</span>}
-          <span className="text-slate-100">{label}</span>
+        <div className="flex items-center gap-2 font-semibold uppercase tracking-tight text-slate-100">
+          {label}
         </div>
         <span className="font-mono text-slate-100">{Math.round(safeCurrent).toLocaleString()} / {Math.round(safeCapacity).toLocaleString()}</span>
       </div>
@@ -273,18 +271,16 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                   <div className="mt-4 space-y-3 text-slate-200">
                       <div className="flex flex-col gap-2 w-full">
                           <GaugeBar
-                            label="Fuel"
+                            label={t('sidemenu.fuelGauge')}
                             current={fuelSummary.totalFuel}
                             capacity={fuelSummary.totalCapacity}
                             tone={getGaugeTone(fuelSummary.fuelPercentage)}
-                            icon={<span>⛽</span>}
                           />
                           <GaugeBar
-                            label="Munitions"
+                            label={t('sidemenu.magazinesGauge')}
                             current={ammoSummary.current}
                             capacity={ammoSummary.capacity}
                             tone={getGaugeTone(ammoSummary.percentage)}
-                            icon={<span>🎯</span>}
                           />
                       </div>
 

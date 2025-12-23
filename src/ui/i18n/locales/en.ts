@@ -70,6 +70,8 @@ export const en = {
   'sidemenu.godEyes': 'God Eyes',
   'sidemenu.aiDebugger': 'AI Debugger',
   'sidemenu.language': 'Language',
+  'sidemenu.fuelGauge': 'Fuel',
+  'sidemenu.magazinesGauge': 'Magazines',
 
   // Context Menu
   'ctx.groundForces': 'Ground Forces',
