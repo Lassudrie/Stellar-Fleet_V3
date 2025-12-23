@@ -19,7 +19,7 @@ interface FleetPickerProps {
   onClose: () => void;
 }
 
-export type FleetEligibilityReason = 'captureRange' | 'outOfRange' | 'insufficientFuel' | 'missingTransport';
+export type FleetEligibilityReason = 'captureRange' | 'outOfRange' | 'insufficientFuel' | 'missingTransport' | 'notOrbit';
 
 export const getFleetEligibility = (
   fleet: Fleet,
@@ -32,6 +32,8 @@ export const getFleetEligibility = (
   const targetPosition = targetSystem.position;
   const distanceSq = sourceSystem ? distSq(sourceSystem.position, targetPosition) : distSq(fleet.position, targetPosition);
   const distanceLy = Math.sqrt(distanceSq);
+
+  if (fleet.state !== FleetState.ORBIT) return { eligible: false, reason: 'notOrbit', distanceLy, distanceSq };
 
   if (mode === 'MOVE' || mode === 'ATTACK') {
       if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };

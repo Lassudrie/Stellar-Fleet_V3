@@ -136,6 +136,7 @@ export const fr = {
   'picker.restriction.outOfRange': 'Destination hors de portée de saut',
   'picker.restriction.captureRange': 'La flotte est déjà à portée de capture',
   'picker.restriction.missingTransport': 'Aucun transport de troupes dans cette flotte',
+  'picker.restriction.notOrbit': 'La flotte doit être en orbite pour exécuter cet ordre',
 
   // Orbiting Fleet Picker
   'orbitPicker.title': 'Flottes en orbite',

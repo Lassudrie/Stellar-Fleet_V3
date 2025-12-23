@@ -137,6 +137,7 @@ export const en = {
   'picker.restriction.outOfRange': 'Destination is beyond jump range',
   'picker.restriction.captureRange': 'Fleet is already within capture range',
   'picker.restriction.missingTransport': 'No troop transports available in this fleet',
+  'picker.restriction.notOrbit': 'Fleet must be in orbit to execute this order',
 
   // Orbiting Fleet Picker
   'orbitPicker.title': 'Fleets in orbit',
