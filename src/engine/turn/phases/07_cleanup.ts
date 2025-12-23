@@ -73,10 +73,12 @@ const applyGasExtractionToFleet = (fleet: Fleet, system: StarSystem | null, flee
         const delta = Math.min(target.missing, share);
         if (delta > 0) {
             const ship = ships[target.index];
-            const nextFuel = Math.min(target.capacity, ship.fuel + delta);
+            const currentFuel = ship.fuel;
+            const nextFuel = Math.min(target.capacity, currentFuel + delta);
             ship.fuel = quantizeFuel(nextFuel);
+            const added = ship.fuel - currentFuel;
+            remaining -= added;
         }
-        remaining -= delta;
         remainingTargets -= 1;
     }
 
