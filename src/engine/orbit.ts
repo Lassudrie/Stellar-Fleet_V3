@@ -33,12 +33,24 @@ export const areFleetsSharingOrbit = (a: Fleet, b: Fleet): boolean =>
     isWithinOrbitProximity(a.position, b.position);
 
 export const getOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
+    let closest: { system: StarSystem; distanceSq: number } | null = null;
+
     for (const system of systems) {
-        if (isFleetOrbitingSystem(fleet, system)) {
-            return system;
+        if (!isFleetOrbitingSystem(fleet, system)) {
+            continue;
+        }
+
+        const distanceSq = distSq(fleet.position, system.position);
+        if (
+            closest === null ||
+            distanceSq < closest.distanceSq ||
+            (distanceSq === closest.distanceSq && system.id < closest.system.id)
+        ) {
+            closest = { system, distanceSq };
         }
     }
-    return null;
+
+    return closest?.system ?? null;
 };
 
 /**
