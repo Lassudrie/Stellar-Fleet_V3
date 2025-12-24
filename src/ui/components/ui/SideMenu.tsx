@@ -163,6 +163,7 @@ type FleetRegistryListProps = {
   systems: StarSystem[];
   day: number;
   onSelectFleet: (fleetId: string) => void;
+  onInspectFleet?: (fleetId: string) => void;
   onClose?: () => void;
 };
 
@@ -171,6 +172,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
   systems,
   day,
   onSelectFleet,
+  onInspectFleet,
   onClose
 }) => {
   const { t } = useI18n();
@@ -221,6 +223,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                 <button
                   key={fleet.id}
                   onClick={() => {
+                      onInspectFleet?.(fleet.id);
                       onSelectFleet(fleet.id);
                       onClose?.();
                   }}
