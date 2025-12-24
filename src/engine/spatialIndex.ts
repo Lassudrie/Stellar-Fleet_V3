@@ -51,6 +51,26 @@ export class SpatialIndex<T extends PositionedEntity> {
     return cells;
   }
 
+  private getCellsInRing(center: { x: number; z: number }, radius: number) {
+    const cells: Array<{ x: number; z: number }> = [];
+    if (radius === 0) {
+      cells.push(center);
+      return cells;
+    }
+
+    // Top and Bottom rows
+    for (let x = center.x - radius; x <= center.x + radius; x += 1) {
+      cells.push({ x, z: center.z - radius });
+      cells.push({ x, z: center.z + radius });
+    }
+    // Left and Right columns (excluding corners which are covered above)
+    for (let z = center.z - radius + 1; z <= center.z + radius - 1; z += 1) {
+      cells.push({ x: center.x - radius, z });
+      cells.push({ x: center.x + radius, z });
+    }
+    return cells;
+  }
+
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
     return {
       minX: (center.x - cellRadius) * this.cellSize,
@@ -90,7 +110,7 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
+      const cells = this.getCellsInRing(center, cellRadius);
 
       cells.forEach(cell => {
         const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
