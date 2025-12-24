@@ -9,6 +9,7 @@ interface FleetRegistryScreenProps {
   systems: StarSystem[];
   day: number;
   onSelectFleet: (fleetId: string) => void;
+  onInspectFleet: (fleetId: string) => void;
   onClose: () => void;
 }
 
@@ -18,6 +19,7 @@ const FleetRegistryScreen: React.FC<FleetRegistryScreenProps> = ({
   systems,
   day,
   onSelectFleet,
+  onInspectFleet,
   onClose
 }) => {
   const { t } = useI18n();
@@ -54,6 +56,7 @@ const FleetRegistryScreen: React.FC<FleetRegistryScreenProps> = ({
               systems={systems}
               day={day}
               onSelectFleet={onSelectFleet}
+              onInspectFleet={onInspectFleet}
               onClose={onClose}
             />
           </div>
