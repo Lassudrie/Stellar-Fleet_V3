@@ -1,5 +1,5 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../shared/types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType } from '../shared/types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
@@ -10,6 +10,7 @@ import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
+import { sorted } from '../shared/sorting';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -56,7 +57,7 @@ const getAvailableTransportsInOrbit = (
         });
     });
 
-    return candidates.sort((a, b) => {
+    return sorted(candidates, (a, b) => {
         const fleetDiff = a.fleet.id.localeCompare(b.fleet.id);
         if (fleetDiff !== 0) return fleetDiff;
         return a.fleet.ships[a.shipIndex].id.localeCompare(b.fleet.ships[b.shipIndex].id);

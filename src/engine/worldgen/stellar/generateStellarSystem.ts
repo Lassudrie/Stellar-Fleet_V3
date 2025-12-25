@@ -26,6 +26,7 @@ import {
   drawEccentricity
 } from './planets';
 import { drawIrregularMoonCount, drawMoonTypes, drawRegularMoonCount, refineMoons } from './moons';
+import { sorted } from '../../../shared/sorting';
 
 export interface GenerateStellarSystemInput {
   worldSeed: number;
@@ -113,7 +114,7 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
     planets.push(planet);
   }
 
-  planets.sort((a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu);
+  const orderedPlanets = sorted(planets, (a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu);
 
   return {
     seed,
@@ -127,6 +128,6 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
       hzOuterAu
     },
     stars,
-    planets
+    planets: orderedPlanets
   };
 }

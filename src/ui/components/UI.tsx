@@ -19,6 +19,7 @@ import { distSq, dist } from '../../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
 import MessageToasts from './ui/MessageToasts';
+import { sorted } from '../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -90,12 +91,11 @@ const UI: React.FC<UIProps> = ({
     onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
-    devMode, godEyes, onSetUiSettings,
-    onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
+  devMode, godEyes, onSetUiSettings,
+  onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
 }) => {
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
   const [isFleetRegistryOpen, setIsFleetRegistryOpen] = useState(false);
 
   // Helper to check ownership against current player
@@ -140,14 +140,16 @@ const UI: React.FC<UIProps> = ({
       const planetIndex = new Map(sys.planets.filter(planet => planet.isSolid).map(planet => [planet.id, planet]));
 
       // Get armies at this system belonging to Player
-      const armies = gameState.armies
-          .filter(a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId))
-          .sort((a, b) => compareIds(a.id, b.id))
-          .map(army => ({
-              army,
-              planetId: army.containerId,
-              planetName: planetIndex.get(army.containerId)?.name ?? sys.name
-          }));
+      const armies = sorted(
+          gameState.armies.filter(
+              a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId)
+          ),
+          (a, b) => compareIds(a.id, b.id)
+      ).map(army => ({
+          army,
+          planetId: army.containerId,
+          planetName: planetIndex.get(army.containerId)?.name ?? sys.name
+      }));
 
       return { orbitingSystem: sys, availableArmies: armies };
   }, [selectedFleet, systems, gameState.armies, playerFactionId]);
@@ -204,16 +206,17 @@ const UI: React.FC<UIProps> = ({
 
       const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
 
-      return blueFleets
-          .filter(fleet => (
+      return sorted(
+          blueFleets.filter(fleet => (
               fleet.state === FleetState.ORBIT &&
               distSq(fleet.position, targetSystem.position) <= orbitThresholdSq
-          ))
-          .sort((a, b) => {
+          )),
+          (a, b) => {
               const sizeDiff = b.ships.length - a.ships.length;
               if (sizeDiff !== 0) return sizeDiff;
               return compareIds(a.id, b.id);
-          });
+          }
+      );
   }, [blueFleets, targetSystem]);
 
   // Compute Ground Forces Summary for Context Menu
@@ -295,7 +298,6 @@ const UI: React.FC<UIProps> = ({
         onToggleMenu={() => setIsSideMenuOpen(true)}
         onNextTurn={onNextTurn}
         onOpenBattle={onOpenBattle}
-        onDebugBattle={devMode ? () => setDebugMode(true) : undefined}
       />
 
       <SideMenu 
@@ -309,7 +311,6 @@ const UI: React.FC<UIProps> = ({
         messages={messages}
         blueFleets={blueFleets}
         systems={systems}
-        day={day}
         onRestart={onRestart}
         onSelectFleet={onSelectFleet}
         onSave={onSave}

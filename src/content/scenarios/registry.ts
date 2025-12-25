@@ -1,5 +1,6 @@
 import { ScenarioTemplate } from './types';
 import { ShipType } from '../../shared/types';
+import { sorted } from '../../shared/sorting';
 import conquestSandbox from './templates/conquest_sandbox';
 import spiralConvergence from './templates/spiral_convergence';
 
@@ -137,10 +138,8 @@ if (failedCount > 0) {
 }
 
 // Sort by difficulty then title
-loadedScenarios.sort((a, b) => {
+export const SCENARIO_REGISTRY = sorted(loadedScenarios, (a, b) => {
     const diff = (a.meta.difficulty || 0) - (b.meta.difficulty || 0);
     if (diff !== 0) return diff;
     return a.meta.title.localeCompare(b.meta.title);
 });
-
-export const SCENARIO_REGISTRY = loadedScenarios;

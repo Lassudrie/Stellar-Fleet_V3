@@ -2,6 +2,7 @@ import React from 'react';
 import { Army, FactionState, Fleet, ShipEntity, ShipConsumables, ShipKillRecord } from '../../../shared/types';
 import { SHIP_STATS } from '../../../content/data/static';
 import { useFleetName } from '../../context/FleetNames';
+import { sorted } from '../../../shared/sorting';
 
 interface ShipDetailModalProps {
   fleet: Fleet;
@@ -23,7 +24,7 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
   const stats = SHIP_STATS[ship.type];
   const carriedArmy = armies.find(a => a.id === ship.carriedArmyId);
   const killTurn = (entry: ShipKillRecord) => entry.turn ?? entry.day ?? 0;
-  const kills = [...(ship.killHistory ?? [])].sort((a, b) => killTurn(a) - killTurn(b));
+  const kills = sorted(ship.killHistory ?? [], (a, b) => killTurn(a) - killTurn(b));
 
   const missileCount = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
   const torpedoCount = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);

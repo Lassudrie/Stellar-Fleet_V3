@@ -10,6 +10,7 @@ import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../content/data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
+import { sorted } from '../shared/sorting';
 
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
@@ -65,7 +66,7 @@ const withOverrides = (overrides: Partial<AiConfig>): AiConfig => ({
 
 const compareStrings = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 const sortRecordKeys = (record: Record<string, unknown>): string[] =>
-  Object.keys(record).sort(compareStrings);
+  sorted(Object.keys(record), compareStrings);
 
 const createSortedRecord = <T>(record: Record<string, T>): Record<string, T> => {
   const sorted: Record<string, T> = {};
@@ -78,10 +79,12 @@ const createSortedRecord = <T>(record: Record<string, T>): Record<string, T> => 
 const isCommandableFleet = (fleet: Fleet): boolean => fleet.state !== FleetState.COMBAT && !fleet.retreating;
 
 export const getAiFactionIds = (factions: FactionState[]): FactionId[] =>
-  factions
-    .filter(faction => faction.aiProfile)
-    .map(faction => faction.id)
-    .sort((a, b) => compareStrings(a, b));
+  sorted(
+    factions
+      .filter(faction => faction.aiProfile)
+      .map(faction => faction.id),
+    compareStrings
+  );
 
 export const getLegacyAiFactionId = (factions: FactionState[]): FactionId | undefined =>
   getAiFactionIds(factions)[0];
@@ -501,9 +504,9 @@ const generateTasks = (
   });
 
   if (rng.next() < cfg.scoutProb) {
-    const scoutCandidates = analysisArray
-      .filter(sysData => sysData.fogAge > 0)
-      .sort((a, b) => {
+    const scoutCandidates = sorted(
+      analysisArray.filter(sysData => sysData.fogAge > 0),
+      (a, b) => {
         const fogDiff = b.fogAge - a.fogAge;
         if (fogDiff !== 0) return fogDiff;
 
@@ -511,7 +514,8 @@ const generateTasks = (
         if (valueDiff !== 0) return valueDiff;
 
         return compareStrings(a.id, b.id);
-      });
+      }
+    );
 
     const target = scoutCandidates[0];
 
@@ -527,7 +531,7 @@ const generateTasks = (
     }
   }
 
-  tasks.sort((a, b) => {
+  const orderedTasks = sorted(tasks, (a, b) => {
     const priorityDiff = b.priority - a.priority;
     if (priorityDiff !== 0) return priorityDiff;
 
@@ -540,7 +544,7 @@ const generateTasks = (
     return compareStrings(a.systemId, b.systemId);
   });
 
-  return { tasks, embarkedFriendlyArmies };
+  return { tasks: orderedTasks, embarkedFriendlyArmies };
 };
 
 const assignFleets = (
@@ -638,7 +642,7 @@ const assignFleets = (
       })
       .filter((c): c is NonNullable<typeof c> => c !== null);
 
-    candidates.sort((a, b) => {
+    const orderedCandidates = sorted(candidates, (a, b) => {
       const suitabilityDiff = b.suitability - a.suitability;
       if (suitabilityDiff !== 0) return suitabilityDiff;
 
@@ -651,7 +655,7 @@ const assignFleets = (
     const partialThreshold = isAssaultTask ? task.requiredPower * 0.7 : task.requiredPower;
     const flexibleTask = task.type === 'DEFEND' || task.type === 'HOLD';
 
-    for (const cand of candidates) {
+    for (const cand of orderedCandidates) {
         if (assignedPower >= task.requiredPower) break;
         assigned.push(cand);
         assignedPower += cand.fObj.power;
@@ -914,10 +918,13 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     armiesByPlanetId.set(army.containerId, list);
   });
 
-  const orderedSystems = [...state.systems].sort((a, b) => compareStrings(a.id, b.id));
+  const orderedSystems = sorted(state.systems, (a, b) => compareStrings(a.id, b.id));
 
   orderedSystems.forEach(system => {
-    const solidPlanets = system.planets.filter(planet => planet.isSolid).sort((a, b) => compareStrings(a.id, b.id));
+    const solidPlanets = sorted(
+      system.planets.filter(planet => planet.isSolid),
+      (a, b) => compareStrings(a.id, b.id)
+    );
     if (solidPlanets.length < 2) return;
 
     const availableTransports = state.fleets
@@ -934,7 +941,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
     if (availableTransports <= 0) return;
 
     const planetStats = solidPlanets.map(planet => {
-      const armies = (armiesByPlanetId.get(planet.id) ?? []).slice().sort((a, b) => compareStrings(a.id, b.id));
+      const armies = sorted(armiesByPlanetId.get(planet.id) ?? [], (a, b) => compareStrings(a.id, b.id));
       const friendlyArmies = armies.filter(army => army.factionId === factionId);
       const hostileArmies = armies.filter(army => army.factionId !== factionId);
       return { planet, friendlyArmies, hostileCount: hostileArmies.length };
@@ -945,20 +952,20 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
 
     if (friendlyPlanets.length === 0 || hostilePlanets.length === 0) return;
 
-    friendlyPlanets.sort((a, b) => {
+    const sortedFriendlyPlanets = sorted(friendlyPlanets, (a, b) => {
       const diff = b.friendlyArmies.length - a.friendlyArmies.length;
       if (diff !== 0) return diff;
       return compareStrings(a.planet.id, b.planet.id);
     });
 
-    hostilePlanets.sort((a, b) => {
+    const sortedHostilePlanets = sorted(hostilePlanets, (a, b) => {
       const diff = b.hostileCount - a.hostileCount;
       if (diff !== 0) return diff;
       return compareStrings(a.planet.id, b.planet.id);
     });
 
-    const fromPlanet = friendlyPlanets[0];
-    const toPlanet = hostilePlanets[0];
+    const fromPlanet = sortedFriendlyPlanets[0];
+    const toPlanet = sortedHostilePlanets[0];
     if (fromPlanet.planet.id === toPlanet.planet.id) return;
 
     const army = fromPlanet.friendlyArmies[0];

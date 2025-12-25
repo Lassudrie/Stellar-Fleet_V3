@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameMessage } from '../../../shared/types';
 import { useI18n } from '../../i18n';
+import { sorted } from '../../../shared/sorting';
 
 interface MessageToastsProps {
   messages: GameMessage[];
@@ -21,16 +22,16 @@ export const computeHiddenToastState = (previous: Set<string>, messageId: string
 };
 
 export const selectActiveToastMessages = (messages: GameMessage[], hiddenToastIds: Set<string>): GameMessage[] => {
-  return messages
-    .filter(msg => !msg.dismissed && !hiddenToastIds.has(msg.id))
-    .sort((a, b) => {
+  return sorted(
+    messages.filter(msg => !msg.dismissed && !hiddenToastIds.has(msg.id)),
+    (a, b) => {
       const turnDiff = b.createdAtTurn - a.createdAtTurn;
       if (turnDiff !== 0) return turnDiff;
       const priorityDiff = b.priority - a.priority;
       if (priorityDiff !== 0) return priorityDiff;
       return compareIds(b.id, a.id);
-    })
-    .slice(0, 6);
+    }
+  ).slice(0, 6);
 };
 
 const MessageToasts: React.FC<MessageToastsProps> = ({
@@ -47,11 +48,6 @@ const MessageToasts: React.FC<MessageToastsProps> = ({
     if (options?.markRead) {
       onMarkRead(messageId, true);
     }
-    setHiddenToastIds(prev => computeHiddenToastState(prev, messageId).next);
-  }, [onMarkRead]);
-
-  const dismissToast = useCallback((messageId: string) => {
-    onMarkRead(messageId, true);
     setHiddenToastIds(prev => computeHiddenToastState(prev, messageId).next);
   }, [onMarkRead]);
 

@@ -12,6 +12,7 @@ import GameCamera from './GameCamera';
 import IntelGhosts from './IntelGhosts';
 import { Vec3 } from '../../engine/math/vec3';
 import { useMapMetrics } from './hooks/useMapMetrics';
+import { sorted } from '../../shared/sorting';
 
 interface GameSceneProps {
   gameState: GameState;
@@ -78,9 +79,8 @@ const LaserRenderer: React.FC<{ lasers: LaserShot[] }> = React.memo(({ lasers })
 const TrajectoryRenderer: React.FC<{
   fleets: GameState['fleets'];
   factions: GameState['factions'];
-  day: number;
   playerFactionId: string;
-}> = React.memo(({ fleets, factions, day, playerFactionId }) => {
+}> = React.memo(({ fleets, factions, playerFactionId }) => {
     return (
         <group>
             {fleets.map(fleet => {
@@ -158,8 +158,7 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   const ownershipSignature = useMemo(() => {
       const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
-      owners.sort();
-      return owners.join('|');
+      return sorted(owners).join('|');
   }, [gameState.systems]);
 
   const battlingSystemIds = useMemo(() => {
@@ -254,7 +253,6 @@ const GameScene: React.FC<GameSceneProps> = ({
                 <TrajectoryRenderer
                   fleets={gameState.fleets}
                   factions={gameState.factions}
-                  day={gameState.day}
                   playerFactionId={gameState.playerFactionId}
                 />
 

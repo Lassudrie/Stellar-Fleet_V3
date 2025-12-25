@@ -1,5 +1,5 @@
 
-import { GameState, FactionId, VictoryCondition, Fleet } from '../shared/types';
+import { GameState, FactionId } from '../shared/types';
 
 /**
  * Checks all active victory conditions to determine if a faction has won.

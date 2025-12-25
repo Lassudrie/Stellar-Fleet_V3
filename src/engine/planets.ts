@@ -7,6 +7,7 @@ import {
   StarSystem,
   StarSystemAstro
 } from '../shared/types';
+import { sorted } from '../shared/sorting';
 
 export interface PlanetBodySeed {
   id?: string;
@@ -72,7 +73,7 @@ export const buildPlanetBodies = (
   const usedIds = new Set<string>();
   const bodies: PlanetBody[] = [];
 
-  const planets = astro?.planets ? [...astro.planets].sort((a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu) : [];
+  const planets = astro?.planets ? sorted(astro.planets, (a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu) : [];
 
   planets.forEach((planet, planetIndex) => {
     const planetId = `planet-${system.id}-${planetIndex + 1}`;
@@ -92,7 +93,7 @@ export const buildPlanetBodies = (
     bodies.push(planetBody);
     usedIds.add(planetId);
 
-    const moons = planet.moons ? [...planet.moons].sort((a, b) => a.orbitDistanceRp - b.orbitDistanceRp) : [];
+    const moons = planet.moons ? sorted(planet.moons, (a, b) => a.orbitDistanceRp - b.orbitDistanceRp) : [];
     moons.forEach((moon, moonIndex) => {
       const moonId = `moon-${system.id}-${planetIndex + 1}-${moonIndex + 1}`;
       const moonName = buildMoonName(planetName, moonIndex);
@@ -215,5 +216,5 @@ export const getSolidPlanets = (system: StarSystem): PlanetBody[] =>
 export const getDefaultSolidPlanet = (system: StarSystem): PlanetBody | null => {
   const solids = getSolidPlanets(system);
   if (solids.length === 0) return null;
-  return [...solids].sort((a, b) => a.id.localeCompare(b.id))[0];
+  return sorted(solids, (a, b) => a.id.localeCompare(b.id))[0];
 };

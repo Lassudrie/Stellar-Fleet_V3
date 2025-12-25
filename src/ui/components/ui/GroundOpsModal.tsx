@@ -5,6 +5,7 @@ import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
 import { distSq } from '../../../engine/math/vec3';
 import { shortId } from '../../../engine/idUtils';
 import { getBombardedPlanetIdsForSystem } from '../../../engine/orbitalBombardment';
+import { sorted } from '../../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -39,9 +40,10 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
   }, [factions]);
 
   const solidPlanets = useMemo(() => {
-    return system.planets
-      .filter(planet => planet.isSolid)
-      .sort((a, b) => compareIds(a.id, b.id));
+    return sorted(
+      system.planets.filter(planet => planet.isSolid),
+      (a, b) => compareIds(a.id, b.id)
+    );
   }, [system.planets]);
 
   const bombardedPlanetIds = useMemo(() => {
@@ -130,8 +132,8 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
               const enemyArmies = planetArmies.filter(army => army.factionId !== playerFactionId);
               const isContested = playerArmies.length > 0 && enemyArmies.length > 0;
 
-              const factionSummaries = Array.from(byFaction.entries())
-                .map(([factionId, list]) => {
+              const factionSummaries = sorted(
+                Array.from(byFaction.entries()).map(([factionId, list]) => {
                   const faction = factionLookup[factionId];
                   const strength = list.reduce((sum, army) => sum + army.strength, 0);
                   return {
@@ -141,8 +143,9 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
                     count: list.length,
                     strength
                   };
-                })
-                .sort((a, b) => b.strength - a.strength || b.count - a.count);
+                }),
+                (a, b) => b.strength - a.strength || b.count - a.count
+              );
 
               const ownerLabel = planet.ownerFactionId
                 ? factionLookup[planet.ownerFactionId]?.name ?? planet.ownerFactionId

@@ -10,6 +10,7 @@ import {
 } from '../content/data/static';
 import { ARMY_DESTROY_THRESHOLD } from './army';
 import { isFleetWithinOrbitProximity } from './orbit';
+import { sorted } from '../shared/sorting';
 
 export interface OrbitalBombardmentTarget {
   systemId: string;
@@ -65,10 +66,10 @@ export const getOrbitalBombardmentTargets = (
   const bombardmentPower = getBombardmentPower(bombardmentFleets);
   if (bombardmentPower <= 0) return [];
 
-  const solidPlanets = system.planets
-    .filter(planet => planet.isSolid)
-    .slice()
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const solidPlanets = sorted(
+    system.planets.filter(planet => planet.isSolid),
+    (a, b) => a.id.localeCompare(b.id)
+  );
 
   if (solidPlanets.length === 0) return [];
 
@@ -96,7 +97,7 @@ export const getOrbitalBombardmentTargets = (
       planetName: planet.name,
       attackerFactionId,
       bombardmentPower,
-      targetArmies: [...targetArmies].sort((a, b) => a.id.localeCompare(b.id))
+      targetArmies: sorted(targetArmies, (a, b) => a.id.localeCompare(b.id))
     });
   });
 

@@ -18,6 +18,7 @@ import {
 import { resolveBattle } from '../src/engine/battle/resolution';
 import { SHIP_STATS, COLORS } from '../src/content/data/static';
 import { Vec3 } from '../src/engine/math/vec3';
+import { sorted } from '../src/shared/sorting';
 import { computeFleetRadius } from '../src/engine/fleetDerived';
 
 type FleetComposition = Partial<Record<ShipType, number>>;
@@ -203,9 +204,7 @@ const parseShipType = (value: string): ShipType => {
   const normalized = normalizeKey(value);
   const resolved = SHIP_TYPE_ALIASES[normalized];
   if (!resolved) {
-    const valid = Object.keys(SHIP_TYPE_ALIASES)
-      .sort()
-      .join(', ');
+    const valid = sorted(Object.keys(SHIP_TYPE_ALIASES)).join(', ');
     throw new Error(`Unknown ship type "${value}". Valid options: ${valid}`);
   }
   return resolved;
@@ -322,8 +321,7 @@ const formatCounts = (counts: FleetComposition): string => {
   const entries = Object.entries(counts).filter(([, count]) => (count ?? 0) > 0);
   if (entries.length === 0) return 'aucun vaisseau';
 
-  return entries
-    .sort(([typeA], [typeB]) => typeA.localeCompare(typeB))
+  return sorted(entries, ([typeA], [typeB]) => typeA.localeCompare(typeB))
     .map(([type, count]) => `${type} x${count}`)
     .join(', ');
 };
@@ -432,13 +430,14 @@ const buildCountsFromBudget = (budget: number, weights: Partial<Record<ShipType,
 
   let remaining = budget - spent;
   while (remaining >= cheapest.cost) {
-    const affordable = entries
-      .filter(entry => entry.cost <= remaining)
-      .sort((a, b) => {
+    const affordable = sorted(
+      entries.filter(entry => entry.cost <= remaining),
+      (a, b) => {
         const ratioA = a.weight / a.cost;
         const ratioB = b.weight / b.cost;
         return ratioB !== ratioA ? ratioB - ratioA : a.type.localeCompare(b.type);
-      });
+      }
+    );
 
     if (affordable.length === 0) break;
     const selected = affordable[0];
@@ -674,11 +673,9 @@ const aggregateResults = (
 
 const printPresetList = (): void => {
   console.log('Présélections disponibles :');
-  Object.entries(PRESETS)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .forEach(([name, preset]) => {
-      console.log(`  - ${name}: ${preset.description}`);
-    });
+  sorted(Object.entries(PRESETS), ([a], [b]) => a.localeCompare(b)).forEach(([name, preset]) => {
+    console.log(`  - ${name}: ${preset.description}`);
+  });
 };
 
 const printSummary = (summary: SimulationSummary): void => {
