@@ -176,6 +176,8 @@ const createBaseState = (): GameState => {
 
   const restored = deserializeGameState(JSON.stringify(save));
   const restoredShip = restored.fleets[0].ships[0];
+  assert.ok(restoredShip.consumables, 'Consumables should be sanitized during load');
+  const restoredConsumables = restoredShip.consumables;
 
   assert.strictEqual(restoredShip.hp, 0, 'Negative hp should clamp to zero');
   assert.strictEqual(restoredShip.maxHp, 200, 'Valid maxHp should be preserved');
@@ -185,7 +187,7 @@ const createBaseState = (): GameState => {
     'Fuel should be clamped to capacity then quantized'
   );
   assert.strictEqual(
-    restoredShip.consumables.offensiveMissiles,
+    restoredConsumables.offensiveMissiles,
     4,
     'Invalid consumables should fall back to stock'
   );
