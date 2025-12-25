@@ -166,12 +166,12 @@ const updateMemory = (
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
   const myFleets = state.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f));
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
-  const fleetIndex = new SpatialIndex(myFleets, CAPTURE_RANGE);
-  const systemIndex = new SpatialIndex(state.systems, CAPTURE_RANGE);
+  const fleetIndex = new SpatialIndex(myFleets, CAPTURE_RANGE, state.day);
+  const systemIndex = new SpatialIndex(state.systems, CAPTURE_RANGE, state.day);
 
   const minDistanceBySystemId: Record<string, number> = {};
   state.systems.forEach(system => {
-    const nearest = fleetIndex.findNearest(system.position);
+    const nearest = fleetIndex.findNearest(system.position, undefined, { currentTurn: state.day });
     minDistanceBySystemId[system.id] = nearest ? Math.sqrt(nearest.distanceSq) : Infinity;
   });
 
@@ -206,7 +206,11 @@ const updateMemory = (
   const captureSq = CAPTURE_RANGE_SQ;
 
   visibleEnemyFleets.forEach(fleet => {
-    const nearestSystem = systemIndex.findNearest(fleet.position, sys => distSq(sys.position, fleet.position) <= captureSq);
+    const nearestSystem = systemIndex.findNearest(
+      fleet.position,
+      sys => distSq(sys.position, fleet.position) <= captureSq,
+      { currentTurn: state.day }
+    );
     const closestSystemId = nearestSystem && nearestSystem.distanceSq <= captureSq ? nearestSystem.item.id : null;
 
     const updatedSighting: EnemySighting = {
@@ -281,7 +285,7 @@ const evaluateSystems = (
   }[] = [];
   const visibleEnemyFleets = perceivedState.fleets
     .filter(f => f.factionId !== factionId && isCommandableFleet(f));
-  const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE);
+  const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE, state.day);
   const totalMyPower = perceivedState.fleets
     .filter(f => f.factionId === factionId && isCommandableFleet(f))
     .reduce((sum, f) => sum + calculateFleetPower(f), 0);
@@ -295,7 +299,7 @@ const evaluateSystems = (
       const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
       const distanceToEmpire = minDistanceBySystemId[sys.id] ?? Infinity;
 
-      const visibleFleetsHere = enemyIndex.queryRadius(sys.position, CAPTURE_RANGE);
+      const visibleFleetsHere = enemyIndex.queryRadius(sys.position, CAPTURE_RANGE, { currentTurn: state.day });
 
       const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
 
