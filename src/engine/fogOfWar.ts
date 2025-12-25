@@ -139,7 +139,7 @@ const buildVisibilityContext = (
   for (const sys of state.systems) {
     if (observedIds.has(sys.id)) observedPositions.push(sys.position);
   }
-  const territoryResolver = buildTerritoryResolver(state.systems);
+  const territoryResolver = buildTerritoryResolver(state.systems, state.day);
 
   return {
     state,
