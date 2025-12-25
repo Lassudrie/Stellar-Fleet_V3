@@ -20,6 +20,7 @@ Stellar Fleet est conçu pour être strictement déterministe.
 *   Interdiction d'utiliser `Date.now()` ou `performance.now()` pour influencer la logique de jeu.
 *   Le temps est discret (`state.day`).
 *   Seul le rendu visuel (`useFrame`) peut utiliser le temps système pour les animations.
+*   Les métadonnées de debug (ex : AI Debugger) doivent réutiliser un temps logique (tour/jour) ou une horloge injectée pour éviter d'introduire du bruit non déterministe dans les journaux. Par défaut, privilégier `state.day` comme timestamp logique et marquer clairement la source du timestamp dans la structure de log.
 
 ### Règle #3 : Ordre des opérations stable
 *   Lorsqu'on itère sur des collections (Flottes, Systèmes) pour appliquer des règles (ex: Combat), il faut garantir un ordre stable.

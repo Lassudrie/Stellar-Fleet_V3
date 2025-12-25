@@ -15,6 +15,7 @@ Détail des règles du jeu et des mécaniques.
 Conception technique et contraintes critiques.
 - **[Architecture Système](architecture/system-design.md)** : Architecture globale, séparation Moteur/UI/Rendu, Stack technique.
 - **[Déterminisme & Gestion d'État](architecture/determinism-and-state.md)** : Le cœur du moteur. Gestion de la RNG, Immutabilité, Sérialisation.
+- **Débogage IA (AI Debugger)** : Les journaux sont strictement hors logique (métadonnées uniquement). Le timestamp est basé sur le temps logique (`day`/`turn`) par défaut et indique la source via `timestampSource` (`logical` ou `injected`). Éviter toute horloge non déterministe.
 
 ### 3. Données & API (`data/`)
 Structure des données.
