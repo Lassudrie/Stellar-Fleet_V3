@@ -701,9 +701,10 @@ const tests: TestCase[] = [
       const nextState = phaseCleanup(state, ctx);
       const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
       const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+      const baseFuel = extractor.fuel ?? 0;
 
       assert.ok(updatedExtractor, 'Extractor ship should persist after cleanup');
-      assert.ok(updatedExtractor?.fuel > extractor.fuel, 'Extractor should gain fuel when orbit is safe');
+      assert.ok(updatedExtractor?.fuel !== undefined && updatedExtractor.fuel > baseFuel, 'Extractor should gain fuel when orbit is safe');
     }
   },
   {
@@ -729,11 +730,12 @@ const tests: TestCase[] = [
       const nextState = phaseCleanup(state, ctx);
       const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
       const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+      const baselineFuel = extractor.fuel ?? 0;
 
       assert.ok(updatedExtractor, 'Extractor ship should persist after contested cleanup');
       assert.strictEqual(
         updatedExtractor?.fuel,
-        extractor.fuel,
+        baselineFuel,
         'Extraction should not add fuel when enemy fleets contest the orbit'
       );
     }

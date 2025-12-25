@@ -17,15 +17,23 @@ const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleet
   const { t } = useI18n();
   const getFleetName = useFleetName();
 
+  const powerByFleetId = useMemo(() => {
+      const cache = new Map<string, number>();
+      fleets.forEach(fleet => {
+          cache.set(fleet.id, calculateFleetPower(fleet));
+      });
+      return cache;
+  }, [fleets]);
+
   const sortedFleets = useMemo(() => {
       return [...fleets].sort((a, b) => {
           const sizeDiff = b.ships.length - a.ships.length;
           if (sizeDiff !== 0) return sizeDiff;
-          const powerDiff = calculateFleetPower(b) - calculateFleetPower(a);
+          const powerDiff = (powerByFleetId.get(b.id) ?? 0) - (powerByFleetId.get(a.id) ?? 0);
           if (powerDiff !== 0) return powerDiff;
           return compareIds(a.id, b.id);
       });
-  }, [fleets]);
+  }, [fleets, powerByFleetId]);
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur pointer-events-auto z-50">
@@ -56,7 +64,9 @@ const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleet
                                 </div>
                                 <div className="text-xs text-slate-400 flex gap-3 mt-1">
                                     <span>{t('orbitPicker.shipCount', { count: fleet.ships.length })}</span>
-                                    <span className="text-blue-300">{t('orbitPicker.power', { power: calculateFleetPower(fleet).toLocaleString() })}</span>
+                                    <span className="text-blue-300">
+                                        {t('orbitPicker.power', { power: (powerByFleetId.get(fleet.id) ?? 0).toLocaleString() })}
+                                    </span>
                                 </div>
                             </div>
                         </button>
