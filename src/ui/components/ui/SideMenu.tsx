@@ -193,9 +193,9 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
               const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
               const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
               const orbitingSystem = findOrbitingSystem(fleet, systems);
-              const originLabel = orbitingSystem?.name ?? 'Deep space';
+              const originLabel = orbitingSystem?.name ?? t('sidemenu.deepSpace');
               const routeLabel = !inTransit && !orbitingSystem
-                ? 'Deep space patrol'
+                ? t('sidemenu.deepSpacePatrol')
                 : null;
 
               const speed = getFleetSpeed(fleet);
@@ -207,7 +207,10 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                   : t('picker.eta_other', { count: etaTurns })
                 : null;
               const distanceLabel = inTransit
-                ? `${Math.round(Math.max(0, remainingDistance))} ${t('picker.ly')}`
+                ? t('sidemenu.remainingDistance', {
+                    distance: Math.round(Math.max(0, remainingDistance)),
+                    unit: t('picker.ly')
+                  })
                 : null;
               const fuelSummary = computeFleetFuelSummary(fleet);
               const ammoSummary = computeFleetAmmoSummary(fleet);
@@ -218,15 +221,25 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                   ? 'bg-amber-900/30 text-amber-100 border border-amber-700/30'
                   : 'bg-emerald-900/30 text-emerald-100 border border-emerald-700/30';
 
+              const handleCardActivate = () => {
+                  onInspectFleet?.(fleet.id);
+                  onSelectFleet(fleet.id);
+                  onClose?.();
+              };
+
               return (
-                <button
+                <div
                   key={fleet.id}
-                  onClick={() => {
-                      onInspectFleet?.(fleet.id);
-                      onSelectFleet(fleet.id);
-                      onClose?.();
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleCardActivate}
+                  onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      handleCardActivate();
                   }}
                   className="relative w-full text-left bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-800/60 border border-slate-700/60 p-4 rounded-2xl shadow-lg hover:border-blue-500/50 hover:shadow-blue-900/30 transition-all group overflow-hidden"
+                  aria-label={t('sidemenu.openFleetCard', { fleet: getFleetName(fleet.id) })}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
@@ -245,12 +258,12 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                           )}
                           {inTransit && (
                             <div className="text-sm text-slate-400 mt-1">
-                                From {originLabel} to {targetSystem?.name ?? t('ctx.systemDetails')}
+                                {t('sidemenu.routeFromTo', { origin: originLabel, target: targetSystem?.name ?? t('ctx.systemDetails') })}
                             </div>
                           )}
                           {inTransit && (distanceLabel || etaLabel) && (
                             <div className="text-xs text-slate-500 mt-1 flex gap-3">
-                                {distanceLabel && <span>Remaining {distanceLabel}</span>}
+                                {distanceLabel && <span>{distanceLabel}</span>}
                                 {etaLabel && <span>{etaLabel}</span>}
                             </div>
                           )}
@@ -266,7 +279,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
                           </div>
-                          <span className="sr-only">Fleet options</span>
+                          <span className="sr-only">{t('sidemenu.fleetOptions')}</span>
                       </div>
                   </div>
 
@@ -290,7 +303,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                           <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
                               {t('orbitPicker.shipCount', { count: fleet.ships.length })}
                           </span>
-                          <span className="text-sm text-slate-400">Speed {Math.round(speed)} {t('picker.ly')}/T</span>
+                          <span className="text-sm text-slate-400">{t('sidemenu.speedLabel', { speed: Math.round(speed), unit: t('picker.ly') })}</span>
                           <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
                               {visibleChips.map(item => (
                                   <span
@@ -301,55 +314,43 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
                                   </span>
                               ))}
                               {hasOverflow && !isExpanded && (
-                                  <span
-                                    role="button"
-                                    tabIndex={0}
+                                  <button
+                                    type="button"
                                     onClick={(event) => {
                                         event.stopPropagation();
-                                        const next = new Set(expandedFleets);
-                                        next.add(fleet.id);
-                                        setExpandedFleets(next);
-                                    }}
-                                    onKeyDown={(event) => {
-                                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        const next = new Set(expandedFleets);
-                                        next.add(fleet.id);
-                                        setExpandedFleets(next);
+                                        setExpandedFleets(prev => {
+                                            const next = new Set(prev);
+                                            next.add(fleet.id);
+                                            return next;
+                                        });
                                     }}
                                     className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold cursor-pointer"
+                                    aria-label={t('sidemenu.expandComposition')}
                                   >
                                       ...
-                                  </span>
+                                  </button>
                               )}
                               {hasOverflow && isExpanded && (
-                                  <span
-                                    role="button"
-                                    tabIndex={0}
+                                  <button
+                                    type="button"
                                     onClick={(event) => {
                                         event.stopPropagation();
-                                        const next = new Set(expandedFleets);
-                                        next.delete(fleet.id);
-                                        setExpandedFleets(next);
-                                    }}
-                                    onKeyDown={(event) => {
-                                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        const next = new Set(expandedFleets);
-                                        next.delete(fleet.id);
-                                        setExpandedFleets(next);
+                                        setExpandedFleets(prev => {
+                                            const next = new Set(prev);
+                                            next.delete(fleet.id);
+                                            return next;
+                                        });
                                     }}
                                     className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap cursor-pointer"
+                                    aria-label={t('sidemenu.collapse')}
                                   >
-                                      ??-
-                                  </span>
+                                      {t('sidemenu.collapse')}
+                                  </button>
                               )}
                           </div>
                       </div>
                   </div>
-                </button>
+                </div>
               );
           })}
       </div>
@@ -568,7 +569,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className="flex items-center justify-between mb-4">
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.devMode')}</div>
-                      <div className="text-xs text-slate-500">Enable advanced features</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.devModeHint')}</div>
                   </div>
                   <button 
                       onClick={() => onSetUiSettings({ devMode: !devMode, godEyes: devMode ? false : godEyes, aiDebug: devMode ? false : aiDebug })}
@@ -582,7 +583,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className={`flex items-center justify-between transition-opacity ${devMode ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.godEyes')}</div>
-                      <div className="text-xs text-slate-500">Disable Fog of War (Visual Only)</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.godEyesHint')}</div>
                   </div>
                   <button 
                       onClick={() => onSetUiSettings({ devMode, godEyes: !godEyes, aiDebug })}
@@ -597,7 +598,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className={`flex items-center justify-between mt-4 transition-opacity ${devMode ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.aiDebugger')}</div>
-                      <div className="text-xs text-slate-500">Log AI decision metrics</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.aiDebuggerHint')}</div>
                   </div>
                   <button 
                       onClick={() => {
@@ -757,7 +758,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 {view === 'MESSAGES' && renderMessages()}
             </div>
             <div className="p-4 border-t border-slate-800 text-center bg-slate-950/30">
-                <p className="text-[10px] text-slate-600 uppercase tracking-widest">Galactic Conflict v1.1</p>
+                <p className="text-[10px] text-slate-600 uppercase tracking-widest">{t('sidemenu.footerVersion')}</p>
             </div>
         </div>
     </>

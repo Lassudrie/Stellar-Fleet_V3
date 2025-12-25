@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
 import { GameMessage, GameState, StarSystem, EnemySighting } from '../shared/types';
 import GameScene from './components/GameScene';
@@ -48,14 +48,40 @@ const App: React.FC = () => {
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
+  const [uiMessages, setUiMessages] = useState<GameMessage[]>([]);
 
   // Settings
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
+  const addUiMessage = useCallback((message: Pick<GameMessage, 'title' | 'subtitle' | 'lines' | 'priority' | 'type'> & Partial<GameMessage>) => {
+      const baseDay = viewGameState?.day ?? engine?.state.day ?? 0;
+      const id = message.id ?? `ui:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const normalized: GameMessage = {
+          id,
+          day: baseDay,
+          type: message.type ?? 'ui',
+          priority: message.priority ?? 1,
+          title: message.title,
+          subtitle: message.subtitle ?? '',
+          lines: message.lines ?? [],
+          payload: {},
+          read: message.read ?? false,
+          dismissed: message.dismissed ?? false,
+          createdAtTurn: baseDay
+      };
+      setUiMessages(prev => [normalized, ...prev].slice(0, 50));
+  }, [engine, viewGameState]);
+
   const notifyCommandError = useCallback((error: string) => {
       const detail = error || 'Unknown error';
-      alert(t('msg.commandFailed', { error: detail }));
-  }, [t]);
+      addUiMessage({
+          title: t('msg.commandFailedTitle'),
+          subtitle: t('msg.commandFailed', { error: detail }),
+          lines: [],
+          priority: 2,
+          type: 'ui'
+      });
+  }, [addUiMessage, t]);
 
   const handleExportAiLogs = () => {
       const history = aiDebugger.getHistory();
@@ -74,10 +100,24 @@ const App: React.FC = () => {
 
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      addUiMessage({
+          title: t('msg.exportSuccessTitle'),
+          subtitle: t('msg.exportSuccess'),
+          lines: [],
+          priority: 1,
+          type: 'ui'
+      });
   };
 
   const handleClearAiLogs = () => {
       aiDebugger.clear();
+      addUiMessage({
+          title: t('msg.logsClearedTitle'),
+          subtitle: t('msg.logsCleared'),
+          lines: [],
+          priority: 1,
+          type: 'ui'
+      });
   };
 
   const selectedFleetIdRef = useRef<string | null>(selectedFleetId);
@@ -193,6 +233,7 @@ const App: React.FC = () => {
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
     setEnemySightings({}); 
+    setUiMessages([]);
     setTimeout(() => {
         // Handle both simple seed (number) and full Scenario object
         let scenario;
@@ -233,9 +274,22 @@ const App: React.FC = () => {
           
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
+          addUiMessage({
+              title: t('msg.saveSuccessTitle'),
+              subtitle: t('msg.saveSuccess', { filename }),
+              lines: [],
+              priority: 1,
+              type: 'ui'
+          });
       } catch (e) {
           console.error("Save failed:", e);
-          alert(t('msg.saveFail'));
+          addUiMessage({
+              title: t('msg.saveFailTitle'),
+              subtitle: t('msg.saveFail'),
+              lines: [(e as Error).message],
+              priority: 2,
+              type: 'ui'
+          });
       }
   };
 
@@ -255,13 +309,27 @@ const App: React.FC = () => {
           setSelectedFleetId(null);
           setFleetPickerMode(null);
           setUiMode('NONE');
+          setUiMessages([]);
           
           updateViewState(newEngine.state);
           
           setScreen('GAME');
+          addUiMessage({
+              title: t('msg.loadSuccessTitle'),
+              subtitle: t('msg.loadSuccess'),
+              lines: [],
+              priority: 1,
+              type: 'ui'
+          });
       } catch (e) {
           console.error("Load failed:", e);
-          alert(t('msg.invalidSave') + "\n" + (e as Error).message);
+          addUiMessage({
+              title: t('msg.loadFailTitle'),
+              subtitle: t('msg.invalidSave'),
+              lines: [(e as Error).message],
+              priority: 2,
+              type: 'ui'
+          });
       } finally {
           setLoading(false);
       }
@@ -523,6 +591,10 @@ const App: React.FC = () => {
   };
 
   const handleMarkMessageRead = (messageId: string, read: boolean) => {
+      if (messageId.startsWith('ui:')) {
+          setUiMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, read } : msg));
+          return;
+      }
       if (!engine) {
           console.warn('[App] handleMarkMessageRead: Engine not initialized');
           return;
@@ -531,6 +603,7 @@ const App: React.FC = () => {
   };
 
   const handleMarkAllMessagesRead = () => {
+      setUiMessages(prev => prev.map(msg => ({ ...msg, read: true })));
       if (!engine) {
           console.warn('[App] handleMarkAllMessagesRead: Engine not initialized');
           return;
@@ -539,6 +612,10 @@ const App: React.FC = () => {
   };
 
   const handleOpenMessage = (message: GameMessage) => {
+      if (message.id.startsWith('ui:')) {
+          setUiMessages(prev => prev.map(msg => msg.id === message.id ? { ...msg, read: true } : msg));
+          return;
+      }
       if (!engine || !viewGameState) {
           console.warn('[App] handleOpenMessage: Engine or viewGameState not initialized');
           return;
@@ -590,6 +667,7 @@ const App: React.FC = () => {
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
       const inspectedFleet = viewGameState.fleets.find(f => f.id === inspectedFleetId) || null;
+      const combinedMessages = useMemo(() => [...viewGameState.messages, ...uiMessages], [uiMessages, viewGameState.messages]);
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
@@ -612,7 +690,7 @@ const App: React.FC = () => {
                     selectedFleet={selectedFleet}
                     inspectedFleet={inspectedFleet}
                     logs={viewGameState.logs}
-                    messages={viewGameState.messages}
+                    messages={combinedMessages}
                     
                     uiMode={uiMode}
                     menuPosition={menuPosition}
