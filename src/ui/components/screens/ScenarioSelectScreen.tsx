@@ -18,7 +18,8 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
   const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) as ScenarioTemplate;
 
   const handleLaunch = () => {
-    const seed = customSeed ? parseInt(customSeed, 10) || Date.now() : Date.now();
+    const parsedSeed = Number(customSeed);
+    const seed = customSeed === '' || Number.isNaN(parsedSeed) ? Date.now() : parsedSeed;
     const scenario = buildScenario(selectedTemplateId, seed, {
       rules: { unlimitedFuel }
     });
