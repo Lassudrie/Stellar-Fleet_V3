@@ -49,6 +49,10 @@ const App: React.FC = () => {
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
   const [uiMessages, setUiMessages] = useState<GameMessage[]>([]);
+  const combinedMessages = useMemo(
+    () => [...(viewGameState?.messages ?? []), ...uiMessages],
+    [viewGameState?.messages, uiMessages]
+  );
 
   // Settings
   const [devMode, setDevMode] = useState(false);
@@ -667,7 +671,6 @@ const App: React.FC = () => {
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
       const inspectedFleet = viewGameState.fleets.find(f => f.id === inspectedFleetId) || null;
-      const combinedMessages = useMemo(() => [...viewGameState.messages, ...uiMessages], [uiMessages, viewGameState.messages]);
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
