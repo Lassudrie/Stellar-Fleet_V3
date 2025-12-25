@@ -134,16 +134,18 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
 
   const toggleShipSelect = (id: string) => {
     if (fleet.factionId !== playerFactionId) return; // Prevent selection on enemy fleets
-    const next = new Set(selectedShipIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedShipIds(next);
+    setSelectedShipIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const handleDetach = () => {
     if (fleet.factionId !== playerFactionId) return;
     onSplit(Array.from(selectedShipIds));
-    setSelectedShipIds(new Set());
+    setSelectedShipIds(() => new Set());
   };
 
   // Sort order: Capital first, but put transports high if they have actions
@@ -162,6 +164,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
   const isPlayer = fleet.factionId === playerFactionId;
   const factionColor = isPlayer ? 'text-blue-500' : 'text-red-500';
   const factionTitle = isPlayer ? 'text-blue-400' : 'text-red-400';
+  const unitLabel = t('picker.ly');
 
   return (
     <div className="absolute bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-700 p-4 pointer-events-auto transition-transform duration-300 max-h-[40vh] flex flex-col animate-in slide-in-from-bottom duration-300 shadow-2xl z-30">
@@ -173,12 +176,12 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={`w-5 h-5 ${factionColor}`}>
                   <path fillRule="evenodd" d="M14.615 1.595a.75.75 0 01.359.852L12.981 9.75h5.527a.75.75 0 01.625 1.072l-12 14a.75.75 0 01-1.196-.86l4.634-11.492h-5.91a.75.75 0 01-.662-1.006l6.635-9.28a.75.75 0 01.98-.189z" clipRule="evenodd" />
                 </svg>
-                {isPlayer ? getFleetName(fleet.id) : `ENEMY CONTACT ${shortId(fleet.id)}`}
+                {isPlayer ? getFleetName(fleet.id) : t('fleet.enemyContact', { id: shortId(fleet.id) })}
             </h2>
             <div className="text-xs text-slate-400 ml-7 flex gap-2">
-                <span>Ships: {fleet.ships.length}</span>
+                <span>{t('fleet.shipCountLabel', { count: fleet.ships.length })}</span>
                 <span>•</span>
-                <span>Status: <span className="text-white">{t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}</span></span>
+                <span>{t('fleet.statusLabel', { status: t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state }) })}</span>
                 {currentSystem && (
                     <>
                         <span>•</span>
@@ -189,9 +192,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
             <div className="text-[11px] text-slate-400 ml-7 flex gap-2">
                 <span>{GAS_GIANT_ICON}: <span className="text-white font-mono">{Math.round(fuelSummary.totalFuel)}/{Math.round(fuelSummary.totalCapacity)}</span></span>
                 <span>•</span>
-                <span>Range: <span className="text-white font-mono">{fuelSummary.cappedCurrentReach.toFixed(1)} ly</span></span>
-                <span className="text-slate-600">/</span>
-                <span className="text-slate-300">{fuelSummary.cappedFullReach.toFixed(1)} ly</span>
+                <span className="text-white font-mono">{t('fleet.range', { current: fuelSummary.cappedCurrentReach.toFixed(1), max: fuelSummary.cappedFullReach.toFixed(1), unit: unitLabel })}</span>
             </div>
         </div>
         
@@ -270,10 +271,18 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                             return (
                                 <div 
                                     key={ship.id}
+                                    role="button"
+                                    tabIndex={0}
                                     onClick={() => toggleShipSelect(ship.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                                        event.preventDefault();
+                                        toggleShipSelect(ship.id);
+                                    }}
                                     className={`cursor-pointer px-2 py-1.5 rounded flex flex-col gap-2 transition-colors ${
                                         isSelected ? 'bg-blue-600/30 border border-blue-500/50' : 'bg-slate-900/40 border border-transparent'
                                     } ${isPlayer ? 'hover:bg-white/5' : 'cursor-default'}`}
+                                    aria-label={t('fleet.shipCardLabel', { id: shortId(ship.id) })}
                                 >
                                     {/* ROW TOP: Status & Selection */}
                                     <div className="flex items-center justify-between w-full">
@@ -286,7 +295,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                                     {shortId(ship.id)}
                                                 </span>
                                                 {hasArmy && (
-                                                    <span title="Army Loaded" className="text-[8px] bg-green-900 text-green-300 px-1 rounded font-bold">ARM</span>
+                                                    <span title={t('fleet.armyLoaded')} className="text-[8px] bg-green-900 text-green-300 px-1 rounded font-bold">ARM</span>
                                                 )}
                                             </div>
                                         </div>

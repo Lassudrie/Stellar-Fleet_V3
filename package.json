@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20 <21",
+    "npm": ">=10 <11"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -11,9 +15,10 @@
     "typecheck": "tsc --noEmit",
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "typecheck:watch": "tsc --noEmit --watch",
-    "smoke": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/aiSmoke.ts",
-    "battle:sim": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs tools/battleSim.ts",
-    "test": "node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/engine.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/rangeConsistency.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/stellarSystemGen.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/fogOfWar.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/rng.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/immutability.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/fuelTransfer.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/aiSpatialIndex.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/engine/tests/serializationRobustness.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/components/ui/FleetPicker.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/components/ui/MessageToasts.logic.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/components/GameCamera.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/commands/processCommandResult.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/i18n/tests/i18n.spec.ts && node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs src/ui/components/ui/positioning/computeConstrainedMenuPosition.spec.ts"
+    "check:runtime": "node ./tools/runtimeCheck.mjs",
+    "smoke": "npm run check:runtime && tsx --tsconfig tsconfig.smoke.json src/engine/aiSmoke.ts",
+    "battle:sim": "npm run check:runtime && tsx tools/battleSim.ts",
+    "test": "npm run check:runtime && tsx src/engine/tests/engine.spec.ts && tsx src/engine/tests/rangeConsistency.spec.ts && tsx src/engine/tests/stellarSystemGen.spec.ts && tsx src/engine/tests/fogOfWar.spec.ts && tsx src/engine/tests/rng.spec.ts && tsx src/engine/tests/immutability.spec.ts && tsx src/engine/tests/fuelTransfer.spec.ts && tsx src/engine/tests/aiSpatialIndex.spec.ts && tsx src/engine/tests/serializationRobustness.spec.ts && tsx src/ui/components/ui/FleetPicker.spec.ts && tsx src/ui/components/ui/MessageToasts.logic.spec.ts && tsx src/ui/components/GameCamera.spec.ts && tsx src/ui/commands/processCommandResult.spec.ts && tsx src/ui/i18n/tests/i18n.spec.ts && tsx src/ui/components/ui/positioning/computeConstrainedMenuPosition.spec.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -35,6 +40,7 @@
     "eslint": "^8.57.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.19",
+    "tsx": "^4.19.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
