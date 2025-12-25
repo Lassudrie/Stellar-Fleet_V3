@@ -30,6 +30,8 @@ import {
   SaveFile,
   GameStateDTO,
   Vector3DTO,
+  AIStateDTO,
+  EnemySightingDTO,
   GameMessageDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../content/data/static';

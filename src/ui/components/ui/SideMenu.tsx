@@ -161,6 +161,7 @@ const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
 type FleetRegistryListProps = {
   blueFleets: Fleet[];
   systems: StarSystem[];
+  day?: number;
   onSelectFleet: (fleetId: string) => void;
   onInspectFleet?: (fleetId: string) => void;
   onClose?: () => void;
