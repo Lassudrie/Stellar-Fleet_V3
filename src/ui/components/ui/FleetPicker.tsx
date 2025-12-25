@@ -8,6 +8,7 @@ import { distSq } from '../../../engine/math/vec3';
 import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
 import { canFleetPayJump } from '../../../engine/logistics/fuel';
 import { getOrbitingSystem } from '../../../engine/orbit';
+import { sorted } from '../../../shared/sorting';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
@@ -65,21 +66,22 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, 
   const getFleetName = useFleetName();
 
   const fleetOptions = useMemo(() => {
-      return blueFleets
-          .map(fleet => {
+      return sorted(
+          blueFleets.map(fleet => {
               const eligibility = getFleetEligibility(fleet, mode, targetSystem, systems, unlimitedFuel);
               const { distanceLy, distanceSq } = eligibility;
               const speed = getFleetSpeed(fleet);
               const eta = Math.max(1, Math.ceil(distanceLy / speed));
 
               return { fleet, distanceSq, distanceLy, eligibility, eta };
-          })
-          .sort((a, b) => {
+          }),
+          (a, b) => {
               if (a.eligibility.eligible !== b.eligibility.eligible) {
                   return a.eligibility.eligible ? -1 : 1;
               }
               return a.distanceSq - b.distanceSq;
-          });
+          }
+      );
   }, [blueFleets, mode, systems, targetSystem, unlimitedFuel]);
 
   const titleKey = mode === 'LOAD'

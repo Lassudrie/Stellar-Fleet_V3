@@ -1,11 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Fleet, ShipEntity, ShipType, FactionId, Army, StarSystem } from '../../../shared/types';
+import { Fleet, ShipEntity, ShipType, Army, StarSystem } from '../../../shared/types';
 import { shortId } from '../../../engine/idUtils';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 import { GAS_GIANT_ICON } from '../../constants/icons';
+import { sorted } from '../../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -107,9 +108,10 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
 
   const solidPlanets = useMemo(() => {
     if (!currentSystem) return [];
-    return currentSystem.planets
-      .filter(planet => planet.isSolid)
-      .sort((a, b) => compareIds(a.id, b.id));
+    return sorted(
+      currentSystem.planets.filter(planet => planet.isSolid),
+      (a, b) => compareIds(a.id, b.id)
+    );
   }, [currentSystem]);
 
   // Reset selection when fleet changes

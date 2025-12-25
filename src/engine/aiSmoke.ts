@@ -5,6 +5,7 @@ import { buildScenario } from '../content/scenarios';
 import { generateWorld } from './worldgen/worldGenerator';
 import { Fleet, GameState, StarSystem } from '../shared/types';
 import { devLog } from '../shared/devLogger';
+import { sorted } from '../shared/sorting';
 
 const parseTurnCount = (): number => {
   const raw = process.env.SMOKE_TURNS ?? '100';
@@ -66,14 +67,12 @@ const countAiOrders = (state: GameState, rngSnapshot: RNG): number => {
   const legacyAiFactionId = getLegacyAiFactionId(state.factions);
   let commandCount = 0;
 
-  aiFactions
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .forEach(faction => {
-      const legacyState = faction.id === legacyAiFactionId ? state.aiState : undefined;
-      const aiState = state.aiStates?.[faction.id] ?? legacyState ?? createEmptyAIState();
-      const commands = planAiTurn(state, faction.id, aiState, rngSnapshot);
-      commandCount += commands.filter(cmd => cmd.type !== 'AI_UPDATE_STATE').length;
-    });
+  sorted(aiFactions, (a, b) => a.id.localeCompare(b.id)).forEach(faction => {
+    const legacyState = faction.id === legacyAiFactionId ? state.aiState : undefined;
+    const aiState = state.aiStates?.[faction.id] ?? legacyState ?? createEmptyAIState();
+    const commands = planAiTurn(state, faction.id, aiState, rngSnapshot);
+    commandCount += commands.filter(cmd => cmd.type !== 'AI_UPDATE_STATE').length;
+  });
 
   return commandCount;
 };
@@ -86,7 +85,6 @@ const runSmokeTest = () => {
   const engine = new GameEngine(state);
   const minActiveTurns = Math.max(2, Math.floor(turnsToPlay / 25));
 
-  let lastTurnWithAiOrders = state.day;
   let aiOrderTurns = 0;
   let totalAiOrders = 0;
 
@@ -96,7 +94,6 @@ const runSmokeTest = () => {
 
     const ordersThisTurn = countAiOrders(engine.state, previewRng);
     if (ordersThisTurn > 0) {
-      lastTurnWithAiOrders = engine.state.day;
       aiOrderTurns += 1;
       totalAiOrders += ordersThisTurn;
     }
@@ -104,7 +101,6 @@ const runSmokeTest = () => {
     engine.advanceTurn();
     assertStateIsFinite(engine.state);
 
-    const turnsSinceAiOrders = engine.state.day - lastTurnWithAiOrders;
   }
 
   if (aiOrderTurns === 0) {

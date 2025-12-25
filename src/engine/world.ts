@@ -1,5 +1,5 @@
 
-import { GameState, StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/types';
+import { StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/types';
 import { SENSOR_RANGE, SHIP_STATS } from '../content/data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';

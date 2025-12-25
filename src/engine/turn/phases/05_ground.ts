@@ -6,6 +6,7 @@ import { COLORS } from '../../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
 import { isOrbitContested } from '../../orbit';
 import { canonicalizeMessages } from '../../state/canonicalize';
+import { sorted } from '../../../shared/sorting';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextLogs = [...state.logs];
@@ -137,16 +138,20 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
 
                 const formatCasualtiesLine = (): string => {
                     if (casualtiesByFaction.size === 0) return 'Losses - none';
-                    const parts = Array.from(casualtiesByFaction.entries())
-                        .sort(([a], [b]) => a.localeCompare(b))
+                    const parts = sorted(
+                        Array.from(casualtiesByFaction.entries()),
+                        ([a], [b]) => a.localeCompare(b)
+                    )
                         .map(([factionId, data]) => `${factionId}: ${data.strengthLost} strength (${data.destroyed} destroyed)`);
                     return `Losses - ${parts.join(', ')}`;
                 };
 
                 const formatRemainingLine = (): string => {
                     if (remainingByFaction.size === 0) return 'Remaining forces - none';
-                    const parts = Array.from(remainingByFaction.entries())
-                        .sort(([a], [b]) => a.localeCompare(b))
+                    const parts = sorted(
+                        Array.from(remainingByFaction.entries()),
+                        ([a], [b]) => a.localeCompare(b)
+                    )
                         .map(([factionId, totalStrength]) => `${factionId}: ${totalStrength} strength`);
                     return `Remaining forces - ${parts.join(', ')}`;
                 };
@@ -164,7 +169,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                     payload: {
                         planetId: planet.id,
                         systemId: system.id,
-                        involvedFactionIds: Array.from(involvedFactionIds).sort((a, b) => a.localeCompare(b))
+                        involvedFactionIds: sorted(Array.from(involvedFactionIds), (a, b) => a.localeCompare(b))
                     },
                     read: false,
                     dismissed: false,

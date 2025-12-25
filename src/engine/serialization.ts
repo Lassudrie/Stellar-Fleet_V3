@@ -30,13 +30,8 @@ import {
   SaveFile,
   GameStateDTO,
   Vector3DTO,
-  StarSystemDTO,
-  FleetDTO,
-  LaserShotDTO,
-  BattleDTO,
   AIStateDTO,
   EnemySightingDTO,
-  ArmyDTO,
   GameMessageDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../content/data/static';
@@ -453,8 +448,6 @@ export const deserializeGameState = (json: string): GameState => {
 
   // MIGRATION V1 -> V2 logic
   // If factions or playerFactionId are missing, inject defaults
-  const isLegacy = !dto.playerFactionId || !dto.factions;
-  
   if (dto.factions !== undefined && !Array.isArray(dto.factions)) {
     throw new Error("Field 'factions' must be an array.");
   }

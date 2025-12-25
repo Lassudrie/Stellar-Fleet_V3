@@ -1,12 +1,12 @@
 
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem, ShipType } from '../../../shared/types';
-import { shortId } from '../../../engine/idUtils';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { dist, distSq } from '../../../engine/math/vec3';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
+import { sorted } from '../../../shared/sorting';
 
 interface InvasionModalProps {
   targetSystem: StarSystem;
@@ -34,11 +34,10 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
     });
 
     // Sort by Distance
-    return candidates.sort((a, b) => {
-        const distA = dist(a.position, targetPos);
-        const distB = dist(b.position, targetPos);
-        return distA - distB;
-    });
+    return sorted(
+        candidates,
+        (a, b) => dist(a.position, targetPos) - dist(b.position, targetPos)
+    );
   }, [fleets, targetSystem, playerFactionId]);
 
   return (

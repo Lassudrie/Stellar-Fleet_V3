@@ -6,7 +6,6 @@ import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
-import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import { buildScenario } from '../content/scenarios';
@@ -21,6 +20,7 @@ import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
+import { sorted } from '../shared/sorting';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -52,7 +52,6 @@ const App: React.FC = () => {
   // Settings
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
-  const [aiDebug, setAiDebug] = useState(false);
   const notifyCommandError = useCallback((error: string) => {
       const detail = error || 'Unknown error';
       alert(t('msg.commandFailed', { error: detail }));
@@ -146,10 +145,11 @@ const App: React.FC = () => {
 
           const entries = Object.values(next);
           if (entries.length > ENEMY_SIGHTING_LIMIT) {
-              const keepIds = new Set(entries
-                  .sort((a, b) => b.daySeen - a.daySeen)
-                  .slice(0, ENEMY_SIGHTING_LIMIT)
-                  .map(s => s.fleetId));
+              const keepIds = new Set(
+                  sorted(entries, (a, b) => b.daySeen - a.daySeen)
+                      .slice(0, ENEMY_SIGHTING_LIMIT)
+                      .map(s => s.fleetId)
+              );
 
               Object.keys(next).forEach(id => {
                   if (!keepIds.has(id)) {
@@ -663,7 +663,6 @@ const App: React.FC = () => {
                         setDevMode(s.devMode);
                         setGodEyes(s.godEyes);
                         const enableAiDebug = s.aiDebug || false;
-                        setAiDebug(enableAiDebug);
                         aiDebugger.setEnabled(enableAiDebug);
                     }}
                     onExportAiLogs={handleExportAiLogs}

@@ -1,4 +1,4 @@
-import { GameState, StarSystem, Fleet, FactionId, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/types';
+import { GameState, StarSystem, Fleet, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/types';
 import { RNG } from '../rng';
 import { GameScenario } from '../../content/scenarios/types';
 import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../army';
@@ -9,6 +9,7 @@ import { SHIP_STATS } from '../../content/data/static';
 import { devLog, devWarn } from '../../shared/devLogger';
 import { generateStellarSystem } from './stellar';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
+import { sorted } from '../../shared/sorting';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -354,11 +355,12 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               if (!home) return;
 
               // Find N nearest unowned neighbors
-              const neighbors = systems
-                  .filter(s => !s.ownerFactionId && s.id !== home.id && !staticSystemIds.has(s.id))
-                  .map(s => ({ sys: s, dist: distSq(s.position, home.position) }))
-                  .sort((a, b) => a.dist - b.dist)
-                  .slice(0, CLUSTER_NEIGHBOR_COUNT);
+              const neighbors = sorted(
+                  systems
+                      .filter(s => !s.ownerFactionId && s.id !== home.id && !staticSystemIds.has(s.id))
+                      .map(s => ({ sys: s, dist: distSq(s.position, home.position) })),
+                  (a, b) => a.dist - b.dist
+              ).slice(0, CLUSTER_NEIGHBOR_COUNT);
 
               neighbors.forEach(n => {
                   n.sys.ownerFactionId = faction.id;
@@ -387,9 +389,9 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               const b = Math.floor(r);
               raw.push({ id: fid, raw: r, base: b, frac: r - b });
           }
-          raw.sort((a, b) => b.frac - a.frac);
+          const orderedRaw = sorted(raw, (a, b) => b.frac - a.frac);
 
-          let allocated = raw.reduce((acc, x) => acc + x.base, 0);
+          let allocated = orderedRaw.reduce((acc, x) => acc + x.base, 0);
           // Neutral share defaults to remaining systems
           const neutralTarget = ta.neutralShare !== undefined
               ? Math.max(0, Math.round(total * ta.neutralShare))
@@ -399,13 +401,13 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           const maxFactionTotal = Math.max(0, total - neutralTarget);
 
           // Start with floored targets
-          raw.forEach(x => targets.set(x.id, x.base));
+          orderedRaw.forEach(x => targets.set(x.id, x.base));
 
           // Distribute remainder up to maxFactionTotal
           let remainder = maxFactionTotal - allocated;
           let idx = 0;
-          while (remainder > 0 && raw.length > 0) {
-              const pick = raw[idx % raw.length];
+          while (remainder > 0 && orderedRaw.length > 0) {
+              const pick = orderedRaw[idx % orderedRaw.length];
               targets.set(pick.id, (targets.get(pick.id) || 0) + 1);
               remainder--;
               idx++;
@@ -491,7 +493,6 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       }
 
       let position = vec3(0, 0, 0);
-      let sysId: string | null = null;
       let state = FleetState.ORBIT;
       let targetPosition: Vec3 | null = null;
       let targetSystemId: string | null = null;
@@ -501,13 +502,11 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           const home = homeSystems.get(factionId);
           if (home) {
               position = clone(home.position);
-              sysId = home.id;
           } else {
               // Fallback
               const randomSys = rng.pick(systems);
               if (randomSys) {
                   position = clone(randomSys.position);
-                  sysId = randomSys.id;
               } else {
                   devWarn(`[WorldGen] No systems available for fleet spawn, using origin`);
                   position = vec3(0, 0, 0);
@@ -525,7 +524,6 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           const randomSys = rng.pick(candidatePool);
           if (randomSys) {
               position = clone(randomSys.position);
-              sysId = randomSys.id;
           } else {
               devWarn(`[WorldGen] No systems available for random fleet spawn, using origin`);
               position = vec3(0, 0, 0);

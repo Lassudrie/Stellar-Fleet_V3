@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import { Fleet } from '../../shared/types';
 import { shortId } from '../../engine/idUtils';
+import { sorted } from '../../shared/sorting';
 
 const GREEK_LETTERS = [
   'Alpha',
@@ -50,8 +51,8 @@ const buildFleetNameRegistry = (fleets: Fleet[]): Record<string, string> => {
 
   const registry: Record<string, string> = {};
   byFaction.forEach((factionFleets) => {
-    const sorted = [...factionFleets].sort((a, b) => compareIds(a.id, b.id));
-    sorted.forEach((fleet, index) => {
+    const orderedFleets = sorted(factionFleets, (a, b) => compareIds(a.id, b.id));
+    orderedFleets.forEach((fleet, index) => {
       registry[fleet.id] = formatFleetName(index);
     });
   });

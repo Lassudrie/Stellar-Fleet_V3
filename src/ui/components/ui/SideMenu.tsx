@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { FleetState, LogEntry, Fleet, StarSystem, FactionId, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
+import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
 import { useFleetName } from '../../context/FleetNames';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
 import { dist } from '../../../engine/math/vec3';
@@ -8,6 +8,7 @@ import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 import { SHIP_STATS } from '../../../content/data/static';
+import { sorted } from '../../../shared/sorting';
 
 interface SideMenuProps {
   isOpen: boolean;
@@ -17,7 +18,6 @@ interface SideMenuProps {
   messages: GameMessage[];
   blueFleets: Fleet[];
   systems: StarSystem[];
-  day: number;
   onRestart: () => void;
   onSelectFleet: (fleetId: string) => void;
   onSave: () => void;
@@ -161,7 +161,7 @@ const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
 type FleetRegistryListProps = {
   blueFleets: Fleet[];
   systems: StarSystem[];
-  day: number;
+  day?: number;
   onSelectFleet: (fleetId: string) => void;
   onInspectFleet?: (fleetId: string) => void;
   onClose?: () => void;
@@ -170,7 +170,6 @@ type FleetRegistryListProps = {
 export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
   blueFleets,
   systems,
-  day,
   onSelectFleet,
   onInspectFleet,
   onClose
@@ -358,7 +357,7 @@ export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
 };
 
 const SideMenu: React.FC<SideMenuProps> = ({ 
-    isOpen, onClose, onOpenFleetRegistry, logs, messages, blueFleets, systems, day,
+    isOpen, onClose, onOpenFleetRegistry, logs, messages, blueFleets, systems,
     onRestart, onSelectFleet, onSave, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
@@ -381,7 +380,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const unreadMessages = useMemo(() => messages.filter(msg => !msg.read && !msg.dismissed).length, [messages]);
   const messageTypes = useMemo(() => {
       const types = new Set(messages.map(m => m.type.toLowerCase()));
-      return Array.from(types).sort();
+      return sorted(Array.from(types));
   }, [messages]);
 
   if (!isOpen) return null;
@@ -514,7 +513,6 @@ const SideMenu: React.FC<SideMenuProps> = ({
       <FleetRegistryList
         blueFleets={blueFleets}
         systems={systems}
-        day={day}
         onSelectFleet={onSelectFleet}
         onClose={onClose}
       />
@@ -653,15 +651,16 @@ const SideMenu: React.FC<SideMenuProps> = ({
   );
 
   const renderMessages = () => {
-      const sortedMessages = [...messages]
-        .filter(msg => !msg.dismissed)
-        .sort((a, b) => {
+      const sortedMessages = sorted(
+        messages.filter(msg => !msg.dismissed),
+        (a, b) => {
             const turnDiff = b.createdAtTurn - a.createdAtTurn;
             if (turnDiff !== 0) return turnDiff;
             const priorityDiff = b.priority - a.priority;
             if (priorityDiff !== 0) return priorityDiff;
             return compareIds(b.id, a.id);
-        });
+        }
+      );
 
       const filteredMessages = sortedMessages.filter(msg => {
           if (messageTypeFilter === 'ALL') return true;

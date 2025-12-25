@@ -1,6 +1,6 @@
 
 import { GameState, FactionId, Fleet } from '../shared/types';
-import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, SENSOR_RANGE } from '../content/data/static';
+import { CAPTURE_RANGE_SQ, SENSOR_RANGE } from '../content/data/static';
 import { buildTerritoryResolver } from './territory';
 import { Vec3, distSq } from './math/vec3';
 

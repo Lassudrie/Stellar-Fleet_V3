@@ -2,11 +2,12 @@
 import { GameState, Fleet, LogEntry } from '../../../shared/types';
 import { TurnContext } from '../types';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from '../../movement/movementPhase';
+import { sorted } from '../../../shared/sorting';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
     const nextDay = ctx.turn; // Movement projects to current turn positions
 
-    const fleetsToProcess = [...state.fleets].sort((a, b) => a.id.localeCompare(b.id));
+    const fleetsToProcess = sorted(state.fleets, (a, b) => a.id.localeCompare(b.id));
     const newLogs: LogEntry[] = [];
 
     let workingArmies = state.armies;

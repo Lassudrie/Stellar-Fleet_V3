@@ -3,6 +3,7 @@ import { Fleet, StarSystem } from '../../../shared/types';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { calculateFleetPower } from '../../../engine/world';
+import { sorted } from '../../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -26,7 +27,7 @@ const OrbitingFleetPicker: React.FC<OrbitingFleetPickerProps> = ({ system, fleet
   }, [fleets]);
 
   const sortedFleets = useMemo(() => {
-      return [...fleets].sort((a, b) => {
+      return sorted(fleets, (a, b) => {
           const sizeDiff = b.ships.length - a.ships.length;
           if (sizeDiff !== 0) return sizeDiff;
           const powerDiff = (powerByFleetId.get(b.id) ?? 0) - (powerByFleetId.get(a.id) ?? 0);

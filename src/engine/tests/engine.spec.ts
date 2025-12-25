@@ -19,7 +19,6 @@ import {
   GameObjectives,
   GameplayRules,
   GameState,
-  LogEntry,
   PlanetBody,
   AIState,
   ShipEntity,

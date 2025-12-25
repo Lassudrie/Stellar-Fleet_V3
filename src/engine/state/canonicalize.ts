@@ -8,6 +8,7 @@
  */
 
 import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage } from '../../shared/types';
+import { sorted } from '../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -47,7 +48,7 @@ export const canonicalizeState = (state: GameState): GameState => {
  * Canonicalize systems array - sorted by ID
  */
 export const canonicalizeSystems = (systems: StarSystem[]): StarSystem[] => {
-    return [...systems].sort((a, b) => compareIds(a.id, b.id));
+    return sorted(systems, (a, b) => compareIds(a.id, b.id));
 };
 
 /**
@@ -55,26 +56,27 @@ export const canonicalizeSystems = (systems: StarSystem[]): StarSystem[] => {
  * Also canonicalizes ships within each fleet
  */
 export const canonicalizeFleets = (fleets: Fleet[]): Fleet[] => {
-    return [...fleets]
-        .map(fleet => ({
+    return sorted(
+        fleets.map(fleet => ({
             ...fleet,
-            ships: [...fleet.ships].sort((a, b) => compareIds(a.id, b.id))
-        }))
-        .sort((a, b) => compareIds(a.id, b.id));
+            ships: sorted(fleet.ships, (a, b) => compareIds(a.id, b.id))
+        })),
+        (a, b) => compareIds(a.id, b.id)
+    );
 };
 
 /**
  * Canonicalize armies array - sorted by ID
  */
 export const canonicalizeArmies = (armies: Army[]): Army[] => {
-    return [...armies].sort((a, b) => compareIds(a.id, b.id));
+    return sorted(armies, (a, b) => compareIds(a.id, b.id));
 };
 
 /**
  * Canonicalize battles array - sorted by ID
  */
 export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
-    return [...battles].sort((a, b) => compareIds(a.id, b.id));
+    return sorted(battles, (a, b) => compareIds(a.id, b.id));
 };
 
 /**
@@ -83,7 +85,7 @@ export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
  */
 export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
     if (isSortedByDayThenId(logs)) return logs;
-    return [...logs].sort((a, b) => {
+    return sorted(logs, (a, b) => {
         const dayDiff = a.day - b.day;
         if (dayDiff !== 0) return dayDiff;
         return compareIds(a.id, b.id);
@@ -92,7 +94,7 @@ export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
 
 export const canonicalizeMessages = (messages: GameMessage[]): GameMessage[] => {
     if (isSortedByDayThenId(messages)) return messages;
-    return [...messages].sort((a, b) => {
+    return sorted(messages, (a, b) => {
         const dayDiff = a.day - b.day;
         if (dayDiff !== 0) return dayDiff;
         return compareIds(a.id, b.id);

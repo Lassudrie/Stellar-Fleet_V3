@@ -1,8 +1,9 @@
 
-import { GameState, Battle, Fleet, BattleAmmunitionBreakdown, BattleAmmunitionByFaction, GameMessage, FactionId, ArmyState, Army } from '../../../shared/types';
+import { GameState, BattleAmmunitionBreakdown, BattleAmmunitionByFaction, GameMessage, FactionId, ArmyState, Army } from '../../../shared/types';
 import { TurnContext } from '../types';
 import { resolveBattle } from '../../battle/resolution';
 import { canonicalizeMessages } from '../../state/canonicalize';
+import { sorted } from '../../../shared/sorting';
 
 const createEmptyAmmunitionTotals = (): BattleAmmunitionBreakdown => ({
     offensiveMissiles: { initial: 0, used: 0, remaining: 0 },
@@ -31,7 +32,7 @@ const aggregateAmmunitionTotals = (ammunitionByFaction?: BattleAmmunitionByFacti
 };
 
 const formatLossesLine = (shipsLost: Record<FactionId, number>, involvedFactionIds: FactionId[]): string => {
-    const sortedFactions = [...involvedFactionIds].sort((a, b) => a.localeCompare(b));
+    const sortedFactions = sorted(involvedFactionIds, (a, b) => a.localeCompare(b));
     const descriptions = sortedFactions.map(factionId => `${factionId}: ${shipsLost[factionId] ?? 0}`);
     return descriptions.join(', ');
 };
@@ -51,19 +52,18 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
     const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
 
     // 1. Identify Scheduled Battles
-    const scheduledBattles = state.battles.filter(b => b.status === 'scheduled');
+    const scheduledBattles = sorted(
+        state.battles.filter(b => b.status === 'scheduled'),
+        (a, b) => {
+            // Primary: by systemId (alphabetical)
+            const sysCompare = a.systemId.localeCompare(b.systemId);
+            if (sysCompare !== 0) return sysCompare;
+            // Secondary: by battle id (ensures uniqueness)
+            return a.id.localeCompare(b.id);
+        }
+    );
     
     if (scheduledBattles.length === 0) return state;
-
-    // DETERMINISM FIX: Sort battles canonically before processing
-    // This ensures RNG consumption order is consistent regardless of array insertion order
-    scheduledBattles.sort((a, b) => {
-        // Primary: by systemId (alphabetical)
-        const sysCompare = a.systemId.localeCompare(b.systemId);
-        if (sysCompare !== 0) return sysCompare;
-        // Secondary: by battle id (ensures uniqueness)
-        return a.id.localeCompare(b.id);
-    });
 
     let nextBattles = [...state.battles];
     let nextFleets = [...state.fleets];
@@ -140,7 +140,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
             if (fleet) involvedFactionIdsSet.add(fleet.factionId as FactionId);
         });
         Object.keys(result.updatedBattle.shipsLost ?? {}).forEach(factionId => involvedFactionIdsSet.add(factionId as FactionId));
-        const involvedFactionIds = Array.from(involvedFactionIdsSet).sort((a, b) => a.localeCompare(b));
+        const involvedFactionIds = sorted(Array.from(involvedFactionIdsSet), (a, b) => a.localeCompare(b));
 
         const systemName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
         const isPlayerInvolved = involvedFactionIds.includes(currentTurnState.playerFactionId);
@@ -148,7 +148,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         const battleSystemName = systemName || battle.systemId;
 
         if (lostArmyIds.length > 0) {
-            lostArmyIds.sort().forEach(armyId => {
+            sorted(lostArmyIds).forEach(armyId => {
                 nextLogs.push({
                     id: ctx.rng.id('log'),
                     day: ctx.turn,

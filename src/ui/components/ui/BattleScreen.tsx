@@ -2,8 +2,9 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../../shared/types';
 import { useI18n } from '../../i18n';
-import { BattleOutcome, FactionRegistry, resolveBattleOutcome } from '../../../engine/battle/outcome';
+import { FactionRegistry, resolveBattleOutcome } from '../../../engine/battle/outcome';
 import { shortId } from '../../../engine/idUtils';
+import { sorted } from '../../../shared/sorting';
 
 interface BattleScreenProps {
   battleId?: string;
@@ -60,7 +61,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
   const stats = useMemo(() => {
       if (!battle) return null;
 
-      const initialShips = battle.initialShips || [];
+      const initialShips: BattleShipSnapshot[] = battle.initialShips || [];
       const survivorSet = new Set(battle.survivorShipIds || []);
 
       const factions = initialShips.length > 0
@@ -78,12 +79,12 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
       });
 
       const playerPresent = factions.includes(playerFactionId);
-      const primaryEnemyId = factions
-          .filter(f => f !== playerFactionId || !playerPresent)
-          .sort((a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0))[0]
-          || null;
+      const primaryEnemyId = sorted(
+          factions.filter(f => f !== playerFactionId || !playerPresent),
+          (a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0)
+      )[0] || null;
 
-      const buildSide = (targetFactionId: string) => {
+      const buildSide = (targetFactionId: FactionId) => {
           const snaps = initialShips.filter(s => s.factionId === targetFactionId);
           const lost = snaps.reduce((count, s) => count + (survivorSet.has(s.shipId) ? 0 : 1), 0);
           const fleetsFromSnapshots = snaps.map(s => shortId(s.fleetId));
@@ -114,13 +115,13 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
           };
       };
 
-      const orderedFactionIds: string[] = [];
+      const orderedFactionIds: FactionId[] = [];
       if (playerPresent) orderedFactionIds.push(playerFactionId);
       if (primaryEnemyId && !orderedFactionIds.includes(primaryEnemyId)) orderedFactionIds.push(primaryEnemyId);
-      factions
-          .filter(fid => !orderedFactionIds.includes(fid))
-          .sort((a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0))
-          .forEach(fid => orderedFactionIds.push(fid));
+      sorted(
+          factions.filter(fid => !orderedFactionIds.includes(fid)),
+          (a, b) => (factionCounts[b] || 0) - (factionCounts[a] || 0)
+      ).forEach(fid => orderedFactionIds.push(fid));
 
       const sides = orderedFactionIds.map(fid => buildSide(fid));
 
@@ -152,7 +153,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({
         : t('battle.finished');
 
   const renderComposition = (comp: Record<string, { engaged: number, lost: number }>, color: string) => {
-      const types = Object.keys(comp).sort();
+      const types = sorted(Object.keys(comp));
       if (types.length === 0) return null;
 
       return (

@@ -3,15 +3,17 @@ import { GameState, FactionId, AIState } from '../../../shared/types';
 import { TurnContext } from '../types';
 import { createEmptyAIState, getLegacyAiFactionId, planAiTurn } from '../../ai';
 import { applyCommand } from '../../commands';
+import { sorted } from '../../../shared/sorting';
 
 export const phaseAI = (state: GameState, ctx: TurnContext): GameState => {
     if (!state.rules.aiEnabled) return state;
 
     const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
 
-    const aiFactions = state.factions
-        .filter(faction => faction.aiProfile)
-        .sort((a, b) => a.id.localeCompare(b.id));
+    const aiFactions = sorted(
+        state.factions.filter(faction => faction.aiProfile),
+        (a, b) => a.id.localeCompare(b.id)
+    );
 
     const ensuredAiStates: Record<FactionId, AIState> = { ...(currentTurnState.aiStates ?? {}) };
     const legacyAiFactionId = getLegacyAiFactionId(currentTurnState.factions);

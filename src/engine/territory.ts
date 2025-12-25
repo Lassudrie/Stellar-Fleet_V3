@@ -3,6 +3,7 @@ import { StarSystem, FactionId } from '../shared/types';
 import { TERRITORY_RADIUS } from '../content/data/static';
 import { Vec3, distSq } from './math/vec3';
 import { SpatialIndex } from './spatialIndex';
+import { sorted } from '../shared/sorting';
 
 // Pre-calculate squared radius to avoid Sqrt operations in hot loops
 const TERRITORY_RADIUS_SQ = TERRITORY_RADIUS * TERRITORY_RADIUS;
@@ -24,7 +25,7 @@ export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): Factio
   if (ownedSystems.length === 0) return null;
 
   // Sort to guarantee deterministic processing when distances tie
-  const sortedSystems = [...ownedSystems].sort((a, b) => a.id.localeCompare(b.id));
+  const sortedSystems = sorted(ownedSystems, (a, b) => a.id.localeCompare(b.id));
 
   let closestSystem: StarSystem | null = null;
   let minDistSq = Infinity;
@@ -59,9 +60,10 @@ export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): Factio
 };
 
 export const buildTerritoryResolver = (systems: StarSystem[], currentDay?: number) => {
-  const ownedSystems = systems
-    .filter(system => system.ownerFactionId !== null)
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const ownedSystems = sorted(
+    systems.filter(system => system.ownerFactionId !== null),
+    (a, b) => a.id.localeCompare(b.id)
+  );
 
   if (ownedSystems.length === 0) {
     return (_position: Vec3): FactionId | null => null;

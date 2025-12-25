@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { FactionId, StarSystem } from '../../../shared/types';
 import { useI18n } from '../../i18n';
 import { computeConstrainedMenuPosition, SafeAreaInsets, ViewportRect } from './positioning/computeConstrainedMenuPosition';
+import { sorted } from '../../../shared/sorting';
 
 type GroundForceStats = {
   count: number;
@@ -242,9 +243,10 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
                   {(() => {
                       const entries = Object.values(groundForces);
                       const playerEntry = entries.find(entry => entry.isPlayer);
-                      const hostileEntries = entries
-                          .filter(entry => !entry.isPlayer)
-                          .sort((a, b) => b.currentStrength - a.currentStrength || b.maxStrength - a.maxStrength);
+                      const hostileEntries = sorted(
+                          entries.filter(entry => !entry.isPlayer),
+                          (a, b) => b.currentStrength - a.currentStrength || b.maxStrength - a.maxStrength
+                      );
 
                       const highlightedHostiles = hostileEntries.slice(0, 2);
                       const coalitionEntries = hostileEntries.slice(2);

@@ -3,6 +3,7 @@ import { GameState, Battle, FleetState } from '../../shared/types';
 import { RNG } from '../rng';
 import { CAPTURE_RANGE_SQ } from '../../content/data/static';
 import { distSq } from '../math/vec3';
+import { sorted } from '../../shared/sorting';
 
 /**
  * Scans the galaxy for contested systems.
@@ -69,7 +70,7 @@ export const detectNewBattles = (state: GameState, rng: RNG, turn: number): Batt
 
     if (presentFactionIds.size > 1) {
       const battleId = rng.id('battle');
-      const involvedFleetIds = [...fleetIds].sort();
+      const involvedFleetIds = sorted([...fleetIds]);
 
       const battle: Battle = {
         id: battleId,

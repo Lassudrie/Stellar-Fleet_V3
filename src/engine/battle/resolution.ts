@@ -26,6 +26,7 @@ import {
 import { withUpdatedFleetDerived } from '../fleetDerived';
 import { devWarn } from '../../shared/devLogger';
 import { shortId } from '../idUtils';
+import { sorted } from '../../shared/sorting';
 
 const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
@@ -135,11 +136,11 @@ export const resolveBattle = (
   const involvedFleets = state.fleets.filter(f => battle.involvedFleetIds.includes(f.id));
   
   // --- CAPTURE SNAPSHOT BEFORE SIMULATION ---
-  const initialShips: BattleShipSnapshot[] = [];
+  let initialShips: BattleShipSnapshot[] = [];
   const initialAmmunitionByShip = new Map<string, ShipConsumables>();
   
   // Deterministic ship initialization
-  const battleShips: BattleShipState[] = [];
+  let battleShips: BattleShipState[] = [];
   
   // We use a Map for O(1) lookups during the hot loop
   const shipMap = new Map<string, BattleShipState>();
@@ -174,8 +175,8 @@ export const resolveBattle = (
   });
   
   // Deterministic Sort of snapshot and logic array
-  initialShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
-  battleShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
+  initialShips = sorted(initialShips, (a, b) => a.shipId.localeCompare(b.shipId));
+  battleShips = sorted(battleShips, (a, b) => a.shipId.localeCompare(b.shipId));
 
   // Safety guard: if no valid ships, return early with a draw
   if (battleShips.length === 0) {
@@ -259,7 +260,7 @@ export const resolveBattle = (
       }
     }
 
-    const activeFactions = Array.from(activeByFaction.keys()).sort();
+    const activeFactions = sorted(Array.from(activeByFaction.keys()));
     const enemiesByFaction = new Map<FactionId, BattleShipState[]>();
     const enemiesByFactionAndType = new Map<FactionId, Map<ShipType, BattleShipState[]>>();
 
@@ -376,7 +377,7 @@ export const resolveBattle = (
       }
     }
 
-    const threatTargets = Array.from(projectileThreats.keys()).sort();
+    const threatTargets = sorted(Array.from(projectileThreats.keys()));
 
     for (const targetId of threatTargets) {
       const defender = shipMap.get(targetId);
