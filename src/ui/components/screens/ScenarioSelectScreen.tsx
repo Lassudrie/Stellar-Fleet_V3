@@ -11,22 +11,41 @@ interface ScenarioSelectScreenProps {
 
 const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onLaunch }) => {
   const { t } = useI18n();
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id);
+  const defaultTemplate = SCENARIO_TEMPLATES[0];
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(defaultTemplate?.id ?? null);
   const [customSeed, setCustomSeed] = useState<string>('');
   const [unlimitedFuel, setUnlimitedFuel] = useState(false);
 
-  const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) as ScenarioTemplate;
+  const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) ?? defaultTemplate ?? null;
+  const isLaunchDisabled = !selectedTemplate;
 
   const handleLaunch = () => {
+    if (!selectedTemplate) {
+      return;
+    }
+
     const seed = customSeed ? parseInt(customSeed, 10) || Date.now() : Date.now();
-    const scenario = buildScenario(selectedTemplateId, seed, {
+    const scenario = buildScenario(selectedTemplate.id, seed, {
       rules: { unlimitedFuel }
     });
     onLaunch(scenario);
   };
 
-  const getScenarioTitle = (template: ScenarioTemplate) => t(`scenario.${template.id}.title`, { defaultValue: template.meta.title });
-  const getScenarioDesc = (template: ScenarioTemplate) => t(`scenario.${template.id}.desc`, { defaultValue: template.meta.description });
+  const getScenarioTitle = (template: ScenarioTemplate | null) => {
+    if (!template) {
+      return t('scenario.title');
+    }
+
+    return t(`scenario.${template.id}.title`, { defaultValue: template.meta.title });
+  };
+
+  const getScenarioDesc = (template: ScenarioTemplate | null) => {
+    if (!template) {
+      return t('scenario.select');
+    }
+
+    return t(`scenario.${template.id}.desc`, { defaultValue: template.meta.description });
+  };
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950 select-none animate-in fade-in duration-300">
@@ -50,7 +69,10 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
             {/* MOBILE QUICK LAUNCH BUTTON */}
             <button 
               onClick={handleLaunch}
-              className="md:hidden bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded shadow-[0_0_15px_rgba(37,99,235,0.4)] uppercase text-xs font-bold tracking-widest active:scale-95 transition-transform flex items-center gap-2"
+              disabled={isLaunchDisabled}
+              className={`md:hidden bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded shadow-[0_0_15px_rgba(37,99,235,0.4)] uppercase text-xs font-bold tracking-widest active:scale-95 transition-transform flex items-center gap-2 ${
+                isLaunchDisabled ? 'opacity-50 cursor-not-allowed hover:bg-blue-600 active:scale-100' : ''
+              }`}
             >
               <span>{t('scenario.launch_short')}</span>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
@@ -100,10 +122,10 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
                 {getScenarioTitle(selectedTemplate)}
               </h1>
               <div className="flex gap-2 mb-4 md:mb-6">
-                 {selectedTemplate.rules.fogOfWar && (
+                 {selectedTemplate?.rules.fogOfWar && (
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.fog')}</span>
                  )}
-                 {selectedTemplate.rules.aiEnabled && (
+                 {selectedTemplate?.rules.aiEnabled && (
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.ai')}</span>
                  )}
               </div>
@@ -116,11 +138,11 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
            <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
               <div className="bg-slate-800/30 p-4 rounded border border-slate-700/50">
                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">{t('scenario.size')}</div>
-                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate.generation.systemCount} <span className="text-sm text-slate-600">{t('scenario.stars')}</span></div>
+                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate?.generation.systemCount ?? 0} <span className="text-sm text-slate-600">{t('scenario.stars')}</span></div>
               </div>
               <div className="bg-slate-800/30 p-4 rounded border border-slate-700/50">
                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">{t('scenario.radius')}</div>
-                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate.generation.radius} <span className="text-sm text-slate-600">LY</span></div>
+                 <div className="text-xl md:text-2xl font-mono text-blue-200">{selectedTemplate?.generation.radius ?? 0} <span className="text-sm text-slate-600">LY</span></div>
               </div>
            </div>
 
@@ -170,7 +192,10 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
 
               <button 
                 onClick={handleLaunch}
-                className="hidden md:block w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase tracking-widest rounded shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1 active:translate-y-0"
+                disabled={isLaunchDisabled}
+                className={`hidden md:block w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase tracking-widest rounded shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] transition-all transform hover:-translate-y-1 active:translate-y-0 ${
+                  isLaunchDisabled ? 'opacity-50 cursor-not-allowed hover:-translate-y-0' : ''
+                }`}
               >
                 {t('scenario.launch')}
               </button>
