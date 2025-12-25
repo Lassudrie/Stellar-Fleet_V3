@@ -582,7 +582,12 @@ const assignFleets = (
   };
 
   if (aiDebugger.getEnabled()) {
-      aiDebugger.startTurn(state.day, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
+      aiDebugger.startTurn(
+        state.day,
+        factionId,
+        { totalFleets: myFleets.length, ownedSystems: mySystems.length },
+        { timestamp: state.day }
+      );
   }
 
   for (const task of tasks) {

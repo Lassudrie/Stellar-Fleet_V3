@@ -60,6 +60,7 @@ export interface AIDebugTurnLog {
   turn: number;
   factionId: FactionId;
   timestamp: number;
+  timestampSource: 'logical' | 'injected';
   meta: {
     totalFleets: number;
     ownedSystems: number;
@@ -70,6 +71,18 @@ export interface AIDebugTurnLog {
   fleetEvaluations: Record<string, FleetEvalLog[]>; // Map TaskID -> Fleets Considered
   decisions: (CombatDecisionLog | SplitMergeLog)[];
   logs: string[];
+}
+
+export interface AIDebugStartOptions {
+  /**
+   * Optional deterministic timestamp for debug metadata.
+   * Defaults to the logical turn when omitted to avoid wall-clock usage in the engine.
+   */
+  timestamp?: number;
+  /**
+   * Optional clock function used only for debug metadata. Prefer stable sources (e.g., turn/day).
+   */
+  clock?: () => number;
 }
 
 // --- LOGGER CLASS ---
@@ -91,13 +104,22 @@ class AIDebugger {
     return this.isEnabled;
   }
 
-  public startTurn(turn: number, factionId: FactionId, meta: { totalFleets: number, ownedSystems: number }) {
+  public startTurn(
+    turn: number,
+    factionId: FactionId,
+    meta: { totalFleets: number, ownedSystems: number },
+    options: AIDebugStartOptions = {}
+  ) {
     if (!this.isEnabled) return;
+
+    const resolvedTimestamp = options.timestamp ?? (options.clock ? options.clock() : turn);
+    const timestampSource = options.timestamp !== undefined || options.clock ? 'injected' : 'logical';
 
     this.currentLog = {
       turn,
       factionId,
-      timestamp: Date.now(),
+      timestamp: resolvedTimestamp,
+      timestampSource,
       meta: {
         ...meta,
         globalThreat: 0 // Will be updated during analysis via setGlobalThreat
