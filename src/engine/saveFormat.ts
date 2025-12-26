@@ -65,6 +65,7 @@ export interface FleetDTO {
   stateStartTurn: number;
   retreating?: boolean;
   invasionTargetSystemId?: string | null;
+  invasionTargetPlanetId?: string | null;
   loadTargetSystemId?: string | null;
   unloadTargetSystemId?: string | null;
 }

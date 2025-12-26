@@ -237,6 +237,7 @@ export interface Fleet {
   stateStartTurn: number; // Turn when the current state began (Used for VFX)
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
+  invasionTargetPlanetId?: string | null; // Preferred planet target for invasion orders
   loadTargetSystemId?: string | null; // If set, fleet will embark allied armies at this system upon arrival
   unloadTargetSystemId?: string | null; // If set, fleet will unload embarked armies at this allied system upon arrival
 }

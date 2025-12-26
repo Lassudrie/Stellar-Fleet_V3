@@ -66,7 +66,7 @@ interface UIProps {
 
   onOpenBattle: (battleId: string) => void;
   onInvade: (systemId: string) => void;
-  onCommitInvasion: (fleetId: string) => void;
+  onCommitInvasion: (fleetId: string, planetId: string | null) => void;
 
   onSave: () => void;
   onExportAiLogs?: () => void;

@@ -1,6 +1,6 @@
 
 import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/types';
-import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
+import { ARMY_DESTROY_THRESHOLD } from './army';
 import { sorted } from '../shared/sorting';
 
 export interface GroundBattleResult {
@@ -58,27 +58,10 @@ const applyLosses = (
         return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0, thresholds: [] };
     }
 
-    if (totalStrengthLoss <= 0) {
-        const thresholds = armies.map(army => ({ armyId: army.id, threshold: ARMY_DESTROY_THRESHOLD(army.maxStrength) }));
-        const strengthById = new Map(armies.map(army => [army.id, army.strength]));
-        const destroyedIds = thresholds
-            .filter(({ armyId, threshold }) => (strengthById.get(armyId) ?? 0) <= threshold)
-            .map(entry => entry.armyId);
-
-        const updates = armies.map(army => ({ armyId: army.id, strength: army.strength, morale: army.morale }));
-
-        return {
-            updates,
-            destroyedIds,
-            strengthLost: 0,
-            moraleLost: 0,
-            thresholds
-        };
-    }
-
     const sortedArmies = sorted(armies, (a, b) => a.id.localeCompare(b.id));
     const totalStrength = calculateTotalStrength(sortedArmies);
-    let remainingLoss = Math.min(totalStrengthLoss, totalStrength);
+    const clampedStrengthLoss = Math.max(0, Math.min(totalStrengthLoss, totalStrength));
+    let remainingLoss = clampedStrengthLoss;
     let appliedLoss = 0;
     let moraleLost = 0;
     const updates: { armyId: string; strength: number; morale: number }[] = [];
@@ -86,16 +69,12 @@ const applyLosses = (
     const thresholds: { armyId: string; threshold: number }[] = [];
 
     sortedArmies.forEach((army, index) => {
-        if (remainingLoss <= 0) {
-            updates.push({ armyId: army.id, strength: army.strength, morale: army.morale });
-            return;
-        }
-
         const isLast = index === sortedArmies.length - 1;
-        const proportionalLoss = isLast ? remainingLoss : Math.floor((totalStrengthLoss * army.strength) / totalStrength);
-        const loss = Math.min(army.strength, Math.max(0, proportionalLoss));
+        const proportionalLoss = totalStrength > 0 ? Math.floor((clampedStrengthLoss * army.strength) / totalStrength) : 0;
+        const plannedLoss = isLast ? remainingLoss : proportionalLoss;
+        const loss = Math.max(0, Math.min(army.strength, plannedLoss, remainingLoss));
         const newStrength = Math.max(0, army.strength - loss);
-        const moralePenalty = lossFraction * MORALE_LOSS_MULTIPLIER;
+        const moralePenalty = loss > 0 ? lossFraction * MORALE_LOSS_MULTIPLIER : 0;
         const newMorale = clampMoraleFactor(army.morale * (1 - moralePenalty));
         const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
 
@@ -138,8 +117,17 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
         return map;
     }, new Map());
 
-    const defendingFactionId =
-        system.ownerFactionId && armiesByFaction.has(system.ownerFactionId) ? system.ownerFactionId : null;
+    const defendingFactionId = (() => {
+        const planetOwner = planet.ownerFactionId;
+        if (planetOwner && armiesByFaction.has(planetOwner)) {
+            return planetOwner;
+        }
+        const systemOwner = system.ownerFactionId;
+        if (systemOwner && armiesByFaction.has(systemOwner)) {
+            return systemOwner;
+        }
+        return null;
+    })();
     const attackingFactions = defendingFactionId
         ? Array.from(armiesByFaction.keys()).filter(factionId => factionId !== defendingFactionId)
         : [];
@@ -209,8 +197,12 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
 
         factionOutcomes.forEach((outcome, factionId) => {
             const thresholdMap = factionThresholds.get(factionId) ?? new Map<string, number>();
-            const survivors = outcome.updates.filter(update => update.strength > (thresholdMap.get(update.armyId) ?? MIN_ARMY_CREATION_STRENGTH));
-            survivorsByFaction.set(factionId, { updates: survivors });
+        const survivors = outcome.updates.filter(update => {
+            const baseArmy = originalArmiesById.get(update.armyId);
+            const threshold = thresholdMap.get(update.armyId) ?? (baseArmy ? ARMY_DESTROY_THRESHOLD(baseArmy.maxStrength) : 0);
+            return update.strength > threshold;
+        });
+        survivorsByFaction.set(factionId, { updates: survivors });
 
             armiesToDestroy.push(...outcome.destroyedIds);
             armyUpdates.push(...outcome.updates);

@@ -5,6 +5,7 @@ import { getDefaultSolidPlanet } from './planets';
 
 const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
 const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
+type ContestedLandingMode = 'abort' | 'always_land';
 
 export interface ArmyOpsOptions {
     fleetLabel?: string;
@@ -38,6 +39,16 @@ export interface ArmyOpsResult {
     logs: LogEntry[];
     count: number;
     unloadedArmyIds?: string[];
+}
+export interface ContestedLandingRiskParams {
+    mode: ContestedLandingMode;
+    armies: Army[];
+    targetArmyIds: string[];
+    systemName: string;
+    planetName?: string;
+    targetPlanetId?: string;
+    day: number;
+    rng: RNG;
 }
 
 const getLogText = (
@@ -187,48 +198,92 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
     return { fleet: updatedFleet, armies: updatedArmies, logs, count: unloadedArmyIds.size, unloadedArmyIds: [...unloadedArmyIds] };
 };
 
-export const applyContestedUnloadRisk = (
-    armies: Army[],
-    targetArmyIds: string[],
-    systemName: string,
-    planetName: string | undefined,
-    day: number,
-    rng: RNG
-): { armies: Army[]; logs: LogEntry[] } => {
-    return targetArmyIds.reduce<{
-        armies: Army[];
-        logs: LogEntry[];
-    }>((outcome, targetArmyId) => {
+export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
+    armies: Army[];
+    logs: LogEntry[];
+    succeeded: string[];
+    failed: string[];
+} => {
+    const {
+        mode,
+        armies,
+        targetArmyIds,
+        systemName,
+        planetName,
+        targetPlanetId,
+        day,
+        rng
+    } = params;
+
+    if (targetArmyIds.length === 0) {
+        return { armies, logs: [], succeeded: [], failed: [] };
+    }
+
+    const targetSet = new Set(targetArmyIds);
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    const outcomes = new Map<string, { tookFire: boolean; strengthLoss: number; success: boolean }>();
+
+    const updatedArmies = armies.map(army => {
+        if (!targetSet.has(army.id)) return army;
+
         const roll = rng.next();
-        const success = roll >= CONTESTED_UNLOAD_FAILURE_THRESHOLD;
-        const logs: LogEntry[] = [];
+        const tookFire = roll < CONTESTED_UNLOAD_FAILURE_THRESHOLD;
+        const success = mode === 'always_land' || !tookFire;
+        const strengthLoss = tookFire ? Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION)) : 0;
 
-        if (!success) {
-            let appliedLoss = 0;
-            const updatedArmies = outcome.armies.map(army => {
-                if (army.id !== targetArmyId) return army;
-                const strengthLoss = Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION));
-                appliedLoss = strengthLoss;
-                return { ...army, strength: Math.max(0, army.strength - strengthLoss) };
-            });
+        outcomes.set(army.id, { tookFire, strengthLoss, success });
 
+        if (mode === 'abort') {
+            if (success) {
+                succeeded.push(army.id);
+                return {
+                    ...army,
+                    strength: Math.max(0, army.strength - strengthLoss),
+                    state: ArmyState.DEPLOYED,
+                    containerId: targetPlanetId ?? army.containerId
+                };
+            }
+            failed.push(army.id);
+            return {
+                ...army,
+                strength: Math.max(0, army.strength - strengthLoss)
+            };
+        }
+
+        succeeded.push(army.id);
+        return {
+            ...army,
+            strength: Math.max(0, army.strength - strengthLoss)
+        };
+    });
+
+    const logs: LogEntry[] = [];
+    const locationLabel = planetName ?? systemName;
+
+    targetArmyIds.forEach(armyId => {
+        const outcome = outcomes.get(armyId);
+        if (!outcome) return;
+
+        if (mode === 'always_land') {
+            const text = outcome.tookFire
+                ? `Dropships took fire while unloading army ${armyId} at ${locationLabel}, losing ${outcome.strengthLoss} strength.`
+                : `Army ${armyId} dodged enemy fire while unloading at ${locationLabel}.`;
             logs.push({
                 id: rng.id('log'),
                 day,
-                text: `Dropships took fire while unloading army ${targetArmyId} at ${planetName ?? systemName}, losing ${appliedLoss} strength.`,
+                text,
                 type: 'combat'
             });
-
-            return { armies: updatedArmies, logs: [...outcome.logs, ...logs] };
+        } else if (!outcome.success) {
+            logs.push({
+                id: rng.id('log'),
+                day,
+                text: `Dropships took fire while deploying army ${armyId} at ${locationLabel}, losing ${outcome.strengthLoss} strength and aborting landing.`,
+                type: 'combat'
+            });
         }
+    });
 
-        logs.push({
-            id: rng.id('log'),
-            day,
-            text: `Army ${targetArmyId} dodged enemy fire while unloading at ${planetName ?? systemName}.`,
-            type: 'combat'
-        });
-
-        return { armies: outcome.armies, logs: [...outcome.logs, ...logs] };
-    }, { armies, logs: [] });
+    return { armies: updatedArmies, logs, succeeded, failed };
 };

@@ -4,7 +4,7 @@ import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
 import { deepFreezeDev } from './state/immutability';
-import { applyContestedUnloadRisk, computeLoadOps, computeUnloadOps } from './armyOps';
+import { applyContestedLandingRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
@@ -23,7 +23,7 @@ export type GameCommand =
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
   | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
   | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null; reason?: string; turn?: number }
   | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
   | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
 
@@ -109,6 +109,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         targetPosition: clone(system.position),
                         stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null, // Clear previous orders
+                        invasionTargetPlanetId: null,
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
                     };
@@ -147,6 +148,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         targetPosition: clone(system.position),
                         stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: system.id, // Set invasion order
+                        invasionTargetPlanetId: command.targetPlanetId ?? null,
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
                     };
@@ -185,6 +187,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         targetPosition: clone(system.position),
                         stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null,
+                        invasionTargetPlanetId: null,
                         loadTargetSystemId: system.id,
                         unloadTargetSystemId: null
                     };
@@ -223,6 +226,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                         targetPosition: clone(system.position),
                         stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null,
+                        invasionTargetPlanetId: null,
                         loadTargetSystemId: null,
                         unloadTargetSystemId: system.id
                     };
@@ -305,8 +309,17 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 ? system.planets.find(planet => planet.id === command.targetPlanetId && planet.isSolid)
                 : getDefaultSolidPlanet(system);
             const riskOutcome = contested && unloadResult.unloadedArmyIds?.length
-                ? applyContestedUnloadRisk(unloadResult.armies, unloadResult.unloadedArmyIds, system.name, targetPlanet?.name, state.day, rng)
-                : { armies: unloadResult.armies, logs: [] };
+                ? applyContestedLandingRisk({
+                    mode: 'always_land',
+                    armies: unloadResult.armies,
+                    targetArmyIds: unloadResult.unloadedArmyIds,
+                    systemName: system.name,
+                    planetName: targetPlanet?.name,
+                    targetPlanetId: targetPlanet?.id,
+                    day: state.day,
+                    rng
+                })
+                : { armies: unloadResult.armies, logs: [], succeeded: [], failed: [] };
 
             return ok({
                 ...state,
@@ -394,8 +407,17 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (unloadResult.count === 0) return fail('Unable to unload the selected army.');
 
             const riskOutcome = contested
-                ? applyContestedUnloadRisk(unloadResult.armies, [command.armyId], system.name, targetPlanet.planet.name, state.day, rng)
-                : { armies: unloadResult.armies, logs: [] };
+                ? applyContestedLandingRisk({
+                    mode: 'always_land',
+                    armies: unloadResult.armies,
+                    targetArmyIds: [command.armyId],
+                    systemName: system.name,
+                    planetName: targetPlanet.planet.name,
+                    targetPlanetId: targetPlanet.planet.id,
+                    day: state.day,
+                    rng
+                })
+                : { armies: unloadResult.armies, logs: [], succeeded: [], failed: [] };
 
             return ok({
                 ...state,
@@ -474,6 +496,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 position: clone(fleet.position),
                 targetPosition: fleet.targetPosition ? clone(fleet.targetPosition) : null,
                 invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+                invasionTargetPlanetId: fleet.invasionTargetPlanetId ?? null,
                 loadTargetSystemId: fleet.loadTargetSystemId ?? null,
                 unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
             });

@@ -473,7 +473,7 @@ const App: React.FC = () => {
       setUiMode('INVASION_MODAL');
   };
 
-  const handleCommitInvasion = (fleetId: string) => {
+  const handleCommitInvasion = (fleetId: string, planetId: string | null) => {
       const fId = fleetId;
       if (!targetSystem || !engine) {
           console.warn('[App] handleCommitInvasion: Missing targetSystem or engine');
@@ -483,13 +483,14 @@ const App: React.FC = () => {
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
           fleetId: fId,
-          targetSystemId: targetSystem.id
+          targetSystemId: targetSystem.id,
+          targetPlanetId: planetId ?? undefined
       });
 
-      if (processCommandResult(result, notifyCommandError) && typeof result.deployedArmies === 'number') {
+      if (processCommandResult(result, notifyCommandError)) {
           engine.dispatchCommand({
               type: 'ADD_LOG',
-              text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
+              text: t('msg.invasionLog', { system: targetSystem.name }),
               logType: 'move'
           });
       }

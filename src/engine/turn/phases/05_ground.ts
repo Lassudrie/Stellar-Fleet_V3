@@ -99,13 +99,11 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     const updatedSystems = nextSystems.map(system => {
-        const contestedOrbit = isOrbitContested(system, state);
-
         const updatedPlanets = system.planets.map(planet => {
             const armies = armiesByPlanetId.get(planet.id) ?? [];
             const factionIds = new Set(armies.map(a => a.factionId));
             const ownerFactionId =
-                factionIds.size === 1 && !contestedOrbit
+                factionIds.size === 1
                     ? Array.from(factionIds)[0]
                     : planet.ownerFactionId;
 
@@ -190,7 +188,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         });
 
         const newOwnerFactionId =
-            systemFactionIds.size === 1 && !contestedOrbit
+            systemFactionIds.size === 1
                 ? Array.from(systemFactionIds)[0]
                 : system.ownerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;

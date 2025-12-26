@@ -1,5 +1,5 @@
 import { CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../content/data/static';
-import { Fleet, FleetState, GameState, StarSystem } from '../shared/types';
+import { Fleet, FleetState, GameState, StarSystem, FactionId } from '../shared/types';
 import { Vec3, distSq } from './math/vec3';
 
 /**
@@ -31,6 +31,21 @@ export const areFleetsSharingOrbit = (a: Fleet, b: Fleet): boolean =>
     a.state === FleetState.ORBIT &&
     b.state === FleetState.ORBIT &&
     isWithinOrbitProximity(a.position, b.position);
+
+export const getFactionsInCaptureRange = (system: StarSystem, state: GameState): Set<FactionId> => {
+    const captureSq = CAPTURE_RANGE_SQ;
+    return new Set(
+        state.fleets
+            .filter(fleet => fleet.ships.length > 0 && distSq(fleet.position, system.position) <= captureSq)
+            .map(fleet => fleet.factionId)
+    );
+};
+
+export const isOrbitHostileToFaction = (system: StarSystem, state: GameState, factionId: FactionId): boolean => {
+    const factionsInRange = getFactionsInCaptureRange(system, state);
+    if (factionsInRange.size === 0) return false;
+    return Array.from(factionsInRange).some(id => id !== factionId);
+};
 
 export const getOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
     let closest: { system: StarSystem; distanceSq: number } | null = null;
