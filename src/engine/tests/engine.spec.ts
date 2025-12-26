@@ -1925,6 +1925,67 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'System ownership requires all solid bodies to share the same non-null owner',
+    run: () => {
+      const planet = createPlanet('sys-shared', 'red', 1);
+      const moon: PlanetBody = { ...createPlanet('sys-shared', 'red', 2), bodyType: 'moon' };
+
+      const system: StarSystem = {
+        id: 'sys-shared',
+        name: 'sys-shared',
+        position: baseVec,
+        color: COLORS.red,
+        size: 1,
+        ownerFactionId: 'red',
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: [planet, moon]
+      };
+
+      const blueArmy = createArmy('army-blue-shared', 'blue', 6000, ArmyState.DEPLOYED, planet.id);
+      const state = createBaseState({ systems: [system], armies: [blueArmy] });
+      const ctx = { rng: new RNG(42), turn: state.day + 1 };
+
+      const nextState = phaseGround(state, ctx);
+      const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'System ownership should not flip if not all solid bodies share the new owner');
+      assert.strictEqual(nextState.logs.length, state.logs.length, 'No system-level log should be created when control does not change');
+    }
+  },
+  {
+    name: 'System ownership flips only after every solid planet and moon is secured',
+    run: () => {
+      const planet = createPlanet('sys-unified', 'red', 1);
+      const moon: PlanetBody = { ...createPlanet('sys-unified', 'red', 2), bodyType: 'moon' };
+
+      const system: StarSystem = {
+        id: 'sys-unified',
+        name: 'sys-unified',
+        position: baseVec,
+        color: COLORS.red,
+        size: 1,
+        ownerFactionId: 'red',
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: [planet, moon]
+      };
+
+      const greenPlanetArmy = createArmy('army-green-planet', 'green', 4000, ArmyState.DEPLOYED, planet.id);
+      const greenMoonArmy = createArmy('army-green-moon', 'green', 4000, ArmyState.DEPLOYED, moon.id);
+
+      const state = createBaseState({ systems: [system], armies: [greenPlanetArmy, greenMoonArmy] });
+      const ctx = { rng: new RNG(17), turn: state.day + 1 };
+
+      const nextState = phaseGround(state, ctx);
+      const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+      const lastLog = nextState.logs[nextState.logs.length - 1]?.text ?? '';
+
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when all solid bodies share the same non-null owner');
+      assert.match(lastLog, /all solid planets and moons were secured/i, 'System capture log should mention the solid-body prerequisite');
+    }
+  },
+  {
     name: 'Conquest exports remain referenced outside their module',
     run: () => {
       const projectRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));

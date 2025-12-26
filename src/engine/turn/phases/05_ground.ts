@@ -4,7 +4,6 @@ import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
-import { isOrbitContested } from '../../orbit';
 import { canonicalizeMessages } from '../../state/canonicalize';
 import { sorted } from '../../../shared/sorting';
 
@@ -180,17 +179,19 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             return { ...planet, ownerFactionId };
         });
 
-        const systemFactionIds = new Set<FactionId>();
-        updatedPlanets.forEach(planet => {
-            if (!planet.isSolid) return;
-            const armies = armiesByPlanetId.get(planet.id) ?? [];
-            armies.forEach(army => systemFactionIds.add(army.factionId));
-        });
+        const solidBodies = updatedPlanets.filter(planet => planet.isSolid);
+        const uniformSolidOwner = (() => {
+            if (solidBodies.length === 0) return null;
+            const [firstBody] = solidBodies;
+            if (!firstBody.ownerFactionId) return null;
 
-        const newOwnerFactionId =
-            systemFactionIds.size === 1
-                ? Array.from(systemFactionIds)[0]
-                : system.ownerFactionId;
+            const sharedOwner = firstBody.ownerFactionId;
+            const hasMismatch = solidBodies.some(body => body.ownerFactionId !== sharedOwner);
+
+            return hasMismatch ? null : sharedOwner;
+        })();
+
+        const newOwnerFactionId = uniformSolidOwner ?? system.ownerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
 
         if (ownerChanged && newOwnerFactionId && aiFactionIds.has(newOwnerFactionId)) {
@@ -198,6 +199,52 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 holdUpdates[newOwnerFactionId] = [];
             }
             holdUpdates[newOwnerFactionId].push(system.id);
+        }
+
+        if (ownerChanged && newOwnerFactionId) {
+            const sortedBodies = sorted(solidBodies, (a, b) => a.name.localeCompare(b.name));
+            const involvedFactionIds = new Set<FactionId>([
+                system.ownerFactionId,
+                newOwnerFactionId
+            ].filter((factionId): factionId is FactionId => Boolean(factionId)));
+
+            nextLogs = [
+                ...nextLogs,
+                {
+                    id: ctx.rng.id('log'),
+                    day: ctx.turn,
+                    text: `System ${system.name} control set to ${newOwnerFactionId} after all solid planets and moons were secured (${sortedBodies.map(body => body.name).join(', ')}).`,
+                    type: 'combat'
+                }
+            ];
+
+            const isPlayerInvolved =
+                newOwnerFactionId === state.playerFactionId || system.ownerFactionId === state.playerFactionId;
+
+            if (isPlayerInvolved) {
+                const systemMessage: GameMessage = {
+                    id: ctx.rng.id('msg'),
+                    day: ctx.turn,
+                    type: 'SYSTEM_SECURED',
+                    priority: newOwnerFactionId === state.playerFactionId ? 2 : 1,
+                    title: `${system.name} secured`,
+                    subtitle: `Turn ${ctx.turn}`,
+                    lines: [
+                        `All solid planets and moons now belong to ${newOwnerFactionId}.`,
+                        `Secured bodies: ${sortedBodies.map(body => body.name).join(', ') || 'None'}.`
+                    ],
+                    payload: {
+                        systemId: system.id,
+                        newOwnerFactionId,
+                        involvedFactionIds: sorted(Array.from(involvedFactionIds), (a, b) => a.localeCompare(b))
+                    },
+                    read: false,
+                    dismissed: false,
+                    createdAtTurn: ctx.turn
+                };
+
+                nextMessages = canonicalizeMessages([...nextMessages, systemMessage]);
+            }
         }
 
         const newColor =
