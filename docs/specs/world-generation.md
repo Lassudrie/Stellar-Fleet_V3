@@ -45,7 +45,7 @@ Les flottes décrites dans `setup.initialFleets` sont instanciées par faction :
   - `random` : dans un système possédé ; sinon neutre ; sinon n’importe lequel.  
   - Coordonnées `{x,y,z}` : spawn en espace profond, verrouillant la cible vers le système le plus proche (état `MOVING`).  
 - **Composition** : chaque type est validé ; sinon remplacé par `frigate` avec warning.  
-- **Armées embarquées** : si `withArmies` est vrai, chaque `TROOP_TRANSPORT` génère une armée `EMBARKED`.
+- **Armées embarquées** : si `withArmies` est vrai, chaque `TRANSPORTER` génère une armée `EMBARKED`.
 
 ## 7. Garnisons Automatiques
 Tous les systèmes possédés reçoivent des armées déployées sur les planètes solides : 3 pour un capital (`isHomeworld`), 1 pour les autres. Les planètes occupées héritent de l’owner si absent.

@@ -29,8 +29,8 @@ Le jeu repose sur une boucle de jeu séquentielle :
 ## 4. Flottes, Brouillard de Guerre et Vaisseaux
 Une flotte est une entité composée d'un ou plusieurs vaisseaux.
 - **Types de vaisseaux** :
-    *   `CARRIER`, `CRUISER`, `DESTROYER`, `FRIGATE`, `FIGHTER`, `BOMBER`.
-    *   `TROOP_TRANSPORT` : Vaisseau non-combattant (Hull élevée, 0 DPS) capable de transporter une Armée.
+    *   Combattants : `CARRIER`, `CRUISER`, `DESTROYER`, `FRIGATE`, `FIGHTER`, `BOMBER`, `SUPPORT`.
+    *   Logistique : `TRANSPORTER` (transport d'armées), `TANKER` (ravitaillement), `EXTRACTOR` (extraction de gaz), `BUILDER` (construction/civil).
 - **Propriétés** : Chaque type possède des stats définies (HP, Damage, Speed, PD, Evasion, Stocks missiles/torpilles).
 - **Brouillard de guerre (`rules.fogOfWar`)** : quand activé, seul ce qui est observé est visible :
     *  Un système est considéré observé s'il est possédé par la faction observatrice ou si au moins une de ses flottes se trouve dans la portée de capture (`CAPTURE_RANGE`).
@@ -49,7 +49,7 @@ La capture d'un système n'est plus automatique via la présence orbitale. Elle 
 
 ### 6.1. Déploiement ("Boots on the Ground")
 Pour capturer ou défendre un système :
-1.  Une flotte contenant des `TROOP_TRANSPORT` chargés doit être en orbite (`FleetState.ORBIT`) autour du système cible.
+1.  Une flotte contenant des `TRANSPORTER` chargés doit être en orbite (`FleetState.ORBIT`) autour du système cible.
 2.  L'ordre `UNLOAD_ARMY` doit être donné pour débarquer l'armée sur la planète (`ArmyState.DEPLOYED`).
 3.  Conditions de débarquement :
     *   Pas de bataille spatiale active dans le système.
@@ -74,7 +74,7 @@ Le système change de couleur et d'owner si :
 
 ### 6.4. Bombardement Orbital
 Les flottes peuvent affaiblir des forces terrestres ennemies par bombardement orbital entre la résolution spatiale et le combat au sol :
-- **Conditions** : une seule faction doit occuper l'orbite du système, au moins un vaisseau combattant (non `TROOP_TRANSPORT`) doit être en `ORBIT` et des armées ennemies doivent être déployées sur une planète solide du système.
+- **Conditions** : une seule faction doit occuper l'orbite du système, au moins un vaisseau combattant (non `TRANSPORTER`) doit être en `ORBIT` et des armées ennemies doivent être déployées sur une planète solide du système.
 - **Effets** : chaque bombardement inflige une perte de `strength` proportionnelle à la puissance de bombardement disponible, plafonnée pour éviter l'annihilation instantanée, et réduit la `morale` jusqu'à un minimum. Les pertes sont réparties entre les armées ciblées mais respectent un buffer pour éviter de passer sous le seuil minimal instantanément.
 - **Journalisation** : chaque bombardement génère un log indiquant le système, la planète, la faction attaquante et les pertes appliquées. Si plusieurs factions partagent l'orbite, aucun bombardement n'a lieu.
 
