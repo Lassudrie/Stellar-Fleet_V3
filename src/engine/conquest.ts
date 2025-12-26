@@ -118,15 +118,17 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
     }, new Map());
 
     const defendingFactionId = (() => {
-        const planetOwner = planet.ownerFactionId;
-        if (planetOwner && armiesByFaction.has(planetOwner)) {
-            return planetOwner;
+        const planetOwner = planet.ownerFactionId ?? null;
+
+        if (!planetOwner) {
+            return null;
         }
-        const systemOwner = system.ownerFactionId;
-        if (systemOwner && armiesByFaction.has(systemOwner)) {
-            return systemOwner;
+
+        if (!armiesByFaction.has(planetOwner)) {
+            return null;
         }
-        return null;
+
+        return planetOwner;
     })();
     const attackingFactions = defendingFactionId
         ? Array.from(armiesByFaction.keys()).filter(factionId => factionId !== defendingFactionId)
