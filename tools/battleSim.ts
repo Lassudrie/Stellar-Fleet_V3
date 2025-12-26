@@ -120,10 +120,12 @@ const SHIP_TYPE_ALIASES: Record<string, ShipType> = {
   fighters: ShipType.FIGHTER,
   bomber: ShipType.BOMBER,
   bombers: ShipType.BOMBER,
-  transport: ShipType.TROOP_TRANSPORT,
-  transports: ShipType.TROOP_TRANSPORT,
-  troop_transport: ShipType.TROOP_TRANSPORT,
-  trooptransports: ShipType.TROOP_TRANSPORT,
+  transport: ShipType.TRANSPORTER,
+  transports: ShipType.TRANSPORTER,
+  transporter: ShipType.TRANSPORTER,
+  transporters: ShipType.TRANSPORTER,
+  troop_transport: ShipType.TRANSPORTER,
+  trooptransports: ShipType.TRANSPORTER,
   tanker: ShipType.TANKER,
   tankers: ShipType.TANKER,
   extractor: ShipType.EXTRACTOR,
@@ -183,7 +185,7 @@ const PRESETS: Record<string, SimulationPreset> = {
         [ShipType.CRUISER]: 2,
         [ShipType.DESTROYER]: 2,
         [ShipType.FIGHTER]: 2,
-        [ShipType.TROOP_TRANSPORT]: 2
+        [ShipType.TRANSPORTER]: 2
       }
     },
     fleetB: {

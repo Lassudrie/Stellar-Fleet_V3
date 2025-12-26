@@ -137,7 +137,11 @@ export enum ShipType {
   FRIGATE = 'frigate',
   FIGHTER = 'fighter',
   BOMBER = 'bomber',
-  TROOP_TRANSPORT = 'troop_transport',
+  TRANSPORTER = 'transporter',
+  BUILDER = 'builder',
+  SUPPORT = 'support',
+  TANKER = 'tanker',
+  EXTRACTOR = 'extractor',
 }
 
 export interface ShipStats {

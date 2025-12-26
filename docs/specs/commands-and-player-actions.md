@@ -68,7 +68,7 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 - **Préconditions/erreurs** :
   - L’armée doit exister, être `DEPLOYED` et localisée sur `fromPlanetId`.
   - Les planètes source et destination doivent exister, être solides et appartenir au même système que `systemId`.
-  - Un transport de la faction de l’armée doit être disponible en orbite : flotte en `ORBIT` dans la portée `ORBIT_PROXIMITY_RANGE_SQ`, vaisseau `TROOP_TRANSPORT` libre et non occupé (`transferBusyUntilDay` strictement inférieur au jour courant).
+  - Un transport de la faction de l’armée doit être disponible en orbite : flotte en `ORBIT` dans la portée `ORBIT_PROXIMITY_RANGE_SQ`, vaisseau `TRANSPORTER` libre et non occupé (`transferBusyUntilDay` strictement inférieur au jour courant).
   - Si aucun transport n’est disponible ou si une précondition échoue, la commande est ignorée.
 - **Effets** :
   - Marque le vaisseau transporteur comme occupé (`transferBusyUntilDay = state.day`).
