@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Fleet, StarSystem, ShipType } from '../../../shared/types';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
@@ -11,7 +11,7 @@ import { sorted } from '../../../shared/sorting';
 interface InvasionModalProps {
   targetSystem: StarSystem;
   fleets: Fleet[]; // All fleets
-  onConfirm: (fleetId: string) => void; // Changed: returns FleetID now
+  onConfirm: (fleetId: string, planetId: string | null) => void; // Changed: returns FleetID now
   onClose: () => void;
   playerFactionId: string;
 }
@@ -19,6 +19,12 @@ interface InvasionModalProps {
 const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId }) => {
   const { t } = useI18n();
   const getFleetName = useFleetName();
+  const solidPlanets = useMemo(() => targetSystem.planets.filter(planet => planet.isSolid), [targetSystem]);
+  const [selectedPlanetId, setSelectedPlanetId] = useState<string | null>(solidPlanets[0]?.id ?? null);
+
+  useEffect(() => {
+    setSelectedPlanetId(solidPlanets[0]?.id ?? null);
+  }, [solidPlanets, targetSystem.id]);
 
   // Filter fleets: Blue + Contains Loaded Troop Transport
   // Sort by: Distance to system
@@ -60,6 +66,21 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
 
         {/* CONTENT */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-900/50">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-slate-300 font-semibold">{t('invasion.selectPlanet')}</label>
+            <select
+              value={selectedPlanetId ?? ''}
+              onChange={e => setSelectedPlanetId(e.target.value || null)}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
+            >
+              {solidPlanets.map(planet => (
+                <option key={planet.id} value={planet.id}>
+                  {planet.name}
+                </option>
+              ))}
+              {solidPlanets.length === 0 && <option value="">{t('invasion.noSolidPlanets')}</option>}
+            </select>
+          </div>
           {invasionCandidates.length === 0 ? (
             <div className="text-center py-8 text-slate-500 italic text-sm border border-dashed border-slate-700 rounded">
               {t('invasion.noFleets')}
@@ -83,8 +104,9 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
               return (
                 <button 
                     key={fleet.id} 
-                    onClick={() => onConfirm(fleet.id)}
-                    className="w-full bg-slate-800/40 hover:bg-red-900/20 border border-slate-700/50 hover:border-red-500/50 rounded-lg overflow-hidden transition-all group text-left"
+                    onClick={() => onConfirm(fleet.id, selectedPlanetId)}
+                    className="w-full bg-slate-800/40 hover:bg-red-900/20 border border-slate-700/50 hover:border-red-500/50 rounded-lg overflow-hidden transition-all group text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={!selectedPlanetId}
                 >
                   <div className="px-3 py-2 flex justify-between items-center">
                     <div>

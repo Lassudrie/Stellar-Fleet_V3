@@ -202,6 +202,8 @@ export const fr = {
   'invasion.selected': 'Sélection :',
   'invasion.deploy': 'Lancer Déploiement',
   'invasion.cancel': 'Annuler',
+  'invasion.selectPlanet': 'Planète cible',
+  'invasion.noSolidPlanets': 'Aucune planète solide disponible',
 
   // Battle Screen
   'battle.reportTitle': 'Rapport de Bataille',
@@ -267,7 +269,7 @@ export const fr = {
   'msg.mergeFailed': 'Fusion échouée : {{error}}',
   'msg.notOrbiting': 'La flotte n\'est pas en orbite stable.',
   'msg.deployLog': 'Armée déployée du vaisseau {{ship}} vers {{system}}.',
-  'msg.invasionLog': 'Invasion initiée sur {{system}}. {{count}} armées déployées.',
+  'msg.invasionLog': 'Ordre d’invasion émis pour {{system}}.',
   'msg.invasionFail': 'Déployé : {{success}}. Échec : {{fail}}.\nRaison : {{error}}',
   'msg.saveSuccessTitle': 'Sauvegarde exportée',
   'msg.saveSuccess': '{{filename}} généré',

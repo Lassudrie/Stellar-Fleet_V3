@@ -358,6 +358,7 @@ export const serializeGameState = (state: GameState): string => {
       targetPosition: f.targetPosition ? serializeVector3(f.targetPosition) : null,
       retreating: f.retreating ?? false,
       invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+      invasionTargetPlanetId: f.invasionTargetPlanetId ?? null,
       loadTargetSystemId: f.loadTargetSystemId ?? null,
       unloadTargetSystemId: f.unloadTargetSystemId ?? null,
       ships: f.ships.map(s => ({
@@ -604,6 +605,7 @@ export const deserializeGameState = (json: string): GameState => {
         stateStartTurn: Number.isFinite(f.stateStartTurn) ? f.stateStartTurn : 0,
         retreating: f.retreating ?? false,
         invasionTargetSystemId: f.invasionTargetSystemId ?? null,
+        invasionTargetPlanetId: f.invasionTargetPlanetId ?? null,
         loadTargetSystemId: f.loadTargetSystemId ?? null,
         unloadTargetSystemId: f.unloadTargetSystemId ?? null,
         ships: sanitizedShips

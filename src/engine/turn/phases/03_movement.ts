@@ -15,6 +15,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
 
     const movementResults: Array<MovementStepResult & {
         invasionTargetSystemId: string | null;
+        invasionTargetPlanetId: string | null;
         loadTargetSystemId: string | null;
         unloadTargetSystemId: string | null;
     }> = [];
@@ -25,6 +26,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         movementResults.push({
             ...moveResult,
             invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
+            invasionTargetPlanetId: fleet.invasionTargetPlanetId ?? null,
             loadTargetSystemId: fleet.loadTargetSystemId ?? null,
             unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
         });
@@ -45,6 +47,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         const arrivalFleet: Fleet = {
             ...fleet,
             invasionTargetSystemId: result.invasionTargetSystemId,
+            invasionTargetPlanetId: result.invasionTargetPlanetId,
             loadTargetSystemId: result.loadTargetSystemId,
             unloadTargetSystemId: result.unloadTargetSystemId
         };
@@ -57,6 +60,7 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
                 ? {
                       ...arrivalOutcome.fleet,
                       invasionTargetSystemId: null,
+                      invasionTargetPlanetId: null,
                       loadTargetSystemId: null,
                       unloadTargetSystemId: null
                   }
