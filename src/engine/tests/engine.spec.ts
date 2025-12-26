@@ -2086,7 +2086,7 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'System ownership requires all solid bodies to share the same non-null owner',
+    name: 'Systems fall when only one faction keeps ground armies',
     run: () => {
       const planet = createPlanet('sys-shared', 'red', 1);
       const moon: PlanetBody = { ...createPlanet('sys-shared', 'red', 2), bodyType: 'moon' };
@@ -2109,13 +2109,14 @@ const tests: TestCase[] = [
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+      const moonAfter = updatedSystem?.planets.find(body => body.id === moon.id);
 
-      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'System ownership should not flip if not all solid bodies share the new owner');
-      assert.strictEqual(nextState.logs.length, state.logs.length, 'No system-level log should be created when control does not change');
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'blue', 'System should be captured once only one faction remains on the ground');
+      assert.strictEqual(moonAfter?.ownerFactionId, 'red', 'Unoccupied solid bodies keep their previous owner until explicitly taken');
     }
   },
   {
-    name: 'System ownership flips only after every solid planet and moon is secured',
+    name: 'System ownership logs reflect cleared ground resistance',
     run: () => {
       const planet = createPlanet('sys-unified', 'red', 1);
       const moon: PlanetBody = { ...createPlanet('sys-unified', 'red', 2), bodyType: 'moon' };
@@ -2142,8 +2143,39 @@ const tests: TestCase[] = [
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
       const lastLog = nextState.logs[nextState.logs.length - 1]?.text ?? '';
 
-      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when all solid bodies share the same non-null owner');
-      assert.match(lastLog, /all solid planets and moons were secured/i, 'System capture log should mention the solid-body prerequisite');
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when a single faction controls the ground');
+      assert.match(lastLog, /ground presence was cleared/i, 'System capture log should mention cleared enemy ground forces');
+    }
+  },
+  {
+    name: 'Neutral systems fall after capturing a single defended planet',
+    run: () => {
+      const planetA = createPlanet('sys-neutral', null, 1);
+      const planetB = createPlanet('sys-neutral', null, 2);
+
+      const system: StarSystem = {
+        id: 'sys-neutral',
+        name: 'sys-neutral',
+        position: baseVec,
+        color: COLORS.star,
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: [planetA, planetB]
+      };
+
+      const redArmy = createArmy('army-red-neutral', 'red', 6000, ArmyState.DEPLOYED, planetA.id);
+
+      const state = createBaseState({ systems: [system], armies: [redArmy] });
+      const ctx = { rng: new RNG(13), turn: state.day + 1 };
+
+      const nextState = phaseGround(state, ctx);
+      const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
+      const planetBAfter = updatedSystem?.planets.find(planet => planet.id === planetB.id);
+
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Neutral systems should be captured when one faction holds the only ground forces');
+      assert.strictEqual(planetBAfter?.ownerFactionId, null, 'Neutral planets not targeted remain unclaimed even after system capture');
     }
   },
   {
