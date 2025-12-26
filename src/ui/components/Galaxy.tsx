@@ -24,45 +24,44 @@ interface ArmyInfo {
     hasConflict: boolean;
 }
 
-interface PlanetBadgeInfo {
+interface GroundIndicatorSquare {
     planetId: string;
-    systemId: string;
     position: [number, number, number];
     color: string;
     contested: boolean;
 }
 
-const PlanetBadge: React.FC<{ badge: PlanetBadgeInfo }> = ({ badge }) => (
-    <Billboard follow={true} lockX={false} lockY={false} lockZ={false} position={badge.position}>
-        <mesh>
-            <circleGeometry args={[0.45, 24]} />
-            <meshBasicMaterial color={badge.color} transparent opacity={0.85} />
-        </mesh>
-        <mesh>
-            <ringGeometry args={[0.55, 0.7, 24]} />
-            <meshBasicMaterial color="#111827" transparent opacity={0.6} side={DoubleSide} />
-        </mesh>
-        {badge.contested && (
+interface GroundIndicatorInfo {
+    systemId: string;
+    position: [number, number, number];
+    squares: GroundIndicatorSquare[];
+}
+
+const GroundIndicator: React.FC<{ indicator: GroundIndicatorInfo }> = ({ indicator }) => (
+    <group position={indicator.position}>
+        <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
             <group>
-                <mesh>
-                    <ringGeometry args={[0.8, 1, 32]} />
-                    <meshBasicMaterial color="#fbbf24" transparent opacity={0.9} side={DoubleSide} />
-                </mesh>
-                <Text
-                    position={[0, 0, 0.05]}
-                    fontSize={0.5}
-                    color="#fbbf24"
-                    anchorX="center"
-                    anchorY="middle"
-                    outlineWidth={0.04}
-                    outlineColor="#000000"
-                    fontWeight="bold"
-                >
-                    ⚔
-                </Text>
+                {indicator.squares.map((square) => (
+                    <group key={`ground-square-${square.planetId}`} position={square.position}>
+                        <mesh>
+                            <planeGeometry args={[0.7, 0.7]} />
+                            <meshBasicMaterial color="#0f172a" transparent opacity={0.65} />
+                        </mesh>
+                        <mesh position={[0, 0, 0.01]}>
+                            <planeGeometry args={[0.5, 0.5]} />
+                            <meshBasicMaterial color={square.color} transparent opacity={0.95} />
+                        </mesh>
+                        {square.contested && (
+                            <mesh position={[0, 0, 0.02]}>
+                                <ringGeometry args={[0.35, 0.42, 20]} />
+                                <meshBasicMaterial color="#fbbf24" transparent opacity={0.9} side={DoubleSide} />
+                            </mesh>
+                        )}
+                    </group>
+                ))}
             </group>
-        )}
-    </Billboard>
+        </Billboard>
+    </group>
 );
 
 const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor?: string }> = ({ system, armyInfo, iconColor }) => {
@@ -217,16 +216,15 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
       return map;
   }, [armies, playerFactionId, systems]);
 
-  const deployedFactionsByPlanet = useMemo(() => {
-      const map = new Map<string, Set<string>>();
+  const armiesByPlanetId = useMemo(() => {
+      const map = new Map<string, Army[]>();
       if (!armies) return map;
 
       armies.forEach(army => {
           if (army.state !== ArmyState.DEPLOYED) return;
-          if (!map.has(army.containerId)) {
-              map.set(army.containerId, new Set());
-          }
-          map.get(army.containerId)!.add(army.factionId);
+          const list = map.get(army.containerId) ?? [];
+          list.push(army);
+          map.set(army.containerId, list);
       });
 
       return map;
@@ -252,37 +250,78 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
       return map;
   }, [factions]);
 
-  const planetBadges = useMemo<PlanetBadgeInfo[]>(() => {
-      const badges: PlanetBadgeInfo[] = [];
+  const groundIndicators = useMemo<GroundIndicatorInfo[]>(() => {
+      const indicators: GroundIndicatorInfo[] = [];
 
-      systems.forEach((system) => {
-          const solidPlanets = system.planets.filter((planet) => planet.isSolid);
+      systems.forEach(system => {
+          const solidPlanets = system.planets.filter(planet => planet.isSolid);
           if (solidPlanets.length === 0) return;
 
-          const angleStep = (Math.PI * 2) / solidPlanets.length;
-          const radius = Math.max(3.5, 2.5 + system.size * 0.25);
+          const orderedPlanets = [...solidPlanets].sort((a, b) => a.name.localeCompare(b.name));
+          const ownershipSet = new Set<string>();
+          const deployedFactions = new Set<string>();
+          let hasOnGoingConflict = false;
+          let hasForeignPresence = false;
 
-          solidPlanets.forEach((planet, index) => {
-              const angle = index * angleStep;
-              const x = system.position.x + Math.cos(angle) * radius;
-              const z = system.position.z + Math.sin(angle) * radius;
-              const y = system.position.y + 0.2;
-              const ownerColor = planet.ownerFactionId ? factionColorById.get(planet.ownerFactionId) ?? '#9ca3af' : '#9ca3af';
-              const factionsOnPlanet = deployedFactionsByPlanet.get(planet.id);
-              const contested = (factionsOnPlanet?.size ?? 0) >= 2;
+          const spacing = 0.8;
+          const totalWidth = (orderedPlanets.length - 1) * spacing;
+          const startX = -totalWidth / 2;
 
-              badges.push({
+          const squares: GroundIndicatorSquare[] = orderedPlanets.map((planet, index) => {
+              const armiesOnPlanet = armiesByPlanetId.get(planet.id) ?? [];
+              const factionsOnPlanet = new Set(armiesOnPlanet.map(army => army.factionId));
+              armiesOnPlanet.forEach(army => deployedFactions.add(army.factionId));
+
+              if (factionsOnPlanet.size >= 2) {
+                  hasOnGoingConflict = true;
+              }
+
+              if (planet.ownerFactionId) {
+                  ownershipSet.add(planet.ownerFactionId);
+              }
+
+              const hasOwnerMismatch = armiesOnPlanet.length > 0
+                  && planet.ownerFactionId !== null
+                  && armiesOnPlanet.some(army => army.factionId !== planet.ownerFactionId);
+
+              if (hasOwnerMismatch) {
+                  hasForeignPresence = true;
+              }
+
+              const color = planet.ownerFactionId
+                  ? factionColorById.get(planet.ownerFactionId) ?? '#9ca3af'
+                  : '#9ca3af';
+
+              return {
                   planetId: planet.id,
-                  systemId: system.id,
-                  position: [x, y, z],
-                  color: ownerColor,
-                  contested,
-              });
+                  position: [startX + index * spacing, 0, 0] as [number, number, number],
+                  color,
+                  contested: factionsOnPlanet.size >= 2 || hasOwnerMismatch,
+              };
+          });
+
+          const hasDeployedArmies = squares.some(square => (armiesByPlanetId.get(square.planetId)?.length ?? 0) > 0);
+          const hasMultipleOwners = ownershipSet.size > 1;
+          const isGroundBattleActive = hasDeployedArmies && (
+              hasOnGoingConflict ||
+              deployedFactions.size >= 2 ||
+              hasForeignPresence ||
+              hasMultipleOwners
+          );
+
+          if (!isGroundBattleActive) return;
+
+          const verticalOffset = Math.max(5, system.size * 0.35);
+
+          indicators.push({
+              systemId: system.id,
+              position: [system.position.x, system.position.y + verticalOffset, system.position.z],
+              squares,
           });
       });
 
-      return badges;
-  }, [deployedFactionsByPlanet, factionColorById, systems]);
+      return indicators;
+  }, [armiesByPlanetId, factionColorById, systems]);
 
   const resolveGasIconColor = (system: StarSystem): string => {
       if (system.resourceType !== 'gas') return '#ffffff';
@@ -371,8 +410,8 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             </group>
         ))}
 
-        {planetBadges.map((badge) => (
-            <PlanetBadge key={`planet-badge-${badge.planetId}`} badge={badge} />
+        {groundIndicators.map((indicator) => (
+            <GroundIndicator key={`ground-indicator-${indicator.systemId}`} indicator={indicator} />
         ))}
     </group>
   );
