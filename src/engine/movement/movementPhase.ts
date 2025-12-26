@@ -1,5 +1,6 @@
 
 import { Fleet, FleetState, StarSystem, LogEntry, ArmyState, Army, ShipEntity } from '../../shared/types';
+import { sorted } from '../../shared/sorting';
 import { RNG } from '../rng';
 import { getFleetSpeed } from './fleetSpeed';
 import { shortId } from '../idUtils';
@@ -180,37 +181,111 @@ export const executeArrivalOperations = (
                 type: 'combat'
             });
         } else {
-            const embarkedArmies = armiesAfterOps.filter(
-                army => army.containerId === currentFleet.id && army.state === ArmyState.EMBARKED
+            const embarkedArmies = sorted(
+                armiesAfterOps.filter(
+                    army => army.containerId === currentFleet.id && army.state === ArmyState.EMBARKED
+                ),
+                (a, b) => a.id.localeCompare(b.id)
             );
 
-            if (embarkedArmies.length > 0) {
-                let landingOutcome: { armies: Army[]; logs: LogEntry[]; succeeded: string[]; failed: string[] };
+            const attackerHasGroundPresence = (planetId: string): boolean =>
+                armiesAfterOps.some(
+                    army =>
+                        army.containerId === planetId &&
+                        army.state === ArmyState.DEPLOYED &&
+                        army.factionId === currentFleet.factionId
+                );
 
-                if (contestedOrbit) {
-                    landingOutcome = applyContestedLandingRisk({
-                        mode: 'abort',
-                        armies: armiesAfterOps,
-                        targetArmyIds: embarkedArmies.map(army => army.id),
-                        systemName: system.name,
-                        planetName: invasionPlanet.name,
-                        targetPlanetId: invasionPlanet.id,
+            const planetDefenseStrength = (planetId: string): number =>
+                armiesAfterOps
+                    .filter(
+                        army =>
+                            army.containerId === planetId &&
+                            army.state === ArmyState.DEPLOYED &&
+                            army.factionId !== currentFleet.factionId
+                    )
+                    .reduce((total, army) => total + army.strength, 0);
+
+            const eligibleTargets = system.planets.filter(
+                planet =>
+                    planet.isSolid &&
+                    planet.ownerFactionId !== currentFleet.factionId &&
+                    !attackerHasGroundPresence(planet.id)
+            );
+
+            const prioritizedTargets = sorted(
+                eligibleTargets
+                    .map(planet => ({ planet, defense: planetDefenseStrength(planet.id) }))
+                    .filter(entry => entry.defense > 0),
+                (a, b) => b.defense - a.defense || a.planet.id.localeCompare(b.planet.id)
+            ).map(entry => entry.planet);
+
+            const fallbackTargets = prioritizedTargets.length === 0
+                ? sorted(eligibleTargets, (a, b) => a.id.localeCompare(b.id))
+                : [];
+
+            const defaultTarget = invasionPlanet && !attackerHasGroundPresence(invasionPlanet.id)
+                ? invasionPlanet
+                : null;
+
+            const targetQueue =
+                (prioritizedTargets.length > 0 ? prioritizedTargets : fallbackTargets.length > 0 ? fallbackTargets : defaultTarget ? [defaultTarget] : [])
+                    .filter((planet, index, arr) => arr.findIndex(p => p.id === planet.id) === index);
+
+            if (embarkedArmies.length > 0 && targetQueue.length > 0) {
+                type LandingResult = { armyId: string; planet: typeof targetQueue[number]; success: boolean };
+                const landingResults: LandingResult[] = [];
+                let updatedArmies = armiesAfterOps;
+
+                embarkedArmies.forEach((army, index) => {
+                    const targetPlanet = targetQueue[index % targetQueue.length];
+
+                    if (contestedOrbit) {
+                        const landingOutcome = applyContestedLandingRisk({
+                            mode: 'abort',
+                            armies: updatedArmies,
+                            targetArmyIds: [army.id],
+                            systemName: system.name,
+                            planetName: targetPlanet.name,
+                            targetPlanetId: targetPlanet.id,
+                            day,
+                            rng
+                        });
+
+                        updatedArmies = landingOutcome.armies;
+                        generatedLogs.push(...landingOutcome.logs);
+                        landingResults.push({
+                            armyId: army.id,
+                            planet: targetPlanet,
+                            success: landingOutcome.succeeded.includes(army.id)
+                        });
+                    } else {
+                        updatedArmies = updatedArmies.map(existing =>
+                            existing.id === army.id
+                                ? { ...existing, state: ArmyState.DEPLOYED, containerId: targetPlanet.id }
+                                : existing
+                        );
+                        landingResults.push({ armyId: army.id, planet: targetPlanet, success: true });
+                    }
+
+                    const lastResult = landingResults[landingResults.length - 1];
+                    const landingText = lastResult.success
+                        ? `Army ${shortId(lastResult.armyId)} landed on ${targetPlanet.name} (${system.name}).`
+                        : `Army ${shortId(lastResult.armyId)} failed to land on ${targetPlanet.name} (${system.name}) due to contested orbit.`;
+
+                    generatedLogs.push({
+                        id: rng.id('log'),
                         day,
-                        rng
+                        text: landingText,
+                        type: 'combat'
                     });
-                } else {
-                    const landedArmyIds = new Set(embarkedArmies.map(army => army.id));
-                    const updatedArmies = armiesAfterOps.map(army => landedArmyIds.has(army.id)
-                        ? { ...army, state: ArmyState.DEPLOYED, containerId: invasionPlanet.id }
-                        : army);
-                    landingOutcome = { armies: updatedArmies, logs: [], succeeded: [...landedArmyIds], failed: [] };
-                }
+                });
 
-                armiesAfterOps = landingOutcome.armies;
-                generatedLogs.push(...landingOutcome.logs);
+                armiesAfterOps = updatedArmies;
 
-                if (landingOutcome.succeeded.length > 0) {
-                    const succeededSet = new Set(landingOutcome.succeeded);
+                const succeededSet = new Set(landingResults.filter(result => result.success).map(result => result.armyId));
+
+                if (succeededSet.size > 0) {
                     const updatedShips = currentFleet.ships.map(ship => {
                         if (ship.carriedArmyId && succeededSet.has(ship.carriedArmyId)) {
                             shipsChanged = true;
@@ -221,11 +296,12 @@ export const executeArrivalOperations = (
                     currentFleet = shipsChanged ? { ...currentFleet, ships: updatedShips } : currentFleet;
                 }
 
-                const deployedCount = landingOutcome.succeeded.length;
-                const failedCount = landingOutcome.failed.length;
+                const deployedCount = Array.from(succeededSet).length;
+                const failedCount = landingResults.length - deployedCount;
+                const distinctPlanets = new Set(landingResults.map(result => result.planet.id));
 
                 if (deployedCount > 0) {
-                    const baseText = `INVASION STARTED: Fleet ${shortId(fleet.id)} deployed ${deployedCount} armies onto ${invasionPlanet.name} (${system.name}).`;
+                    const baseText = `INVASION STARTED: Fleet ${shortId(fleet.id)} deployed ${deployedCount} armies onto ${distinctPlanets.size} planet(s) in ${system.name}.`;
                     const suffix = contestedOrbit && failedCount > 0 ? ' Orbit is contested, expect resistance.' : '';
 
                     generatedLogs.push({
@@ -238,10 +314,17 @@ export const executeArrivalOperations = (
                     generatedLogs.push({
                         id: rng.id('log'),
                         day,
-                        text: `Deployment aborted: ${failedCount} armies could not land on ${invasionPlanet.name} (${system.name}) due to contested orbit.`,
+                        text: `Deployment aborted: ${failedCount} armies could not land on targeted planets in ${system.name} due to contested orbit.`,
                         type: 'combat'
                     });
                 }
+            } else if (embarkedArmies.length > 0) {
+                generatedLogs.push({
+                    id: rng.id('log'),
+                    day,
+                    text: `Invasion skipped: Fleet ${shortId(fleet.id)} found no eligible planets to target in ${system.name}.`,
+                    type: 'combat'
+                });
             }
         }
     }

@@ -1313,6 +1313,69 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Auto invasion assigns armies to highest defended planets with per-army outcomes',
+    run: () => {
+      const systemId = 'sys-priority';
+      const planetA = createPlanet(systemId, 'red', 1);
+      const planetB = createPlanet(systemId, 'red', 2);
+
+      const system: StarSystem = {
+        ...createSystem(systemId, 'red'),
+        position: { x: 0, y: 0, z: 0 },
+        planets: [planetA, planetB]
+      };
+
+      const defenderA = createArmy('def-A', 'red', 2000, ArmyState.DEPLOYED, planetA.id);
+      const defenderB = createArmy('def-B', 'red', 5000, ArmyState.DEPLOYED, planetB.id);
+
+      const attackerArmy1 = createArmy('atk-1', 'blue', 4000, ArmyState.EMBARKED, 'fleet-priority');
+      const attackerArmy2 = createArmy('atk-2', 'blue', 4000, ArmyState.EMBARKED, 'fleet-priority');
+
+      const fleet: Fleet = {
+        ...createFleet('fleet-priority', 'blue', { x: 0, y: 0, z: 0 }, [
+          { id: 'ship-1', type: ShipType.TROOP_TRANSPORT, hp: 100, maxHp: 100, carriedArmyId: attackerArmy1.id },
+          { id: 'ship-2', type: ShipType.TROOP_TRANSPORT, hp: 100, maxHp: 100, carriedArmyId: attackerArmy2.id }
+        ]),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        invasionTargetSystemId: system.id
+      };
+
+      const rng = new RNG(17);
+
+      const arrival = resolveFleetMovement(
+        fleet,
+        [system],
+        [attackerArmy1, attackerArmy2, defenderA, defenderB],
+        0,
+        rng,
+        [fleet]
+      );
+
+      const updatedArmies = [attackerArmy1, attackerArmy2, defenderA, defenderB].map(army => {
+        const update = arrival.armyUpdates.find(change => change.id === army.id);
+        return update ? { ...army, ...update.changes } : army;
+      });
+
+      const landedArmy1 = updatedArmies.find(army => army.id === attackerArmy1.id);
+      const landedArmy2 = updatedArmies.find(army => army.id === attackerArmy2.id);
+
+      assert.strictEqual(landedArmy1?.containerId, planetB.id, 'First army should target the strongest defended planet');
+      assert.strictEqual(landedArmy2?.containerId, planetA.id, 'Second army should rotate to the next target');
+
+      const landingLogs = arrival.logs.filter(log => log.text.includes('landed on'));
+      assert.ok(
+        landingLogs.some(log => log.text.includes(planetB.name)),
+        'Logs should mention the primary defended target'
+      );
+      assert.ok(
+        landingLogs.some(log => log.text.includes(planetA.name)),
+        'Logs should mention each army assignment outcome'
+      );
+    }
+  },
+  {
     name: 'Invasion movement deploys embarked armies and logs the landing on arrival',
     run: () => {
       const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
