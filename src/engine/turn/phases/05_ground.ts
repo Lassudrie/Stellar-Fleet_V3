@@ -97,6 +97,17 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         armiesByPlanetId.set(match.planetId, list);
     });
 
+    const armiesBySystemId = new Map<string, Army[]>();
+
+    nextArmies.forEach(army => {
+        if (army.state !== ArmyState.DEPLOYED) return;
+        const match = planetIndex.get(army.containerId);
+        if (!match) return;
+        const list = armiesBySystemId.get(match.systemId) ?? [];
+        list.push(army);
+        armiesBySystemId.set(match.systemId, list);
+    });
+
     const updatedSystems = nextSystems.map(system => {
         const updatedPlanets = system.planets.map(planet => {
             const armies = armiesByPlanetId.get(planet.id) ?? [];
@@ -191,8 +202,16 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             return hasMismatch ? null : sharedOwner;
         })();
 
-        const newOwnerFactionId = uniformSolidOwner ?? system.ownerFactionId;
+        const armiesInSystem = armiesBySystemId.get(system.id) ?? [];
+        const groundFactionIds = sorted(
+            Array.from(new Set(armiesInSystem.map(army => army.factionId))),
+            (a, b) => a.localeCompare(b)
+        );
+        const soleGroundFaction = groundFactionIds.length === 1 ? groundFactionIds[0] : null;
+
+        const newOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
+        const solidBodiesHeldByNewOwner = solidBodies.filter(planet => planet.ownerFactionId === newOwnerFactionId);
 
         if (ownerChanged && newOwnerFactionId && aiFactionIds.has(newOwnerFactionId)) {
             if (!holdUpdates[newOwnerFactionId]) {
@@ -213,7 +232,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 {
                     id: ctx.rng.id('log'),
                     day: ctx.turn,
-                    text: `System ${system.name} control set to ${newOwnerFactionId} after all solid planets and moons were secured (${sortedBodies.map(body => body.name).join(', ')}).`,
+                    text: `System ${system.name} control set to ${newOwnerFactionId} after enemy ground presence was cleared. Solid worlds now held: ${sortedBodies.filter(body => body.ownerFactionId === newOwnerFactionId).map(body => body.name).join(', ') || 'none'}.`,
                     type: 'combat'
                 }
             ];
@@ -230,13 +249,18 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                     title: `${system.name} secured`,
                     subtitle: `Turn ${ctx.turn}`,
                     lines: [
-                        `All solid planets and moons now belong to ${newOwnerFactionId}.`,
-                        `Secured bodies: ${sortedBodies.map(body => body.name).join(', ') || 'None'}.`
+                        groundFactionIds.length > 0
+                            ? `No opposing ground armies remain; ${newOwnerFactionId} holds surface control.`
+                            : `${newOwnerFactionId} controls the system following ground resolution.`,
+                        `Solid bodies held: ${solidBodiesHeldByNewOwner.map(body => body.name).join(', ') || 'None'}.`
                     ],
                     payload: {
                         systemId: system.id,
                         newOwnerFactionId,
-                        involvedFactionIds: sorted(Array.from(involvedFactionIds), (a, b) => a.localeCompare(b))
+                        involvedFactionIds: sorted(
+                            Array.from(new Set<FactionId>([...involvedFactionIds, ...groundFactionIds])),
+                            (a, b) => a.localeCompare(b)
+                        )
                     },
                     read: false,
                     dismissed: false,
