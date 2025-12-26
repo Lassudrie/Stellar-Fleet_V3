@@ -55,6 +55,37 @@ export class SpatialIndex<T extends PositionedEntity> {
     return cells;
   }
 
+  /**
+   * Returns only the cells on the perimeter of the square defined by cellRadius.
+   * This avoids re-checking inner cells during expanding search.
+   */
+  private getCellsInRing(center: { x: number; z: number }, cellRadius: number) {
+    const cells: Array<{ x: number; z: number }> = [];
+    if (cellRadius === 0) {
+      cells.push(center);
+      return cells;
+    }
+
+    const minX = center.x - cellRadius;
+    const maxX = center.x + cellRadius;
+    const minZ = center.z - cellRadius;
+    const maxZ = center.z + cellRadius;
+
+    // Top and Bottom rows
+    for (let x = minX; x <= maxX; x += 1) {
+      cells.push({ x, z: minZ });
+      cells.push({ x, z: maxZ });
+    }
+
+    // Left and Right columns (excluding corners already added)
+    for (let z = minZ + 1; z < maxZ; z += 1) {
+      cells.push({ x: minX, z });
+      cells.push({ x: maxX, z });
+    }
+
+    return cells;
+  }
+
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
     return {
       minX: (center.x - cellRadius) * this.cellSize,
@@ -128,7 +159,9 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
+      // Optimization: Only check cells in the current ring (perimeter)
+      // checking inner cells again is redundant
+      const cells = this.getCellsInRing(center, cellRadius);
 
       cells.forEach(cell => {
         const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
