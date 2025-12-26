@@ -1,11 +1,11 @@
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
 import { GameMessage, GameState, StarSystem, EnemySighting } from '../shared/types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
+import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
-import NewGameScreen from './components/screens/NewGameScreen';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import { buildScenario } from '../content/scenarios';
@@ -20,6 +20,7 @@ import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
+import { sorted } from '../shared/sorting';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
 
@@ -47,15 +48,44 @@ const App: React.FC = () => {
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
+  const [uiMessages, setUiMessages] = useState<GameMessage[]>([]);
+  const combinedMessages = useMemo(
+    () => [...(viewGameState?.messages ?? []), ...uiMessages],
+    [viewGameState?.messages, uiMessages]
+  );
 
   // Settings
   const [devMode, setDevMode] = useState(false);
   const [godEyes, setGodEyes] = useState(false);
-  const [aiDebug, setAiDebug] = useState(false);
+  const addUiMessage = useCallback((message: Pick<GameMessage, 'title' | 'subtitle' | 'lines' | 'priority' | 'type'> & Partial<GameMessage>) => {
+      const baseDay = viewGameState?.day ?? engine?.state.day ?? 0;
+      const id = message.id ?? `ui:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const normalized: GameMessage = {
+          id,
+          day: baseDay,
+          type: message.type ?? 'ui',
+          priority: message.priority ?? 1,
+          title: message.title,
+          subtitle: message.subtitle ?? '',
+          lines: message.lines ?? [],
+          payload: {},
+          read: message.read ?? false,
+          dismissed: message.dismissed ?? false,
+          createdAtTurn: baseDay
+      };
+      setUiMessages(prev => [normalized, ...prev].slice(0, 50));
+  }, [engine, viewGameState]);
+
   const notifyCommandError = useCallback((error: string) => {
       const detail = error || 'Unknown error';
-      alert(t('msg.commandFailed', { error: detail }));
-  }, [t]);
+      addUiMessage({
+          title: t('msg.commandFailedTitle'),
+          subtitle: t('msg.commandFailed', { error: detail }),
+          lines: [],
+          priority: 2,
+          type: 'ui'
+      });
+  }, [addUiMessage, t]);
 
   const handleExportAiLogs = () => {
       const history = aiDebugger.getHistory();
@@ -74,10 +104,24 @@ const App: React.FC = () => {
 
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      addUiMessage({
+          title: t('msg.exportSuccessTitle'),
+          subtitle: t('msg.exportSuccess'),
+          lines: [],
+          priority: 1,
+          type: 'ui'
+      });
   };
 
   const handleClearAiLogs = () => {
       aiDebugger.clear();
+      addUiMessage({
+          title: t('msg.logsClearedTitle'),
+          subtitle: t('msg.logsCleared'),
+          lines: [],
+          priority: 1,
+          type: 'ui'
+      });
   };
 
   const selectedFleetIdRef = useRef<string | null>(selectedFleetId);
@@ -145,10 +189,11 @@ const App: React.FC = () => {
 
           const entries = Object.values(next);
           if (entries.length > ENEMY_SIGHTING_LIMIT) {
-              const keepIds = new Set(entries
-                  .sort((a, b) => b.daySeen - a.daySeen)
-                  .slice(0, ENEMY_SIGHTING_LIMIT)
-                  .map(s => s.fleetId));
+              const keepIds = new Set(
+                  sorted(entries, (a, b) => b.daySeen - a.daySeen)
+                      .slice(0, ENEMY_SIGHTING_LIMIT)
+                      .map(s => s.fleetId)
+              );
 
               Object.keys(next).forEach(id => {
                   if (!keepIds.has(id)) {
@@ -192,6 +237,7 @@ const App: React.FC = () => {
   const handleLaunchGame = (scenarioArg: any) => {
     setLoading(true);
     setEnemySightings({}); 
+    setUiMessages([]);
     setTimeout(() => {
         // Handle both simple seed (number) and full Scenario object
         let scenario;
@@ -212,7 +258,10 @@ const App: React.FC = () => {
   // --- SAVE / LOAD HANDLERS ---
 
   const handleSave = () => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleSave: Engine not initialized');
+          return;
+      }
       try {
           const json = serializeGameState(engine.state);
           const blob = new Blob([json], { type: 'application/json' });
@@ -229,9 +278,22 @@ const App: React.FC = () => {
           
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
+          addUiMessage({
+              title: t('msg.saveSuccessTitle'),
+              subtitle: t('msg.saveSuccess', { filename }),
+              lines: [],
+              priority: 1,
+              type: 'ui'
+          });
       } catch (e) {
           console.error("Save failed:", e);
-          alert(t('msg.saveFail'));
+          addUiMessage({
+              title: t('msg.saveFailTitle'),
+              subtitle: t('msg.saveFail'),
+              lines: [(e as Error).message],
+              priority: 2,
+              type: 'ui'
+          });
       }
   };
 
@@ -251,13 +313,27 @@ const App: React.FC = () => {
           setSelectedFleetId(null);
           setFleetPickerMode(null);
           setUiMode('NONE');
+          setUiMessages([]);
           
           updateViewState(newEngine.state);
           
           setScreen('GAME');
+          addUiMessage({
+              title: t('msg.loadSuccessTitle'),
+              subtitle: t('msg.loadSuccess'),
+              lines: [],
+              priority: 1,
+              type: 'ui'
+          });
       } catch (e) {
           console.error("Load failed:", e);
-          alert(t('msg.invalidSave') + "\n" + (e as Error).message);
+          addUiMessage({
+              title: t('msg.loadFailTitle'),
+              subtitle: t('msg.invalidSave'),
+              lines: [(e as Error).message],
+              priority: 2,
+              type: 'ui'
+          });
       } finally {
           setLoading(false);
       }
@@ -358,13 +434,19 @@ const App: React.FC = () => {
   };
 
   const handleOpenGroundOps = () => {
-      if (!targetSystem) return;
+      if (!targetSystem) {
+          console.warn('[App] handleOpenGroundOps: No target system selected');
+          return;
+      }
       setFleetPickerMode(null);
       setUiMode('GROUND_OPS_MODAL');
   };
 
   const handleOpenSystemDetails = () => {
-      if (!targetSystem || !viewGameState) return;
+      if (!targetSystem || !viewGameState) {
+          console.warn('[App] handleOpenSystemDetails: Missing targetSystem or viewGameState');
+          return;
+      }
       const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
       setSystemDetailSystem(latestSystem);
       setUiMode('NONE');
@@ -382,7 +464,10 @@ const App: React.FC = () => {
 
   const handleInvade = (systemId: string) => {
       const system = viewGameState?.systems.find(s => s.id === systemId);
-      if (!system) return;
+      if (!system) {
+          console.warn('[App] handleInvade: System not found', { systemId });
+          return;
+      }
       setTargetSystem(system);
       setFleetPickerMode(null);
       setUiMode('INVASION_MODAL');
@@ -390,7 +475,10 @@ const App: React.FC = () => {
 
   const handleCommitInvasion = (fleetId: string) => {
       const fId = fleetId;
-      if (!targetSystem || !engine) return;
+      if (!targetSystem || !engine) {
+          console.warn('[App] handleCommitInvasion: Missing targetSystem or engine');
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
@@ -432,17 +520,29 @@ const App: React.FC = () => {
   };
 
   const handleDeploySingle = (shipId: string, planetId: string) => {
-      if (!engine || !selectedFleetId) return;
+      if (!engine || !selectedFleetId) {
+          console.warn('[App] handleDeploySingle: Missing engine or selectedFleetId');
+          return;
+      }
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
       const system = findOrbitingSystem(fleet, engine.state.systems);
-      if (!fleet || !system) return;
+      if (!fleet || !system) {
+          console.warn('[App] handleDeploySingle: Fleet or system not found', { selectedFleetId, fleet: !!fleet, system: !!system });
+          return;
+      }
 
       const ship = fleet.ships.find(s => s.id === shipId);
-      if (!ship || !ship.carriedArmyId) return;
+      if (!ship || !ship.carriedArmyId) {
+          console.warn('[App] handleDeploySingle: Ship not found or no carried army', { shipId, ship: !!ship });
+          return;
+      }
 
       const targetPlanet = system.planets.find(planet => planet.id === planetId && planet.isSolid);
-      if (!targetPlanet) return;
+      if (!targetPlanet) {
+          console.warn('[App] handleDeploySingle: Target planet not found', { planetId });
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'UNLOAD_ARMY',
@@ -456,11 +556,17 @@ const App: React.FC = () => {
   };
 
   const handleEmbarkArmy = (shipId: string, armyId: string) => {
-      if (!engine || !selectedFleetId) return;
+      if (!engine || !selectedFleetId) {
+          console.warn('[App] handleEmbarkArmy: Missing engine or selectedFleetId');
+          return;
+      }
 
       const fleet = engine.state.fleets.find(f => f.id === selectedFleetId) || null;
       const system = findOrbitingSystem(fleet, engine.state.systems);
-      if (!fleet || !system) return;
+      if (!fleet || !system) {
+          console.warn('[App] handleEmbarkArmy: Fleet or system not found', { selectedFleetId });
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'LOAD_ARMY',
@@ -473,7 +579,10 @@ const App: React.FC = () => {
   };
 
   const handleTransferArmy = (systemId: string, armyId: string, fromPlanetId: string, toPlanetId: string) => {
-      if (!engine) return;
+      if (!engine) {
+          console.warn('[App] handleTransferArmy: Engine not initialized');
+          return;
+      }
 
       const result = engine.dispatchPlayerCommand({
           type: 'TRANSFER_ARMY_PLANET',
@@ -486,17 +595,35 @@ const App: React.FC = () => {
   };
 
   const handleMarkMessageRead = (messageId: string, read: boolean) => {
-      if (!engine) return;
+      if (messageId.startsWith('ui:')) {
+          setUiMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, read } : msg));
+          return;
+      }
+      if (!engine) {
+          console.warn('[App] handleMarkMessageRead: Engine not initialized');
+          return;
+      }
       engine.markMessageRead(messageId, read);
   };
 
   const handleMarkAllMessagesRead = () => {
-      if (!engine) return;
+      setUiMessages(prev => prev.map(msg => ({ ...msg, read: true })));
+      if (!engine) {
+          console.warn('[App] handleMarkAllMessagesRead: Engine not initialized');
+          return;
+      }
       engine.markAllMessagesRead();
   };
 
   const handleOpenMessage = (message: GameMessage) => {
-      if (!engine || !viewGameState) return;
+      if (message.id.startsWith('ui:')) {
+          setUiMessages(prev => prev.map(msg => msg.id === message.id ? { ...msg, read: true } : msg));
+          return;
+      }
+      if (!engine || !viewGameState) {
+          console.warn('[App] handleOpenMessage: Engine or viewGameState not initialized');
+          return;
+      }
       engine.markMessageRead(message.id, true);
 
       const payload = message.payload || {};
@@ -547,83 +674,85 @@ const App: React.FC = () => {
 
       return (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
-            <GameScene
-                gameState={viewGameState}
-                enemySightings={enemySightings}
-                selectedFleetId={selectedFleetId}
-                onFleetSelect={handleFleetSelect}
-                onFleetInspect={handleFleetInspect}
-                onSystemClick={handleSystemClick}
-                onBackgroundClick={() => {
-                    handleCloseMenu();
-                    setSelectedFleetId(null);
-                }}
-            />
-            <UI
-                startYear={viewGameState.startYear}
-                day={viewGameState.day}
-                selectedFleet={selectedFleet}
-                inspectedFleet={inspectedFleet}
-                logs={viewGameState.logs}
-                messages={viewGameState.messages}
-                
-                uiMode={uiMode}
-                menuPosition={menuPosition}
-                targetSystem={targetSystem}
-                systems={viewGameState.systems}
-                blueFleets={blueFleets}
-                battles={viewGameState.battles}
-                selectedBattleId={selectedBattleId}
-                gameState={viewGameState}
-                
-                onSplit={handleSplitFleet}
-                onMerge={handleMergeFleet}
-                onDeploy={handleDeploySingle}
-                onEmbark={handleEmbarkArmy}
-                onTransferArmy={handleTransferArmy}
-                winner={viewGameState.winnerFactionId}
-                onRestart={() => setScreen('MENU')}
-                onNextTurn={handleNextTurn}
-                onMoveCommand={handleMoveCommand}
-                onAttackCommand={handleAttackCommand}
-                onLoadCommand={handleLoadCommand}
-                onUnloadCommand={handleUnloadCommand}
-                onOpenFleetPicker={handleOpenFleetPicker}
-                onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
-                onOpenGroundOps={handleOpenGroundOps}
-                onCloseMenu={handleCloseMenu}
-                fleetPickerMode={fleetPickerMode}
-                onOpenSystemDetails={handleOpenSystemDetails}
-                systemDetailSystem={systemDetailSystem}
-                onCloseSystemDetails={handleCloseSystemDetails}
-                onSelectFleet={setSelectedFleetId}
-                onCloseShipDetail={() => handleCloseMenu()}
+            <FleetNameProvider fleets={viewGameState.fleets}>
+                <GameScene
+                    gameState={viewGameState}
+                    enemySightings={enemySightings}
+                    selectedFleetId={selectedFleetId}
+                    onFleetSelect={handleFleetSelect}
+                    onFleetInspect={handleFleetInspect}
+                    onSystemClick={handleSystemClick}
+                    onBackgroundClick={() => {
+                        handleCloseMenu();
+                        setSelectedFleetId(null);
+                    }}
+                />
+                <UI
+                    startYear={viewGameState.startYear}
+                    day={viewGameState.day}
+                    selectedFleet={selectedFleet}
+                    inspectedFleet={inspectedFleet}
+                    logs={viewGameState.logs}
+                    messages={combinedMessages}
+                    
+                    uiMode={uiMode}
+                    menuPosition={menuPosition}
+                    targetSystem={targetSystem}
+                    systems={viewGameState.systems}
+                    blueFleets={blueFleets}
+                    battles={viewGameState.battles}
+                    selectedBattleId={selectedBattleId}
+                    gameState={viewGameState}
+                    
+                    onSplit={handleSplitFleet}
+                    onMerge={handleMergeFleet}
+                    onDeploy={handleDeploySingle}
+                    onEmbark={handleEmbarkArmy}
+                    onTransferArmy={handleTransferArmy}
+                    winner={viewGameState.winnerFactionId}
+                    onRestart={() => setScreen('MENU')}
+                    onNextTurn={handleNextTurn}
+                    onMoveCommand={handleMoveCommand}
+                    onAttackCommand={handleAttackCommand}
+                    onLoadCommand={handleLoadCommand}
+                    onUnloadCommand={handleUnloadCommand}
+                    onOpenFleetPicker={handleOpenFleetPicker}
+                    onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
+                    onOpenGroundOps={handleOpenGroundOps}
+                    onCloseMenu={handleCloseMenu}
+                    fleetPickerMode={fleetPickerMode}
+                    onOpenSystemDetails={handleOpenSystemDetails}
+                    systemDetailSystem={systemDetailSystem}
+                    onCloseSystemDetails={handleCloseSystemDetails}
+                    onSelectFleet={setSelectedFleetId}
+                    onInspectFleet={handleFleetInspect}
+                    onCloseShipDetail={() => handleCloseMenu()}
 
-                onOpenBattle={(id) => {
-                    setSelectedBattleId(id);
-                    setFleetPickerMode(null);
-                    setUiMode('BATTLE_SCREEN');
-                }}
-                onInvade={handleInvade}
-                onCommitInvasion={handleCommitInvasion}
+                    onOpenBattle={(id) => {
+                        setSelectedBattleId(id);
+                        setFleetPickerMode(null);
+                        setUiMode('BATTLE_SCREEN');
+                    }}
+                    onInvade={handleInvade}
+                    onCommitInvasion={handleCommitInvasion}
 
-                onSave={handleSave}
+                    onSave={handleSave}
 
-                devMode={devMode}
-                godEyes={godEyes}
-                onSetUiSettings={(s) => {
-                    setDevMode(s.devMode);
-                    setGodEyes(s.godEyes);
-                    const enableAiDebug = s.aiDebug || false;
-                    setAiDebug(enableAiDebug);
-                    aiDebugger.setEnabled(enableAiDebug);
-                }}
-                onExportAiLogs={handleExportAiLogs}
-                onClearAiLogs={handleClearAiLogs}
-                onOpenMessage={handleOpenMessage}
-                onMarkMessageRead={handleMarkMessageRead}
-                onMarkAllMessagesRead={handleMarkAllMessagesRead}
-            />
+                    devMode={devMode}
+                    godEyes={godEyes}
+                    onSetUiSettings={(s) => {
+                        setDevMode(s.devMode);
+                        setGodEyes(s.godEyes);
+                        const enableAiDebug = s.aiDebug || false;
+                        aiDebugger.setEnabled(enableAiDebug);
+                    }}
+                    onExportAiLogs={handleExportAiLogs}
+                    onClearAiLogs={handleClearAiLogs}
+                    onOpenMessage={handleOpenMessage}
+                    onMarkMessageRead={handleMarkMessageRead}
+                    onMarkAllMessagesRead={handleMarkAllMessagesRead}
+                />
+            </FleetNameProvider>
         </div>
       );
 }

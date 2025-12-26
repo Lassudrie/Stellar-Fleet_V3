@@ -26,6 +26,7 @@ import {
 import { withUpdatedFleetDerived } from '../fleetDerived';
 import { devWarn } from '../../shared/devLogger';
 import { shortId } from '../idUtils';
+import { sorted } from '../../shared/sorting';
 
 const SURVIVOR_ATTRITION_RATIO = 0.1;
 const SURVIVOR_MIN_POST_BATTLE_DAMAGE = 15;
@@ -135,11 +136,11 @@ export const resolveBattle = (
   const involvedFleets = state.fleets.filter(f => battle.involvedFleetIds.includes(f.id));
   
   // --- CAPTURE SNAPSHOT BEFORE SIMULATION ---
-  const initialShips: BattleShipSnapshot[] = [];
+  let initialShips: BattleShipSnapshot[] = [];
   const initialAmmunitionByShip = new Map<string, ShipConsumables>();
   
   // Deterministic ship initialization
-  const battleShips: BattleShipState[] = [];
+  let battleShips: BattleShipState[] = [];
   
   // We use a Map for O(1) lookups during the hot loop
   const shipMap = new Map<string, BattleShipState>();
@@ -174,8 +175,8 @@ export const resolveBattle = (
   });
   
   // Deterministic Sort of snapshot and logic array
-  initialShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
-  battleShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
+  initialShips = sorted(initialShips, (a, b) => a.shipId.localeCompare(b.shipId));
+  battleShips = sorted(battleShips, (a, b) => a.shipId.localeCompare(b.shipId));
 
   // Safety guard: if no valid ships, return early with a draw
   if (battleShips.length === 0) {
@@ -259,7 +260,7 @@ export const resolveBattle = (
       }
     }
 
-    const activeFactions = Array.from(activeByFaction.keys()).sort();
+    const activeFactions = sorted(Array.from(activeByFaction.keys()));
     const enemiesByFaction = new Map<FactionId, BattleShipState[]>();
     const enemiesByFactionAndType = new Map<FactionId, Map<ShipType, BattleShipState[]>>();
 
@@ -290,9 +291,10 @@ export const resolveBattle = (
     // --- PHASE 2: TARGETING ---
     for (const ship of activeShips) {
       const enemies = enemiesByFaction.get(ship.faction) ?? [];
-      ship.targetId = selectTarget(ship, enemies, rng.next(), {
+      ship.targetId = selectTarget(ship, enemies, () => rng.next(), {
         enemiesByType: enemiesByFactionAndType.get(ship.faction),
-        shipLookup: shipMap
+        shipLookup: shipMap,
+        round
       });
     }
 
@@ -375,7 +377,7 @@ export const resolveBattle = (
       }
     }
 
-    const threatTargets = Array.from(projectileThreats.keys()).sort();
+    const threatTargets = sorted(Array.from(projectileThreats.keys()));
 
     for (const targetId of threatTargets) {
       const defender = shipMap.get(targetId);
@@ -486,10 +488,56 @@ export const resolveBattle = (
   const survivorShipIds: string[] = [];
 
   const aliveFactionsBeforeAttrition = new Set(battleShips.filter(s => s.currentHp > 0).map(s => s.faction));
+
+  const computeStrengthByFaction = () => {
+    const totals = new Map<FactionId, { hp: number; ships: number }>();
+    battleShips.forEach(s => {
+      if (s.currentHp <= 0) return;
+      const entry = totals.get(s.faction);
+      if (entry) {
+        entry.hp += s.currentHp;
+        entry.ships += 1;
+      } else {
+        totals.set(s.faction, { hp: s.currentHp, ships: 1 });
+      }
+    });
+    return totals;
+  };
+
+  const resolveTiebreakerWinner = (): FactionId | 'draw' => {
+    const totals = computeStrengthByFaction();
+    if (totals.size === 0) return 'draw';
+
+    let bestFaction: FactionId | null = null;
+    let bestHp = -1;
+    let bestShips = -1;
+
+    totals.forEach((value, faction) => {
+      if (
+        value.hp > bestHp ||
+        (value.hp === bestHp && value.ships > bestShips)
+      ) {
+        bestHp = value.hp;
+        bestShips = value.ships;
+        bestFaction = faction;
+      }
+    });
+
+    const contenders = Array.from(totals.entries()).filter(
+      ([, val]) => val.hp === bestHp && val.ships === bestShips
+    );
+
+    if (contenders.length === 1 && bestFaction) {
+      return bestFaction;
+    }
+
+    return 'draw';
+  };
+
   // Winner is locked in before post-battle attrition so repairs/failures cannot flip the outcome.
   const winnerFactionId: FactionId | 'draw' = aliveFactionsBeforeAttrition.size === 1
     ? (Array.from(aliveFactionsBeforeAttrition)[0] as FactionId)
-    : 'draw';
+    : (roundsPlayed >= MAX_ROUNDS ? resolveTiebreakerWinner() : 'draw');
 
   involvedFleets.forEach(oldFleet => {
     const newShips: ShipEntity[] = [];

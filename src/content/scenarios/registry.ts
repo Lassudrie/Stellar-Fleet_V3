@@ -1,5 +1,6 @@
 import { ScenarioTemplate } from './types';
 import { ShipType } from '../../shared/types';
+import { sorted } from '../../shared/sorting';
 import conquestSandbox from './templates/conquest_sandbox';
 import spiralConvergence from './templates/spiral_convergence';
 
@@ -121,19 +122,24 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
 
 // Parse and Load
 const loadedScenarios: ScenarioTemplate[] = [];
+let failedCount = 0;
 
 for (const { data, name } of templatesToLoad) {
     const validated = validateScenarioV1(data, name);
     if (validated) {
         loadedScenarios.push(validated);
+    } else {
+        failedCount++;
     }
 }
 
+if (failedCount > 0) {
+    console.error(`[ScenarioRegistry] ${failedCount} scenario(s) failed to load. Check warnings above for details.`);
+}
+
 // Sort by difficulty then title
-loadedScenarios.sort((a, b) => {
+export const SCENARIO_REGISTRY = sorted(loadedScenarios, (a, b) => {
     const diff = (a.meta.difficulty || 0) - (b.meta.difficulty || 0);
     if (diff !== 0) return diff;
     return a.meta.title.localeCompare(b.meta.title);
 });
-
-export const SCENARIO_REGISTRY = loadedScenarios;

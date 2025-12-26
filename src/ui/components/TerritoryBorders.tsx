@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { Color, DoubleSide, BufferGeometry, BufferAttribute } from 'three';
 import { StarSystem, FactionId, FactionState } from '../../shared/types';
 import { TERRITORY_RADIUS } from '../../content/data/static';
+import { sorted } from '../../shared/sorting';
 
 // --- CONFIGURATION ---
 const CIRCLE_SEGMENTS = 64;  
@@ -248,12 +249,12 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
                 }
             });
 
-            events.sort((a, b) => a.t - b.t);
+            const orderedEvents = sorted(events, (a, b) => a.t - b.t);
 
             let depth = 0;
-            let prevT = events[0]?.t || 0;
+            let prevT = orderedEvents[0]?.t || 0;
 
-            for (const e of events) {
+            for (const e of orderedEvents) {
                 const dist = e.t - prevT;
                 if (dist > 0.02) {
                     if (depth === 1) {

@@ -1,5 +1,5 @@
 
-import { GameState, StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/types';
+import { StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/types';
 import { SENSOR_RANGE, SHIP_STATS } from '../content/data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
@@ -96,6 +96,7 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
       type: fallbackType,
       hp: fallbackStats.maxHp,
       maxHp: fallbackStats.maxHp,
+      fuel: fallbackStats.fuelCapacity,
       carriedArmyId: null,
       consumables: {
         offensiveMissiles: fallbackStats.offensiveMissileStock,
@@ -111,6 +112,7 @@ export const createShip = (type: ShipType, rng: RNG): ShipEntity => {
     type,
     hp: stats.maxHp,
     maxHp: stats.maxHp,
+    fuel: stats.fuelCapacity,
     carriedArmyId: null, // Default: No army loaded
     consumables: {
       offensiveMissiles: stats.offensiveMissileStock,

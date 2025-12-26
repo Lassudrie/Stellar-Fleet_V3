@@ -34,7 +34,8 @@ const rules: GameplayRules = {
   fogOfWar: false,
   useAdvancedCombat: true,
   aiEnabled: false,
-  totalWar: false
+  totalWar: false,
+  unlimitedFuel: false
 };
 
 const objectives: GameObjectives = { conditions: [] };
@@ -44,6 +45,7 @@ const createShip = (id: string): ShipEntity => ({
   type: ShipType.FRIGATE,
   hp: 100,
   maxHp: 100,
+  fuel: 100,
   carriedArmyId: null
 });
 

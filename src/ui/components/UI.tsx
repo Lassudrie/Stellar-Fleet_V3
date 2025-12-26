@@ -8,6 +8,7 @@ import SystemContextMenu, { GroundForceSummaryEntry } from './ui/SystemContextMe
 import FleetPicker from './ui/FleetPicker';
 import FleetPanel, { AvailableArmy } from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
+import FleetRegistryScreen from './ui/FleetRegistryScreen';
 import InvasionModal from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
@@ -18,6 +19,7 @@ import { distSq, dist } from '../../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
 import MessageToasts from './ui/MessageToasts';
+import { sorted } from '../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
@@ -55,6 +57,7 @@ interface UIProps {
   onOpenGroundOps: () => void;
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
+  onInspectFleet: (fleetId: string) => void;
   onOpenSystemDetails: () => void;
   systemDetailSystem: StarSystem | null;
   onCloseSystemDetails: () => void;
@@ -84,15 +87,16 @@ const UI: React.FC<UIProps> = ({
     uiMode, menuPosition, targetSystem, systems, blueFleets, battles,
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
+    onInspectFleet,
     onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
-    devMode, godEyes, onSetUiSettings,
-    onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
+  devMode, godEyes, onSetUiSettings,
+  onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
 }) => {
   
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
+  const [isFleetRegistryOpen, setIsFleetRegistryOpen] = useState(false);
 
   // Helper to check ownership against current player
   const playerFactionId = gameState.playerFactionId;
@@ -136,14 +140,16 @@ const UI: React.FC<UIProps> = ({
       const planetIndex = new Map(sys.planets.filter(planet => planet.isSolid).map(planet => [planet.id, planet]));
 
       // Get armies at this system belonging to Player
-      const armies = gameState.armies
-          .filter(a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId))
-          .sort((a, b) => compareIds(a.id, b.id))
-          .map(army => ({
-              army,
-              planetId: army.containerId,
-              planetName: planetIndex.get(army.containerId)?.name ?? sys.name
-          }));
+      const armies = sorted(
+          gameState.armies.filter(
+              a => a.state === ArmyState.DEPLOYED && a.factionId === playerFactionId && planetIndex.has(a.containerId)
+          ),
+          (a, b) => compareIds(a.id, b.id)
+      ).map(army => ({
+          army,
+          planetId: army.containerId,
+          planetName: planetIndex.get(army.containerId)?.name ?? sys.name
+      }));
 
       return { orbitingSystem: sys, availableArmies: armies };
   }, [selectedFleet, systems, gameState.armies, playerFactionId]);
@@ -200,16 +206,17 @@ const UI: React.FC<UIProps> = ({
 
       const orbitThresholdSq = ORBIT_PROXIMITY_RANGE_SQ;
 
-      return blueFleets
-          .filter(fleet => (
+      return sorted(
+          blueFleets.filter(fleet => (
               fleet.state === FleetState.ORBIT &&
               distSq(fleet.position, targetSystem.position) <= orbitThresholdSq
-          ))
-          .sort((a, b) => {
+          )),
+          (a, b) => {
               const sizeDiff = b.ships.length - a.ships.length;
               if (sizeDiff !== 0) return sizeDiff;
               return compareIds(a.id, b.id);
-          });
+          }
+      );
   }, [blueFleets, targetSystem]);
 
   // Compute Ground Forces Summary for Context Menu
@@ -291,12 +298,15 @@ const UI: React.FC<UIProps> = ({
         onToggleMenu={() => setIsSideMenuOpen(true)}
         onNextTurn={onNextTurn}
         onOpenBattle={onOpenBattle}
-        onDebugBattle={devMode ? () => setDebugMode(true) : undefined}
       />
 
       <SideMenu 
         isOpen={isSideMenuOpen}
         onClose={() => setIsSideMenuOpen(false)}
+        onOpenFleetRegistry={() => {
+          setIsSideMenuOpen(false);
+          setIsFleetRegistryOpen(true);
+        }}
         logs={logs}
         messages={messages}
         blueFleets={blueFleets}
@@ -316,6 +326,22 @@ const UI: React.FC<UIProps> = ({
         
         // Pass PlayerID for ownership checks
         playerFactionId={playerFactionId}
+      />
+
+      <FleetRegistryScreen
+        isOpen={isFleetRegistryOpen}
+        blueFleets={blueFleets}
+        systems={systems}
+        day={day}
+        onSelectFleet={(fleetId) => {
+          onSelectFleet(fleetId);
+          setIsFleetRegistryOpen(false);
+        }}
+        onInspectFleet={(fleetId) => {
+          onInspectFleet(fleetId);
+          setIsFleetRegistryOpen(false);
+        }}
+        onClose={() => setIsFleetRegistryOpen(false)}
       />
 
       {uiMode === 'SYSTEM_MENU' && menuPosition && targetSystem && (
@@ -345,7 +371,9 @@ const UI: React.FC<UIProps> = ({
         <FleetPicker
             mode={fleetPickerMode || 'MOVE'}
             targetSystem={targetSystem}
+            systems={systems}
             blueFleets={blueFleets}
+            unlimitedFuel={gameState.rules.unlimitedFuel}
             onSelectFleet={(fleetId) => {
                 if (fleetPickerMode === 'LOAD') return onLoadCommand(fleetId);
                 if (fleetPickerMode === 'UNLOAD') return onUnloadCommand(fleetId);

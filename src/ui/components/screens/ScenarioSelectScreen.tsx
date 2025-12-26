@@ -13,12 +13,16 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
   const { t } = useI18n();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id);
   const [customSeed, setCustomSeed] = useState<string>('');
+  const [unlimitedFuel, setUnlimitedFuel] = useState(false);
 
   const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) as ScenarioTemplate;
 
   const handleLaunch = () => {
-    const seed = customSeed ? parseInt(customSeed, 10) || Date.now() : Date.now();
-    const scenario = buildScenario(selectedTemplateId, seed);
+    const parsedSeed = Number(customSeed);
+    const seed = customSeed === '' || Number.isNaN(parsedSeed) ? Date.now() : parsedSeed;
+    const scenario = buildScenario(selectedTemplateId, seed, {
+      rules: { unlimitedFuel }
+    });
     onLaunch(scenario);
   };
 
@@ -144,6 +148,26 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
                   </button>
                 </div>
               </div>
+
+              <label className="flex items-center justify-between gap-4 bg-slate-900/40 border border-slate-700/60 px-4 py-3 rounded">
+                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                  {t('scenario.unlimited_fuel')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setUnlimitedFuel(value => !value)}
+                  aria-pressed={unlimitedFuel}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
+                    unlimitedFuel ? 'bg-blue-500/80 border-blue-400' : 'bg-slate-800 border-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                      unlimitedFuel ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
 
               <button 
                 onClick={handleLaunch}

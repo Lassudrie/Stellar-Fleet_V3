@@ -1,4 +1,4 @@
-import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../content/data/static';
+import { CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../content/data/static';
 import { Fleet, FleetState, GameState, StarSystem } from '../shared/types';
 import { Vec3, distSq } from './math/vec3';
 
@@ -31,6 +31,27 @@ export const areFleetsSharingOrbit = (a: Fleet, b: Fleet): boolean =>
     a.state === FleetState.ORBIT &&
     b.state === FleetState.ORBIT &&
     isWithinOrbitProximity(a.position, b.position);
+
+export const getOrbitingSystem = (fleet: Fleet, systems: StarSystem[]): StarSystem | null => {
+    let closest: { system: StarSystem; distanceSq: number } | null = null;
+
+    for (const system of systems) {
+        if (!isFleetOrbitingSystem(fleet, system)) {
+            continue;
+        }
+
+        const distanceSq = distSq(fleet.position, system.position);
+        if (
+            closest === null ||
+            distanceSq < closest.distanceSq ||
+            (distanceSq === closest.distanceSq && system.id < closest.system.id)
+        ) {
+            closest = { system, distanceSq };
+        }
+    }
+
+    return closest?.system ?? null;
+};
 
 /**
  * Detects whether multiple factions with active ships are within capture range of a system.

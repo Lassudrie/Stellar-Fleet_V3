@@ -5,7 +5,7 @@ import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler
 import { Fleet, FleetState } from '../../shared/types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../../content/data/static';
 import { Text, Billboard } from '@react-three/drei';
-import { fleetLabel } from '../../engine/idUtils';
+import { useFleetName } from '../context/FleetNames';
 
 interface FleetMeshProps {
   fleet: Fleet;
@@ -51,6 +51,7 @@ const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
       dark: `#${darkHighlight.getHexString()}`
     };
   } catch (error) {
+    console.warn('[FleetRenderer] Failed to derive highlight palette from color:', baseColor, error);
     return {
       light: baseColor,
       dark: baseColor
@@ -59,6 +60,7 @@ const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
 };
 
 const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected, onSelect, playerFactionId: _playerFactionId, color }) => {
+  const getFleetName = useFleetName();
   // We use a Group to handle the Position of the entire fleet entity (ship + label + selection ring)
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
@@ -262,7 +264,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                 outlineColor="#000000"
                 fontWeight="bold"
             >
-                {`${fleetLabel(fleet.id)} [${fleet.ships.length}]`}
+                {`${getFleetName(fleet.id)} [${fleet.ships.length}]`}
             </Text>
         </Billboard>
     </group>

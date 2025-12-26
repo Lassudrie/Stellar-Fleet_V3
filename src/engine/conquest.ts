@@ -1,6 +1,7 @@
 
 import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/types';
 import { ARMY_DESTROY_THRESHOLD, MIN_ARMY_CREATION_STRENGTH } from './army';
+import { sorted } from '../shared/sorting';
 
 export interface GroundBattleResult {
     systemId: string;
@@ -75,7 +76,7 @@ const applyLosses = (
         };
     }
 
-    const sortedArmies = [...armies].sort((a, b) => a.id.localeCompare(b.id));
+    const sortedArmies = sorted(armies, (a, b) => a.id.localeCompare(b.id));
     const totalStrength = calculateTotalStrength(sortedArmies);
     let remainingLoss = Math.min(totalStrengthLoss, totalStrength);
     let appliedLoss = 0;
@@ -161,6 +162,7 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
         const soleFactionResult = armiesByFaction.keys().next();
         if (soleFactionResult.done || !soleFactionResult.value) {
             // Safety guard: should never happen given size === 1, but prevents crash
+            console.error('[Conquest] CRITICAL: armiesByFaction.size === 1 but iterator returned empty. Planet:', planet.id, 'System:', system.id);
             return null;
         }
         const soleFaction = soleFactionResult.value as FactionId;
@@ -252,9 +254,10 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
             } else if (Math.abs(attackersRemainingPower - defendersRemainingPower) < 1e-6) {
                 winnerFactionId = 'draw';
             } else if (attackersRemainingPower > defendersRemainingPower) {
-                const topAttacker = survivingPowers
-                    .filter(entry => entry.factionId !== defendingFactionId)
-                    .sort((a, b) => b.remainingPower - a.remainingPower)[0];
+                const topAttacker = sorted(
+                  survivingPowers.filter(entry => entry.factionId !== defendingFactionId),
+                  (a, b) => b.remainingPower - a.remainingPower
+                )[0];
                 winnerFactionId = topAttacker?.factionId ?? null;
             } else {
                 winnerFactionId = defendingFactionId;
@@ -263,8 +266,11 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
             if (survivingPowers.length === 0) {
                 winnerFactionId = null;
             } else {
-                survivingPowers.sort((a, b) => b.remainingPower - a.remainingPower);
-                const [top, second] = survivingPowers;
+                const survivingPowersByStrength = sorted(
+                  survivingPowers,
+                  (a, b) => b.remainingPower - a.remainingPower
+                );
+                const [top, second] = survivingPowersByStrength;
                 if (second && Math.abs(top.remainingPower - second.remainingPower) < 1e-6) {
                     winnerFactionId = 'draw';
                 } else {

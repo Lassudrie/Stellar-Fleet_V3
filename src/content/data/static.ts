@@ -32,6 +32,9 @@ export const ORBITAL_BOMBARDMENT_MAX_MORALE_LOSS_FRACTION = 0.3;
 export const ORBITAL_BOMBARDMENT_MIN_MORALE = 0.25;
 export const ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER = 1;
 
+// --- FUEL RULES ---
+export const MAX_HYPERJUMP_DISTANCE_LY = 200;
+
 // --- V1 SHIP BALANCING ---
 export const SHIP_STATS: Record<ShipType, ShipStats> = {
   [ShipType.CARRIER]: {
@@ -47,7 +50,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 0,
     torpedoDamage: 0,
     interceptorStock: 0,
-    role: 'capital'
+    role: 'capital',
+    fuelCapacity: 5000,
+    fuelConsumptionPerLy: 12
   },
   [ShipType.CRUISER]: {
     maxHp: 1200,
@@ -62,7 +67,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 4,
     torpedoDamage: 150,
     interceptorStock: 12,
-    role: 'capital'
+    role: 'capital',
+    fuelCapacity: 3000,
+    fuelConsumptionPerLy: 8
   },
   [ShipType.DESTROYER]: {
     maxHp: 600,
@@ -77,7 +84,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 0,
     torpedoDamage: 0,
     interceptorStock: 8,
-    role: 'screen'
+    role: 'screen',
+    fuelCapacity: 2000,
+    fuelConsumptionPerLy: 6
   },
   [ShipType.FRIGATE]: {
     maxHp: 300,
@@ -92,7 +101,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 2,
     torpedoDamage: 100,
     interceptorStock: 4,
-    role: 'screen'
+    role: 'screen',
+    fuelCapacity: 1500,
+    fuelConsumptionPerLy: 4
   },
   [ShipType.FIGHTER]: {
     maxHp: 50,
@@ -107,7 +118,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 0,
     torpedoDamage: 0,
     interceptorStock: 2,
-    role: 'striker'
+    role: 'striker',
+    fuelCapacity: 120,
+    fuelConsumptionPerLy: 2
   },
   [ShipType.BOMBER]: {
     maxHp: 80,
@@ -122,7 +135,9 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 4, // Torpedo specialist
     torpedoDamage: 120,
     interceptorStock: 0,
-    role: 'striker'
+    role: 'striker',
+    fuelCapacity: 180,
+    fuelConsumptionPerLy: 3
   },
   [ShipType.TROOP_TRANSPORT]: {
     maxHp: 2000, // Very durable (Capital class hull)
@@ -137,7 +152,45 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     torpedoStock: 0,
     torpedoDamage: 0,
     interceptorStock: 0,
-    role: 'transport'
+    role: 'transport',
+    fuelCapacity: 3000,
+    fuelConsumptionPerLy: 10
+  },
+  [ShipType.TANKER]: {
+    maxHp: 1400,
+    damage: 10,
+    speed: 0.85,
+    cost: 70,
+    pdStrength: 8,
+    evasion: 0.12,
+    maneuverability: 0.25,
+    offensiveMissileStock: 0,
+    missileDamage: 0,
+    torpedoStock: 0,
+    torpedoDamage: 0,
+    interceptorStock: 0,
+    role: 'transport',
+    fuelCapacity: 12000,
+    fuelConsumptionPerLy: 10,
+    fuelTransferRate: 400
+  },
+  [ShipType.EXTRACTOR]: {
+    maxHp: 700,
+    damage: 15,
+    speed: 0.95,
+    cost: 45,
+    pdStrength: 6,
+    evasion: 0.2,
+    maneuverability: 0.35,
+    offensiveMissileStock: 0,
+    missileDamage: 0,
+    torpedoStock: 0,
+    torpedoDamage: 0,
+    interceptorStock: 0,
+    role: 'transport',
+    fuelCapacity: 5000,
+    fuelConsumptionPerLy: 10,
+    fuelExtractionRate: 500
   },
 };
 

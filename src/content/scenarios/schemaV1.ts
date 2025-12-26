@@ -173,6 +173,7 @@ export interface GameplayRules {
   aiEnabled: boolean;
   /** Si true, pas de diplomatie/échange (guerre totale) */
   totalWar: boolean;
+  unlimitedFuel: boolean;
 }
 
 // --- ROOT INTERFACE ---

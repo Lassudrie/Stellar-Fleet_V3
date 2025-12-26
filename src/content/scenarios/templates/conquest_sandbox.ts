@@ -33,7 +33,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "blue",
         spawnLocation: "home_system",
-        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "frigate", "fighter", "fighter", "fighter"],
+        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "frigate", "extractor", "fighter", "fighter", "fighter"],
         withArmies: false
       },
       {
@@ -45,7 +45,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "red",
         spawnLocation: "home_system",
-        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "frigate", "bomber", "bomber", "fighter"],
+        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "frigate", "extractor", "bomber", "bomber", "fighter"],
         withArmies: false
       },
       {
@@ -63,7 +63,8 @@ const conquestSandbox: ScenarioDefinitionV1 = {
     fogOfWar: true,
     useAdvancedCombat: true,
     aiEnabled: true,
-    totalWar: true
+    totalWar: true,
+    unlimitedFuel: false
   }
 };
 

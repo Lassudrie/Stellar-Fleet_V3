@@ -3,6 +3,7 @@ import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, Pla
 import { RNG } from './rng';
 import { logger } from '../shared/devLogger';
 import { getPlanetById } from './planets';
+import { sorted } from '../shared/sorting';
 
 export const MIN_ARMY_CREATION_STRENGTH = 10000;
 export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
@@ -153,8 +154,8 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
     carrierMap.forEach((carriers, armyId) => {
         if (carriers.length <= 1) return;
 
-        carriers.sort((a, b) => a.shipId.localeCompare(b.shipId));
-        const [canonical, ...duplicates] = carriers;
+        const orderedCarriers = sorted(carriers, (a, b) => a.shipId.localeCompare(b.shipId));
+        const [canonical, ...duplicates] = orderedCarriers;
         duplicates.forEach(({ fleet, shipIndex, shipId }) => {
             clearShipArmy(fleet, shipIndex, armyId);
             logs.push(`Ship ${shipId} (${fleet.id}) unlinked from shared army ${armyId}; canonical carrier is ${canonical.shipId} (${canonical.fleet.id}).`);

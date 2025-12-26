@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { SAVE_VERSION } from '../saveFormat';
 import { ArmyState, FleetState, FactionState, GameState, ShipType, StarSystem, Fleet, ShipEntity, PlanetBody } from '../../shared/types';
+import { quantizeFuel } from '../logistics/fuel';
 
 const factions: FactionState[] = [
   { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }
@@ -36,6 +37,7 @@ const createFleet = (id: string, system: StarSystem): Fleet => {
     type: ShipType.FRIGATE,
     hp: 50,
     maxHp: 50,
+    fuel: 50,
     carriedArmyId: null
   };
 
@@ -74,7 +76,7 @@ const createBaseState = (): GameState => {
     selectedFleetId: null,
     winnerFactionId: null,
     objectives: { conditions: [] },
-    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false }
+    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
   };
 };
 
@@ -160,6 +162,44 @@ const createBaseState = (): GameState => {
   const restored = deserializeGameState(JSON.stringify(save));
   assert.ok(restored.logs.length < 6000, 'Logs should be truncated on load to prevent overload');
   assert.ok(restored.messages.length < 1500, 'Messages should be truncated on load to prevent overload');
+}
+
+{
+  const base = createBaseState();
+  const save = JSON.parse(serializeGameState(base));
+  const ship = save.state.fleets[0].ships[0];
+
+  ship.maxHp = 200;
+  ship.hp = -10;
+  ship.fuel = 1499.99994;
+  ship.consumables = { offensiveMissiles: -1, torpedoes: 3.7, interceptors: 'bad' };
+
+  const restored = deserializeGameState(JSON.stringify(save));
+  const restoredShip = restored.fleets[0].ships[0];
+  assert.ok(restoredShip.consumables, 'Consumables should be sanitized during load');
+  const restoredConsumables = restoredShip.consumables;
+
+  assert.strictEqual(restoredShip.hp, 0, 'Negative hp should clamp to zero');
+  assert.strictEqual(restoredShip.maxHp, 200, 'Valid maxHp should be preserved');
+  assert.strictEqual(
+    restoredShip.fuel,
+    quantizeFuel(1500),
+    'Fuel should be clamped to capacity then quantized'
+  );
+  assert.strictEqual(
+    restoredConsumables.offensiveMissiles,
+    4,
+    'Invalid consumables should fall back to stock'
+  );
+
+  const roundTripped = JSON.parse(serializeGameState(restored));
+  const persistedShip = roundTripped.state.fleets[0].ships[0];
+
+  assert.strictEqual(
+    persistedShip.fuel,
+    restoredShip.fuel,
+    'Round-trip serialization should preserve sanitized fuel'
+  );
 }
 
 console.log('serialization robustness tests passed');

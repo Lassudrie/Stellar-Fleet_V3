@@ -1,12 +1,19 @@
 
 import React, { useState, useMemo } from 'react';
-import { LogEntry, Fleet, StarSystem, FactionId, GameMessage } from '../../../shared/types';
-import { fleetLabel } from '../../../engine/idUtils';
+import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
+import { useFleetName } from '../../context/FleetNames';
+import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
+import { dist } from '../../../engine/math/vec3';
+import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
+import { computeFleetFuelSummary } from '../../utils/fleetFuel';
+import { SHIP_STATS } from '../../../content/data/static';
+import { sorted } from '../../../shared/sorting';
 
 interface SideMenuProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenFleetRegistry: () => void;
   logs: LogEntry[];
   messages: GameMessage[];
   blueFleets: Fleet[];
@@ -33,8 +40,325 @@ type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES'
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
+const getAmmoFromConsumables = (
+  ship: ShipEntity,
+  key: keyof ShipConsumables,
+  fallback: number,
+  legacy?: number
+) => ship.consumables?.[key] ?? legacy ?? fallback;
+
+const getGaugeTone = (percentage: number): string => {
+  if (percentage >= 90) return 'bg-emerald-500/80';
+  if (percentage >= 50) return 'bg-amber-400/80';
+  return 'bg-red-500/80';
+};
+
+type AmmunitionSummary = {
+  current: number;
+  capacity: number;
+  percentage: number;
+};
+
+const computeFleetAmmoSummary = (fleet: Fleet): AmmunitionSummary => {
+  const totals = fleet.ships.reduce(
+    (acc, ship) => {
+      const stats = SHIP_STATS[ship.type];
+      if (!stats) return acc;
+
+      const missiles = getAmmoFromConsumables(ship, 'offensiveMissiles', stats.offensiveMissileStock, ship.offensiveMissilesLeft);
+      const torpedoes = getAmmoFromConsumables(ship, 'torpedoes', stats.torpedoStock, ship.torpedoesLeft);
+      const interceptors = getAmmoFromConsumables(ship, 'interceptors', stats.interceptorStock, ship.interceptorsLeft);
+
+      acc.current += missiles + torpedoes + interceptors;
+      acc.capacity += stats.offensiveMissileStock + stats.torpedoStock + stats.interceptorStock;
+      return acc;
+    },
+    { current: 0, capacity: 0 }
+  );
+
+  const percentage = totals.capacity > 0
+    ? Math.min(100, Math.max(0, (totals.current / totals.capacity) * 100))
+    : 0;
+
+  return {
+    current: totals.current,
+    capacity: totals.capacity,
+    percentage
+  };
+};
+
+type GaugeBarProps = {
+  label: string;
+  current: number;
+  capacity: number;
+  tone: string;
+};
+
+const GaugeBar: React.FC<GaugeBarProps> = ({ label, current, capacity, tone }) => {
+  const safeCapacity = Math.max(0, capacity);
+  const safeCurrent = Math.max(0, current);
+  const percentage = safeCapacity > 0 ? Math.min(100, Math.max(0, (safeCurrent / safeCapacity) * 100)) : 0;
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <div className="flex items-center justify-between text-xs text-slate-200">
+        <div className="flex items-center gap-2 font-semibold uppercase tracking-tight text-slate-100">
+          {label}
+        </div>
+        <span className="font-mono text-slate-100">{Math.round(safeCurrent).toLocaleString()} / {Math.round(safeCapacity).toLocaleString()}</span>
+      </div>
+      <div
+        className="relative h-3 rounded-full bg-slate-800/80 border border-slate-700 overflow-hidden"
+        role="img"
+        aria-label={`${label} ${Math.round(percentage)}%`}
+      >
+        <div
+          className={`h-full ${tone} transition-all duration-300`}
+          style={{ width: `${percentage}%` }}
+          aria-hidden="true"
+        />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[10px] font-bold text-white drop-shadow-sm">
+            {Math.round(percentage)}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SHIP_TRIGRAM: Record<ShipType, string> = {
+  [ShipType.CARRIER]: 'CAR',
+  [ShipType.CRUISER]: 'CRU',
+  [ShipType.DESTROYER]: 'DST',
+  [ShipType.FRIGATE]: 'FRI',
+  [ShipType.FIGHTER]: 'FTR',
+  [ShipType.BOMBER]: 'BMB',
+  [ShipType.TROOP_TRANSPORT]: 'TRN',
+  [ShipType.TANKER]: 'TNK',
+  [ShipType.EXTRACTOR]: 'EXT',
+};
+
+const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
+  return fleet.ships.reduce<Record<ShipType, number>>((acc, ship) => {
+      if (ship?.type) {
+          acc[ship.type as ShipType] = (acc[ship.type as ShipType] ?? 0) + 1;
+      }
+      return acc;
+  }, {
+      [ShipType.CARRIER]: 0,
+      [ShipType.CRUISER]: 0,
+      [ShipType.DESTROYER]: 0,
+      [ShipType.FRIGATE]: 0,
+      [ShipType.FIGHTER]: 0,
+      [ShipType.BOMBER]: 0,
+      [ShipType.TROOP_TRANSPORT]: 0,
+      [ShipType.TANKER]: 0,
+      [ShipType.EXTRACTOR]: 0,
+  });
+};
+
+type FleetRegistryListProps = {
+  blueFleets: Fleet[];
+  systems: StarSystem[];
+  day?: number;
+  onSelectFleet: (fleetId: string) => void;
+  onInspectFleet?: (fleetId: string) => void;
+  onClose?: () => void;
+};
+
+export const FleetRegistryList: React.FC<FleetRegistryListProps> = ({
+  blueFleets,
+  systems,
+  onSelectFleet,
+  onInspectFleet,
+  onClose
+}) => {
+  const { t } = useI18n();
+  const getFleetName = useFleetName();
+  const [expandedFleets, setExpandedFleets] = useState<Set<string>>(new Set());
+
+  return (
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+          {blueFleets.map(fleet => {
+              const composition = getFleetComposition(fleet);
+              const compositionEntries = Object.entries(composition)
+                .filter(([, count]) => count > 0)
+                .map(([type, count]) => ({ label: SHIP_TRIGRAM[type as ShipType], count }));
+              const isExpanded = expandedFleets.has(fleet.id);
+              const maxVisibleChips = 4;
+              const visibleChips = isExpanded ? compositionEntries : compositionEntries.slice(0, maxVisibleChips);
+              const hasOverflow = compositionEntries.length > maxVisibleChips;
+
+              const inTransit = fleet.state === FleetState.MOVING && Boolean(fleet.targetPosition);
+              const targetSystem = fleet.targetSystemId ? systems.find(s => s.id === fleet.targetSystemId) : null;
+              const orbitingSystem = findOrbitingSystem(fleet, systems);
+              const originLabel = orbitingSystem?.name ?? t('sidemenu.deepSpace');
+              const routeLabel = !inTransit && !orbitingSystem
+                ? t('sidemenu.deepSpacePatrol')
+                : null;
+
+              const speed = getFleetSpeed(fleet);
+              const remainingDistance = inTransit && fleet.targetPosition ? dist(fleet.position, fleet.targetPosition) : 0;
+              const etaTurns = inTransit && speed > 0 ? Math.max(1, Math.ceil(remainingDistance / speed)) : 0;
+              const etaLabel = inTransit
+                ? etaTurns === 1
+                  ? t('picker.eta_one')
+                  : t('picker.eta_other', { count: etaTurns })
+                : null;
+              const distanceLabel = inTransit
+                ? t('sidemenu.remainingDistance', {
+                    distance: Math.round(Math.max(0, remainingDistance)),
+                    unit: t('picker.ly')
+                  })
+                : null;
+              const fuelSummary = computeFleetFuelSummary(fleet);
+              const ammoSummary = computeFleetAmmoSummary(fleet);
+
+              const statusTone = fleet.state === FleetState.COMBAT
+                ? 'bg-red-900/40 text-red-200 border border-red-700/40'
+                : fleet.state === FleetState.MOVING
+                  ? 'bg-amber-900/30 text-amber-100 border border-amber-700/30'
+                  : 'bg-emerald-900/30 text-emerald-100 border border-emerald-700/30';
+
+              const handleCardActivate = () => {
+                  onInspectFleet?.(fleet.id);
+                  onSelectFleet(fleet.id);
+                  onClose?.();
+              };
+
+              return (
+                <div
+                  key={fleet.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleCardActivate}
+                  onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      handleCardActivate();
+                  }}
+                  className="relative w-full text-left bg-gradient-to-br from-slate-900/80 via-slate-900/40 to-slate-800/60 border border-slate-700/60 p-4 rounded-2xl shadow-lg hover:border-blue-500/50 hover:shadow-blue-900/30 transition-all group overflow-hidden"
+                  aria-label={t('sidemenu.openFleetCard', { fleet: getFleetName(fleet.id) })}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+                  <div className="flex items-start justify-between gap-3">
+                      <div>
+                          <div className="text-xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
+                              {getFleetName(fleet.id)}
+                              <span className={`text-[10px] px-2 py-1 rounded-full uppercase font-bold ${statusTone}`}>
+                                  {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
+                              </span>
+                          </div>
+                          {!inTransit && orbitingSystem && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                {t('fleet.orbiting', { system: orbitingSystem.name })}
+                            </div>
+                          )}
+                          {inTransit && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                {t('sidemenu.routeFromTo', { origin: originLabel, target: targetSystem?.name ?? t('ctx.systemDetails') })}
+                            </div>
+                          )}
+                          {inTransit && (distanceLabel || etaLabel) && (
+                            <div className="text-xs text-slate-500 mt-1 flex gap-3">
+                                {distanceLabel && <span>{distanceLabel}</span>}
+                                {etaLabel && <span>{etaLabel}</span>}
+                            </div>
+                          )}
+                          {routeLabel && (
+                            <div className="text-sm text-slate-400 mt-1">
+                                {routeLabel}
+                            </div>
+                          )}
+                      </div>
+                      <div className="h-12 w-12 rounded-xl border border-slate-700 flex items-center justify-center bg-slate-800/60 text-slate-300">
+                          <div className="flex flex-col gap-1 items-center" aria-hidden="true">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400/90" />
+                          </div>
+                          <span className="sr-only">{t('sidemenu.fleetOptions')}</span>
+                      </div>
+                  </div>
+
+                  <div className="mt-4 space-y-3 text-slate-200">
+                      <div className="flex flex-col gap-2 w-full">
+                          <GaugeBar
+                            label={t('sidemenu.fuelGauge')}
+                            current={fuelSummary.totalFuel}
+                            capacity={fuelSummary.totalCapacity}
+                            tone={getGaugeTone(fuelSummary.fuelPercentage)}
+                          />
+                          <GaugeBar
+                            label={t('sidemenu.magazinesGauge')}
+                            current={ammoSummary.current}
+                            capacity={ammoSummary.capacity}
+                            tone={getGaugeTone(ammoSummary.percentage)}
+                          />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-slate-200">
+                          <span className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-sm font-semibold">
+                              {t('orbitPicker.shipCount', { count: fleet.ships.length })}
+                          </span>
+                          <span className="text-sm text-slate-400">{t('sidemenu.speedLabel', { speed: Math.round(speed), unit: t('picker.ly') })}</span>
+                          <div className={`flex gap-2 text-sm text-slate-100 ${isExpanded ? 'overflow-x-auto pr-2' : 'flex-wrap'}`}>
+                              {visibleChips.map(item => (
+                                  <span
+                                    key={item.label}
+                                    className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold whitespace-nowrap"
+                                  >
+                                      {item.label} {item.count}
+                                  </span>
+                              ))}
+                              {hasOverflow && !isExpanded && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        setExpandedFleets(prev => {
+                                            const next = new Set(prev);
+                                            next.add(fleet.id);
+                                            return next;
+                                        });
+                                    }}
+                                    className="px-3 py-1 rounded-full bg-slate-100 text-slate-900 border border-slate-200 text-xs font-semibold cursor-pointer"
+                                    aria-label={t('sidemenu.expandComposition')}
+                                  >
+                                      ...
+                                  </button>
+                              )}
+                              {hasOverflow && isExpanded && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        setExpandedFleets(prev => {
+                                            const next = new Set(prev);
+                                            next.delete(fleet.id);
+                                            return next;
+                                        });
+                                    }}
+                                    className="px-3 py-1 rounded-full bg-slate-800/70 text-slate-200 border border-slate-600 text-xs font-semibold whitespace-nowrap cursor-pointer"
+                                    aria-label={t('sidemenu.collapse')}
+                                  >
+                                      {t('sidemenu.collapse')}
+                                  </button>
+                              )}
+                          </div>
+                      </div>
+                  </div>
+                </div>
+              );
+          })}
+      </div>
+  );
+};
+
 const SideMenu: React.FC<SideMenuProps> = ({ 
-    isOpen, onClose, logs, messages, blueFleets, systems, 
+    isOpen, onClose, onOpenFleetRegistry, logs, messages, blueFleets, systems,
     onRestart, onSelectFleet, onSave, onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead,
     devMode, godEyes, onSetUiSettings,
     onExportAiLogs, onClearAiLogs,
@@ -57,7 +381,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const unreadMessages = useMemo(() => messages.filter(msg => !msg.read && !msg.dismissed).length, [messages]);
   const messageTypes = useMemo(() => {
       const types = new Set(messages.map(m => m.type.toLowerCase()));
-      return Array.from(types).sort();
+      return sorted(Array.from(types));
   }, [messages]);
 
   if (!isOpen) return null;
@@ -112,7 +436,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
              </svg>
         </button>
 
-        <button onClick={() => setView('FLEETS')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
+        <button onClick={onOpenFleetRegistry} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
                  <span className="text-blue-200 font-bold tracking-wider uppercase">{t('sidemenu.registry')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.activeUnits', { count: blueFleets.length })}</span>
@@ -187,32 +511,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
   );
 
   const renderFleets = () => (
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-          {blueFleets.map(fleet => (
-              <button 
-                  key={fleet.id} 
-                  onClick={() => {
-                      onSelectFleet(fleet.id);
-                      onClose();
-                  }}
-                  className="w-full text-left bg-slate-800/30 border border-slate-700/50 p-3 rounded hover:bg-slate-700 hover:border-blue-500/50 transition-all group"
-              >
-                  <div className="flex justify-between items-start mb-1">
-                      <span className="text-blue-300 font-bold text-sm group-hover:text-blue-100 transition-colors">{fleetLabel(fleet.id)}</span>
-                      <span className="text-[10px] bg-slate-700 px-1 rounded text-slate-300 uppercase">
-                        {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
-                      </span>
-                  </div>
-                  <div className="text-xs text-slate-500 group-hover:text-slate-400">Ships: {fleet.ships.length}</div>
-                  <div className="flex gap-1 mt-2 flex-wrap">
-                     {fleet.ships.slice(0, 10).map((_, i) => (
-                         <div key={i} className="w-1 h-1 bg-blue-500 rounded-full"></div>
-                     ))}
-                     {fleet.ships.length > 10 && <span className="text-[10px] text-slate-600">+</span>}
-                  </div>
-              </button>
-          ))}
-      </div>
+      <FleetRegistryList
+        blueFleets={blueFleets}
+        systems={systems}
+        onSelectFleet={onSelectFleet}
+        onClose={onClose}
+      />
   );
 
   const renderSystems = () => (
@@ -265,7 +569,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className="flex items-center justify-between mb-4">
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.devMode')}</div>
-                      <div className="text-xs text-slate-500">Enable advanced features</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.devModeHint')}</div>
                   </div>
                   <button 
                       onClick={() => onSetUiSettings({ devMode: !devMode, godEyes: devMode ? false : godEyes, aiDebug: devMode ? false : aiDebug })}
@@ -279,7 +583,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className={`flex items-center justify-between transition-opacity ${devMode ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.godEyes')}</div>
-                      <div className="text-xs text-slate-500">Disable Fog of War (Visual Only)</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.godEyesHint')}</div>
                   </div>
                   <button 
                       onClick={() => onSetUiSettings({ devMode, godEyes: !godEyes, aiDebug })}
@@ -294,7 +598,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               <div className={`flex items-center justify-between mt-4 transition-opacity ${devMode ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                   <div>
                       <div className="text-white font-bold text-sm">{t('sidemenu.aiDebugger')}</div>
-                      <div className="text-xs text-slate-500">Log AI decision metrics</div>
+                      <div className="text-xs text-slate-500">{t('sidemenu.aiDebuggerHint')}</div>
                   </div>
                   <button 
                       onClick={() => {
@@ -348,15 +652,16 @@ const SideMenu: React.FC<SideMenuProps> = ({
   );
 
   const renderMessages = () => {
-      const sortedMessages = [...messages]
-        .filter(msg => !msg.dismissed)
-        .sort((a, b) => {
+      const sortedMessages = sorted(
+        messages.filter(msg => !msg.dismissed),
+        (a, b) => {
             const turnDiff = b.createdAtTurn - a.createdAtTurn;
             if (turnDiff !== 0) return turnDiff;
             const priorityDiff = b.priority - a.priority;
             if (priorityDiff !== 0) return priorityDiff;
             return compareIds(b.id, a.id);
-        });
+        }
+      );
 
       const filteredMessages = sortedMessages.filter(msg => {
           if (messageTypeFilter === 'ALL') return true;
@@ -453,7 +758,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 {view === 'MESSAGES' && renderMessages()}
             </div>
             <div className="p-4 border-t border-slate-800 text-center bg-slate-950/30">
-                <p className="text-[10px] text-slate-600 uppercase tracking-widest">Galactic Conflict v1.1</p>
+                <p className="text-[10px] text-slate-600 uppercase tracking-widest">{t('sidemenu.footerVersion')}</p>
             </div>
         </div>
     </>

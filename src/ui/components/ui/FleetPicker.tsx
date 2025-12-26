@@ -2,51 +2,87 @@
 import React, { useMemo } from 'react';
 import { Fleet, StarSystem, FleetState, ShipType } from '../../../shared/types';
 import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
-import { fleetLabel } from '../../../engine/idUtils';
+import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { distSq } from '../../../engine/math/vec3';
-import { CAPTURE_RANGE_SQ } from '../../../content/data/static';
-
-export const isFleetEligibleForMode = (
-  fleet: Fleet,
-  mode: FleetPickerProps['mode'],
-  targetPosition: StarSystem['position']
-): boolean => {
-  const distanceSq = distSq(fleet.position, targetPosition);
-
-  if (mode === 'MOVE' || mode === 'ATTACK') {
-      return distanceSq > CAPTURE_RANGE_SQ;
-  }
-
-  const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
-  return hasTransport;
-};
+import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
+import { canFleetPayJump } from '../../../engine/logistics/fuel';
+import { getOrbitingSystem } from '../../../engine/orbit';
+import { sorted } from '../../../shared/sorting';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';
   targetSystem: StarSystem;
+  systems: StarSystem[];
   blueFleets: Fleet[];
+  unlimitedFuel?: boolean;
   onSelectFleet: (fleetId: string) => void;
   onClose: () => void;
 }
 
-const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleets, onSelectFleet, onClose }) => {
+export type FleetEligibilityReason = 'captureRange' | 'outOfRange' | 'insufficientFuel' | 'missingTransport' | 'notOrbit';
+
+export const getFleetEligibility = (
+  fleet: Fleet,
+  mode: FleetPickerProps['mode'],
+  targetSystem: StarSystem,
+  systems: StarSystem[],
+  unlimitedFuel?: boolean
+): { eligible: boolean; reason: FleetEligibilityReason | null; distanceLy: number; distanceSq: number } => {
+  const sourceSystem = getOrbitingSystem(fleet, systems);
+  const targetPosition = targetSystem.position;
+  const distanceSq = sourceSystem ? distSq(sourceSystem.position, targetPosition) : distSq(fleet.position, targetPosition);
+  const distanceLy = Math.sqrt(distanceSq);
+
+  if (fleet.state !== FleetState.ORBIT) return { eligible: false, reason: 'notOrbit', distanceLy, distanceSq };
+
+  if (mode === 'MOVE' || mode === 'ATTACK') {
+      if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };
+      if (!canFleetPayJump(fleet, distanceLy, { unlimitedFuel })) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
+      if (distanceSq <= CAPTURE_RANGE_SQ) return { eligible: false, reason: 'captureRange', distanceLy, distanceSq };
+      return { eligible: true, reason: null, distanceLy, distanceSq };
+  }
+
+  const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
+  if (!hasTransport) return { eligible: false, reason: 'missingTransport', distanceLy, distanceSq };
+  if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };
+  if (!canFleetPayJump(fleet, distanceLy, { unlimitedFuel })) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };
+
+  return { eligible: true, reason: null, distanceLy, distanceSq };
+};
+
+export const isFleetEligibleForMode = (
+  fleet: Fleet,
+  mode: FleetPickerProps['mode'],
+  targetSystem: StarSystem,
+  systems: StarSystem[],
+  unlimitedFuel?: boolean
+): boolean => {
+  return getFleetEligibility(fleet, mode, targetSystem, systems, unlimitedFuel).eligible;
+};
+
+const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, systems, blueFleets, unlimitedFuel, onSelectFleet, onClose }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
 
-  // Sort fleets by distance to target system and filter based on mode
-  const sortedFleets = useMemo(() => {
-      const targetPos = targetSystem.position;
+  const fleetOptions = useMemo(() => {
+      return sorted(
+          blueFleets.map(fleet => {
+              const eligibility = getFleetEligibility(fleet, mode, targetSystem, systems, unlimitedFuel);
+              const { distanceLy, distanceSq } = eligibility;
+              const speed = getFleetSpeed(fleet);
+              const eta = Math.max(1, Math.ceil(distanceLy / speed));
 
-      const availableFleets = blueFleets.filter(fleet => {
-          return isFleetEligibleForMode(fleet, mode, targetPos);
-      });
-
-      return availableFleets.sort((a, b) => {
-          const distASq = distSq(a.position, targetPos);
-          const distBSq = distSq(b.position, targetPos);
-          return distASq - distBSq;
-      });
-  }, [blueFleets, mode, targetSystem]);
+              return { fleet, distanceSq, distanceLy, eligibility, eta };
+          }),
+          (a, b) => {
+              if (a.eligibility.eligible !== b.eligibility.eligible) {
+                  return a.eligibility.eligible ? -1 : 1;
+              }
+              return a.distanceSq - b.distanceSq;
+          }
+      );
+  }, [blueFleets, mode, systems, targetSystem, unlimitedFuel]);
 
   const titleKey = mode === 'LOAD'
       ? 'picker.titleLoad'
@@ -80,37 +116,36 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                {sortedFleets.length === 0 ? (
+                {fleetOptions.length === 0 ? (
                     <div className="text-center p-8 text-slate-500">
                       {t(emptyKey)}
                     </div>
                 ) : (
-                    sortedFleets.map(fleet => {
-                        const fleetPos = fleet.position;
-                        const targetPos = targetSystem.position;
-                        const rawDistSq = distSq(fleetPos, targetPos);
-                        const rawDist = Math.sqrt(rawDistSq);
-
-                        const d = Math.round(rawDist);
-
-                        // Calculate dynamic speed based on composition
-                        const speed = getFleetSpeed(fleet);
-                        const eta = Math.max(1, Math.ceil(rawDist / speed));
-                        
-                        // Localization for ETA
+                    fleetOptions.map(({ fleet, distanceLy, eligibility, eta }) => {
+                        const roundedDistance = Math.round(distanceLy);
                         const etaText = eta === 1 
                             ? t('picker.eta_one') 
                             : t('picker.eta_other', { count: eta });
 
+                        const disabled = !eligibility.eligible;
+                        const restrictionKey = eligibility.reason
+                            ? `picker.restriction.${eligibility.reason}`
+                            : null;
+
                         return (
                             <button
                               key={fleet.id}
-                              onClick={() => onSelectFleet(fleet.id)}
-                              className="w-full bg-slate-800/50 hover:bg-blue-900/30 border border-slate-700 hover:border-blue-500/50 p-3 rounded-lg flex items-center justify-between group transition-all"
+                              onClick={() => !disabled && onSelectFleet(fleet.id)}
+                              disabled={disabled}
+                              className={`w-full border p-3 rounded-lg flex items-center justify-between group transition-all ${
+                                  disabled
+                                      ? 'bg-slate-800/30 border-slate-700/70 cursor-not-allowed opacity-70'
+                                      : 'bg-slate-800/50 hover:bg-blue-900/30 border-slate-700 hover:border-blue-500/50'
+                              }`}
                             >
                                 <div className="text-left">
                                     <div className="text-white font-bold group-hover:text-blue-200">
-                                        {fleetLabel(fleet.id)}
+                                        {getFleetName(fleet.id)}
                                     </div>
                                     <div className="text-xs text-slate-400 flex gap-2 mt-1">
                                         <span>{fleet.ships.length} Ships</span>
@@ -118,10 +153,15 @@ const FleetPicker: React.FC<FleetPickerProps> = ({ mode, targetSystem, blueFleet
                                             • {t(`fleet.status.${fleet.state.toLowerCase()}`, { defaultValue: fleet.state })}
                                         </span>
                                     </div>
+                                    {!eligibility.eligible && restrictionKey && (
+                                        <div className="text-xs text-amber-300 mt-1">
+                                            {t(restrictionKey)}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="text-right flex flex-col items-end">
                                     <div className="text-lg font-mono font-bold text-slate-500 group-hover:text-white leading-tight">
-                                        {d} <span className="text-xs">{t('picker.ly')}</span>
+                                        {roundedDistance} <span className="text-xs">{t('picker.ly')}</span>
                                     </div>
                                     <div className="text-xs font-mono font-bold text-blue-500/70 group-hover:text-blue-300">
                                         {etaText}

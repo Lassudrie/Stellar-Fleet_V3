@@ -30,18 +30,14 @@ import {
   SaveFile,
   GameStateDTO,
   Vector3DTO,
-  StarSystemDTO,
-  FleetDTO,
-  LaserShotDTO,
-  BattleDTO,
   AIStateDTO,
   EnemySightingDTO,
-  ArmyDTO,
   GameMessageDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
+import { quantizeFuel } from './logistics/fuel';
 
 // --- HELPERS ---
 
@@ -77,6 +73,8 @@ const MAX_MESSAGE_LINES = 20;
 const MAX_MESSAGE_TITLE_LENGTH = 200;
 const MAX_MESSAGE_SUBTITLE_LENGTH = 200;
 const MAX_MESSAGE_TYPE_LENGTH = 64;
+
+const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapacity ?? 0;
 
 const ARMY_STATES = new Set(Object.values(ArmyState));
 const FLEET_STATES = new Set(Object.values(FleetState));
@@ -123,7 +121,13 @@ const restoreAstro = (
   const sanitized = sanitizeStarSystemAstro(astro);
   if (sanitized) return sanitized;
   if (isFiniteNumber(worldSeed) && typeof systemId === 'string' && systemId.length > 0) {
+    if (astro) {
+      console.warn(`[Serialization] Astro data for system '${systemId}' was invalid; regenerating from seed.`);
+    }
     return generateStellarSystem({ worldSeed, systemId });
+  }
+  if (astro) {
+    console.warn(`[Serialization] Cannot restore astro for system '${systemId}': invalid data and no seed available.`);
   }
   return undefined;
 };
@@ -361,6 +365,7 @@ export const serializeGameState = (state: GameState): string => {
           type: s.type,
           hp: s.hp,
           maxHp: s.maxHp,
+          fuel: s.fuel,
           carriedArmyId: s.carriedArmyId || null,
           transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
           consumables: extractConsumables(s, s.type),
@@ -443,8 +448,6 @@ export const deserializeGameState = (json: string): GameState => {
 
   // MIGRATION V1 -> V2 logic
   // If factions or playerFactionId are missing, inject defaults
-  const isLegacy = !dto.playerFactionId || !dto.factions;
-  
   if (dto.factions !== undefined && !Array.isArray(dto.factions)) {
     throw new Error("Field 'factions' must be an array.");
   }
@@ -542,15 +545,27 @@ export const deserializeGameState = (json: string): GameState => {
 
       const ships: unknown[] = Array.isArray(f.ships) ? f.ships : [];
       const sanitizedShips = ships
-        .map((entry: unknown): ShipEntity | null => {
+        .map((entry: unknown, index: number): ShipEntity | null => {
           const ship = entry as any;
-          if (typeof ship?.id !== 'string') return null;
-          if (!isEnumValue(SHIP_TYPES, ship.type)) return null;
+          if (typeof ship?.id !== 'string') {
+            console.warn(`[Serialization] Ship at index ${index} in fleet '${f.id}' has invalid id; skipping.`);
+            return null;
+          }
+          if (!isEnumValue(SHIP_TYPES, ship.type)) {
+            console.warn(`[Serialization] Ship '${ship.id}' has invalid type '${ship.type}'; skipping.`);
+            return null;
+          }
 
           const shipType = ship.type as ShipType;
           const fallbackMaxHp = SHIP_STATS[shipType]?.maxHp ?? 100;
           const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
           const hp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
+          const capacity = getFuelCapacity(shipType);
+          const fallbackFuel = Number.isFinite(capacity) ? capacity : 0;
+          const rawFuel = Number.isFinite(ship.fuel) ? ship.fuel : fallbackFuel;
+          const upperBound = capacity > 0 ? capacity : Math.max(rawFuel, 0);
+          const clampedFuel = Math.min(Math.max(rawFuel, 0), upperBound);
+          const fuel = quantizeFuel(clampedFuel);
 
           const consumables = extractConsumables(ship, shipType);
           const killHistory = sanitizeKillHistory(ship.killHistory);
@@ -560,6 +575,7 @@ export const deserializeGameState = (json: string): GameState => {
             type: shipType,
             hp,
             maxHp,
+            fuel,
             carriedArmyId: typeof ship.carriedArmyId === 'string' ? ship.carriedArmyId : null,
             transferBusyUntilDay: Number.isFinite(ship.transferBusyUntilDay) ? ship.transferBusyUntilDay : undefined,
             consumables,
@@ -690,14 +706,29 @@ export const deserializeGameState = (json: string): GameState => {
 
       const rawInitialShips: unknown[] = Array.isArray(b.initialShips) ? b.initialShips : [];
       const initialShips = rawInitialShips
-        .map((entry: unknown) => {
+        .map((entry: unknown, index: number) => {
           const snapshot = entry as any;
-          if (typeof snapshot?.shipId !== 'string' || typeof snapshot?.fleetId !== 'string') return null;
+          if (typeof snapshot?.shipId !== 'string' || typeof snapshot?.fleetId !== 'string') {
+            console.warn(`[Serialization] Battle '${b.id}' initialShips[${index}] has invalid shipId or fleetId; skipping.`);
+            return null;
+          }
           const factionId = typeof snapshot.factionId === 'string' ? snapshot.factionId : snapshot.faction;
-          if (typeof factionId !== 'string') return null;
-          if (validFactionIds && !validFactionIds.has(factionId)) return null;
-          if (!isEnumValue(SHIP_TYPES, snapshot.type)) return null;
-          if (!isFiniteNumber(snapshot.maxHp) || !isFiniteNumber(snapshot.startingHp)) return null;
+          if (typeof factionId !== 'string') {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid factionId; skipping.`);
+            return null;
+          }
+          if (validFactionIds && !validFactionIds.has(factionId)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' references unknown faction '${factionId}'; skipping.`);
+            return null;
+          }
+          if (!isEnumValue(SHIP_TYPES, snapshot.type)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid type '${snapshot.type}'; skipping.`);
+            return null;
+          }
+          if (!isFiniteNumber(snapshot.maxHp) || !isFiniteNumber(snapshot.startingHp)) {
+            console.warn(`[Serialization] Battle '${b.id}' ship '${snapshot.shipId}' has invalid HP values; skipping.`);
+            return null;
+          }
           return {
             shipId: snapshot.shipId,
             fleetId: snapshot.fleetId,
@@ -804,6 +835,14 @@ export const deserializeGameState = (json: string): GameState => {
     const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
     const day = Number.isFinite(dto.day) ? dto.day : 0;
 
+    const defaultRules: GameplayRules = {
+      fogOfWar: true,
+      aiEnabled: true,
+      useAdvancedCombat: true,
+      totalWar: true,
+      unlimitedFuel: false
+    };
+
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
@@ -825,7 +864,7 @@ export const deserializeGameState = (json: string): GameState => {
       aiStates: migratedAiStates,
       aiState: primaryAiState,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
-      rules: dto.rules || { fogOfWar: true, aiEnabled: true, useAdvancedCombat: true, totalWar: true }
+      rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
 
     return state;

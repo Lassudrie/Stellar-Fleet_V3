@@ -19,7 +19,6 @@ import {
   GameObjectives,
   GameplayRules,
   GameState,
-  LogEntry,
   PlanetBody,
   AIState,
   ShipEntity,
@@ -44,6 +43,7 @@ import { resolveFleetMovement } from '../movement/movementPhase';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../worldgen/stellar';
 import { findNearestSystem } from '../world';
+import { FuelShortageError } from '../logistics/fuel';
 
 interface TestCase {
   name: string;
@@ -81,10 +81,18 @@ const createSystem = (id: string, ownerFactionId: string | null): StarSystem => 
   planets: [createPlanet(id, ownerFactionId)]
 });
 
-const createFleet = (id: string, factionId: string, position: Vec3, ships: ShipEntity[]): Fleet => ({
+type TestShipInput = Omit<ShipEntity, 'fuel'> & Partial<Pick<ShipEntity, 'fuel'>>;
+
+const withFuel = (ship: TestShipInput): ShipEntity => {
+  const stats = SHIP_STATS[ship.type];
+  const fuel = ship.fuel ?? stats?.fuelCapacity ?? 0;
+  return { ...ship, fuel };
+};
+
+const createFleet = (id: string, factionId: string, position: Vec3, ships: TestShipInput[]): Fleet => ({
   id,
   factionId,
-  ships,
+  ships: ships.map(withFuel),
   position,
   state: FleetState.ORBIT,
   targetSystemId: null,
@@ -114,7 +122,8 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     fogOfWar: false,
     useAdvancedCombat: true,
     aiEnabled: false,
-    totalWar: false
+    totalWar: false,
+    unlimitedFuel: false
   };
 
   const defaultObjectives: GameObjectives = {
@@ -187,14 +196,14 @@ const tests: TestCase[] = [
     name: 'Battle resolution uses the context turn for dating effects',
     run: () => {
       const system = createSystem('sys-turn-sync', null);
-      const attackerShip: ShipEntity = {
+      const attackerShip: TestShipInput = {
         id: 'attacker-sync',
         type: ShipType.CRUISER,
         hp: 120,
         maxHp: 120,
         carriedArmyId: null
       };
-      const defenderShip: ShipEntity = {
+      const defenderShip: TestShipInput = {
         id: 'defender-sync',
         type: ShipType.FIGHTER,
         hp: 1,
@@ -241,7 +250,7 @@ const tests: TestCase[] = [
     name: 'Battle winner is decided before post-combat attrition',
     run: () => {
       const system = createSystem('sys-attrition-winner', 'blue');
-      const fragileBlueShip: ShipEntity = {
+      const fragileBlueShip: TestShipInput = {
         id: 'blue-fragile',
         type: ShipType.CRUISER,
         maxHp: 20,
@@ -297,7 +306,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD_MOVE applique le chargement après un runTurn',
     run: () => {
       const system = createSystem('sys-load-runturn', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-runturn',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -342,7 +351,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD ignore le chargement immédiat pour une flotte en transit',
     run: () => {
       const system = createSystem('sys-load-transit', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-transit',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -642,7 +651,7 @@ const tests: TestCase[] = [
     name: 'Orbit proximity helpers enforce distance and state invariants',
     run: () => {
       const system = createSystem('sys-orbit-helpers', 'blue');
-      const sharedShip: ShipEntity = { id: 'orbit-helper', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null };
+      const sharedShip: TestShipInput = { id: 'orbit-helper', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null };
 
       const orbitingFleet = createFleet('fleet-orbiting-helpers', 'blue', { ...baseVec }, [sharedShip]);
       const movingFleet: Fleet = { ...orbitingFleet, id: 'fleet-moving-helpers', state: FleetState.MOVING };
@@ -668,6 +677,65 @@ const tests: TestCase[] = [
       assert.ok(
         !areFleetsSharingOrbit(orbitingFleet, distantFleet),
         'Separated fleets should not be treated as sharing orbit'
+      );
+    }
+  },
+  {
+    name: 'Gas extraction refuels fleets in safe orbit',
+    run: () => {
+      const gasSystem: StarSystem = { ...createSystem('sys-gas-safe', null), resourceType: 'gas' };
+      const extractor: TestShipInput = {
+        id: 'extractor-safe',
+        type: ShipType.EXTRACTOR,
+        hp: 50,
+        maxHp: 50,
+        fuel: 0,
+        carriedArmyId: null
+      };
+
+      const blueFleet = createFleet('fleet-blue-extract', 'blue', { ...baseVec }, [extractor]);
+      const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet] });
+      const ctx = { turn: state.day + 1, rng: new RNG(29) };
+
+      const nextState = phaseCleanup(state, ctx);
+      const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+      const baseFuel = extractor.fuel ?? 0;
+
+      assert.ok(updatedExtractor, 'Extractor ship should persist after cleanup');
+      assert.ok(updatedExtractor?.fuel !== undefined && updatedExtractor.fuel > baseFuel, 'Extractor should gain fuel when orbit is safe');
+    }
+  },
+  {
+    name: 'Gas extraction is blocked when enemies share gas orbit',
+    run: () => {
+      const gasSystem: StarSystem = { ...createSystem('sys-gas-block', null), resourceType: 'gas' };
+      const extractor: TestShipInput = {
+        id: 'extractor-block',
+        type: ShipType.EXTRACTOR,
+        hp: 50,
+        maxHp: 50,
+        fuel: 0,
+        carriedArmyId: null
+      };
+      const blueFleet = createFleet('fleet-blue-block', 'blue', { ...baseVec }, [extractor]);
+      const redFleet = createFleet('fleet-red-block', 'red', { ...baseVec }, [
+        { id: 'red-ship-block', type: ShipType.FIGHTER, hp: 30, maxHp: 30, carriedArmyId: null }
+      ]);
+
+      const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet, redFleet] });
+      const ctx = { turn: state.day + 1, rng: new RNG(31) };
+
+      const nextState = phaseCleanup(state, ctx);
+      const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
+      const updatedExtractor = updatedFleet?.ships.find(ship => ship.id === extractor.id);
+      const baselineFuel = extractor.fuel ?? 0;
+
+      assert.ok(updatedExtractor, 'Extractor ship should persist after contested cleanup');
+      assert.strictEqual(
+        updatedExtractor?.fuel,
+        baselineFuel,
+        'Extraction should not add fuel when enemy fleets contest the orbit'
       );
     }
   },
@@ -877,14 +945,14 @@ const tests: TestCase[] = [
     name: 'LOAD_ARMY respecte le ciblage du vaisseau imposé',
     run: () => {
       const system = createSystem('sys-load-targeted', null);
-      const allowedTransport: ShipEntity = {
+      const allowedTransport: TestShipInput = {
         id: 'blue-transport-allowed',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
         maxHp: 50,
         carriedArmyId: null
       };
-      const blockedTransport: ShipEntity = {
+      const blockedTransport: TestShipInput = {
         id: 'blue-transport-blocked',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -918,7 +986,7 @@ const tests: TestCase[] = [
     name: 'ORDER_LOAD_MOVE charge une armée alliée à l’arrivée',
     run: () => {
       const system = createSystem('sys-load-move-arrival', 'blue');
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport-move-load',
         type: ShipType.TROOP_TRANSPORT,
         hp: 40,
@@ -965,7 +1033,7 @@ const tests: TestCase[] = [
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-transport',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1006,7 +1074,7 @@ const tests: TestCase[] = [
     name: 'Contested orbit applies deterministic risk to unloading armies',
     run: () => {
       const system = createSystem('sys-unload-risk', null);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'blue-risk-transport',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1066,7 +1134,7 @@ const tests: TestCase[] = [
       const toPlanet = system.planets[1];
 
       const army = createArmy('army-transfer', 'blue', 6000, ArmyState.DEPLOYED, fromPlanet.id);
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transfer-ship',
         type: ShipType.TROOP_TRANSPORT,
         hp: 50,
@@ -1130,6 +1198,46 @@ const tests: TestCase[] = [
         invasionFleet?.stateStartTurn,
         customTurn,
         'Movement commands should respect an explicit turn override'
+      );
+    }
+  },
+  {
+    name: 'Fleet movement errors report per-ship fuel shortages',
+    run: () => {
+      const sourceSystem = createSystem('sys-fuel-source', null);
+      const targetSystem = { ...createSystem('sys-fuel-target', null), position: { x: 1, y: 0, z: 0 } };
+
+      const ship: TestShipInput = {
+        id: 'fuel-poor-1',
+        type: ShipType.FIGHTER,
+        hp: 50,
+        maxHp: 50,
+        carriedArmyId: null,
+        fuel: 1
+      };
+
+      const fleet = createFleet('fleet-fuel', 'blue', { ...baseVec }, [ship]);
+      const state = createBaseState({ systems: [sourceSystem, targetSystem], fleets: [fleet] });
+
+      const result = applyCommand(
+        state,
+        { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: targetSystem.id },
+        new RNG(13)
+      );
+
+      assert.strictEqual(result.ok, false, 'Movement should fail when fuel is insufficient');
+      assert.ok(result.error && typeof result.error !== 'string', 'Fuel shortage should return structured error details');
+      const error = result.error as FuelShortageError;
+
+      assert.strictEqual(error.code, 'INSUFFICIENT_FUEL', 'Error code should identify insufficient fuel');
+      assert.ok(error.shortages.length > 0, 'Shortage list should include affected ships');
+      const shortage = error.shortages[0];
+      assert.strictEqual(shortage.shipId, ship.id, 'Shortage should reference the ship ID');
+      assert.strictEqual(shortage.shipType, ship.type, 'Shortage should include the ship type');
+      assert.ok(shortage.missingFuel > 0, 'Missing fuel should be greater than zero');
+      assert.ok(
+        error.message.includes(ship.id) && error.message.includes(shortage.missingFuel.toFixed(2)),
+        'Error message should summarize the missing fuel per ship'
       );
     }
   },
@@ -1209,7 +1317,7 @@ const tests: TestCase[] = [
     run: () => {
       const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
 
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transport-invasion',
         type: ShipType.TROOP_TRANSPORT,
         hp: 2000,
@@ -1278,7 +1386,7 @@ const tests: TestCase[] = [
         position: { x: 0, y: 0, z: 0 }
       };
 
-      const transport: ShipEntity = {
+      const transport: TestShipInput = {
         id: 'transport-gas',
         type: ShipType.TROOP_TRANSPORT,
         hp: 2000,
@@ -1743,7 +1851,7 @@ const tests: TestCase[] = [
     name: 'Massive space battles resolve within expected time using pre-indexed targets',
     run: () => {
       const system = createSystem('sys-massive', null);
-      const createShips = (prefix: string, type: ShipType, count: number): ShipEntity[] => {
+      const createShips = (prefix: string, type: ShipType, count: number): TestShipInput[] => {
         const stats = SHIP_STATS[type];
         return Array.from({ length: count }, (_, idx) => ({
           id: `${prefix}-${idx}`,
@@ -1946,7 +2054,7 @@ const tests: TestCase[] = [
         }
       };
 
-      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false };
+      const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false };
 
       const state = createBaseState({
         day: 2,
@@ -2207,7 +2315,7 @@ const tests: TestCase[] = [
         systems,
         fleets: [idleFleet, combatFleet, enemyBattleFleet],
         battles: [battle],
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 
@@ -2253,7 +2361,7 @@ const tests: TestCase[] = [
         factions: [aiFaction, enemyFaction],
         systems,
         fleets: [retreatingFleet, readyFleet, enemyFrontierFleet],
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 
@@ -2278,7 +2386,7 @@ const tests: TestCase[] = [
 
       const homeSystem = { ...createSystem('ground-home', aiFaction.id), resourceType: 'gas' as const };
       const targetSystem = { ...createSystem('ground-target', enemyFaction.id), resourceType: 'gas' as const };
-      const fighterShip: ShipEntity = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const fighterShip: TestShipInput = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
 
       const createAssaultFleet = (id: string): Fleet =>
         createFleet(id, aiFaction.id, { ...homeSystem.position }, [
@@ -2300,7 +2408,7 @@ const tests: TestCase[] = [
         systems: [homeSystem, targetSystem],
         fleets: [assaultFleetA, assaultFleetB],
         armies: defenders,
-        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
         playerFactionId: enemyFaction.id
       });
 

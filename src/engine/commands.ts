@@ -1,5 +1,5 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, Army, LogEntry, Fleet, ShipType } from '../shared/types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType } from '../shared/types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
@@ -9,6 +9,8 @@ import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from '
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
+import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
+import { sorted } from '../shared/sorting';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -28,7 +30,7 @@ export type GameCommand =
 export interface CommandResult {
     ok: boolean;
     state: GameState;
-    error?: string;
+    error?: string | FuelShortageError;
     events?: string[];
 }
 
@@ -55,7 +57,7 @@ const getAvailableTransportsInOrbit = (
         });
     });
 
-    return candidates.sort((a, b) => {
+    return sorted(candidates, (a, b) => {
         const fleetDiff = a.fleet.id.localeCompare(b.fleet.id);
         if (fleetDiff !== 0) return fleetDiff;
         return a.fleet.ships[a.shipIndex].id.localeCompare(b.fleet.ships[b.shipIndex].id);
@@ -68,7 +70,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
     // Enforce Immutability in Dev
     deepFreezeDev(state);
 
-    const fail = (error: string): CommandResult => ({ ok: false, state, error });
+    const fail = (error: string | FuelShortageError): CommandResult => ({ ok: false, state, error });
     const ok = (nextState: GameState, events?: string[]): CommandResult => ({ ok: true, state: nextState, events });
 
     switch (command.type) {
@@ -85,6 +87,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
+            if ('error' in validation) return fail(validation.error);
+
             // Structural Sharing Update
             return ok({
                 ...state,
@@ -94,12 +99,15 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                     // Locked fleets cannot move
                     if (fleet.retreating) return fleet;
 
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+
                     return {
-                        ...fleet,
+                        ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn,
+                        stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null, // Clear previous orders
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
@@ -120,18 +128,24 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
+            if ('error' in validation) return fail(validation.error);
+
             return ok({
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+
                     return {
-                        ...fleet,
+                        ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn,
+                        stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: system.id, // Set invasion order
                         loadTargetSystemId: null,
                         unloadTargetSystemId: null
@@ -152,18 +166,24 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
+            if ('error' in validation) return fail(validation.error);
+
             return ok({
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+
                     return {
-                        ...fleet,
+                        ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn,
+                        stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null,
                         loadTargetSystemId: system.id,
                         unloadTargetSystemId: null
@@ -184,18 +204,24 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
             if (isCombatLocked(fleet)) return fail('Fleet is in combat and cannot receive commands.');
             if (fleet.retreating) return fail('Fleet is retreating and cannot receive commands.');
 
+            const validation = validateAndDebitJumpOrFail(fleet, system, state.systems, state.rules);
+            if ('error' in validation) return fail(validation.error);
+
             return ok({
                 ...state,
                 fleets: state.fleets.map(fleet => {
                     if (fleet.id !== command.fleetId) return fleet;
                     if (fleet.retreating) return fleet;
 
+                    const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
+                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+
                     return {
-                        ...fleet,
+                        ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn,
+                        stateStartTurn: nextStateStartTurn,
                         invasionTargetSystemId: null,
                         loadTargetSystemId: null,
                         unloadTargetSystemId: system.id

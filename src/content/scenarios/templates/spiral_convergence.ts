@@ -47,7 +47,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "aurora",
         spawnLocation: "home_system",
-        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "bomber", "fighter", "fighter"],
+        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "tanker", "extractor", "bomber", "fighter", "fighter"],
         withArmies: false
       },
       {
@@ -71,7 +71,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "ember",
         spawnLocation: "home_system",
-        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "bomber", "fighter", "fighter"],
+        ships: ["carrier", "cruiser", "cruiser", "destroyer", "destroyer", "frigate", "tanker", "extractor", "bomber", "fighter", "fighter"],
         withArmies: false
       },
       {
@@ -105,7 +105,8 @@ const spiralConvergence: ScenarioDefinitionV1 = {
     fogOfWar: true,
     useAdvancedCombat: true,
     aiEnabled: true,
-    totalWar: true
+    totalWar: true,
+    unlimitedFuel: false
   }
 };
 

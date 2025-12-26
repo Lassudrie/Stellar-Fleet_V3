@@ -19,3 +19,10 @@ A minimalist 3D space battle simulator for mobile.
 - React 19 / Vite
 - React Three Fiber / Three.js
 - TailwindCSS
+
+## Installation fiable
+
+- Version Node recommandée : **20.x** (voir `.nvmrc` pour la version exacte). npm 10.x est attendu (champ `engines`).
+- Commande standard : `npm ci` (identique à la CI).  
+  - Pré-requis réseau : l'étape `postinstall` télécharge les binaires `esbuild` (hébergés par l'équipe esbuild).
+- Pour accélérer la CI, activer le cache npm (ex. `cache: 'npm'` dans GitHub Actions) et, si vos jobs compilent des binaires, augmenter légèrement le timeout afin d'éviter les faux positifs de flakiness.

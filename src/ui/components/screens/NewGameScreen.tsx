@@ -12,7 +12,8 @@ const NewGameScreen: React.FC<NewGameScreenProps> = ({ onBack, onLaunch }) => {
   const [seedInput, setSeedInput] = useState<string>('');
 
   const handleLaunch = () => {
-    const seed = seedInput ? parseInt(seedInput, 10) || Date.now() : Date.now();
+    const parsedSeed = Number(seedInput);
+    const seed = seedInput === '' || Number.isNaN(parsedSeed) ? Date.now() : parsedSeed;
     onLaunch(seed);
   };
 
