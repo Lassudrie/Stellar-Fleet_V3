@@ -68,7 +68,7 @@ const systems: StarSystem[] = [
   const transportFleet = buildFleet({
     id: 'f-transport',
     position: { x: targetSystem.position.x - 5, y: 0, z: 0 },
-    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 100, carriedArmyId: 'army-1' }],
+    ships: [{ id: 's1', type: ShipType.TRANSPORTER, hp: 1, maxHp: 1, fuel: 100, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
     getFleetEligibility(transportFleet, 'UNLOAD', targetSystem, systems).eligible,
@@ -106,7 +106,7 @@ const systems: StarSystem[] = [
   const distantFleet = buildFleet({
     id: 'f-out-of-range',
     position: { x: targetSystem.position.x + 500, y: 0, z: 0 },
-    ships: [{ id: 's1', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 1, fuel: 999, carriedArmyId: 'army-1' }],
+    ships: [{ id: 's1', type: ShipType.TRANSPORTER, hp: 1, maxHp: 1, fuel: 999, carriedArmyId: 'army-1' }],
   });
   assert.strictEqual(
     getFleetEligibility(distantFleet, 'UNLOAD', targetSystem, systems).reason,

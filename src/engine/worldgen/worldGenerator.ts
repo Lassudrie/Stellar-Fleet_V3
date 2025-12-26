@@ -580,7 +580,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       // Generate Embarked Armies
       if (def.withArmies) {
           fleet.ships.forEach(ship => {
-              if (ship.type === ShipType.TROOP_TRANSPORT) {
+              if (ship.type === ShipType.TRANSPORTER) {
                   const army = createArmy(
                       factionId,
                       MIN_ARMY_CREATION_STRENGTH,

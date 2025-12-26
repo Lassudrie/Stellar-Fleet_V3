@@ -69,7 +69,7 @@ Pour capturer ou défendre un système :
 
 ### 6.3. Changement de Propriétaire
 Le système change de couleur et d'owner si :
-1.  Une seule faction conserve des armées déployées dans le système (aucun ennemi terrestre restant). Dans un système neutre, capturer une seule planète suffit alors à revendiquer le système, même si d'autres mondes restent neutres ou occupés passivement.
+1.  Une seule faction conserve des armées déployées dans le système (aucun ennemi terrestre restant). Il suffit d'avoir **au moins une armée déployée** sur **une planète ou lune solide** : le système bascule et **tous les corps solides** du système deviennent possédés par cette faction (les corps non solides, ex. géantes gazeuses, ne basculent pas automatiquement).
 2.  **Règle de Contestation Orbitale** : la capture est bloquée s'il existe une orbite contestée (`isOrbitContested`) dans la portée de capture, même après une victoire terrestre. Il faut nettoyer l'orbite ET le sol pour sécuriser la conquête.
 
 ### 6.4. Bombardement Orbital

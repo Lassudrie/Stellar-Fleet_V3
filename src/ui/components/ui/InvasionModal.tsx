@@ -36,7 +36,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
       if (f.retreating) return false; // Retreating fleets can't accept orders
 
       // Check content: Must have at least one loaded transport
-      return f.ships.some(s => s.type === ShipType.TROOP_TRANSPORT && s.carriedArmyId);
+      return f.ships.some(s => s.type === ShipType.TRANSPORTER && s.carriedArmyId);
     });
 
     // Sort by Distance
@@ -87,7 +87,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
             </div>
           ) : (
             invasionCandidates.map(fleet => {
-              const transports = fleet.ships.filter(s => s.type === ShipType.TROOP_TRANSPORT && s.carriedArmyId);
+              const transports = fleet.ships.filter(s => s.type === ShipType.TRANSPORTER && s.carriedArmyId);
               
               // Distance Calc
               const fleetPos = fleet.position;

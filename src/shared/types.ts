@@ -31,7 +31,9 @@ export enum ShipType {
   FRIGATE = 'frigate',
   FIGHTER = 'fighter',
   BOMBER = 'bomber',
-  TROOP_TRANSPORT = 'troop_transport',
+  TRANSPORTER = 'transporter',
+  BUILDER = 'builder',
+  SUPPORT = 'support',
   TANKER = 'tanker',
   EXTRACTOR = 'extractor',
 }
@@ -165,7 +167,7 @@ export interface ShipStats {
   torpedoStock: number;
   torpedoDamage: number;
   interceptorStock: number;
-  role: 'capital' | 'screen' | 'striker' | 'transport';
+  role: 'capital' | 'screen' | 'striker' | 'transport' | 'builder' | 'support';
   fuelCapacity: number;
   fuelConsumptionPerLy: number;
   fuelExtractionRate?: number;

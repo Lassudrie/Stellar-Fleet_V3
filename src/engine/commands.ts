@@ -50,7 +50,7 @@ const getAvailableTransportsInOrbit = (
 
     inOrbit.forEach(fleet => {
         fleet.ships.forEach((ship, index) => {
-            if (ship.type !== ShipType.TROOP_TRANSPORT) return;
+            if (ship.type !== ShipType.TRANSPORTER) return;
             if (ship.carriedArmyId) return;
             if ((ship.transferBusyUntilDay ?? -Infinity) >= state.day) return;
             candidates.push({ fleet, shipIndex: index });

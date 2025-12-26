@@ -87,7 +87,7 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
     );
 
     const transports = fleet.ships.filter(ship =>
-        ship.type === ShipType.TROOP_TRANSPORT &&
+        ship.type === ShipType.TRANSPORTER &&
         !ship.carriedArmyId &&
         (!allowedShipIds || allowedShipIds.has(ship.id))
     );
@@ -116,7 +116,7 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
     const updatedFleet: Fleet = {
         ...fleet,
         ships: fleet.ships.map(ship => {
-            if (ship.type !== ShipType.TROOP_TRANSPORT || ship.carriedArmyId) return ship;
+            if (ship.type !== ShipType.TRANSPORTER || ship.carriedArmyId) return ship;
             if (allowedShipIds && !allowedShipIds.has(ship.id)) return ship;
             const army = availableArmies[loadedCount];
             if (!army || loadedCount >= loadableArmies) return ship;

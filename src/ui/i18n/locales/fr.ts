@@ -177,6 +177,40 @@ export const fr = {
   'fleet.armyLoaded': 'Armée embarquée',
   'fleet.shipCardLabel': 'Sélectionner le vaisseau {{id}}',
 
+
+  // Ship Types
+  'shipType.carrier': 'Porte-vaisseaux',
+  'shipType.cruiser': 'Croiseur',
+  'shipType.destroyer': 'Destroyer',
+  'shipType.frigate': 'Fregate',
+  'shipType.fighter': 'Chasseur',
+  'shipType.bomber': 'Bombardier',
+  'shipType.transporter': 'Transporteur',
+  'shipType.builder': 'Constructeur',
+  'shipType.support': 'Soutien',
+  'shipType.tanker': 'Ravitailleur',
+  'shipType.extractor': 'Extracteur',
+
+  // Ship Detail
+  'ship.detail.unknownFaction': 'Faction inconnue',
+  'ship.detail.shipsTitle': 'Vaisseaux',
+  'ship.detail.idLabel': 'ID : {{id}}',
+  'ship.detail.imageAlt': 'Image du vaisseau : {{type}}',
+  'ship.detail.health': 'Sante',
+  'ship.detail.damage': 'Degats',
+  'ship.detail.missiles': 'Missiles',
+  'ship.detail.torpedoes': 'Torpilles',
+  'ship.detail.interceptors': 'Intercepteurs',
+  'ship.detail.pointDefense': 'Defense rapprochee',
+  'ship.detail.embarkedTroops': 'Troupes embarquees',
+  'ship.detail.armyLabel': 'Armee : {{id}}',
+  'ship.detail.strengthLabel': 'Force : {{current}} / {{max}}',
+  'ship.detail.moraleLabel': 'Moral : {{percent}}%',
+  'ship.detail.killLog': 'Journal des destructions',
+  'ship.detail.noKills': 'Aucune destruction confirmee.',
+  'ship.detail.turnLabel': 'Tour {{turn}}',
+  'ship.detail.close': 'Fermer le detail des vaisseaux',
+
   // Ground Ops
   'groundOps.title': 'Fronts au sol',
   'groundOps.system': 'Systeme: {{system}}',

@@ -39,7 +39,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "blue",
         spawnLocation: "home_system",
-        ships: ["troop_transport", "troop_transport", "troop_transport", "troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "transporter", "transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       },
       {
@@ -51,7 +51,7 @@ const conquestSandbox: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "red",
         spawnLocation: "home_system",
-        ships: ["troop_transport", "troop_transport", "troop_transport", "troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "transporter", "transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       }
     ]

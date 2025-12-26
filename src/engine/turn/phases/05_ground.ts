@@ -109,18 +109,31 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     });
 
     const updatedSystems = nextSystems.map(system => {
+        const armiesInSystem = armiesBySystemId.get(system.id) ?? [];
+        const groundFactionIds = sorted(
+            Array.from(new Set(armiesInSystem.map(army => army.factionId))),
+            (a, b) => a.localeCompare(b)
+        );
+        const soleGroundFaction = groundFactionIds.length === 1 ? groundFactionIds[0] : null;
+
         const updatedPlanets = system.planets.map(planet => {
             const armies = armiesByPlanetId.get(planet.id) ?? [];
             const factionIds = new Set(armies.map(a => a.factionId));
-            const ownerFactionId =
+            const ownerFromLocalPresence =
                 factionIds.size === 1
                     ? Array.from(factionIds)[0]
                     : planet.ownerFactionId;
+            const ownerFactionId =
+                planet.isSolid && soleGroundFaction
+                    ? soleGroundFaction
+                    : ownerFromLocalPresence;
 
             const initialOwner = initialPlanetOwners.get(planet.id) ?? null;
             const ownerChanged = planet.isSolid && ownerFactionId !== initialOwner;
 
-            if (ownerChanged) {
+            const shouldNotifyPlanetConquest = ownerChanged && armies.length > 0;
+
+            if (shouldNotifyPlanetConquest) {
                 const battleResult = groundResults.get(planet.id);
                 const casualtiesByFaction = new Map<FactionId, { strengthLost: number; destroyed: number }>();
 
@@ -201,13 +214,6 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
 
             return hasMismatch ? null : sharedOwner;
         })();
-
-        const armiesInSystem = armiesBySystemId.get(system.id) ?? [];
-        const groundFactionIds = sorted(
-            Array.from(new Set(armiesInSystem.map(army => army.factionId))),
-            (a, b) => a.localeCompare(b)
-        );
-        const soleGroundFaction = groundFactionIds.length === 1 ? groundFactionIds[0] : null;
 
         const newOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;

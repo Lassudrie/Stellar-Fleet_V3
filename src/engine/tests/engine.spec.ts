@@ -308,7 +308,7 @@ const tests: TestCase[] = [
       const system = createSystem('sys-load-runturn', 'blue');
       const transport: TestShipInput = {
         id: 'blue-transport-runturn',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 40,
         maxHp: 40,
         carriedArmyId: null
@@ -353,7 +353,7 @@ const tests: TestCase[] = [
       const system = createSystem('sys-load-transit', 'blue');
       const transport: TestShipInput = {
         id: 'blue-transport-transit',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 40,
         maxHp: 40,
         carriedArmyId: null
@@ -840,7 +840,7 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-bombard-transport', null);
       const transportFleet = createFleet('fleet-transport-only', 'blue', { ...baseVec }, [
-        { id: 'blue-transport', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: null }
+        { id: 'blue-transport', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: null }
       ]);
 
       const redArmy = createArmy('army-red-transport', 'red', 12000, ArmyState.DEPLOYED, system.planets[0].id);
@@ -971,14 +971,14 @@ const tests: TestCase[] = [
       const system = createSystem('sys-load-targeted', null);
       const allowedTransport: TestShipInput = {
         id: 'blue-transport-allowed',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 50,
         maxHp: 50,
         carriedArmyId: null
       };
       const blockedTransport: TestShipInput = {
         id: 'blue-transport-blocked',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 50,
         maxHp: 50,
         carriedArmyId: null
@@ -1012,7 +1012,7 @@ const tests: TestCase[] = [
       const system = createSystem('sys-load-move-arrival', 'blue');
       const transport: TestShipInput = {
         id: 'blue-transport-move-load',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 40,
         maxHp: 40,
         carriedArmyId: null
@@ -1059,7 +1059,7 @@ const tests: TestCase[] = [
       const system = createSystem('sys-unload-clear', null);
       const transport: TestShipInput = {
         id: 'blue-transport',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 50,
         maxHp: 50,
         carriedArmyId: 'army-blue-unload'
@@ -1100,7 +1100,7 @@ const tests: TestCase[] = [
       const system = createSystem('sys-unload-risk', null);
       const transport: TestShipInput = {
         id: 'blue-risk-transport',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 50,
         maxHp: 50,
         carriedArmyId: 'army-blue-risk'
@@ -1160,7 +1160,7 @@ const tests: TestCase[] = [
       const army = createArmy('army-transfer', 'blue', 6000, ArmyState.DEPLOYED, fromPlanet.id);
       const transport: TestShipInput = {
         id: 'transfer-ship',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 50,
         maxHp: 50,
         carriedArmyId: null
@@ -1357,8 +1357,8 @@ const tests: TestCase[] = [
 
       const fleet: Fleet = {
         ...createFleet('fleet-priority', 'blue', { x: 0, y: 0, z: 0 }, [
-          { id: 'ship-1', type: ShipType.TROOP_TRANSPORT, hp: 100, maxHp: 100, carriedArmyId: attackerArmy1.id },
-          { id: 'ship-2', type: ShipType.TROOP_TRANSPORT, hp: 100, maxHp: 100, carriedArmyId: attackerArmy2.id }
+          { id: 'ship-1', type: ShipType.TRANSPORTER, hp: 100, maxHp: 100, carriedArmyId: attackerArmy1.id },
+          { id: 'ship-2', type: ShipType.TRANSPORTER, hp: 100, maxHp: 100, carriedArmyId: attackerArmy2.id }
         ]),
         state: FleetState.MOVING,
         targetSystemId: system.id,
@@ -1428,7 +1428,7 @@ const tests: TestCase[] = [
 
       const transports: TestShipInput[] = attackers.map(army => ({
         id: `ship-${army.id}`,
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 100,
         maxHp: 100,
         carriedArmyId: army.id
@@ -1480,7 +1480,7 @@ const tests: TestCase[] = [
 
       const transport: TestShipInput = {
         id: 'transport-invasion',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 2000,
         maxHp: 2000,
         carriedArmyId: 'army-invasion'
@@ -1549,7 +1549,7 @@ const tests: TestCase[] = [
 
       const transport: TestShipInput = {
         id: 'transport-gas',
-        type: ShipType.TROOP_TRANSPORT,
+        type: ShipType.TRANSPORTER,
         hp: 2000,
         maxHp: 2000,
         carriedArmyId: 'army-gas'
@@ -1727,7 +1727,7 @@ const tests: TestCase[] = [
 
       const blueArmy = createArmy('army-blue-embarked', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-transport');
       const blueTransport = createFleet('fleet-blue-transport', 'blue', { ...baseVec }, [
-        { id: 'blue-transport', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: blueArmy.id }
+        { id: 'blue-transport', type: ShipType.TRANSPORTER, hp: 1, maxHp: 2000, carriedArmyId: blueArmy.id }
       ]);
 
       const redFleet = createFleet('fleet-red-intercept', 'red', { ...baseVec }, [
@@ -1772,7 +1772,7 @@ const tests: TestCase[] = [
 
       const embarkedArmy = createArmy('army-transport-loss', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-carrier');
       const transportFleet = createFleet('fleet-blue-carrier', 'blue', { ...baseVec }, [
-        { id: 'blue-transport-loss', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
+        { id: 'blue-transport-loss', type: ShipType.TRANSPORTER, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
       ]);
       const attackerFleet = createFleet('fleet-red-destroyer', 'red', { ...baseVec }, [
         { id: 'red-destroyer-loss', type: ShipType.CRUISER, hp: 1200, maxHp: 1200, carriedArmyId: null }
@@ -1811,7 +1811,7 @@ const tests: TestCase[] = [
 
       const embarkedArmy = createArmy('army-battle-clean', 'blue', 12000, ArmyState.EMBARKED, 'fleet-blue-clean');
       const carrierFleet = createFleet('fleet-blue-clean', 'blue', { ...baseVec }, [
-        { id: 'blue-clean-transport', type: ShipType.TROOP_TRANSPORT, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
+        { id: 'blue-clean-transport', type: ShipType.TRANSPORTER, hp: 1, maxHp: 2000, carriedArmyId: embarkedArmy.id }
       ]);
       const interceptorFleet = createFleet('fleet-red-clean', 'red', { ...baseVec }, [
         { id: 'red-clean-cruiser', type: ShipType.CRUISER, hp: 1200, maxHp: 1200, carriedArmyId: null }
@@ -2112,7 +2112,7 @@ const tests: TestCase[] = [
       const moonAfter = updatedSystem?.planets.find(body => body.id === moon.id);
 
       assert.strictEqual(updatedSystem?.ownerFactionId, 'blue', 'System should be captured once only one faction remains on the ground');
-      assert.strictEqual(moonAfter?.ownerFactionId, 'red', 'Unoccupied solid bodies keep their previous owner until explicitly taken');
+      assert.strictEqual(moonAfter?.ownerFactionId, 'blue', 'System conquest grants ownership of all solid bodies once no enemy ground armies remain');
     }
   },
   {
@@ -2175,7 +2175,7 @@ const tests: TestCase[] = [
       const planetBAfter = updatedSystem?.planets.find(planet => planet.id === planetB.id);
 
       assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Neutral systems should be captured when one faction holds the only ground forces');
-      assert.strictEqual(planetBAfter?.ownerFactionId, null, 'Neutral planets not targeted remain unclaimed even after system capture');
+      assert.strictEqual(planetBAfter?.ownerFactionId, 'red', 'System conquest claims all solid bodies even if only one was initially occupied');
     }
   },
   {
@@ -2420,7 +2420,7 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-3', 'blue');
       const fleet = createFleet('fleet-clean', 'blue', baseVec, [
-        { id: 'transport-clean', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: 'missing-army' }
+        { id: 'transport-clean', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: 'missing-army' }
       ]);
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [] });
@@ -2439,8 +2439,8 @@ const tests: TestCase[] = [
       const army = createArmy('army-shared', 'blue', 15000, ArmyState.EMBARKED, 'fleet-shared');
 
       const fleet = createFleet('fleet-shared', 'blue', baseVec, [
-        { id: 'ship-a', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: army.id },
-        { id: 'ship-b', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: army.id }
+        { id: 'ship-a', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: army.id },
+        { id: 'ship-b', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: army.id }
       ]);
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
@@ -2461,7 +2461,7 @@ const tests: TestCase[] = [
       const strandedArmy = createArmy('army-stranded', 'blue', 15000, ArmyState.EMBARKED, 'fleet-stranded');
 
       const fleet = createFleet('fleet-stranded', 'blue', baseVec, [
-        { id: 'ship-stranded', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: null }
+        { id: 'ship-stranded', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: null }
       ]);
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [strandedArmy] });
@@ -2487,7 +2487,7 @@ const tests: TestCase[] = [
       };
 
       const fleet = createFleet('fleet-weak', 'blue', baseVec, [
-        { id: 'carrier-weak', type: ShipType.TROOP_TRANSPORT, hp: 2000, maxHp: 2000, carriedArmyId: weakArmy.id }
+        { id: 'carrier-weak', type: ShipType.TRANSPORTER, hp: 2000, maxHp: 2000, carriedArmyId: weakArmy.id }
       ]);
 
       const state = createBaseState({ systems: [system], fleets: [fleet], armies: [weakArmy] });

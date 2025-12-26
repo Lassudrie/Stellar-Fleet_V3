@@ -82,6 +82,10 @@ const SHIP_TYPES = new Set(Object.values(ShipType));
 const BATTLE_STATUSES = new Set<BattleStatus>(['scheduled', 'resolved']);
 
 const isEnumValue = <T>(set: Set<T>, value: unknown): value is T => set.has(value as T);
+const normalizeShipType = (value: unknown): ShipType | null => {
+  if (value === 'troop_transport') return ShipType.TRANSPORTER;
+  return isEnumValue(SHIP_TYPES, value) ? (value as ShipType) : null;
+};
 
 const clampText = (value: unknown, maxLength: number, fallback: string): string => {
   if (typeof value !== 'string') return fallback;
@@ -179,7 +183,7 @@ const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
       day: Number.isFinite(entry?.day) ? entry.day : 0,
       turn: Number.isFinite(entry?.turn) ? entry.turn : (Number.isFinite(entry?.day) ? entry.day : 0),
       targetId: typeof entry?.targetId === 'string' ? entry.targetId : 'unknown',
-      targetType: entry?.targetType ?? ShipType.FRIGATE,
+      targetType: normalizeShipType(entry?.targetType) ?? ShipType.FRIGATE,
       targetFactionId: entry?.targetFactionId ?? 'unknown'
     }))
     .filter((entry): entry is ShipKillRecord => Boolean(entry.targetId));
@@ -552,12 +556,13 @@ export const deserializeGameState = (json: string): GameState => {
             console.warn(`[Serialization] Ship at index ${index} in fleet '${f.id}' has invalid id; skipping.`);
             return null;
           }
-          if (!isEnumValue(SHIP_TYPES, ship.type)) {
+          const normalizedType = normalizeShipType(ship.type);
+          if (!normalizedType) {
             console.warn(`[Serialization] Ship '${ship.id}' has invalid type '${ship.type}'; skipping.`);
             return null;
           }
 
-          const shipType = ship.type as ShipType;
+          const shipType = normalizedType;
           const fallbackMaxHp = SHIP_STATS[shipType]?.maxHp ?? 100;
           const maxHp = Number.isFinite(ship.maxHp) ? ship.maxHp : fallbackMaxHp;
           const hp = Number.isFinite(ship.hp) ? Math.min(Math.max(ship.hp, 0), maxHp) : maxHp;
