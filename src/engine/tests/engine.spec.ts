@@ -942,6 +942,30 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Planet owner defends ground battles even when system owner differs',
+    run: () => {
+      const planet = createPlanet('sys-planet-def', 'red', 1);
+      const system: StarSystem = {
+        ...createSystem('sys-planet-def', 'blue'),
+        planets: [planet]
+      };
+
+      const defendingArmy = createArmy('army-red-defender', 'red', 9000, ArmyState.DEPLOYED, planet.id);
+      const attackingArmy = createArmy('army-blue-attacker', 'blue', 6000, ArmyState.DEPLOYED, planet.id);
+
+      const state = createBaseState({ systems: [system], armies: [defendingArmy, attackingArmy] });
+
+      const result = resolveGroundConflict(planet, system, state);
+
+      assert.ok(result, 'Ground conflict should resolve when both factions are present');
+      assert.strictEqual(result?.winnerFactionId, 'red', 'Defending faction should use the planet owner even if the system owner differs');
+      assert.ok(
+        result?.logs.some(log => log.includes('attacker coalition vs defender')),
+        'Resolution should follow the defender-versus-attacker rule'
+      );
+    }
+  },
+  {
     name: 'LOAD_ARMY respecte le ciblage du vaisseau imposé',
     run: () => {
       const system = createSystem('sys-load-targeted', null);
@@ -1373,6 +1397,80 @@ const tests: TestCase[] = [
         landingLogs.some(log => log.text.includes(planetA.name)),
         'Logs should mention each army assignment outcome'
       );
+    }
+  },
+  {
+    name: 'Auto invasion distributes armies across defended planets in priority order',
+    run: () => {
+      const systemId = 'sys-distribute';
+      const planetStrong = createPlanet(systemId, 'red', 1);
+      const planetMedium = createPlanet(systemId, 'red', 2);
+      const planetWeak = createPlanet(systemId, 'red', 3);
+
+      const system: StarSystem = {
+        ...createSystem(systemId, 'red'),
+        position: { x: 0, y: 0, z: 0 },
+        planets: [planetStrong, planetMedium, planetWeak]
+      };
+
+      const defenders = [
+        createArmy('def-strong', 'red', 7000, ArmyState.DEPLOYED, planetStrong.id),
+        createArmy('def-medium', 'red', 5000, ArmyState.DEPLOYED, planetMedium.id),
+        createArmy('def-weak', 'red', 3000, ArmyState.DEPLOYED, planetWeak.id)
+      ];
+
+      const attackers = [
+        createArmy('atk-1', 'blue', 4000, ArmyState.EMBARKED, 'fleet-distribute'),
+        createArmy('atk-2', 'blue', 4000, ArmyState.EMBARKED, 'fleet-distribute'),
+        createArmy('atk-3', 'blue', 4000, ArmyState.EMBARKED, 'fleet-distribute'),
+        createArmy('atk-4', 'blue', 4000, ArmyState.EMBARKED, 'fleet-distribute')
+      ];
+
+      const transports: TestShipInput[] = attackers.map(army => ({
+        id: `ship-${army.id}`,
+        type: ShipType.TROOP_TRANSPORT,
+        hp: 100,
+        maxHp: 100,
+        carriedArmyId: army.id
+      }));
+
+      const fleet: Fleet = {
+        ...createFleet('fleet-distribute', 'blue', { ...system.position }, transports),
+        state: FleetState.MOVING,
+        targetSystemId: system.id,
+        targetPosition: { ...system.position },
+        invasionTargetSystemId: system.id
+      };
+
+      const rng = new RNG(27);
+
+      const arrival = resolveFleetMovement(fleet, [system], [...attackers, ...defenders], 0, rng, [fleet]);
+
+      const armiesAfterArrival = [...attackers, ...defenders].map(army => {
+        const update = arrival.armyUpdates.find(change => change.id === army.id);
+        return update ? { ...army, ...update.changes } : army;
+      });
+
+      const targetByArmy = new Map<string, string>();
+      armiesAfterArrival.forEach(army => {
+        if (army.state === ArmyState.DEPLOYED && [planetStrong.id, planetMedium.id, planetWeak.id].includes(army.containerId)) {
+          targetByArmy.set(army.id, army.containerId);
+        }
+      });
+
+      assert.strictEqual(targetByArmy.get('atk-1'), planetStrong.id, 'First landing should prioritize the strongest defended planet');
+      assert.strictEqual(targetByArmy.get('atk-2'), planetMedium.id, 'Second landing should target the next defended planet');
+      assert.strictEqual(targetByArmy.get('atk-3'), planetWeak.id, 'Third landing should use the last defended planet before rotating');
+      assert.strictEqual(targetByArmy.get('atk-4'), planetStrong.id, 'Assignments should rotate back to the top of the defended queue');
+
+      const landingLogs = arrival.logs.filter(log => log.text.includes('landed on'));
+      const expectedOrder = [planetStrong.name, planetMedium.name, planetWeak.name, planetStrong.name];
+      expectedOrder.forEach((planetName, index) => {
+        assert.ok(
+          landingLogs[index]?.text.includes(planetName),
+          `Landing log ${index + 1} should mention ${planetName}`
+        );
+      });
     }
   },
   {
@@ -2046,6 +2144,70 @@ const tests: TestCase[] = [
 
       assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when all solid bodies share the same non-null owner');
       assert.match(lastLog, /all solid planets and moons were secured/i, 'System capture log should mention the solid-body prerequisite');
+    }
+  },
+  {
+    name: 'Multi-planet systems change owner only after every solid world falls',
+    run: () => {
+      const planetA = createPlanet('sys-multi-solid', 'red', 1);
+      const planetB = createPlanet('sys-multi-solid', 'red', 2);
+      const gasGiant: PlanetBody = {
+        ...createPlanet('sys-multi-solid', 'red', 3),
+        class: 'gas_giant',
+        isSolid: false
+      };
+
+      const system: StarSystem = {
+        id: 'sys-multi-solid',
+        name: 'sys-multi-solid',
+        position: baseVec,
+        color: COLORS.red,
+        size: 1,
+        ownerFactionId: 'red',
+        resourceType: 'gas',
+        isHomeworld: false,
+        planets: [planetA, planetB, gasGiant]
+      };
+
+      const blueAssaultA = createArmy('army-blue-assault-a', 'blue', 20000, ArmyState.DEPLOYED, planetA.id);
+      const redGarrisonB = createArmy('army-red-hold-b', 'red', 8000, ArmyState.DEPLOYED, planetB.id);
+
+      const initialState = createBaseState({
+        systems: [system],
+        armies: [blueAssaultA, redGarrisonB]
+      });
+      const ctxFirst = { rng: new RNG(25), turn: initialState.day + 1 };
+
+      const afterFirst = phaseGround(initialState, ctxFirst);
+      const systemAfterFirst = afterFirst.systems.find(sys => sys.id === system.id);
+      const planetAAfter = systemAfterFirst?.planets.find(planet => planet.id === planetA.id);
+      const planetBAfter = systemAfterFirst?.planets.find(planet => planet.id === planetB.id);
+
+      assert.strictEqual(planetAAfter?.ownerFactionId, 'blue', 'First conquered planet should switch to the attacker');
+      assert.strictEqual(planetBAfter?.ownerFactionId, 'red', 'Remaining defended planet should stay with the original owner');
+      assert.strictEqual(
+        systemAfterFirst?.ownerFactionId,
+        'red',
+        'System owner should remain unchanged while a solid planet is still defended'
+      );
+
+      const blueAssaultB = createArmy('army-blue-assault-b', 'blue', 15000, ArmyState.DEPLOYED, planetB.id);
+      const reinforcedState: GameState = {
+        ...afterFirst,
+        armies: [...afterFirst.armies.filter(army => army.id !== redGarrisonB.id), blueAssaultB]
+      };
+      const ctxSecond = { rng: new RNG(27), turn: ctxFirst.turn + 1 };
+
+      const afterSecond = phaseGround(reinforcedState, ctxSecond);
+      const systemAfterSecond = afterSecond.systems.find(sys => sys.id === system.id);
+      const gasOwner = systemAfterSecond?.planets.find(planet => planet.id === gasGiant.id)?.ownerFactionId;
+
+      assert.strictEqual(systemAfterSecond?.ownerFactionId, 'blue', 'System owner should flip once all solid planets are captured');
+      assert.strictEqual(
+        gasOwner,
+        'red',
+        'Non-solid bodies should not block conquest and should retain their previous owner'
+      );
     }
   },
   {
