@@ -39,7 +39,7 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
     <div className="bg-slate-800/70 border border-slate-700 rounded-lg p-4 space-y-2">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-md bg-slate-900/60 border border-slate-700 p-1">
+          <div className="h-32 w-32 rounded-md bg-slate-900/60 border border-slate-700 p-1">
             <img
               src={SHIP_ICONS[ship.type]}
               alt={t('ship.detail.imageAlt', { type: shipTypeLabel })}
