@@ -55,6 +55,32 @@ export class SpatialIndex<T extends PositionedEntity> {
     return cells;
   }
 
+  /**
+   * Returns cells in the ring at distance `cellRadius` from center.
+   * This is used for incremental search in `findNearest`.
+   */
+  private getCellsInRing(center: { x: number; z: number }, cellRadius: number) {
+    const cells: Array<{ x: number; z: number }> = [];
+    if (cellRadius === 0) {
+      cells.push({ x: center.x, z: center.z });
+      return cells;
+    }
+
+    // Top and bottom rows
+    for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
+      cells.push({ x, z: center.z - cellRadius });
+      cells.push({ x, z: center.z + cellRadius });
+    }
+
+    // Left and right columns (excluding corners already added)
+    for (let z = center.z - cellRadius + 1; z <= center.z + cellRadius - 1; z += 1) {
+      cells.push({ x: center.x - cellRadius, z });
+      cells.push({ x: center.x + cellRadius, z });
+    }
+
+    return cells;
+  }
+
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
     return {
       minX: (center.x - cellRadius) * this.cellSize,
@@ -128,7 +154,7 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
+      const cells = this.getCellsInRing(center, cellRadius);
 
       cells.forEach(cell => {
         const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
