@@ -45,14 +45,44 @@ export class SpatialIndex<T extends PositionedEntity> {
     return `${x}:${z}`;
   }
 
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
+  private forEachCellInRing(
+    center: { x: number; z: number },
+    cellRadius: number,
+    callback: (x: number, z: number) => void
+  ) {
+    if (cellRadius === 0) {
+      callback(center.x, center.z);
+      return;
+    }
+
+    const minX = center.x - cellRadius;
+    const maxX = center.x + cellRadius;
+    const minZ = center.z - cellRadius;
+    const maxZ = center.z + cellRadius;
+
+    // Top and Bottom rows
+    for (let x = minX; x <= maxX; x++) {
+      callback(x, minZ);
+      callback(x, maxZ);
+    }
+
+    // Left and Right columns (excluding corners already covered)
+    for (let z = minZ + 1; z < maxZ; z++) {
+      callback(minX, z);
+      callback(maxX, z);
+    }
+  }
+
+  private forEachCellInRadius(
+    center: { x: number; z: number },
+    cellRadius: number,
+    callback: (x: number, z: number) => void
+  ) {
     for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
       for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
+        callback(x, z);
       }
     }
-    return cells;
   }
 
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
@@ -96,8 +126,8 @@ export class SpatialIndex<T extends PositionedEntity> {
     const maxDistanceSq = maxDistance * maxDistance;
     const candidates: T[] = [];
 
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+    this.forEachCellInRadius(center, cellRadius, (x, z) => {
+      const bucket = this.buckets.get(this.getKey(x, z));
       if (!bucket) return;
 
       bucket.forEach(item => {
@@ -128,10 +158,8 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+      this.forEachCellInRing(center, cellRadius, (x, z) => {
+        const bucket = this.buckets.get(this.getKey(x, z));
         if (!bucket) return;
 
         bucket.forEach(item => {
