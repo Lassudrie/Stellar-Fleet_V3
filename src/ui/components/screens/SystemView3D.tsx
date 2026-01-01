@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -15,9 +15,12 @@ import {
   MoonType,
   PlanetData,
   PlanetType,
+  PlanetBodyType,
   StarSystem,
   StarSystemAstro
 } from '../../../shared/types';
+import { useI18n } from '../../i18n';
+import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';
 
 interface SystemView3DProps {
   starSystem: StarSystem;
@@ -75,6 +78,8 @@ type PlanetSource = (PlanetData & {
   radiusKm?: number;
   semiMajorAxisKm?: number;
   planetType?: PlanetType;
+  name?: string;
+  habitabilityScore?: number;
 }) | {
   id?: string;
   class?: string;
@@ -83,15 +88,20 @@ type PlanetSource = (PlanetData & {
   radiusKm?: number;
   semiMajorAxisKm?: number;
   planetType?: PlanetType;
+  name?: string;
+  habitabilityScore?: number;
 };
 
 type MoonSource = MoonData & {
   radiusKm?: number;
   moonType?: MoonType;
   orbitDistanceKm?: number;
+  habitabilityScore?: number;
 };
 
 type UseMemoDisposableDeps = React.DependencyList;
+
+type CelestialBodyType = PlanetBodyType | 'star';
 
 const useDisposableMemo = <T extends { dispose: () => void }>(
   factory: () => T,
@@ -199,9 +209,12 @@ interface StarMeshProps {
   color: string;
   geometry: SphereGeometry;
   onDoubleClick?: () => void;
+  onHover?: () => void;
+  onBlur?: () => void;
+  onSelect?: () => void;
 }
 
-const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleClick }) => {
+const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleClick, onHover, onBlur, onSelect }) => {
   const material = useDisposableMemo(
     () => new MeshStandardMaterial({
       color,
@@ -215,7 +228,26 @@ const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleCl
 
   const scale = useMemo<[number, number, number]>(() => [radius, radius, radius], [radius]);
 
-  return <mesh geometry={geometry} material={material} scale={scale} onDoubleClick={onDoubleClick} />;
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      scale={scale}
+      onDoubleClick={onDoubleClick}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        onHover?.();
+      }}
+      onPointerOut={(event) => {
+        event.stopPropagation();
+        onBlur?.();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect?.();
+      }}
+    />
+  );
 };
 
 interface MoonOrbitGroupProps {
@@ -223,6 +255,9 @@ interface MoonOrbitGroupProps {
   orbitMaterial: MeshBasicMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
+  onHover: (bodyId: string) => void;
+  onBlur: (bodyId: string) => void;
+  onSelect: (bodyId: string) => void;
 }
 
 const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [number, number, number], radius: number) => void }> = ({
@@ -230,7 +265,10 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [numb
   orbitMaterial,
   moonGeometry,
   moonMaterial,
-  onFocus
+  onFocus,
+  onHover,
+  onBlur,
+  onSelect
 }) => {
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(moon.orbitRadius - ORBIT_THICKNESS, 0.005), moon.orbitRadius + ORBIT_THICKNESS, 96),
@@ -255,6 +293,18 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [numb
           event.stopPropagation();
           onFocus(event.point.toArray() as [number, number, number], moon.radius);
         }}
+        onPointerOver={(event) => {
+          event.stopPropagation();
+          onHover(moon.id);
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation();
+          onBlur(moon.id);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(moon.id);
+        }}
       />
     </group>
   );
@@ -268,6 +318,9 @@ interface PlanetOrbitGroupProps {
   planetMaterial: MeshStandardMaterial;
   moonMaterials: Record<MoonType, MeshStandardMaterial>;
   onFocus: (position: [number, number, number], radius: number) => void;
+  onHover: (bodyId: string) => void;
+  onBlur: (bodyId: string) => void;
+  onSelect: (bodyId: string) => void;
 }
 
 const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
@@ -277,7 +330,10 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   moonGeometry,
   planetMaterial,
   moonMaterials,
-  onFocus
+  onFocus,
+  onHover,
+  onBlur,
+  onSelect
 }) => {
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(planet.orbitRadius - ORBIT_THICKNESS, 0.01), planet.orbitRadius + ORBIT_THICKNESS, 128),
@@ -305,6 +361,18 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             event.stopPropagation();
             onFocus(event.point.toArray() as [number, number, number], planet.radius);
           }}
+          onPointerOver={(event) => {
+            event.stopPropagation();
+            onHover(planet.id);
+          }}
+          onPointerOut={(event) => {
+            event.stopPropagation();
+            onBlur(planet.id);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(planet.id);
+          }}
         />
         {planet.moons.map(moon => (
           <MoonOrbitGroup
@@ -314,6 +382,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             moonGeometry={moonGeometry}
             moonMaterial={moonMaterials[moon.type]}
             onFocus={onFocus}
+            onHover={onHover}
+            onBlur={onBlur}
+            onSelect={onSelect}
           />
         ))}
       </group>
@@ -423,13 +494,48 @@ const SystemCamera: React.FC<{
 };
 
 const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialCameraState, onCameraStateChange }) => {
-  const planets = useMemo<OrbitingPlanet[]>(() => {
-    const sourcePlanets: PlanetSource[] = astro?.planets?.length ? astro.planets : starSystem.planets;
-    if (!sourcePlanets.length) {
-      return Array.from({ length: 3 }, (_, idx) => buildPlanetModel({ id: `placeholder-${idx}` }, idx, 3));
+  const { t } = useI18n();
+  const planetBodies = useMemo(
+    () => starSystem.planets.filter(body => body.bodyType === 'planet'),
+    [starSystem.planets]
+  );
+  const sourcePlanets = useMemo<PlanetSource[]>(() => {
+    if (astro?.planets?.length) {
+      return astro.planets.map((planet, index) => {
+        const linkedBody = planetBodies[index];
+        const planetId = linkedBody?.id ?? (planet as { id?: string }).id ?? `planet-${index + 1}`;
+        return {
+          ...planet,
+          id: planetId,
+          name: linkedBody?.name,
+          planetType: planet.type,
+          habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore
+        };
+      });
     }
+
+    if (planetBodies.length) {
+      return planetBodies.map((planetBody) => ({
+        id: planetBody.id,
+        class: planetBody.class,
+        size: planetBody.size,
+        name: planetBody.name,
+        planetType: getPlanetType(planetBody as PlanetSource),
+        habitabilityScore: (planetBody as { habitabilityScore?: number }).habitabilityScore,
+        moons: []
+      }));
+    }
+
+    return Array.from({ length: 3 }, (_, idx) => ({
+      id: `placeholder-${idx + 1}`,
+      planetType: 'Terrestrial' as PlanetType,
+      moons: []
+    }));
+  }, [astro?.planets, planetBodies]);
+
+  const planets = useMemo<OrbitingPlanet[]>(() => {
     return sourcePlanets.map((planet, index) => buildPlanetModel(planet, index, sourcePlanets.length));
-  }, [astro?.planets, starSystem.planets]);
+  }, [sourcePlanets]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
@@ -473,7 +579,73 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
 
   const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
   const starRadius = Math.max(starRadiusKm * KM_TO_SCENE_SCALE * RADIUS_VISIBILITY_BONUS, MIN_STAR_RADIUS);
+  const starBodyId = useMemo(() => `${starSystem.id}-star-primary`, [starSystem.id]);
   const primaryColor = starSystem.color || '#7dd3fc';
+  const bodyInfoMap = useMemo<Record<string, SystemBodyInfo>>(() => {
+    const map: Record<string, SystemBodyInfo> = {};
+    map[starBodyId] = {
+      id: starBodyId,
+      name: t('systemView.bodyInfo.starName', { system: starSystem.name }),
+      bodyType: 'star' as CelestialBodyType,
+      bodySubType: astro?.primarySpectralType,
+      radiusKm: starRadiusKm
+    };
+
+    sourcePlanets.forEach((planet, index) => {
+      const planetId = planet.id ?? `planet-${index + 1}`;
+      const planetName = planet.name ?? t('systemView.bodyInfo.unnamedPlanet', { index: index + 1 });
+      const planetType = getPlanetType(planet);
+      map[planetId] = {
+        id: planetId,
+        name: planetName,
+        bodyType: 'planet',
+        bodySubType: planetType,
+        radiusKm: getPlanetRadiusKm(planet),
+        atmosphere: (planet as PlanetData).atmosphere,
+        habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore
+      };
+
+      const moons = (planet.moons ?? []) as MoonSource[];
+      moons.forEach((moon, moonIndex) => {
+        const moonId = `${planetId}-moon-${moonIndex + 1}`;
+        const moonName = t('systemView.bodyInfo.moonName', {
+          parent: planetName,
+          index: moonIndex + 1
+        });
+        map[moonId] = {
+          id: moonId,
+          name: moonName,
+          bodyType: 'moon',
+          bodySubType: getMoonType(moon),
+          radiusKm: getMoonRadiusKm(moon),
+          atmosphere: moon.atmosphere,
+          habitabilityScore: (moon as { habitabilityScore?: number }).habitabilityScore
+        };
+      });
+    });
+
+    return map;
+  }, [astro?.primarySpectralType, sourcePlanets, starBodyId, starRadiusKm, starSystem.name, t]);
+  const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null);
+  const [selectedBodyId, setSelectedBodyId] = useState<string | null>(null);
+  const displayedBodyId = selectedBodyId ?? hoveredBodyId;
+  const displayedBody = displayedBodyId ? bodyInfoMap[displayedBodyId] : undefined;
+  const handleHover = useCallback((bodyId: string) => {
+    setHoveredBodyId(bodyId);
+  }, []);
+  const handleBlur = useCallback((bodyId: string) => {
+    setHoveredBodyId(prev => (prev === bodyId ? null : prev));
+  }, []);
+  const handleSelect = useCallback((bodyId: string) => {
+    setSelectedBodyId(bodyId);
+  }, []);
+  const clearSelection = useCallback(() => {
+    setSelectedBodyId(null);
+  }, []);
+  useEffect(() => {
+    setHoveredBodyId(null);
+    setSelectedBodyId(null);
+  }, [starSystem.id]);
   const maxOrbitRadius = useMemo(() => {
     return planets.reduce((max, planet) => {
       const planetExtent = planet.orbitRadius + planet.radius;
@@ -503,7 +675,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
   );
 
   return (
-    <div className="w-full h-full bg-black">
+    <div className="relative w-full h-full bg-black">
       <Canvas camera={{ position: initialCameraPosition, fov: 55 }}>
         <color attach="background" args={['#000000']} />
         <ambientLight intensity={0.6} />
@@ -523,6 +695,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
             color={primaryColor}
             geometry={starGeometry}
             onDoubleClick={() => requestFocus([0, 0, 0], starRadius)}
+            onHover={() => handleHover(starBodyId)}
+            onBlur={() => handleBlur(starBodyId)}
+            onSelect={() => handleSelect(starBodyId)}
           />
           {planets.map(planet => (
             <PlanetOrbitGroup
@@ -534,10 +709,22 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
               planetMaterial={planetMaterialMap[planet.type]}
               moonMaterials={moonMaterialMap}
               onFocus={requestFocus}
+              onHover={handleHover}
+              onBlur={handleBlur}
+              onSelect={handleSelect}
             />
           ))}
         </SystemRoot>
       </Canvas>
+      <div className="pointer-events-none absolute inset-0 flex items-end justify-end p-4">
+        <div className="pointer-events-auto w-80 max-w-full">
+          <SystemBodyInfoPanel
+            body={displayedBody}
+            isSelected={Boolean(selectedBodyId)}
+            onClearSelection={selectedBodyId ? clearSelection : undefined}
+          />
+        </div>
+      </div>
     </div>
   );
 };
