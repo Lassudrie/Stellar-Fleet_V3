@@ -103,6 +103,12 @@ export const en = {
   'ctx.systemDetails': 'System Details',
   'ctx.viewSystem': 'View system',
 
+  // System View
+  'systemView.currentSystem': 'System view',
+  'systemView.backToGalaxy': 'Back to galaxy',
+  'systemView.astroLoaded': 'Procedural astro data loaded',
+  'systemView.noAstro': 'No astro data loaded',
+
   // System Detail Modal
   'system.value.unknown': 'Unknown',
   'system.modal.systemLabel': 'System',
