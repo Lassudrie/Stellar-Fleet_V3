@@ -1,5 +1,5 @@
 
-import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef, useState } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -19,6 +19,7 @@ interface GameSceneProps {
   enemySightings: Record<string, EnemySighting>;
   selectedFleetId: string | null;
   isInteractive?: boolean;
+  focusTarget?: Vec3 | null;
   onFleetSelect: (id: string | null) => void;
   onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
@@ -113,6 +114,7 @@ const GameScene: React.FC<GameSceneProps> = ({
   onFleetInspect,
   onSystemClick,
   onBackgroundClick,
+  focusTarget,
   isInteractive = true
 }) => {
 
@@ -137,12 +139,19 @@ const GameScene: React.FC<GameSceneProps> = ({
   const isScenarioReady = gameState.systems.length > 0;
 
   const initialHomeworldRef = useRef<Vec3 | null>(null);
+  const [lastFocusedTarget, setLastFocusedTarget] = useState<Vec3 | null>(null);
 
   useEffect(() => {
     if (isScenarioReady && !initialHomeworldRef.current) {
       initialHomeworldRef.current = playerHomeworld;
     }
   }, [isScenarioReady, playerHomeworld]);
+
+  useEffect(() => {
+    if (focusTarget) {
+      setLastFocusedTarget(focusTarget);
+    }
+  }, [focusTarget]);
 
   const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
 
@@ -155,6 +164,8 @@ const GameScene: React.FC<GameSceneProps> = ({
     () => [homeworldForCamera.x, homeworldForCamera.y + 80, homeworldForCamera.z + 50] as [number, number, number],
     [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
   );
+
+  const cameraFocusTarget = lastFocusedTarget;
 
   const mapMetrics = useMapMetrics(gameState.systems);
 
@@ -231,6 +242,7 @@ const GameScene: React.FC<GameSceneProps> = ({
             <GameCamera
               initialPosition={cameraPosition}
               initialTarget={cameraTarget}
+              focusTarget={cameraFocusTarget}
               ready={isScenarioReady}
               mapRadius={mapMetrics.radius}
               mapBounds={mapMetrics.bounds}

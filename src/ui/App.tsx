@@ -15,7 +15,7 @@ import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower } from '../engine/world';
-import { clone, equals } from '../engine/math/vec3';
+import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState, deserializeGameState } from '../engine/serialization';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [systemDetailSystem, setSystemDetailSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
+  const [focusTarget, setFocusTarget] = useState<Vec3 | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
   
@@ -380,6 +381,7 @@ const App: React.FC = () => {
 
   const handleSystemClick = (sys: StarSystem, event: any) => {
       setTargetSystem(sys);
+      setFocusTarget(sys.position);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setFleetPickerMode(null);
       setInspectedFleetId(null);
@@ -794,6 +796,7 @@ const App: React.FC = () => {
                     gameState={viewGameState}
                     enemySightings={enemySightings}
                     selectedFleetId={selectedFleetId}
+                    focusTarget={focusTarget}
                     isInteractive={!isGameInteractionLocked}
                     onFleetSelect={handleFleetSelect}
                     onFleetInspect={handleFleetInspect}
