@@ -39,7 +39,7 @@ const App: React.FC = () => {
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
-  const [systemViewCameraState, setSystemViewCameraState] = useState<SystemCameraState | null>(null);
+  const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
   const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
   const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
@@ -495,6 +495,13 @@ const App: React.FC = () => {
       });
   };
 
+  const handleSystemCameraStateChange = useCallback((systemId: string, state: SystemCameraState) => {
+      setSystemViewCameraBySystem(prev => ({
+          ...prev,
+          [systemId]: state
+      }));
+  }, []);
+
   const handleReturnToGalaxy = () => {
       beginScreenTransition('GAME', () => {
           setUiMode('NONE');
@@ -745,8 +752,8 @@ const App: React.FC = () => {
             <SystemView3D
               starSystem={systemViewSystem}
               astro={systemViewSystem.astro}
-              initialCameraState={systemViewCameraState ?? undefined}
-              onCameraStateChange={setSystemViewCameraState}
+              initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
+              onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
               scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
             />
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
