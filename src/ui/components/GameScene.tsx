@@ -18,6 +18,7 @@ interface GameSceneProps {
   gameState: GameState;
   enemySightings: Record<string, EnemySighting>;
   selectedFleetId: string | null;
+  isInteractive?: boolean;
   onFleetSelect: (id: string | null) => void;
   onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
@@ -111,7 +112,8 @@ const GameScene: React.FC<GameSceneProps> = ({
   onFleetSelect,
   onFleetInspect,
   onSystemClick,
-  onBackgroundClick
+  onBackgroundClick,
+  isInteractive = true
 }) => {
 
   const playerHomeworld = useMemo(() => {
@@ -184,6 +186,7 @@ const GameScene: React.FC<GameSceneProps> = ({
     fleetId: string,
     options?: { isDouble?: boolean; pointerType?: string }
   ) => {
+    if (!isInteractive) return;
     const isDouble = options?.isDouble ?? false;
     const pointerType = options?.pointerType;
     const isTouchPointer = pointerType === 'touch' || hasCoarsePointer();
@@ -215,11 +218,14 @@ const GameScene: React.FC<GameSceneProps> = ({
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   return (
-    <div className="absolute inset-0 z-0 bg-black">
+    <div className={`absolute inset-0 z-0 bg-black ${isInteractive ? '' : 'pointer-events-none'}`}>
       <Canvas
         gl={{ antialias: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
-        onPointerMissed={() => onBackgroundClick()}
+        onPointerMissed={() => {
+            if (!isInteractive) return;
+            onBackgroundClick();
+        }}
       >
         <Suspense fallback={null}>
             <GameCamera

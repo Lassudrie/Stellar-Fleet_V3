@@ -28,6 +28,8 @@ type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVAS
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
+const SCREEN_TRANSITION_MS = 400;
+const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
 
 const App: React.FC = () => {
   const { t } = useI18n();
@@ -38,6 +40,9 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
   const [systemViewCameraState, setSystemViewCameraState] = useState<SystemCameraState | null>(null);
+  const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
+  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -142,6 +147,35 @@ const App: React.FC = () => {
   useEffect(() => {
       inspectedFleetIdRef.current = inspectedFleetId;
   }, [inspectedFleetId]);
+
+  const clearTransitionTimer = useCallback(() => {
+      if (transitionTimerRef.current !== null) {
+          window.clearTimeout(transitionTimerRef.current);
+          transitionTimerRef.current = null;
+      }
+  }, []);
+
+  useEffect(() => {
+      return () => clearTransitionTimer();
+  }, [clearTransitionTimer]);
+
+  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW', prepare?: () => void) => {
+      clearTransitionTimer();
+      prepare?.();
+      setPendingScreen(nextScreen);
+      setTransitionPhase('fadeOut');
+
+      transitionTimerRef.current = window.setTimeout(() => {
+          setScreen(nextScreen);
+          setTransitionPhase('fadeIn');
+
+          transitionTimerRef.current = window.setTimeout(() => {
+              setTransitionPhase('idle');
+              setPendingScreen(null);
+              transitionTimerRef.current = null;
+          }, SCREEN_TRANSITION_MS);
+      }, SCREEN_TRANSITION_MS);
+  }, [clearTransitionTimer]);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -453,14 +487,17 @@ const App: React.FC = () => {
       const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
       setTargetSystem(latestSystem);
       setSystemViewSystem(latestSystem);
-      setUiMode('NONE');
-      setMenuPosition(null);
-      setScreen('SYSTEM_VIEW');
+      beginScreenTransition('SYSTEM_VIEW', () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+      });
   };
 
   const handleReturnToGalaxy = () => {
-      setScreen('GAME');
-      setUiMode('NONE');
+      beginScreenTransition('GAME', () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+      });
   };
 
   const handleOpenSystemDetails = () => {
@@ -684,6 +721,18 @@ const App: React.FC = () => {
 
   if (loading) return <LoadingScreen />;
 
+  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW';
+
+  const transitionOverlayElement = (
+    <div
+      className={`${transitionPhase === 'idle' ? 'pointer-events-none' : 'pointer-events-auto'} absolute inset-0 z-50 bg-black`}
+      style={{
+          opacity: transitionPhase === 'fadeOut' ? 1 : 0,
+          transition: `opacity ${SCREEN_TRANSITION_MS}ms ease`
+      }}
+    />
+  );
+
   if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'LOAD_GAME' ? 'LOAD_GAME' : 'SCENARIO')} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
@@ -696,6 +745,7 @@ const App: React.FC = () => {
               astro={systemViewSystem.astro}
               initialCameraState={systemViewCameraState ?? undefined}
               onCameraStateChange={setSystemViewCameraState}
+              scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
             />
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
                 <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
@@ -726,6 +776,7 @@ const App: React.FC = () => {
                     </button>
                 </div>
             </div>
+            {transitionOverlayElement}
         </div>
       );
   }
@@ -743,6 +794,7 @@ const App: React.FC = () => {
                     gameState={viewGameState}
                     enemySightings={enemySightings}
                     selectedFleetId={selectedFleetId}
+                    isInteractive={!isGameInteractionLocked}
                     onFleetSelect={handleFleetSelect}
                     onFleetInspect={handleFleetInspect}
                     onSystemClick={handleSystemClick}
@@ -817,6 +869,7 @@ const App: React.FC = () => {
                     onMarkMessageRead={handleMarkMessageRead}
                     onMarkAllMessagesRead={handleMarkAllMessagesRead}
                 />
+                {transitionOverlayElement}
             </FleetNameProvider>
         </div>
       );
