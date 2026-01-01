@@ -31,6 +31,7 @@ interface SystemContextMenuProps {
   showUnloadOption: boolean;
   showGroundOpsOption: boolean;
   canSelectFleet: boolean;
+  onOpenSystemView: () => void;
   onOpenSystemDetails: () => void;
   onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
@@ -88,7 +89,7 @@ const readViewportRect = (): ViewportRect => {
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption, showGroundOpsOption,
-    canSelectFleet, onOpenSystemDetails, onSelectFleetAtSystem,
+    canSelectFleet, onOpenSystemView, onOpenSystemDetails, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onOpenGroundOps, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
@@ -204,6 +205,17 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
               </span>
           )}
       </div>
+
+      <button
+          onClick={onOpenSystemView}
+          className="text-left px-3 py-2 hover:bg-sky-700/30 text-sky-200 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+      >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+              <path d="M1.5 12s4-7.5 10.5-7.5S22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12z" />
+              <circle cx="12" cy="12" r="3.5" />
+          </svg>
+          {t('ctx.viewSystem')}
+      </button>
 
       <button
           onClick={onOpenSystemDetails}

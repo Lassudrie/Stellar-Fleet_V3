@@ -22,7 +22,7 @@ import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/sorting';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
@@ -442,6 +442,16 @@ const App: React.FC = () => {
       setUiMode('GROUND_OPS_MODAL');
   };
 
+  const handleOpenSystemView = () => {
+      if (!targetSystem || !viewGameState) {
+          console.warn('[App] handleOpenSystemView: Missing targetSystem or viewGameState');
+          return;
+      }
+      const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
+      setTargetSystem(latestSystem);
+      setUiMode('SYSTEM_VIEW');
+  };
+
   const handleOpenSystemDetails = () => {
       if (!targetSystem || !viewGameState) {
           console.warn('[App] handleOpenSystemDetails: Missing targetSystem or viewGameState');
@@ -721,6 +731,7 @@ const App: React.FC = () => {
                     onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
                     onOpenGroundOps={handleOpenGroundOps}
                     onCloseMenu={handleCloseMenu}
+                    onOpenSystemView={handleOpenSystemView}
                     fleetPickerMode={fleetPickerMode}
                     onOpenSystemDetails={handleOpenSystemDetails}
                     systemDetailSystem={systemDetailSystem}
