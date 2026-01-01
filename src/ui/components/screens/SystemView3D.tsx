@@ -708,11 +708,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     return radii;
   }, [planets, starBodyId, starRadius]);
+  const resolvedAnchoredBodyId = useMemo(() => {
+    if (initialCameraState?.anchoredBodyId && bodyWorldPositions[initialCameraState.anchoredBodyId]) {
+      return initialCameraState.anchoredBodyId;
+    }
+    return starBodyId;
+  }, [bodyWorldPositions, initialCameraState?.anchoredBodyId, starBodyId]);
   const cameraInitialState = useMemo<SystemCameraState>(() => ({
     position: initialCameraState?.position ?? defaultCameraPosition,
     target: initialCameraState?.target ?? [0, 0, 0],
-    anchoredBodyId: initialCameraState?.anchoredBodyId ?? starBodyId
-  }), [defaultCameraPosition, initialCameraState, starBodyId]);
+    anchoredBodyId: resolvedAnchoredBodyId
+  }), [defaultCameraPosition, initialCameraState, resolvedAnchoredBodyId]);
   const bodyInfoMap = useMemo<Record<string, SystemBodyInfo>>(() => {
     const map: Record<string, SystemBodyInfo> = {};
     map[starBodyId] = {
