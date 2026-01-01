@@ -121,8 +121,10 @@ export const en = {
   'systemView.bodyInfo.radius': 'Radius',
   'systemView.bodyInfo.atmosphere': 'Atmosphere',
   'systemView.bodyInfo.habitability': 'Habitability',
+  'systemView.bodyInfo.center': 'Center',
   'systemView.bodyInfo.clearSelection': 'Clear selection',
   'systemView.bodyInfo.unknown': 'Unknown',
+  'systemView.actions.resetCamera': 'Reset camera',
 
   // System Detail Modal
   'system.value.unknown': 'Unknown',

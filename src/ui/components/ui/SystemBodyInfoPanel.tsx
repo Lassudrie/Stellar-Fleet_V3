@@ -16,6 +16,7 @@ interface SystemBodyInfoPanelProps {
   body?: SystemBodyInfo;
   isSelected: boolean;
   onClearSelection?: () => void;
+  onCenter?: (bodyId: string) => void;
 }
 
 const formatRadius = (radiusKm: number | undefined, unknown: string): string => {
@@ -29,7 +30,7 @@ const formatHabitability = (score: number | undefined, unknown: string): string 
   return score.toFixed(2);
 };
 
-const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelected, onClearSelection }) => {
+const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelected, onClearSelection, onCenter }) => {
   const { t } = useI18n();
   const unknown = t('systemView.bodyInfo.unknown');
 
@@ -56,6 +57,15 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelec
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
+          {onCenter && (
+            <button
+              type="button"
+              onClick={() => onCenter(body.id)}
+              className="rounded border border-slate-700 bg-slate-800 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-100 transition hover:border-slate-500 hover:bg-slate-700"
+            >
+              {t('systemView.bodyInfo.center')}
+            </button>
+          )}
           <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-200">
             {badgeLabel}
           </span>
