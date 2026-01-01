@@ -1,6 +1,15 @@
-import React, { useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { MeshBasicMaterial, MeshStandardMaterial, RingGeometry, SphereGeometry } from 'three';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import {
+  MathUtils,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  RingGeometry,
+  SphereGeometry,
+  Vector3
+} from 'three';
 import {
   MoonData,
   MoonType,
@@ -13,6 +22,8 @@ import {
 interface SystemView3DProps {
   starSystem: StarSystem;
   astro?: StarSystemAstro;
+  initialCameraState?: SystemCameraState;
+  onCameraStateChange?: (state: SystemCameraState) => void;
 }
 
 const KM_PER_AU = 149_597_870.7;
@@ -187,9 +198,10 @@ interface StarMeshProps {
   radius: number;
   color: string;
   geometry: SphereGeometry;
+  onDoubleClick?: () => void;
 }
 
-const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry }) => {
+const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleClick }) => {
   const material = useDisposableMemo(
     () => new MeshStandardMaterial({
       color,
@@ -203,7 +215,7 @@ const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry }) => {
 
   const scale = useMemo<[number, number, number]>(() => [radius, radius, radius], [radius]);
 
-  return <mesh geometry={geometry} material={material} scale={scale} />;
+  return <mesh geometry={geometry} material={material} scale={scale} onDoubleClick={onDoubleClick} />;
 };
 
 interface MoonOrbitGroupProps {
@@ -213,7 +225,13 @@ interface MoonOrbitGroupProps {
   moonMaterial: MeshStandardMaterial;
 }
 
-const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({ moon, orbitMaterial, moonGeometry, moonMaterial }) => {
+const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [number, number, number], radius: number) => void }> = ({
+  moon,
+  orbitMaterial,
+  moonGeometry,
+  moonMaterial,
+  onFocus
+}) => {
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(moon.orbitRadius - ORBIT_THICKNESS, 0.005), moon.orbitRadius + ORBIT_THICKNESS, 96),
     [moon.orbitRadius]
@@ -228,7 +246,16 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({ moon, orbitMaterial, mo
   return (
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} />
-      <mesh geometry={moonGeometry} material={moonMaterial} position={moonPosition} scale={moonScale} />
+      <mesh
+        geometry={moonGeometry}
+        material={moonMaterial}
+        position={moonPosition}
+        scale={moonScale}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onFocus(event.point.toArray() as [number, number, number], moon.radius);
+        }}
+      />
     </group>
   );
 };
@@ -240,6 +267,7 @@ interface PlanetOrbitGroupProps {
   moonGeometry: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
   moonMaterials: Record<MoonType, MeshStandardMaterial>;
+  onFocus: (position: [number, number, number], radius: number) => void;
 }
 
 const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
@@ -248,7 +276,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   planetGeometry,
   moonGeometry,
   planetMaterial,
-  moonMaterials
+  moonMaterials,
+  onFocus
 }) => {
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(planet.orbitRadius - ORBIT_THICKNESS, 0.01), planet.orbitRadius + ORBIT_THICKNESS, 128),
@@ -268,7 +297,15 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} />
       <group position={planetPosition}>
-        <mesh geometry={planetGeometry} material={planetMaterial} scale={planetScale} />
+        <mesh
+          geometry={planetGeometry}
+          material={planetMaterial}
+          scale={planetScale}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onFocus(event.point.toArray() as [number, number, number], planet.radius);
+          }}
+        />
         {planet.moons.map(moon => (
           <MoonOrbitGroup
             key={moon.id}
@@ -276,6 +313,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             orbitMaterial={orbitMaterial}
             moonGeometry={moonGeometry}
             moonMaterial={moonMaterials[moon.type]}
+            onFocus={onFocus}
           />
         ))}
       </group>
@@ -283,7 +321,108 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   );
 };
 
-const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro }) => {
+export type SystemCameraState = {
+  position: [number, number, number];
+  target: [number, number, number];
+};
+
+type FocusRequest = {
+  target: Vector3;
+  distance: number;
+};
+
+const SystemCamera: React.FC<{
+  maxDistance: number;
+  focusRequest: React.MutableRefObject<FocusRequest | null>;
+  initialState?: SystemCameraState;
+  onCameraStateChange?: (state: SystemCameraState) => void;
+  lastCameraStateRef: React.MutableRefObject<SystemCameraState>;
+}> = ({
+  maxDistance,
+  focusRequest,
+  initialState,
+  onCameraStateChange,
+  lastCameraStateRef
+}) => {
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const { camera } = useThree();
+  const initialTarget = useMemo<[number, number, number]>(() => initialState?.target ?? [0, 0, 0], [
+    initialState?.target?.[0],
+    initialState?.target?.[1],
+    initialState?.target?.[2]
+  ]);
+  const initialPosition = useMemo<[number, number, number]>(() => initialState?.position ?? [0, 6, 12], [
+    initialState?.position?.[0],
+    initialState?.position?.[1],
+    initialState?.position?.[2]
+  ]);
+  const targetRef = useRef<Vector3>(new Vector3(...initialTarget));
+  const desiredTargetRef = useRef<Vector3>(targetRef.current.clone());
+  const initialDistance = useMemo(() => {
+    const distance = new Vector3(...initialPosition).distanceTo(new Vector3(...initialTarget));
+    return distance || maxDistance * 0.6;
+  }, [initialPosition, initialTarget, maxDistance]);
+  const desiredDistanceRef = useRef<number>(initialDistance);
+  const workingVector = useMemo(() => new Vector3(), []);
+
+  useEffect(() => {
+    camera.position.set(...initialPosition);
+    targetRef.current.set(...initialTarget);
+    desiredTargetRef.current.copy(targetRef.current);
+    desiredDistanceRef.current = initialDistance;
+    controlsRef.current?.target.copy(targetRef.current);
+    controlsRef.current?.update();
+    lastCameraStateRef.current = {
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [targetRef.current.x, targetRef.current.y, targetRef.current.z]
+    };
+  }, [camera, initialPosition, initialTarget, initialDistance, lastCameraStateRef]);
+
+  useEffect(() => {
+    return () => {
+      if (onCameraStateChange) {
+        onCameraStateChange(lastCameraStateRef.current);
+      }
+    };
+  }, [lastCameraStateRef, onCameraStateChange]);
+
+  useFrame((_, delta) => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const pendingFocus = focusRequest.current;
+    if (pendingFocus) {
+      desiredTargetRef.current.copy(pendingFocus.target);
+      desiredDistanceRef.current = Math.min(pendingFocus.distance, maxDistance);
+      focusRequest.current = null;
+    }
+
+    const lerpAlpha = 1 - Math.exp(-6 * delta);
+    targetRef.current.lerp(desiredTargetRef.current, lerpAlpha);
+
+    const currentDirection = workingVector.copy(camera.position).sub(targetRef.current);
+    const currentDistance = currentDirection.length();
+    const nextDistance = MathUtils.damp(currentDistance, desiredDistanceRef.current, 8, delta);
+    const clampedDistance = Math.min(nextDistance, maxDistance);
+
+    const nextPosition = currentDirection.setLength(clampedDistance).add(targetRef.current);
+    camera.position.copy(nextPosition);
+    controls.target.copy(targetRef.current);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.2;
+    controls.maxDistance = maxDistance;
+    controls.update();
+
+    lastCameraStateRef.current = {
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [targetRef.current.x, targetRef.current.y, targetRef.current.z]
+    };
+  });
+
+  return <OrbitControls ref={controlsRef} />;
+};
+
+const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialCameraState, onCameraStateChange }) => {
   const planets = useMemo<OrbitingPlanet[]>(() => {
     const sourcePlanets: PlanetSource[] = astro?.planets?.length ? astro.planets : starSystem.planets;
     if (!sourcePlanets.length) {
@@ -335,16 +474,56 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro }) => {
   const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
   const starRadius = Math.max(starRadiusKm * KM_TO_SCENE_SCALE * RADIUS_VISIBILITY_BONUS, MIN_STAR_RADIUS);
   const primaryColor = starSystem.color || '#7dd3fc';
+  const maxOrbitRadius = useMemo(() => {
+    return planets.reduce((max, planet) => {
+      const planetExtent = planet.orbitRadius + planet.radius;
+      const moonExtent = planet.moons.reduce(
+        (moonMax, moon) => Math.max(moonMax, planet.orbitRadius + moon.orbitRadius + moon.radius),
+        planetExtent
+      );
+      return Math.max(max, moonExtent);
+    }, starRadius);
+  }, [planets, starRadius]);
+  const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, 12);
+  const focusRequestRef = useRef<FocusRequest | null>(null);
+  const lastCameraStateRef = useRef<SystemCameraState>({
+    position: initialCameraState?.position ?? [0, 6, 12],
+    target: initialCameraState?.target ?? [0, 0, 0]
+  });
+  const requestFocus = useCallback((position: [number, number, number], radius: number) => {
+    const desiredDistance = Math.min(Math.max(radius * 8, 2.5), cameraMaxDistance * 0.95);
+    focusRequestRef.current = {
+      target: new Vector3(...position),
+      distance: desiredDistance
+    };
+  }, [cameraMaxDistance]);
+  const initialCameraPosition = useMemo<[number, number, number]>(
+    () => initialCameraState?.position ?? [0, 6, 12],
+    [initialCameraState?.position?.[0], initialCameraState?.position?.[1], initialCameraState?.position?.[2]]
+  );
 
   return (
     <div className="w-full h-full bg-black">
-      <Canvas camera={{ position: [0, 6, 12], fov: 55 }}>
+      <Canvas camera={{ position: initialCameraPosition, fov: 55 }}>
         <color attach="background" args={['#000000']} />
         <ambientLight intensity={0.6} />
         <pointLight position={[6, 6, 4]} intensity={1.5} />
 
+        <SystemCamera
+          maxDistance={cameraMaxDistance}
+          focusRequest={focusRequestRef}
+          initialState={initialCameraState}
+          onCameraStateChange={onCameraStateChange}
+          lastCameraStateRef={lastCameraStateRef}
+        />
+
         <SystemRoot>
-          <StarMesh radius={starRadius} color={primaryColor} geometry={starGeometry} />
+          <StarMesh
+            radius={starRadius}
+            color={primaryColor}
+            geometry={starGeometry}
+            onDoubleClick={() => requestFocus([0, 0, 0], starRadius)}
+          />
           {planets.map(planet => (
             <PlanetOrbitGroup
               key={planet.id}
@@ -354,6 +533,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro }) => {
               moonGeometry={moonGeometry}
               planetMaterial={planetMaterialMap[planet.type]}
               moonMaterials={moonMaterialMap}
+              onFocus={requestFocus}
             />
           ))}
         </SystemRoot>

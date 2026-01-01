@@ -8,7 +8,7 @@ import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
-import SystemView3D from './components/screens/SystemView3D';
+import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
+  const [systemViewCameraState, setSystemViewCameraState] = useState<SystemCameraState | null>(null);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -690,7 +691,12 @@ const App: React.FC = () => {
   if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
       return (
         <div className="relative w-full h-screen bg-black text-white">
-            <SystemView3D starSystem={systemViewSystem} astro={systemViewSystem.astro} />
+            <SystemView3D
+              starSystem={systemViewSystem}
+              astro={systemViewSystem.astro}
+              initialCameraState={systemViewCameraState ?? undefined}
+              onCameraStateChange={setSystemViewCameraState}
+            />
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
                 <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
