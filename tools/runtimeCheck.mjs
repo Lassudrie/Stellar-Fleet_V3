@@ -10,6 +10,11 @@ const parseVersion = (value) => {
   return { major, minor, patch };
 };
 
+const parseBooleanEnv = (value) => {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'y', 'on'].includes(value.toLowerCase());
+};
+
 const formatVersion = ({ major, minor, patch }) => `${major}.${minor}.${patch}`;
 
 const nodeVersion = parseVersion(process.versions.node);
@@ -24,25 +29,36 @@ const npmVersion = process.versions.npm
   ? parseVersion(process.versions.npm)
   : parseNpmVersionFromUA();
 
+const allowUnsupportedNode = parseBooleanEnv(process.env.ALLOW_UNSUPPORTED_NODE);
+
 const minNode = { major: 20, minor: 0, patch: 0 };
 const maxNodeExclusiveMajor = 21;
 
-if (
-  nodeVersion.major < minNode.major ||
-  nodeVersion.major >= maxNodeExclusiveMajor
-) {
-  fail(`Node ${formatVersion(minNode)} required (< ${maxNodeExclusiveMajor}.0.0). Detected ${formatVersion(nodeVersion)}.`);
+const isUnsupportedNodeVersion =
+  nodeVersion.major < minNode.major || nodeVersion.major >= maxNodeExclusiveMajor;
+
+if (isUnsupportedNodeVersion) {
+  const message = `Node ${formatVersion(minNode)} required (< ${maxNodeExclusiveMajor}.0.0). Detected ${formatVersion(nodeVersion)}.`;
+  if (allowUnsupportedNode) {
+    console.warn(`\u26a0\uFE0F  Runtime check bypassed: ${message} Use at your own risk; CI still enforces Node ${formatVersion(minNode)}.`);
+  } else {
+    fail(message);
+  }
 }
 
 const minNpm = { major: 10, minor: 0, patch: 0 };
 const maxNpmExclusiveMajor = 11;
 
 if (npmVersion) {
-  if (
-    npmVersion.major < minNpm.major ||
-    npmVersion.major >= maxNpmExclusiveMajor
-  ) {
-    fail(`npm ${formatVersion(minNpm)} required (< ${maxNpmExclusiveMajor}.0.0). Detected ${formatVersion(npmVersion)}.`);
+  const isUnsupportedNpm =
+    npmVersion.major < minNpm.major || npmVersion.major >= maxNpmExclusiveMajor;
+  if (isUnsupportedNpm) {
+    const message = `npm ${formatVersion(minNpm)} required (< ${maxNpmExclusiveMajor}.0.0). Detected ${formatVersion(npmVersion)}.`;
+    if (allowUnsupportedNode) {
+      console.warn(`\u26a0\uFE0F  Runtime check bypassed: ${message} Use at your own risk; CI still enforces npm ${formatVersion(minNpm)}.`);
+    } else {
+      fail(message);
+    }
   }
 } else {
   console.warn('npm version could not be detected; ensure npm 10.x is used to match CI.');
