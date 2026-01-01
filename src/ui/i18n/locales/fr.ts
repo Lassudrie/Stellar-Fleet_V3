@@ -100,6 +100,7 @@ export const fr = {
   'ctx.hostileCoalition': 'Coalition hostile',
   'ctx.cancel': 'Annuler',
   'ctx.systemDetails': 'Détails du système',
+  'ctx.viewSystem': 'Visualiser le système',
 
   // System Detail Modal
   'system.value.unknown': 'Inconnu',

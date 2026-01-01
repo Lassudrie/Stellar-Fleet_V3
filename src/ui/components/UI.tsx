@@ -31,7 +31,7 @@ interface UIProps {
   logs: LogEntry[];
   messages: GameMessage[];
 
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
+  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -58,6 +58,7 @@ interface UIProps {
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   onInspectFleet: (fleetId: string) => void;
+  onOpenSystemView: () => void;
   onOpenSystemDetails: () => void;
   systemDetailSystem: StarSystem | null;
   onCloseSystemDetails: () => void;
@@ -88,7 +89,7 @@ const UI: React.FC<UIProps> = ({
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
     onInspectFleet,
-    onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
+    onOpenSystemView, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
   devMode, godEyes, onSetUiSettings,
@@ -355,6 +356,7 @@ const UI: React.FC<UIProps> = ({
             showUnloadOption={showUnloadOption}
             showGroundOpsOption={showGroundOpsOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
+            onOpenSystemView={onOpenSystemView}
             onOpenSystemDetails={onOpenSystemDetails}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}

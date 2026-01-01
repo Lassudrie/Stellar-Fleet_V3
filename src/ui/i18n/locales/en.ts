@@ -101,6 +101,7 @@ export const en = {
   'ctx.hostileCoalition': 'Hostile coalition',
   'ctx.cancel': 'Cancel',
   'ctx.systemDetails': 'System Details',
+  'ctx.viewSystem': 'View system',
 
   // System Detail Modal
   'system.value.unknown': 'Unknown',
