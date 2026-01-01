@@ -27,6 +27,7 @@ interface SystemView3DProps {
   astro?: StarSystemAstro;
   initialCameraState?: SystemCameraState;
   onCameraStateChange?: (state: SystemCameraState) => void;
+  scaleFactor?: number;
 }
 
 const KM_PER_AU = 149_597_870.7;
@@ -171,24 +172,27 @@ const getMoonOrbitKm = (moon: MoonSource, planetRadiusKm: number): number => {
 const buildPlanetModel = (
   planet: PlanetSource,
   index: number,
-  total: number
+  total: number,
+  sceneScale: number,
+  minPlanetRadius: number,
+  minMoonRadius: number
 ): OrbitingPlanet => {
   const radiusKm = getPlanetRadiusKm(planet);
   const semiMajorAxisKm = getSemiMajorAxisKm(planet, index);
   const orbitAngle = (index / Math.max(total, 1)) * Math.PI * 2;
-  const orbitRadius = semiMajorAxisKm * KM_TO_SCENE_SCALE;
-  const radius = Math.max(radiusKm * KM_TO_SCENE_SCALE * RADIUS_VISIBILITY_BONUS, MIN_PLANET_RADIUS);
+  const orbitRadius = semiMajorAxisKm * sceneScale;
+  const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
   const planetId = planet.id ?? `planet-${index + 1}`;
   const planetType = getPlanetType(planet);
 
   const moons = (planet.moons ?? []).map((moon, moonIndex) => {
     const moonRadiusKm = getMoonRadiusKm(moon as MoonSource);
     const moonOrbitKm = getMoonOrbitKm(moon as MoonSource, radiusKm);
-    const moonOrbitRadius = moonOrbitKm * KM_TO_SCENE_SCALE;
+    const moonOrbitRadius = moonOrbitKm * sceneScale;
     const moonAngle = (moonIndex / Math.max(planet.moons?.length ?? 1, 1)) * Math.PI * 2 + Math.PI / 4;
     return {
       id: `${planetId}-moon-${moonIndex + 1}`,
-      radius: Math.max(moonRadiusKm * KM_TO_SCENE_SCALE * RADIUS_VISIBILITY_BONUS, MIN_PLANET_RADIUS / 3),
+      radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
       orbitRadius: moonOrbitRadius,
       orbitAngle: moonAngle,
       type: getMoonType(moon as MoonSource)
@@ -246,6 +250,7 @@ const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleCl
         event.stopPropagation();
         onSelect?.();
       }}
+      frustumCulled
     />
   );
 };
@@ -255,6 +260,7 @@ interface MoonOrbitGroupProps {
   orbitMaterial: MeshBasicMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
+  orbitThickness: number;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
   onSelect: (bodyId: string) => void;
@@ -265,14 +271,15 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [numb
   orbitMaterial,
   moonGeometry,
   moonMaterial,
+  orbitThickness,
   onFocus,
   onHover,
   onBlur,
   onSelect
 }) => {
   const orbitGeometry = useDisposableMemo(
-    () => new RingGeometry(Math.max(moon.orbitRadius - ORBIT_THICKNESS, 0.005), moon.orbitRadius + ORBIT_THICKNESS, 96),
-    [moon.orbitRadius]
+    () => new RingGeometry(Math.max(moon.orbitRadius - orbitThickness, 0.0025), moon.orbitRadius + orbitThickness, 96),
+    [moon.orbitRadius, orbitThickness]
   );
   const orbitRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
   const moonPosition = useMemo<[number, number, number]>(
@@ -283,7 +290,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [numb
 
   return (
     <group>
-      <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} />
+      <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
       <mesh
         geometry={moonGeometry}
         material={moonMaterial}
@@ -305,6 +312,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (position: [numb
           event.stopPropagation();
           onSelect(moon.id);
         }}
+        frustumCulled
       />
     </group>
   );
@@ -317,6 +325,7 @@ interface PlanetOrbitGroupProps {
   moonGeometry: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
   moonMaterials: Record<MoonType, MeshStandardMaterial>;
+  orbitThickness: number;
   onFocus: (position: [number, number, number], radius: number) => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
@@ -330,14 +339,15 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   moonGeometry,
   planetMaterial,
   moonMaterials,
+  orbitThickness,
   onFocus,
   onHover,
   onBlur,
   onSelect
 }) => {
   const orbitGeometry = useDisposableMemo(
-    () => new RingGeometry(Math.max(planet.orbitRadius - ORBIT_THICKNESS, 0.01), planet.orbitRadius + ORBIT_THICKNESS, 128),
-    [planet.orbitRadius]
+    () => new RingGeometry(Math.max(planet.orbitRadius - orbitThickness, 0.01), planet.orbitRadius + orbitThickness, 128),
+    [orbitThickness, planet.orbitRadius]
   );
   const orbitRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
   const planetPosition = useMemo<[number, number, number]>(
@@ -351,7 +361,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
 
   return (
     <group>
-      <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} />
+      <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
       <group position={planetPosition}>
         <mesh
           geometry={planetGeometry}
@@ -373,6 +383,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             event.stopPropagation();
             onSelect(planet.id);
           }}
+          frustumCulled
         />
         {planet.moons.map(moon => (
           <MoonOrbitGroup
@@ -381,6 +392,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             orbitMaterial={orbitMaterial}
             moonGeometry={moonGeometry}
             moonMaterial={moonMaterials[moon.type]}
+            orbitThickness={orbitThickness}
             onFocus={onFocus}
             onHover={onHover}
             onBlur={onBlur}
@@ -493,8 +505,26 @@ const SystemCamera: React.FC<{
   return <OrbitControls ref={controlsRef} />;
 };
 
-const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialCameraState, onCameraStateChange }) => {
+const SystemView3D: React.FC<SystemView3DProps> = ({
+  starSystem,
+  astro,
+  initialCameraState,
+  onCameraStateChange,
+  scaleFactor = 1
+}) => {
   const { t } = useI18n();
+  const clampedScale = Math.max(scaleFactor, 0.1);
+  const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
+  const orbitThickness = ORBIT_THICKNESS * clampedScale;
+  const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
+  const minMoonRadius = minPlanetRadius / 3;
+  const minStarRadius = MIN_STAR_RADIUS * clampedScale;
+  const focusDistanceFloor = 2.5 * clampedScale;
+  const baseCameraDistance = 12 * clampedScale;
+  const defaultCameraPosition = useMemo<[number, number, number]>(
+    () => [0, 6 * clampedScale, 12 * clampedScale],
+    [clampedScale]
+  );
   const planetBodies = useMemo(
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
@@ -534,8 +564,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
   }, [astro?.planets, planetBodies]);
 
   const planets = useMemo<OrbitingPlanet[]>(() => {
-    return sourcePlanets.map((planet, index) => buildPlanetModel(planet, index, sourcePlanets.length));
-  }, [sourcePlanets]);
+    return sourcePlanets.map((planet, index) => buildPlanetModel(
+      planet,
+      index,
+      sourcePlanets.length,
+      sceneScale,
+      minPlanetRadius,
+      minMoonRadius
+    ));
+  }, [minMoonRadius, minPlanetRadius, sceneScale, sourcePlanets]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
@@ -578,7 +615,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
   const moonGeometry = useDisposableMemo(() => new SphereGeometry(1, 32, 32), []);
 
   const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
-  const starRadius = Math.max(starRadiusKm * KM_TO_SCENE_SCALE * RADIUS_VISIBILITY_BONUS, MIN_STAR_RADIUS);
+  const starRadius = Math.max(starRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
   const starBodyId = useMemo(() => `${starSystem.id}-star-primary`, [starSystem.id]);
   const primaryColor = starSystem.color || '#7dd3fc';
   const bodyInfoMap = useMemo<Record<string, SystemBodyInfo>>(() => {
@@ -656,23 +693,24 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
       return Math.max(max, moonExtent);
     }, starRadius);
   }, [planets, starRadius]);
-  const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, 12);
+  const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
   const focusRequestRef = useRef<FocusRequest | null>(null);
-  const lastCameraStateRef = useRef<SystemCameraState>({
-    position: initialCameraState?.position ?? [0, 6, 12],
+  const cameraInitialState = useMemo<SystemCameraState>(() => ({
+    position: initialCameraState?.position ?? defaultCameraPosition,
     target: initialCameraState?.target ?? [0, 0, 0]
-  });
+  }), [defaultCameraPosition, initialCameraState]);
+  const lastCameraStateRef = useRef<SystemCameraState>(cameraInitialState);
+  useEffect(() => {
+    lastCameraStateRef.current = cameraInitialState;
+  }, [cameraInitialState]);
   const requestFocus = useCallback((position: [number, number, number], radius: number) => {
-    const desiredDistance = Math.min(Math.max(radius * 8, 2.5), cameraMaxDistance * 0.95);
+    const desiredDistance = Math.min(Math.max(radius * 8, focusDistanceFloor), cameraMaxDistance * 0.95);
     focusRequestRef.current = {
       target: new Vector3(...position),
       distance: desiredDistance
     };
-  }, [cameraMaxDistance]);
-  const initialCameraPosition = useMemo<[number, number, number]>(
-    () => initialCameraState?.position ?? [0, 6, 12],
-    [initialCameraState?.position?.[0], initialCameraState?.position?.[1], initialCameraState?.position?.[2]]
-  );
+  }, [cameraMaxDistance, focusDistanceFloor]);
+  const initialCameraPosition = cameraInitialState.position;
 
   return (
     <div className="relative w-full h-full bg-black">
@@ -684,7 +722,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
         <SystemCamera
           maxDistance={cameraMaxDistance}
           focusRequest={focusRequestRef}
-          initialState={initialCameraState}
+          initialState={cameraInitialState}
           onCameraStateChange={onCameraStateChange}
           lastCameraStateRef={lastCameraStateRef}
         />
@@ -708,6 +746,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({ starSystem, astro, initialC
               moonGeometry={moonGeometry}
               planetMaterial={planetMaterialMap[planet.type]}
               moonMaterials={moonMaterialMap}
+              orbitThickness={orbitThickness}
               onFocus={requestFocus}
               onHover={handleHover}
               onBlur={handleBlur}
