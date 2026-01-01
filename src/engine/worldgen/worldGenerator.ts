@@ -645,6 +645,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       day: 1,
       systems,
       fleets,
+      stations: [],
       armies,
       lasers: [],
       battles: [],

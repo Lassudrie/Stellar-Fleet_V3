@@ -38,6 +38,8 @@ export enum ShipType {
   EXTRACTOR = 'extractor',
 }
 
+export type StationType = 'shipyard' | 'mining' | 'defense' | 'relay' | 'outpost';
+
 export type ResourceType = 'none' | 'gas';
 
 // --- Procedural Stellar System Generation (Astro data) ---
@@ -244,6 +246,16 @@ export interface Fleet {
   unloadTargetSystemId?: string | null; // If set, fleet will unload embarked armies at this allied system upon arrival
 }
 
+export interface Station {
+  id: string;
+  systemId: string;
+  factionId: FactionId;
+  type: StationType;
+  name?: string;
+  anchorBodyId?: string | null;
+  slotIndex?: number;
+}
+
 export interface LaserShot {
   id: string;
   start: Vec3;
@@ -369,6 +381,7 @@ export interface GameState {
   day: number;
   systems: StarSystem[];
   fleets: Fleet[];
+  stations?: Station[];
   armies: Army[];
   lasers: LaserShot[];
   battles: Battle[];

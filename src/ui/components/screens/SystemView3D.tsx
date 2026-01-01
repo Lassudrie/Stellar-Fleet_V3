@@ -1,31 +1,60 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { Billboard, OrbitControls, Text } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
+  ConeGeometry,
+  CylinderGeometry,
+  InstancedMesh,
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   RingGeometry,
   Spherical,
   SphereGeometry,
+  TorusGeometry,
   Vector3
 } from 'three';
 import {
+  FactionState,
+  Fleet,
   MoonData,
   MoonType,
   PlanetData,
   PlanetType,
   PlanetBodyType,
+  Station,
   StarSystem,
   StarSystemAstro
 } from '../../../shared/types';
+import { calculateFleetPower } from '../../../engine/world';
+import { shortId } from '../../../engine/idUtils';
 import { useI18n } from '../../i18n';
+import { useFleetName } from '../../context/FleetNames';
 import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';
+import SystemFleetInfoPanel from '../ui/SystemFleetInfoPanel';
+import SystemStationInfoPanel from '../ui/SystemStationInfoPanel';
+import {
+  getSystemFleets,
+  hashStringToAngle,
+  layoutTacticalRing,
+  makeObjectId,
+  parseObjectId,
+  type SystemObjectId
+} from './systemViewLayout';
 
 interface SystemView3DProps {
   starSystem: StarSystem;
   astro?: StarSystemAstro;
+  fleets?: Fleet[];
+  stations?: Station[];
+  factions?: FactionState[];
+  playerFactionId?: string;
+  day?: number;
+  selectedFleetId?: string | null;
+  onSelectFleet?: (fleetId: string | null) => void;
+  onInspectFleet?: (fleetId: string) => void;
   initialCameraState?: SystemCameraState;
   onCameraStateChange?: (state: SystemCameraState) => void;
   scaleFactor?: number;
@@ -451,6 +480,470 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   );
 };
 
+interface SystemFleetMeshProps {
+  fleet: Fleet;
+  color: string;
+  scale: number;
+  geometry: ConeGeometry;
+  ringGeometry: RingGeometry;
+  isSelected: boolean;
+  isHovered: boolean;
+  showLabel: boolean;
+  onHover: () => void;
+  onBlur: () => void;
+  onInteract: (
+    event: ThreeEvent<MouseEvent | PointerEvent>,
+    options?: { isDouble?: boolean; pointerType?: string }
+  ) => void;
+}
+
+const SystemFleetMesh: React.FC<SystemFleetMeshProps> = ({
+  fleet,
+  color,
+  scale,
+  geometry,
+  ringGeometry,
+  isSelected,
+  isHovered,
+  showLabel,
+  onHover,
+  onBlur,
+  onInteract
+}) => {
+  const getFleetName = useFleetName();
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
+
+  const resolvePointerType = (event: any) => event?.pointerType || event?.nativeEvent?.pointerType || '';
+  const emissiveIntensity = isSelected ? 0.75 : isHovered ? 0.55 : 0.35;
+  const labelText = showLabel ? `${getFleetName(fleet.id)} [${fleet.ships.length}]` : '';
+
+  return (
+    <group>
+      <mesh
+        onClick={(event) => {
+          event.stopPropagation();
+          onInteract(event, { isDouble: false, pointerType: resolvePointerType(event) });
+        }}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          event.nativeEvent.preventDefault();
+          onInteract(event, { isDouble: true, pointerType: resolvePointerType(event) });
+        }}
+        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+            lastTouchRef.current = 0;
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+            onInteract(event, { isDouble: true, pointerType: resolvePointerType(event) });
+          } else {
+            lastTouchRef.current = now;
+          }
+        }}
+        onPointerOver={(event) => {
+          event.stopPropagation();
+          document.body.style.cursor = 'pointer';
+          onHover();
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation();
+          document.body.style.cursor = 'auto';
+          onBlur();
+        }}
+      >
+        <sphereGeometry args={[1.6, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh
+        geometry={geometry}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[scale, scale, scale]}
+      >
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={emissiveIntensity}
+          roughness={0.4}
+          metalness={0.6}
+        />
+      </mesh>
+      {isSelected && (
+        <mesh
+          geometry={ringGeometry}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[scale * 1.1, scale * 1.1, scale * 1.1]}
+        >
+          <meshBasicMaterial color={color} transparent opacity={0.6} />
+        </mesh>
+      )}
+      {showLabel && (
+        <Billboard position={[0, scale * 2.5, 0]}>
+          <Text
+            fontSize={scale * 1.1}
+            color={color}
+            outlineWidth={scale * 0.1}
+            outlineColor="#000000"
+            fontWeight="bold"
+          >
+            {labelText}
+          </Text>
+        </Billboard>
+      )}
+    </group>
+  );
+};
+
+interface SystemFleetShipsProps {
+  fleet: Fleet;
+  scale: number;
+  color: string;
+  visible: boolean;
+}
+
+const SystemFleetShips: React.FC<SystemFleetShipsProps> = ({ fleet, scale, color, visible }) => {
+  const meshRef = useRef<InstancedMesh>(null);
+  const temp = useMemo(() => new Object3D(), []);
+  const shipGeometry = useDisposableMemo(() => new ConeGeometry(0.35, 0.8, 6), []);
+  const shipMaterial = useDisposableMemo(
+    () => new MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3, roughness: 0.5, metalness: 0.4 }),
+    [color]
+  );
+
+  useLayoutEffect(() => {
+    if (!meshRef.current) return;
+    const total = fleet.ships.length;
+    if (total === 0) return;
+    const formationRadius = scale * 1.6;
+    const shipScale = scale * 0.35;
+    const yOffset = scale * 0.18;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+    for (let i = 0; i < total; i += 1) {
+      const t = (i + 0.5) / total;
+      const radius = formationRadius * Math.sqrt(t);
+      const angle = i * goldenAngle;
+      temp.position.set(Math.cos(angle) * radius, yOffset, Math.sin(angle) * radius);
+      temp.rotation.set(-Math.PI / 2, 0, angle);
+      temp.scale.set(shipScale, shipScale, shipScale);
+      temp.updateMatrix();
+      meshRef.current.setMatrixAt(i, temp.matrix);
+    }
+    meshRef.current.count = total;
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  }, [fleet.ships.length, scale, temp]);
+
+  if (!visible || fleet.ships.length === 0) return null;
+
+  return (
+    <instancedMesh ref={meshRef} args={[shipGeometry, shipMaterial, fleet.ships.length]} />
+  );
+};
+
+interface SystemStationMeshProps {
+  station: Station;
+  color: string;
+  scale: number;
+  geometry: TorusGeometry;
+  coreGeometry: CylinderGeometry;
+  ringGeometry: RingGeometry;
+  isSelected: boolean;
+  isHovered: boolean;
+  showLabel: boolean;
+  onHover: () => void;
+  onBlur: () => void;
+  onInteract: (
+    event: ThreeEvent<MouseEvent | PointerEvent>,
+    options?: { isDouble?: boolean; pointerType?: string }
+  ) => void;
+}
+
+const SystemStationMesh: React.FC<SystemStationMeshProps> = ({
+  station,
+  color,
+  scale,
+  geometry,
+  coreGeometry,
+  ringGeometry,
+  isSelected,
+  isHovered,
+  showLabel,
+  onHover,
+  onBlur,
+  onInteract
+}) => {
+  const { t } = useI18n();
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
+  const emissiveIntensity = isSelected ? 0.65 : isHovered ? 0.45 : 0.25;
+  const labelText = station.name ?? t('systemView.stationInfo.unnamedStation', { code: shortId(station.id) });
+  const resolvePointerType = (event: any) => event?.pointerType || event?.nativeEvent?.pointerType || '';
+
+  return (
+    <group>
+      <mesh
+        onClick={(event) => {
+          event.stopPropagation();
+          onInteract(event, { isDouble: false, pointerType: resolvePointerType(event) });
+        }}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          event.nativeEvent.preventDefault();
+          onInteract(event, { isDouble: true, pointerType: resolvePointerType(event) });
+        }}
+        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+            lastTouchRef.current = 0;
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+            onInteract(event, { isDouble: true, pointerType: resolvePointerType(event) });
+          } else {
+            lastTouchRef.current = now;
+          }
+        }}
+        onPointerOver={(event) => {
+          event.stopPropagation();
+          document.body.style.cursor = 'pointer';
+          onHover();
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation();
+          document.body.style.cursor = 'auto';
+          onBlur();
+        }}
+      >
+        <sphereGeometry args={[1.3, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh
+        geometry={geometry}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[scale, scale, scale]}
+      >
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={emissiveIntensity}
+          roughness={0.5}
+          metalness={0.5}
+        />
+      </mesh>
+      <mesh
+        geometry={coreGeometry}
+        scale={[scale * 0.6, scale * 0.9, scale * 0.6]}
+      >
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={emissiveIntensity}
+          roughness={0.6}
+          metalness={0.3}
+        />
+      </mesh>
+      {isSelected && (
+        <mesh
+          geometry={ringGeometry}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[scale * 1.15, scale * 1.15, scale * 1.15]}
+        >
+          <meshBasicMaterial color={color} transparent opacity={0.6} />
+        </mesh>
+      )}
+      {showLabel && (
+        <Billboard position={[0, scale * 2.4, 0]}>
+          <Text
+            fontSize={scale * 1.05}
+            color={color}
+            outlineWidth={scale * 0.1}
+            outlineColor="#000000"
+            fontWeight="bold"
+          >
+            {labelText}
+          </Text>
+        </Billboard>
+      )}
+    </group>
+  );
+};
+
+interface SystemEntitiesLayerProps {
+  starSystem: StarSystem;
+  starBodyId: string;
+  fleets: Fleet[];
+  stations: Station[];
+  day: number;
+  starRadius: number;
+  planets: OrbitingPlanet[];
+  bodyWorldPositions: Record<string, [number, number, number]>;
+  bodyRadii: Record<string, number>;
+  clampedScale: number;
+  focusDistanceFloor: number;
+  selectedFleetId: string | null;
+  selectedObjectId: SystemObjectId | null;
+  hoveredObjectId: SystemObjectId | null;
+  getFactionColor: (id: string) => string;
+  onHoverObject: (objectId: SystemObjectId) => void;
+  onBlurObject: (objectId: SystemObjectId) => void;
+  onSelectObject: (objectId: SystemObjectId) => void;
+  onFocusPoint: (position: [number, number, number], radius: number) => void;
+}
+
+const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
+  starSystem,
+  starBodyId,
+  fleets,
+  stations,
+  day,
+  starRadius,
+  planets,
+  bodyWorldPositions,
+  bodyRadii,
+  clampedScale,
+  focusDistanceFloor,
+  selectedFleetId,
+  selectedObjectId,
+  hoveredObjectId,
+  getFactionColor,
+  onHoverObject,
+  onBlurObject,
+  onSelectObject,
+  onFocusPoint
+}) => {
+  const fleetGeometry = useDisposableMemo(() => new ConeGeometry(0.5, 1.2, 6), []);
+  const stationGeometry = useDisposableMemo(() => new TorusGeometry(0.6, 0.18, 10, 24), []);
+  const stationCoreGeometry = useDisposableMemo(() => new CylinderGeometry(0.35, 0.35, 0.8, 10), []);
+  const selectionRingGeometry = useDisposableMemo(() => new RingGeometry(0.9, 1.15, 32), []);
+
+  const fleetIconScale = 0.45 * clampedScale;
+  const fleetRingSpacing = Math.max(fleetIconScale * 4, clampedScale * 1.1);
+  const fleetRingCapacity = 12;
+  const fleetRingBase = useMemo(() => {
+    if (!planets.length) {
+      return Math.max(starRadius * 4.5, focusDistanceFloor * 1.5);
+    }
+    const firstOrbitRadius = Math.min(...planets.map((planet) => planet.orbitRadius));
+    const unclamped = Math.max(starRadius * 3.2, focusDistanceFloor * 1.5);
+    return Math.min(unclamped, firstOrbitRadius * 0.7);
+  }, [focusDistanceFloor, planets, starRadius]);
+
+  const fleetLayouts = useMemo(() => layoutTacticalRing(fleets, {
+    baseRadius: fleetRingBase,
+    ringSpacing: fleetRingSpacing,
+    maxPerRing: fleetRingCapacity,
+    yOffset: fleetIconScale * 0.35,
+    rotationSpeed: 0.12
+  }, day), [day, fleetRingBase, fleetRingSpacing, fleets, fleetIconScale]);
+
+  const stationLayouts = useMemo(() => {
+    const orderedStations = [...stations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+    const slotCapacity = 8;
+    const stationScale = 0.55 * clampedScale;
+    const stationSpacing = Math.max(stationScale * 2.6, clampedScale * 0.9);
+    const stationYOffset = stationScale * 0.3;
+
+    return orderedStations.map((station, index) => {
+      const anchorId = station.anchorBodyId ?? starBodyId;
+      const anchorPosition = bodyWorldPositions[anchorId] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
+      const anchorRadius = bodyRadii[anchorId] ?? starRadius;
+      const baseRadius = Math.max(anchorRadius * 2.6, stationScale * 2.4);
+      const slotIndex = typeof station.slotIndex === 'number' ? station.slotIndex : index;
+      const ringIndex = typeof station.slotIndex === 'number'
+        ? Math.floor(slotIndex / slotCapacity)
+        : 0;
+      const angle = typeof station.slotIndex === 'number'
+        ? ((slotIndex % slotCapacity) / slotCapacity) * Math.PI * 2
+        : hashStringToAngle(station.id);
+      const radius = baseRadius + ringIndex * stationSpacing;
+      const position: [number, number, number] = [
+        anchorPosition[0] + Math.cos(angle) * radius,
+        anchorPosition[1] + stationYOffset,
+        anchorPosition[2] + Math.sin(angle) * radius
+      ];
+      return {
+        station,
+        position,
+        scale: stationScale
+      };
+    });
+  }, [bodyRadii, bodyWorldPositions, clampedScale, starBodyId, starRadius, stations]);
+
+  return (
+    <group name="SystemEntitiesLayer">
+      {fleetLayouts.map(({ entity: fleet, position }) => {
+        const objectId = makeObjectId('fleet', fleet.id);
+        const isHovered = hoveredObjectId === objectId;
+        const isSelected = selectedFleetId === fleet.id || selectedObjectId === objectId;
+        const showLabel = isHovered || isSelected;
+        const color = getFactionColor(fleet.factionId);
+        const shouldShowShips = isSelected;
+
+        return (
+          <group key={fleet.id} position={position}>
+            <SystemFleetMesh
+              fleet={fleet}
+              color={color}
+              scale={fleetIconScale}
+              geometry={fleetGeometry}
+              ringGeometry={selectionRingGeometry}
+              isSelected={isSelected}
+              isHovered={isHovered}
+              showLabel={showLabel}
+              onHover={() => onHoverObject(objectId)}
+              onBlur={() => onBlurObject(objectId)}
+              onInteract={(_, options) => {
+                onSelectObject(objectId);
+                if (options?.isDouble) {
+                  onFocusPoint(position, fleetIconScale * 6);
+                }
+              }}
+            />
+            <SystemFleetShips
+              fleet={fleet}
+              scale={fleetIconScale}
+              color={color}
+              visible={shouldShowShips}
+            />
+          </group>
+        );
+      })}
+      {stationLayouts.map(({ station, position, scale }) => {
+        const objectId = makeObjectId('station', station.id);
+        const isHovered = hoveredObjectId === objectId;
+        const isSelected = selectedObjectId === objectId;
+        const showLabel = isHovered || isSelected;
+        const color = getFactionColor(station.factionId);
+
+        return (
+          <group key={station.id} position={position}>
+            <SystemStationMesh
+              station={station}
+              color={color}
+              scale={scale}
+              geometry={stationGeometry}
+              coreGeometry={stationCoreGeometry}
+              ringGeometry={selectionRingGeometry}
+              isSelected={isSelected}
+              isHovered={isHovered}
+              showLabel={showLabel}
+              onHover={() => onHoverObject(objectId)}
+              onBlur={() => onBlurObject(objectId)}
+              onInteract={(_, options) => {
+                onSelectObject(objectId);
+                if (options?.isDouble) {
+                  onFocusPoint(position, scale * 6);
+                }
+              }}
+            />
+          </group>
+        );
+      })}
+    </group>
+  );
+};
+
 export type SystemCameraState = {
   theta: number;
   phi: number;
@@ -626,11 +1119,19 @@ const SystemCamera: React.FC<{
 const SystemView3D: React.FC<SystemView3DProps> = ({
   starSystem,
   astro,
+  fleets = [],
+  stations = [],
+  factions = [],
+  day = 0,
+  selectedFleetId = null,
+  onSelectFleet,
+  onInspectFleet,
   initialCameraState,
   onCameraStateChange,
   scaleFactor = 1
 }) => {
   const { t } = useI18n();
+  const getFleetName = useFleetName();
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
   const orbitThickness = ORBIT_THICKNESS * clampedScale;
@@ -823,26 +1324,145 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     return map;
   }, [astro?.primarySpectralType, sourcePlanets, starBodyId, starRadiusKm, starSystem.name, t]);
-  const [hoveredBodyId, setHoveredBodyId] = useState<string | null>(null);
-  const [selectedBodyId, setSelectedBodyId] = useState<string | null>(null);
-  const displayedBodyId = selectedBodyId ?? hoveredBodyId;
-  const displayedBody = displayedBodyId ? bodyInfoMap[displayedBodyId] : undefined;
-  const handleHover = useCallback((bodyId: string) => {
-    setHoveredBodyId(bodyId);
-  }, []);
-  const handleBlur = useCallback((bodyId: string) => {
-    setHoveredBodyId(prev => (prev === bodyId ? null : prev));
-  }, []);
-  const handleSelect = useCallback((bodyId: string) => {
-    setSelectedBodyId(bodyId);
-  }, []);
-  const clearSelection = useCallback(() => {
-    setSelectedBodyId(null);
-  }, []);
+  const systemFleets = useMemo(() => getSystemFleets(starSystem, fleets), [fleets, starSystem]);
+  const systemStations = useMemo(
+    () => stations.filter((station) => station.systemId === starSystem.id),
+    [stations, starSystem.id]
+  );
+  const fleetById = useMemo(() => new Map(systemFleets.map((fleet) => [fleet.id, fleet])), [systemFleets]);
+  const stationById = useMemo(() => new Map(systemStations.map((station) => [station.id, station])), [systemStations]);
+  const factionById = useMemo(() => new Map(factions.map((faction) => [faction.id, faction])), [factions]);
+
+  const [hoveredObjectId, setHoveredObjectId] = useState<SystemObjectId | null>(null);
+  const [selectedObjectId, setSelectedObjectId] = useState<SystemObjectId | null>(null);
+
   useEffect(() => {
-    setHoveredBodyId(null);
-    setSelectedBodyId(null);
+    if (selectedFleetId && fleetById.has(selectedFleetId)) {
+      setSelectedObjectId(makeObjectId('fleet', selectedFleetId));
+    }
+  }, [fleetById, selectedFleetId]);
+  useEffect(() => {
+    if (!selectedFleetId) {
+      const parsed = parseObjectId(selectedObjectId);
+      if (parsed?.kind === 'fleet') {
+        setSelectedObjectId(null);
+      }
+    }
+  }, [selectedFleetId, selectedObjectId]);
+
+  const displayedObject = useMemo(
+    () => parseObjectId(selectedObjectId ?? hoveredObjectId),
+    [hoveredObjectId, selectedObjectId]
+  );
+  const displayedBody = displayedObject?.kind === 'body' ? bodyInfoMap[displayedObject.id] : undefined;
+  const displayedFleet = displayedObject?.kind === 'fleet' ? fleetById.get(displayedObject.id) : undefined;
+  const displayedStation = displayedObject?.kind === 'station' ? stationById.get(displayedObject.id) : undefined;
+  const displayedFleetName = displayedFleet ? getFleetName(displayedFleet.id) : '';
+  const displayedFleetFaction = displayedFleet ? factionById.get(displayedFleet.factionId) : undefined;
+  const displayedStationFaction = displayedStation ? factionById.get(displayedStation.factionId) : undefined;
+  const displayedFleetPower = displayedFleet ? calculateFleetPower(displayedFleet) : undefined;
+  const displayedStationName = displayedStation
+    ? (displayedStation.name ?? t('systemView.stationInfo.unnamedStation', { code: shortId(displayedStation.id) }))
+    : '';
+  const isSelectionActive = Boolean(selectedObjectId);
+
+  const handleHoverBody = useCallback((bodyId: string) => {
+    setHoveredObjectId(makeObjectId('body', bodyId));
+  }, []);
+  const handleBlurBody = useCallback((bodyId: string) => {
+    const objectId = makeObjectId('body', bodyId);
+    setHoveredObjectId(prev => (prev === objectId ? null : prev));
+  }, []);
+  const handleSelectBody = useCallback((bodyId: string) => {
+    setSelectedObjectId(makeObjectId('body', bodyId));
+    onSelectFleet?.(null);
+  }, [onSelectFleet]);
+  const handleHoverObject = useCallback((objectId: SystemObjectId) => {
+    setHoveredObjectId(objectId);
+  }, []);
+  const handleBlurObject = useCallback((objectId: SystemObjectId) => {
+    setHoveredObjectId(prev => (prev === objectId ? null : prev));
+  }, []);
+  const handleSelectObject = useCallback((objectId: SystemObjectId) => {
+    setSelectedObjectId(objectId);
+    const parsed = parseObjectId(objectId);
+    if (parsed?.kind === 'fleet') {
+      onSelectFleet?.(parsed.id);
+    } else {
+      onSelectFleet?.(null);
+    }
+  }, [onSelectFleet]);
+  const getFactionColor = useCallback(
+    (id: string) => factionById.get(id)?.color ?? '#94a3b8',
+    [factionById]
+  );
+  const clearSelection = useCallback(() => {
+    setSelectedObjectId(null);
+    onSelectFleet?.(null);
+  }, [onSelectFleet]);
+  useEffect(() => {
+    setHoveredObjectId(null);
+    setSelectedObjectId(null);
   }, [starSystem.id]);
+  const fleetIconScale = 0.45 * clampedScale;
+  const stationIconScale = 0.55 * clampedScale;
+  const fleetLayoutConfig = useMemo(() => {
+    if (!planets.length) {
+      return {
+        baseRadius: Math.max(starRadius * 4.5, focusDistanceFloor * 1.5),
+        ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
+        maxPerRing: 12,
+        yOffset: fleetIconScale * 0.35,
+        rotationSpeed: 0.12
+      };
+    }
+    const firstOrbitRadius = Math.min(...planets.map((planet) => planet.orbitRadius));
+    const unclamped = Math.max(starRadius * 3.2, focusDistanceFloor * 1.5);
+    return {
+      baseRadius: Math.min(unclamped, firstOrbitRadius * 0.7),
+      ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
+      maxPerRing: 12,
+      yOffset: fleetIconScale * 0.35,
+      rotationSpeed: 0.12
+    };
+  }, [clampedScale, fleetIconScale, focusDistanceFloor, planets, starRadius]);
+  const fleetLayoutsForFocus = useMemo(
+    () => layoutTacticalRing(systemFleets, fleetLayoutConfig, day),
+    [day, fleetLayoutConfig, systemFleets]
+  );
+  const fleetPositionById = useMemo(
+    () => new Map(fleetLayoutsForFocus.map(layout => [layout.entity.id, layout.position])),
+    [fleetLayoutsForFocus]
+  );
+  const stationPositionById = useMemo(() => {
+    const orderedStations = [...systemStations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+    const slotCapacity = 8;
+    const stationSpacing = Math.max(stationIconScale * 2.6, clampedScale * 0.9);
+    const stationYOffset = stationIconScale * 0.3;
+
+    return new Map(
+      orderedStations.map((station, index) => {
+        const anchorId = station.anchorBodyId ?? starBodyId;
+        const anchorPosition = bodyWorldPositions[anchorId] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
+        const anchorRadius = bodyRadii[anchorId] ?? starRadius;
+        const baseRadius = Math.max(anchorRadius * 2.6, stationIconScale * 2.4);
+        const slotIndex = typeof station.slotIndex === 'number' ? station.slotIndex : index;
+        const ringIndex = typeof station.slotIndex === 'number'
+          ? Math.floor(slotIndex / slotCapacity)
+          : 0;
+        const angle = typeof station.slotIndex === 'number'
+          ? ((slotIndex % slotCapacity) / slotCapacity) * Math.PI * 2
+          : hashStringToAngle(station.id);
+        const radius = baseRadius + ringIndex * stationSpacing;
+        const position: [number, number, number] = [
+          anchorPosition[0] + Math.cos(angle) * radius,
+          anchorPosition[1] + stationYOffset,
+          anchorPosition[2] + Math.sin(angle) * radius
+        ];
+        return [station.id, position] as const;
+      })
+    );
+  }, [bodyRadii, bodyWorldPositions, clampedScale, starBodyId, starRadius, stationIconScale, systemStations]);
   const maxOrbitRadius = useMemo(() => {
     return planets.reduce((max, planet) => {
       const planetExtent = planet.orbitRadius + planet.radius;
@@ -883,18 +1503,27 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   useEffect(() => {
     setAnchoredBodyId(resolvedAnchoredBodyId ?? starBodyId);
   }, [resolvedAnchoredBodyId, starBodyId]);
-  const requestFocusOnBody = useCallback((bodyId: string) => {
-    const position = bodyWorldPositions[bodyId];
-    if (!position) return;
-    const radius = bodyRadii[bodyId] ?? focusDistanceFloor;
-    const minDistanceForBody = Math.max(focusDistanceFloor, radius * 2);
-    const desiredDistance = Math.min(Math.max(radius * 8, minDistanceForBody), cameraMaxDistance * 0.95);
+  const requestFocusOnPoint = useCallback((
+    position: [number, number, number],
+    radius: number,
+    anchorId?: string
+  ) => {
+    const minDistanceForTarget = Math.max(focusDistanceFloor, radius * 2);
+    const desiredDistance = Math.min(Math.max(radius * 8, minDistanceForTarget), cameraMaxDistance * 0.95);
     focusRequestRef.current = {
       target: new Vector3(...position),
       distance: desiredDistance
     };
-    setAnchoredBodyId(bodyId);
-  }, [bodyWorldPositions, bodyRadii, cameraMaxDistance, focusDistanceFloor]);
+    if (anchorId) {
+      setAnchoredBodyId(anchorId);
+    }
+  }, [cameraMaxDistance, focusDistanceFloor]);
+  const requestFocusOnBody = useCallback((bodyId: string) => {
+    const position = bodyWorldPositions[bodyId];
+    if (!position) return;
+    const radius = bodyRadii[bodyId] ?? focusDistanceFloor;
+    requestFocusOnPoint(position, radius, bodyId);
+  }, [bodyRadii, bodyWorldPositions, focusDistanceFloor, requestFocusOnPoint]);
   const handleResetCamera = useCallback(() => {
     const anchorPosition = bodyWorldPositions[starBodyId] ?? [0, 0, 0];
     const resetDistance = Math.min(Math.max(baseCameraDistance, focusDistanceFloor * 3), cameraMaxDistance * 0.8);
@@ -907,6 +1536,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const handleCenterBody = useCallback((bodyId: string) => {
     requestFocusOnBody(bodyId);
   }, [requestFocusOnBody]);
+  const handleCenterFleet = useCallback((fleetId: string) => {
+    const position = fleetPositionById.get(fleetId);
+    if (!position) return;
+    requestFocusOnPoint(position, fleetIconScale * 6);
+  }, [fleetIconScale, fleetPositionById, requestFocusOnPoint]);
+  const handleCenterStation = useCallback((stationId: string) => {
+    const position = stationPositionById.get(stationId);
+    if (!position) return;
+    requestFocusOnPoint(position, stationIconScale * 6);
+  }, [requestFocusOnPoint, stationIconScale, stationPositionById]);
   const initialCameraPosition = useMemo<[number, number, number]>(() => (
     positionFromSpherical(cameraInitialSpherical, anchoredTarget)
   ), [
@@ -939,22 +1578,22 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         />
 
         <SystemRoot>
-          <StarMesh
-            radius={starRadius}
-            color={primaryColor}
-            geometry={starGeometry}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              requestFocusOnBody(starBodyId);
-            }}
-            onHover={() => handleHover(starBodyId)}
-            onBlur={() => handleBlur(starBodyId)}
-            onSelect={() => handleSelect(starBodyId)}
-          />
-          {planets.map(planet => (
-            <PlanetOrbitGroup
-              key={planet.id}
-              planet={planet}
+            <StarMesh
+              radius={starRadius}
+              color={primaryColor}
+              geometry={starGeometry}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                requestFocusOnBody(starBodyId);
+              }}
+              onHover={() => handleHoverBody(starBodyId)}
+              onBlur={() => handleBlurBody(starBodyId)}
+              onSelect={() => handleSelectBody(starBodyId)}
+            />
+            {planets.map(planet => (
+              <PlanetOrbitGroup
+                key={planet.id}
+                planet={planet}
               orbitMaterial={orbitMaterial}
               planetGeometry={planetGeometry}
               moonGeometry={moonGeometry}
@@ -962,11 +1601,32 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               moonMaterials={moonMaterialMap}
               orbitThickness={orbitThickness}
               onFocus={requestFocusOnBody}
-              onHover={handleHover}
-              onBlur={handleBlur}
-              onSelect={handleSelect}
+              onHover={handleHoverBody}
+              onBlur={handleBlurBody}
+              onSelect={handleSelectBody}
             />
           ))}
+          <SystemEntitiesLayer
+            starSystem={starSystem}
+            starBodyId={starBodyId}
+            fleets={systemFleets}
+            stations={systemStations}
+            day={day}
+            starRadius={starRadius}
+            planets={planets}
+            bodyWorldPositions={bodyWorldPositions}
+            bodyRadii={bodyRadii}
+            clampedScale={clampedScale}
+            focusDistanceFloor={focusDistanceFloor}
+            selectedFleetId={selectedFleetId}
+            selectedObjectId={selectedObjectId}
+            hoveredObjectId={hoveredObjectId}
+            getFactionColor={getFactionColor}
+            onHoverObject={handleHoverObject}
+            onBlurObject={handleBlurObject}
+            onSelectObject={handleSelectObject}
+            onFocusPoint={requestFocusOnPoint}
+          />
         </SystemRoot>
       </Canvas>
       <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
@@ -982,12 +1642,41 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-end justify-end p-4">
         <div className="pointer-events-auto w-80 max-w-full">
-          <SystemBodyInfoPanel
-            body={displayedBody}
-            isSelected={Boolean(selectedBodyId)}
-            onClearSelection={selectedBodyId ? clearSelection : undefined}
-            onCenter={displayedBody ? () => handleCenterBody(displayedBody.id) : undefined}
-          />
+          {displayedBody ? (
+            <SystemBodyInfoPanel
+              body={displayedBody}
+              isSelected={isSelectionActive}
+              onClearSelection={isSelectionActive ? clearSelection : undefined}
+              onCenter={() => handleCenterBody(displayedBody.id)}
+            />
+          ) : displayedFleet ? (
+            <SystemFleetInfoPanel
+              fleet={displayedFleet}
+              fleetName={displayedFleetName}
+              factionName={displayedFleetFaction?.name ?? t('systemView.fleetInfo.unknownFaction')}
+              factionColor={displayedFleetFaction?.color}
+              power={displayedFleetPower}
+              isSelected={isSelectionActive}
+              onClearSelection={isSelectionActive ? clearSelection : undefined}
+              onCenter={() => handleCenterFleet(displayedFleet.id)}
+              onInspect={onInspectFleet ? () => onInspectFleet(displayedFleet.id) : undefined}
+            />
+          ) : displayedStation ? (
+            <SystemStationInfoPanel
+              station={displayedStation}
+              stationName={displayedStationName}
+              factionName={displayedStationFaction?.name ?? t('systemView.fleetInfo.unknownFaction')}
+              factionColor={displayedStationFaction?.color}
+              isSelected={isSelectionActive}
+              onClearSelection={isSelectionActive ? clearSelection : undefined}
+              onCenter={() => handleCenterStation(displayedStation.id)}
+            />
+          ) : (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-200 shadow-lg">
+              <div className="text-xs uppercase tracking-wide text-slate-400">{t('systemView.objectInfo.title')}</div>
+              <div className="mt-2 text-slate-300">{t('systemView.objectInfo.hoverHint')}</div>
+            </div>
+          )}
         </div>
       </div>
     </div>

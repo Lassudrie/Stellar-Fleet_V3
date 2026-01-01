@@ -749,13 +749,23 @@ const App: React.FC = () => {
   if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
       return (
         <div className="relative w-full h-screen bg-black text-white">
-            <SystemView3D
-              starSystem={systemViewSystem}
-              astro={systemViewSystem.astro}
-              initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
-              onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
-              scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
-            />
+            <FleetNameProvider fleets={viewGameState?.fleets ?? []}>
+                <SystemView3D
+                  starSystem={systemViewSystem}
+                  astro={systemViewSystem.astro}
+                  fleets={viewGameState?.fleets ?? []}
+                  stations={viewGameState?.stations ?? []}
+                  factions={viewGameState?.factions ?? []}
+                  playerFactionId={viewGameState?.playerFactionId}
+                  day={viewGameState?.day ?? 0}
+                  selectedFleetId={selectedFleetId}
+                  onSelectFleet={handleFleetSelect}
+                  onInspectFleet={handleFleetInspect}
+                  initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
+                  onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
+                  scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
+                />
+            </FleetNameProvider>
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
                 <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">

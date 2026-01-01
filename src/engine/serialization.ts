@@ -20,7 +20,9 @@ import {
   ShipKillRecord,
   LogEntry,
   StarSystemAstro,
-  GameMessage
+  GameMessage,
+  Station,
+  StationType
 } from '../shared/types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -79,6 +81,7 @@ const getFuelCapacity = (type: ShipType): number => SHIP_STATS[type]?.fuelCapaci
 const ARMY_STATES = new Set(Object.values(ArmyState));
 const FLEET_STATES = new Set(Object.values(FleetState));
 const SHIP_TYPES = new Set(Object.values(ShipType));
+const STATION_TYPES = new Set<StationType>(['shipyard', 'mining', 'defense', 'relay', 'outpost']);
 const BATTLE_STATUSES = new Set<BattleStatus>(['scheduled', 'resolved']);
 
 const isEnumValue = <T>(set: Set<T>, value: unknown): value is T => set.has(value as T);
@@ -339,6 +342,16 @@ export const serializeGameState = (state: GameState): string => {
     }
   }
 
+  const stationsDto = state.stations?.map((station) => ({
+    id: station.id,
+    systemId: station.systemId,
+    factionId: station.factionId,
+    type: station.type,
+    name: station.name,
+    anchorBodyId: station.anchorBodyId ?? null,
+    slotIndex: Number.isFinite(station.slotIndex) ? station.slotIndex : undefined
+  }));
+
   const stateDto: GameStateDTO = {
     scenarioId: state.scenarioId,
     scenarioTitle: state.scenarioTitle,
@@ -380,6 +393,7 @@ export const serializeGameState = (state: GameState): string => {
           killHistory: sanitizeKillHistory(s.killHistory)
       }))
     })),
+    stations: stationsDto && stationsDto.length > 0 ? stationsDto : undefined,
     armies: state.armies.map(a => ({
       id: a.id,
       factionId: a.factionId,
@@ -514,6 +528,8 @@ export const deserializeGameState = (json: string): GameState => {
       };
     });
 
+    const systemIds = new Set(systems.map(system => system.id));
+
     // Fleets
     const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];
     if (dto.fleets !== undefined && !Array.isArray(dto.fleets)) {
@@ -621,6 +637,47 @@ export const deserializeGameState = (json: string): GameState => {
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
     const planetIds = new Set(systems.flatMap(system => system.planets.map(planet => planet.id)));
+
+    const stationsDto = Array.isArray(dto.stations) ? dto.stations : [];
+    if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
+      throw new Error("Field 'stations' must be an array.");
+    }
+    const stations: Station[] = stationsDto
+      .map((entry: any, index: number) => {
+        if (typeof entry?.id !== 'string') {
+          console.warn(`[Serialization] Station entry at index ${index} missing id; skipping.`);
+          return null;
+        }
+        if (typeof entry.systemId !== 'string' || !systemIds.has(entry.systemId)) {
+          console.warn(`[Serialization] Station '${entry.id}' references unknown system; skipping.`);
+          return null;
+        }
+        const factionId = typeof entry.factionId === 'string' ? entry.factionId : entry.faction;
+        if (typeof factionId !== 'string' || (validFactionIds && !validFactionIds.has(factionId))) {
+          console.warn(`[Serialization] Station '${entry.id}' references unknown faction; skipping.`);
+          return null;
+        }
+        if (!isEnumValue(STATION_TYPES, entry.type)) {
+          console.warn(`[Serialization] Station '${entry.id}' has invalid type '${entry.type}'; skipping.`);
+          return null;
+        }
+        const anchorBodyId = typeof entry.anchorBodyId === 'string' ? entry.anchorBodyId : null;
+        if (anchorBodyId && !planetIds.has(anchorBodyId)) {
+          console.warn(`[Serialization] Station '${entry.id}' references unknown anchor body; keeping id for UI.`);
+        }
+        const slotIndex = isFiniteNumber(entry.slotIndex) ? entry.slotIndex : undefined;
+
+        return {
+          id: entry.id,
+          systemId: entry.systemId,
+          factionId,
+          type: entry.type,
+          name: typeof entry.name === 'string' ? entry.name : undefined,
+          anchorBodyId,
+          slotIndex
+        };
+      })
+      .filter((station): station is Station => Boolean(station));
 
     // Armies
     const armiesDto = Array.isArray(dto.armies) ? dto.armies : [];
@@ -861,6 +918,7 @@ export const deserializeGameState = (json: string): GameState => {
       day,
       systems,
       fleets,
+      stations,
       armies,
       lasers,
       battles,

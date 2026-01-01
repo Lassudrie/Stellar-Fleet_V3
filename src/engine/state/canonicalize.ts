@@ -7,7 +7,7 @@
  * Canonical order is always by ID (lexicographic) for all entity types.
  */
 
-import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage } from '../../shared/types';
+import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage, Station } from '../../shared/types';
 import { sorted } from '../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
@@ -37,6 +37,7 @@ export const canonicalizeState = (state: GameState): GameState => {
         ...state,
         systems: canonicalizeSystems(state.systems),
         fleets: canonicalizeFleets(state.fleets),
+        stations: canonicalizeStations(state.stations ?? []),
         armies: canonicalizeArmies(state.armies),
         battles: canonicalizeBattles(state.battles),
         logs: canonicalizeLogs(state.logs),
@@ -63,6 +64,10 @@ export const canonicalizeFleets = (fleets: Fleet[]): Fleet[] => {
         })),
         (a, b) => compareIds(a.id, b.id)
     );
+};
+
+export const canonicalizeStations = (stations: Station[]): Station[] => {
+    return sorted(stations, (a, b) => compareIds(a.id, b.id));
 };
 
 /**
@@ -116,6 +121,13 @@ export const isCanonical = (state: GameState): boolean => {
     // Check armies order
     for (let i = 1; i < state.armies.length; i++) {
         if (compareIds(state.armies[i].id, state.armies[i - 1].id) < 0) {
+            return false;
+        }
+    }
+
+    const stations = state.stations ?? [];
+    for (let i = 1; i < stations.length; i++) {
+        if (compareIds(stations[i].id, stations[i - 1].id) < 0) {
             return false;
         }
     }
