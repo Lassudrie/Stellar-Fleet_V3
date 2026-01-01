@@ -8,8 +8,6 @@ export interface ClampBounds {
 }
 
 export interface ClampScratch {
-  direction: Vector3;
-  desiredPosition: Vector3;
   offsetFromTarget: Vector3;
   safeDirection: Vector3;
   finalPosition: Vector3;
@@ -17,8 +15,6 @@ export interface ClampScratch {
 }
 
 export const createClampScratch = (): ClampScratch => ({
-  direction: new Vector3(),
-  desiredPosition: new Vector3(),
   offsetFromTarget: new Vector3(),
   safeDirection: new Vector3(),
   finalPosition: new Vector3(),
@@ -39,15 +35,9 @@ export const clampCameraToBounds = (
   const targetChanged = clampedTargetX !== target.x || clampedTargetZ !== target.z;
   target.set(clampedTargetX, target.y, clampedTargetZ);
 
-  scratch.direction.copy(camera).sub(target);
-  scratch.desiredPosition.copy(target).add(scratch.direction);
-  const clampedPositionX = clampValue(scratch.desiredPosition.x, mapBounds.minX, mapBounds.maxX);
-  const clampedPositionZ = clampValue(scratch.desiredPosition.z, mapBounds.minZ, mapBounds.maxZ);
-  scratch.desiredPosition.setX(clampedPositionX).setZ(clampedPositionZ);
-
-  scratch.offsetFromTarget.copy(scratch.desiredPosition).sub(target);
+  scratch.offsetFromTarget.copy(camera).sub(target);
   const currentDistance = scratch.offsetFromTarget.length();
-  const clampedDistance = clampValue(currentDistance || distanceLimits.min, distanceLimits.min, distanceLimits.max);
+  const desiredDistance = clampValue(currentDistance || distanceLimits.min, distanceLimits.min, distanceLimits.max);
 
   scratch.safeDirection.copy(scratch.offsetFromTarget);
   if (scratch.safeDirection.lengthSq() === 0) {
@@ -56,7 +46,28 @@ export const clampCameraToBounds = (
     scratch.safeDirection.normalize();
   }
 
-  scratch.finalPosition.copy(target).addScaledVector(scratch.safeDirection, clampedDistance);
+  const maxDistanceWithinBounds = (() => {
+    const distances: number[] = [];
+    if (scratch.safeDirection.x > 0) {
+      distances.push((mapBounds.maxX - target.x) / scratch.safeDirection.x);
+    } else if (scratch.safeDirection.x < 0) {
+      distances.push((mapBounds.minX - target.x) / scratch.safeDirection.x);
+    }
+
+    if (scratch.safeDirection.z > 0) {
+      distances.push((mapBounds.maxZ - target.z) / scratch.safeDirection.z);
+    } else if (scratch.safeDirection.z < 0) {
+      distances.push((mapBounds.minZ - target.z) / scratch.safeDirection.z);
+    }
+
+    const positiveDistances = distances.filter((distance) => distance >= 0);
+    if (positiveDistances.length === 0) return Number.POSITIVE_INFINITY;
+    return Math.min(...positiveDistances);
+  })();
+
+  const boundedDistance = Math.min(desiredDistance, maxDistanceWithinBounds);
+
+  scratch.finalPosition.copy(target).addScaledVector(scratch.safeDirection, Math.max(0, boundedDistance));
   scratch.boundedPosition.set(
     clampValue(scratch.finalPosition.x, mapBounds.minX, mapBounds.maxX),
     scratch.finalPosition.y,

@@ -45,6 +45,11 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     return { minDistance, maxDistance };
   }, [mapRadius]);
 
+  const polarLimits = useMemo(() => ({
+    min: Math.PI / 8,
+    max: Math.PI / 2,
+  }), []);
+
   const clampControls = useCallback((options?: { skipUpdate?: boolean }) => {
     if (!controlsRef.current || !mapBounds) return;
     if (isClampingRef.current) return;
@@ -156,19 +161,20 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       {/*
         MapControls:
         - Idéal pour les RTS/Cartes.
-        - enableRotate={false} : Verrouille la rotation (pas de pivot).
         - screenSpacePanning={false} : Le pan suit le sol (plan XZ), pas l'écran.
         - dampingFactor : Ajoute de l'inertie fluide.
       */}
       <MapControls
         ref={controlsRef}
         target={targetArray}
-        enableRotate={false}
+        enableRotate
         enablePan={true}
         enableZoom={true}
         minDistance={distanceConfig.minDistance}
         maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}
+        minPolarAngle={polarLimits.min}
+        maxPolarAngle={polarLimits.max}
         screenSpacePanning={false}
         onChange={() => clampControls({ skipUpdate: true })}
       />
