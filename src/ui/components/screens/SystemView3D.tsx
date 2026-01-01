@@ -417,7 +417,7 @@ type FocusRequest = {
 
 const SystemCamera: React.FC<{
   maxDistance: number;
-  focusDistanceFloor: number;
+  minDistance: number;
   focusRequest: React.MutableRefObject<FocusRequest | null>;
   initialState?: SystemCameraState;
   onCameraStateChange?: (state: SystemCameraState) => void;
@@ -426,7 +426,7 @@ const SystemCamera: React.FC<{
   anchoredBodyId?: string;
 }> = ({
   maxDistance,
-  focusDistanceFloor,
+  minDistance,
   focusRequest,
   initialState,
   onCameraStateChange,
@@ -452,8 +452,8 @@ const SystemCamera: React.FC<{
   const initialDistance = useMemo(() => {
     const distance = new Vector3(...initialPosition).distanceTo(new Vector3(...initialTarget));
     const fallbackDistance = maxDistance * 0.6;
-    return Math.max(distance || fallbackDistance, focusDistanceFloor);
-  }, [focusDistanceFloor, initialPosition, initialTarget, maxDistance]);
+    return Math.max(distance || fallbackDistance, minDistance);
+  }, [initialPosition, initialTarget, maxDistance, minDistance]);
   const desiredDistanceRef = useRef<number>(initialDistance);
   const isUserInteractingRef = useRef(false);
   const workingVector = useMemo(() => new Vector3(), []);
@@ -461,14 +461,14 @@ const SystemCamera: React.FC<{
     const controls = controlsRef.current;
     if (!controls) return;
     const distance = controls.object.position.distanceTo(controls.target);
-    desiredDistanceRef.current = MathUtils.clamp(distance, focusDistanceFloor, maxDistance);
-  }, [focusDistanceFloor, maxDistance]);
+    desiredDistanceRef.current = MathUtils.clamp(distance, minDistance, maxDistance);
+  }, [maxDistance, minDistance]);
 
   useLayoutEffect(() => {
     camera.position.set(...initialPosition);
     targetRef.current.set(...initialTarget);
     desiredTargetRef.current.copy(targetRef.current);
-    desiredDistanceRef.current = MathUtils.clamp(initialDistance, focusDistanceFloor, maxDistance);
+    desiredDistanceRef.current = MathUtils.clamp(initialDistance, minDistance, maxDistance);
     controlsRef.current?.target.copy(targetRef.current);
     controlsRef.current?.update();
     lastCameraStateRef.current = {
@@ -478,13 +478,13 @@ const SystemCamera: React.FC<{
     };
   }, [
     camera,
-    focusDistanceFloor,
     initialAnchoredBodyId,
     initialDistance,
     initialPosition,
     initialTarget,
     lastCameraStateRef,
-    maxDistance
+    maxDistance,
+    minDistance
   ]);
 
   useEffect(() => {
@@ -500,8 +500,8 @@ const SystemCamera: React.FC<{
   }, [anchoredTarget]);
 
   useEffect(() => {
-    desiredDistanceRef.current = MathUtils.clamp(desiredDistanceRef.current, focusDistanceFloor, maxDistance);
-  }, [focusDistanceFloor, maxDistance]);
+    desiredDistanceRef.current = MathUtils.clamp(desiredDistanceRef.current, minDistance, maxDistance);
+  }, [maxDistance, minDistance]);
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;
@@ -510,7 +510,7 @@ const SystemCamera: React.FC<{
     const pendingFocus = focusRequest.current;
     if (pendingFocus) {
       desiredTargetRef.current.copy(pendingFocus.target);
-      desiredDistanceRef.current = MathUtils.clamp(pendingFocus.distance, focusDistanceFloor, maxDistance);
+      desiredDistanceRef.current = MathUtils.clamp(pendingFocus.distance, minDistance, maxDistance);
       focusRequest.current = null;
     }
 
@@ -520,7 +520,7 @@ const SystemCamera: React.FC<{
     const currentDirection = workingVector.copy(camera.position).sub(targetRef.current);
     const currentDistance = currentDirection.length();
     const nextDistance = MathUtils.damp(currentDistance, desiredDistanceRef.current, 8, delta);
-    const clampedDistance = MathUtils.clamp(nextDistance, focusDistanceFloor, maxDistance);
+    const clampedDistance = MathUtils.clamp(nextDistance, minDistance, maxDistance);
 
     const nextPosition = currentDirection.setLength(clampedDistance).add(targetRef.current);
     camera.position.copy(nextPosition);
@@ -540,7 +540,9 @@ const SystemCamera: React.FC<{
       enableDamping
       dampingFactor={0.2}
       enablePan={false}
-      minDistance={focusDistanceFloor}
+      minDistance={minDistance}
+      minPolarAngle={0.15}
+      maxPolarAngle={Math.PI / 2 - 0.05}
       maxDistance={maxDistance}
       onStart={() => {
         isUserInteractingRef.current = true;
@@ -788,6 +790,11 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starRadius);
   }, [planets, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
+  const cameraMinDistance = useMemo(() => {
+    const anchoredRadius = bodyRadii[anchoredBodyId ?? ''];
+    const effectiveRadius = typeof anchoredRadius === 'number' ? anchoredRadius : focusDistanceFloor;
+    return Math.max(focusDistanceFloor, effectiveRadius * 2);
+  }, [anchoredBodyId, bodyRadii, focusDistanceFloor]);
   const focusRequestRef = useRef<FocusRequest | null>(null);
   const lastCameraStateRef = useRef<SystemCameraState>(cameraInitialState);
   useEffect(() => {
@@ -803,7 +810,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const position = bodyWorldPositions[bodyId];
     if (!position) return;
     const radius = bodyRadii[bodyId] ?? focusDistanceFloor;
-    const desiredDistance = Math.min(Math.max(radius * 8, focusDistanceFloor), cameraMaxDistance * 0.95);
+    const minDistanceForBody = Math.max(focusDistanceFloor, radius * 2);
+    const desiredDistance = Math.min(Math.max(radius * 8, minDistanceForBody), cameraMaxDistance * 0.95);
     focusRequestRef.current = {
       target: new Vector3(...position),
       distance: desiredDistance
@@ -821,7 +829,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
         <SystemCamera
           maxDistance={cameraMaxDistance}
-          focusDistanceFloor={focusDistanceFloor}
+          minDistance={cameraMinDistance}
           focusRequest={focusRequestRef}
           initialState={cameraInitialState}
           onCameraStateChange={onCameraStateChange}
