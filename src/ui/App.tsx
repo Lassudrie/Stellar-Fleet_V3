@@ -8,6 +8,7 @@ import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
+import SystemView3D from './components/screens/SystemView3D';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
@@ -31,10 +32,11 @@ const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -449,7 +451,15 @@ const App: React.FC = () => {
       }
       const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
       setTargetSystem(latestSystem);
-      setUiMode('SYSTEM_VIEW');
+      setSystemViewSystem(latestSystem);
+      setUiMode('NONE');
+      setMenuPosition(null);
+      setScreen('SYSTEM_VIEW');
+  };
+
+  const handleReturnToGalaxy = () => {
+      setScreen('GAME');
+      setUiMode('NONE');
   };
 
   const handleOpenSystemDetails = () => {
@@ -677,6 +687,43 @@ const App: React.FC = () => {
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
   
+  if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
+      return (
+        <div className="relative w-full h-screen bg-black text-white">
+            <SystemView3D starSystem={systemViewSystem} astro={systemViewSystem.astro} />
+            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
+                <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                        {t('systemView.currentSystem')}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between gap-4">
+                        <div>
+                            <div className="text-2xl font-bold">{systemViewSystem.name}</div>
+                            <div className="text-sm text-slate-300">
+                                {systemViewSystem.astro ? t('systemView.astroLoaded') : t('systemView.noAstro')}
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleReturnToGalaxy}
+                            className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
+                        >
+                            {t('systemView.backToGalaxy')}
+                        </button>
+                    </div>
+                </div>
+                <div className="pointer-events-auto m-4 self-start">
+                    <button
+                        onClick={handleReturnToGalaxy}
+                        className="rounded-full bg-slate-800/80 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg ring-1 ring-slate-600 transition hover:bg-slate-700"
+                    >
+                        {t('systemView.backToGalaxy')}
+                    </button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
   if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
