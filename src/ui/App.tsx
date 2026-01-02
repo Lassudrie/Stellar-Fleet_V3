@@ -23,7 +23,7 @@ import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/sorting';
-import { generateSurfaceMapForState } from '../engine/planetSurface/access';
+import { generateSurfaceMapForState } from '../engine/planetSurface';
 import { resolveSurfaceContext } from './navigation/surfaceNavigation';
 import type { GameCommand } from '../engine/commands';
 

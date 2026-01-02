@@ -22,15 +22,12 @@ import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } f
 import { applyCommand } from './commands';
 import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement/movementPhase';
-import { normalizeSurfacePositions } from './planetSurface/positions';
+import { generateSurfaceMapForState, isPassable, neighborsAxial, normalizeSurfacePositions, relocateSurfacePosDeterministic } from './planetSurface';
 import { checkVictoryConditions } from './objectives';
 import { ORBIT_PROXIMITY_RANGE_SQ, COLORS, CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
 import { isOrbitContested, getOrbitingSystem } from './orbit';
 import { distSq } from './math/vec3';
 import { resolveOrbitalBombardment } from './orbitalBombardment';
-import { generateSurfaceMapForState } from './planetSurface/access';
-import { neighborsAxial } from './planetSurface/hex';
-import { isPassable, relocateSurfacePosDeterministic } from './planetSurface/validation';
 import {
   applyOverrunPenalty,
   chooseDefenderRetreat,

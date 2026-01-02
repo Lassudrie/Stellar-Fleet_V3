@@ -14,7 +14,6 @@ import {
   SurfacePos
 } from '../../../shared/types';
 import { useI18n } from '../../i18n';
-import { fnv1a32 } from '../../../engine/planetSurface/hash32';
 import type { GameCommand } from '../../../engine/commands';
 import {
   computeEffectiveMP,
@@ -31,8 +30,7 @@ import {
   SUPPLY_RADIUS
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
-import { neighborsAxial } from '../../../engine/planetSurface/hex';
-import { isPassable } from '../../../engine/planetSurface/validation';
+import { fnv1a32, isPassable, neighborsAxial } from '../../../engine/planetSurface';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;

@@ -2,10 +2,7 @@ import assert from 'node:assert';
 import type { PlanetBody, PlanetData } from '../../shared/types';
 import { generateStellarSystem } from '../worldgen/stellar';
 import { buildPlanetBodies } from '../planets';
-import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
-import { fnv1a32 } from '../planetSurface/hash32';
-import { generateSurfaceMap } from '../planetSurface/generateSurfaceMap';
-import { deriveSurfaceParamsFromPlanet } from '../planetSurface/params';
+import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap } from '../planetSurface';
 
 interface TestCase {
   name: string;

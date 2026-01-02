@@ -10,8 +10,7 @@ import { devLog, devWarn } from '../../shared/devLogger';
 import { generateStellarSystem } from './stellar';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { sorted } from '../../shared/sorting';
-import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
-import { normalizeSurfacePositions } from '../planetSurface/positions';
+import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from '../planetSurface';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 

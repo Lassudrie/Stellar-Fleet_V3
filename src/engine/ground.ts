@@ -10,10 +10,7 @@ import type {
   PlanetSurfaceMap
 } from '../shared/types';
 import { RNG } from './rng';
-import { generateSurfaceMapForState, getTileAt } from './planetSurface/access';
-import { hashJoin32 } from './planetSurface/hash32';
-import { neighborsAxial } from './planetSurface/hex';
-import { isPassable } from './planetSurface/validation';
+import { generateSurfaceMapForState, getTileAt, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
 
 // ----------------------------
 // Utils (was: ground/utils.ts)

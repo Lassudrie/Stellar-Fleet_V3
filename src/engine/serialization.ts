@@ -48,7 +48,7 @@ import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
-import { normalizeSurfacePositions } from './planetSurface/positions';
+import { normalizeSurfacePositions } from './planetSurface';
 
 // --- HELPERS ---
 

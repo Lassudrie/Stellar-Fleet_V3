@@ -11,9 +11,7 @@ import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/sorting';
-import { getTileAt } from './planetSurface/access';
-import { isBuildable, isPassable } from './planetSurface/validation';
-import { normalizeSurfacePositions } from './planetSurface/positions';
+import { getTileAt, isBuildable, isPassable, normalizeSurfacePositions } from './planetSurface';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
