@@ -1,5 +1,4 @@
-import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../shared/shared';
-import { shortId } from '../shared/shared';
+import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem, shortId } from '../shared/shared';
 import { RNG } from './rng';
 import { getDefaultSolidPlanet } from './planets';
 
@@ -98,13 +97,12 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
         return { fleet, armies, logs: [], count: 0 };
     }
 
+    const loadSet = new Set(availableArmies.slice(0, loadableArmies).map(a => a.id));
     const updatedArmies = armies.map(army => {
         if (!validPlanetIds.has(army.containerId)) return army;
         if (army.factionId !== fleet.factionId) return army;
         if (army.state !== ArmyState.DEPLOYED) return army;
-
-        const idx = availableArmies.findIndex(a => a.id === army.id);
-        if (idx === -1 || idx >= loadableArmies) return army;
+        if (!loadSet.has(army.id)) return army;
 
         return {
             ...army,
@@ -158,16 +156,17 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
     );
 
     if (embarkedArmies.length === 0) {
-        return { fleet, armies, logs: [], count: 0 };
+        return { fleet, armies, logs: [], count: 0, unloadedArmyIds: [] };
     }
 
+    const embarkedArmyMap = new Map(embarkedArmies.map(army => [army.id, army]));
     const unloadedArmyIds: Set<string> = new Set();
     const updatedFleet: Fleet = {
         ...fleet,
         ships: fleet.ships.map(ship => {
             if (!ship.carriedArmyId) return ship;
             if (allowedShipIds && !allowedShipIds.has(ship.id)) return ship;
-            const carryingArmy = embarkedArmies.find(army => army.id === ship.carriedArmyId);
+            const carryingArmy = embarkedArmyMap.get(ship.carriedArmyId);
             if (!carryingArmy) return ship;
             unloadedArmyIds.add(carryingArmy.id);
             return { ...ship, carriedArmyId: null };
@@ -199,6 +198,36 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
     return { fleet: updatedFleet, armies: updatedArmies, logs, count: unloadedArmyIds.size, unloadedArmyIds: [...unloadedArmyIds] };
 };
 
+/**
+ * Applique le risque d'atterrissage contesté lors du débarquement d'armées.
+ *
+ * **Contrat sémantique (CRITIQUE)** :
+ *
+ * - En mode `'always_land'` : toutes les armées débarquent, mais subissent des pertes si elles prennent feu.
+ *   L'état des armées (state/containerId) n'est PAS modifié par cette fonction.
+ *
+ * - En mode `'abort'` : les armées qui prennent feu échouent le débarquement et restent dans leur état actuel.
+ *   Les armées qui réussissent sont mises à DEPLOYED avec containerId = targetPlanetId.
+ *
+ * **Recommandation d'usage (pour éviter les bugs)** :
+ *
+ * Cette fonction doit être appelée AVANT `computeUnloadOps` si vous utilisez le mode `'abort'`.
+ * En cas d'échec en mode abort, les armées restent EMBARKED (containerId = fleet.id) car leur état
+ * n'a pas été modifié par cette fonction. Vous pouvez ensuite appeler `computeUnloadOps` uniquement
+ * sur les armées qui ont réussi (succeeded).
+ *
+ * **NE PAS** appeler `computeUnloadOps` puis `applyContestedLandingRisk(mode='abort')` car cela
+ * laisserait des armées en état DEPLOYED même si elles ont échoué le débarquement.
+ *
+ * Exemple correct :
+ * ```
+ * const riskOutcome = applyContestedLandingRisk({ mode: 'abort', ... });
+ * const unloadResult = computeUnloadOps({
+ *   ...,
+ *   allowedArmyIds: new Set(riskOutcome.succeeded)
+ * });
+ * ```
+ */
 export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
     armies: Army[];
     logs: LogEntry[];
@@ -231,7 +260,8 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
         const roll = rng.next();
         const tookFire = roll < CONTESTED_UNLOAD_FAILURE_THRESHOLD;
         const success = mode === 'always_land' || !tookFire;
-        const membersLoss = tookFire ? Math.max(1, Math.floor(army.members * CONTESTED_UNLOAD_LOSS_FRACTION)) : 0;
+        const rawLoss = Math.max(1, Math.floor(army.members * CONTESTED_UNLOAD_LOSS_FRACTION));
+        const membersLoss = tookFire ? Math.min(army.members, rawLoss) : 0;
         const conditionLoss = tookFire ? CONTESTED_UNLOAD_CONDITION_LOSS : 0;
 
         outcomes.set(army.id, { tookFire, strengthLoss: membersLoss, success });
