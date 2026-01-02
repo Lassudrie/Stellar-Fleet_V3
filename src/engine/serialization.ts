@@ -45,6 +45,7 @@ import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
 import { normalizeSurfacePositions } from './planetSurface/positions';
+import { createPlanetSurfaceDescriptor } from './planetSurface/descriptor';
 
 // --- HELPERS ---
 
@@ -421,6 +422,37 @@ const deserializeAiState = (
   };
 };
 
+// --- BACKFILL PLANET SURFACE DESCRIPTORS ---
+
+const ensurePlanetSurfaceDescriptors = (
+  seed: number,
+  systems: StarSystem[],
+  existing?: Record<string, PlanetSurfaceDescriptor>
+): Record<string, PlanetSurfaceDescriptor> | undefined => {
+  const out: Record<string, PlanetSurfaceDescriptor> = { ...(existing ?? {}) };
+
+  const validSolidBodyIds = new Set<string>();
+  systems.forEach(system => {
+    system.planets.forEach(body => {
+      if (!body.isSolid) return;
+      validSolidBodyIds.add(body.id);
+      if (out[body.id]) return;
+      out[body.id] = createPlanetSurfaceDescriptor({
+        gameSeed: seed,
+        systemId: system.id,
+        body
+      });
+    });
+  });
+
+  // Nettoie les entrées obsolètes (corps supprimés / devenus non-solides)
+  Object.keys(out).forEach(bodyId => {
+    if (!validSolidBodyIds.has(bodyId)) delete out[bodyId];
+  });
+
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 // --- VALIDATORS & MIGRATION ---
 
 // Helper to provide default factions if missing (Backward Compat)
@@ -749,7 +781,7 @@ export const deserializeGameState = (json: string): GameState => {
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
     const planetIds = new Set(systems.flatMap(system => system.planets.map(planet => planet.id)));
-    const planetSurfaceDescriptorsByBodyId = sanitizePlanetSurfaceDescriptorRecord(
+    const sanitizedPlanetSurfaceDescriptorsByBodyId = sanitizePlanetSurfaceDescriptorRecord(
       dto.planetSurfaceDescriptorsByBodyId,
       planetIds
     );
@@ -1036,6 +1068,12 @@ export const deserializeGameState = (json: string): GameState => {
       unlimitedFuel: false
     };
 
+    const ensuredPlanetSurfaceDescriptorsByBodyId = ensurePlanetSurfaceDescriptors(
+      normalizedSeed,
+      systems,
+      sanitizedPlanetSurfaceDescriptorsByBodyId
+    );
+
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
@@ -1057,7 +1095,7 @@ export const deserializeGameState = (json: string): GameState => {
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
       aiStates: migratedAiStates,
       aiState: primaryAiState,
-      planetSurfaceDescriptorsByBodyId,
+      planetSurfaceDescriptorsByBodyId: ensuredPlanetSurfaceDescriptorsByBodyId,
       groundBuildings,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
