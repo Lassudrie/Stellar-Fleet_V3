@@ -36,6 +36,8 @@ type CameraState = { zoom: number; offset: { x: number; y: number } };
 const HEX_SIZE = 12;
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 2.6;
+const CLICK_DRAG_THRESHOLD_PX = 6;
+const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 
 const biomeColors: Record<Biome, string> = {
   ocean: '#0ea5e9',
@@ -173,7 +175,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const panRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+  const panRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    didPan: boolean;
+    movedSq: number;
+  } | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [camera, setCamera] = useState<CameraState>({ zoom: 1, offset: { x: 0, y: 0 } });
   const [hovered, setHovered] = useState<HexCoord | null>(null);
@@ -422,20 +432,34 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       startX: event.clientX,
       startY: event.clientY,
       offsetX: camera.offset.x,
-      offsetY: camera.offset.y
+      offsetY: camera.offset.y,
+      didPan: false,
+      movedSq: 0
     };
-    setIsPanning(true);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (panRef.current && panRef.current.pointerId === event.pointerId) {
-      setCamera(prev => ({
-        ...prev,
-        offset: {
-          x: panRef.current!.offsetX + (event.clientX - panRef.current!.startX),
-          y: panRef.current!.offsetY + (event.clientY - panRef.current!.startY)
-        }
-      }));
+      const dx = event.clientX - panRef.current.startX;
+      const dy = event.clientY - panRef.current.startY;
+      const movedSq = dx * dx + dy * dy;
+
+      panRef.current.movedSq = movedSq;
+
+      if (!panRef.current.didPan && movedSq >= CLICK_DRAG_THRESHOLD_SQ) {
+        panRef.current.didPan = true;
+        setIsPanning(true);
+      }
+
+      if (panRef.current.didPan) {
+        setCamera(prev => ({
+          ...prev,
+          offset: {
+            x: panRef.current!.offsetX + dx,
+            y: panRef.current!.offsetY + dy
+          }
+        }));
+      }
       return;
     }
 
@@ -444,19 +468,29 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const clearPan = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (panRef.current) {
-      if (event.pointerId === panRef.current.pointerId) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-        panRef.current = null;
-        setIsPanning(false);
-      }
-    }
+    if (!panRef.current) return;
+    if (event.pointerId !== panRef.current.pointerId) return;
+
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    panRef.current = null;
+    setIsPanning(false);
   };
 
-  const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!map) return;
-    const coord = pickCoord(event.clientX, event.clientY);
-    setSelected(coord);
+  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const pan = panRef.current;
+    if (pan && pan.pointerId === event.pointerId) {
+      const isClick = !pan.didPan && pan.movedSq < CLICK_DRAG_THRESHOLD_SQ;
+
+      clearPan(event);
+
+      if (isClick && map) {
+        const coord = pickCoord(event.clientX, event.clientY);
+        setSelected(coord);
+      }
+      return;
+    }
+
+    clearPan(event);
   };
 
   const activeCoord = selected ?? hovered;
@@ -529,12 +563,11 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={clearPan}
+          onPointerUp={handlePointerUp}
           onPointerLeave={(event) => {
             clearPan(event);
             setHovered(null);
           }}
-          onClick={handleClick}
         />
       </div>
 
