@@ -235,67 +235,76 @@ export const canLoadArmy = (ship: ShipEntity): boolean => {
     return true;
 };
 
+export type ArmyEmbarkResult =
+    | { ok: true; ship: ShipEntity; army: Army }
+    | { ok: false; ship: ShipEntity; army: Army; error: string };
+
 /**
  * Loads an army into a transport ship.
- * Updates both the Ship (carriedArmyId) and the Army (state, containerId).
- * 
- * @returns true if successful, false if validation failed.
+ * Returns updated copies of both the Ship and the Army.
+ *
+ * IMPORTANT: This function is PURE (does not mutate inputs). Callers must persist the returned objects.
  */
-export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
+export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): ArmyEmbarkResult => {
     if (!canLoadArmy(ship)) {
-        logger.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
-        return false;
+        const error = `Ship ${ship.id} cannot carry an army.`;
+        logger.error(`[Army] Load Failed: ${error}`);
+        return { ok: false, ship, army, error };
     }
     
     if (army.factionId !== fleet.factionId) {
-        logger.error('[Army] Load Failed: Faction mismatch.');
-        return false;
+        const error = 'Faction mismatch between army and fleet.';
+        logger.error(`[Army] Load Failed: ${error}`);
+        return { ok: false, ship, army, error };
     }
 
     if (army.state !== ArmyState.DEPLOYED) {
-        logger.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
-        return false;
+        const error = `Army ${army.id} is not deployed (State: ${army.state}).`;
+        logger.error(`[Army] Load Failed: ${error}`);
+        return { ok: false, ship, army, error };
     }
 
-    // Mutate State (Simulated)
-    ship.carriedArmyId = army.id;
-    army.containerId = fleet.id;
-    army.state = ArmyState.EMBARKED;
+    const updatedShip: ShipEntity = { ...ship, carriedArmyId: army.id };
+    const updatedArmy: Army = { ...army, containerId: fleet.id, state: ArmyState.EMBARKED };
     
     logger.debug(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
-    return true;
+    return { ok: true, ship: updatedShip, army: updatedArmy };
 };
+
+export type ArmyDeployResult =
+    | { ok: true; ship: ShipEntity; army: Army }
+    | { ok: false; ship: ShipEntity; army: Army; error: string };
 
 /**
  * Unloads an army from a ship to a planet.
- * 
- * @returns true if successful.
+ * Returns updated copies of both the Ship and the Army.
+ *
+ * IMPORTANT: This function is PURE (does not mutate inputs). Callers must persist the returned objects.
  */
-export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): boolean => {
+export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): ArmyDeployResult => {
     if (ship.carriedArmyId !== army.id) {
-        logger.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-        return false;
+        const error = `Ship ${ship.id} does not carry army ${army.id}.`;
+        logger.warn(`[Army] Deploy Failed: ${error}`);
+        return { ok: false, ship, army, error };
     }
 
-    ship.carriedArmyId = null;
-    army.state = ArmyState.DEPLOYED;
-    army.containerId = planet.id;
+    const updatedShip: ShipEntity = { ...ship, carriedArmyId: null };
+    const updatedArmy: Army = { ...army, state: ArmyState.DEPLOYED, containerId: planet.id };
     
     logger.info(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
-    return true;
+    return { ok: true, ship: updatedShip, army: updatedArmy };
 };
 
 /**
- * Unloads an army from a ship (Generic / Destruction context).
- * Does NOT set new state (Caller must handle that, e.g. deleting army).
+ * Clears the carriedArmyId from a ship if it matches the provided army.
+ *
+ * IMPORTANT: This function is PURE (does not mutate inputs).
  */
-export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
-    if (ship.carriedArmyId === army.id) {
-        ship.carriedArmyId = null;
-        logger.info(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
-    } else {
-        logger.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-    }
+export const unloadArmyFromShip = (army: Army, ship: ShipEntity): ShipEntity => {
+    if (ship.carriedArmyId !== army.id) return ship;
+
+    logger.info(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
+    return { ...ship, carriedArmyId: null };
 };
 
 /**
