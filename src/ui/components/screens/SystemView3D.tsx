@@ -65,7 +65,10 @@ const EARTH_RADIUS_KM = 6_371;
 const SOLAR_RADIUS_KM = 695_700;
 const KM_TO_SCENE_SCALE = 1 / 10_000_000;
 const RADIUS_VISIBILITY_BONUS = 25;
-const MIN_PLANET_RADIUS = 0.12;
+const EARTH_LIKE_SCENE_RADIUS = 0.45;
+const RADIUS_SCALE_EXPONENT = 0.5;
+const MIN_PLANET_SCENE_RADIUS = 0.18;
+const MIN_MOON_SCENE_RADIUS = 0.06;
 const MIN_STAR_RADIUS = 0.5;
 const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
@@ -199,6 +202,15 @@ const getMoonRadiusKm = (moon: MoonSource): number => {
   return Math.max(moon.radiusEarth, 0.05) * EARTH_RADIUS_KM;
 };
 
+const computeSceneRadiusFromKm = (
+  radiusKm: number,
+  earthLikeSceneRadius: number,
+  minSceneRadius: number
+): number => {
+  const scaledRadius = earthLikeSceneRadius * Math.pow(Math.max(radiusKm, 0.001) / EARTH_RADIUS_KM, RADIUS_SCALE_EXPONENT);
+  return Math.max(scaledRadius, minSceneRadius);
+};
+
 const getMoonType = (moon: MoonSource): MoonType => moon.moonType ?? moon.type;
 
 const getMoonOrbitKm = (moon: MoonSource, planetRadiusKm: number): number => {
@@ -250,14 +262,15 @@ const buildPlanetModel = (
   index: number,
   total: number,
   sceneScale: number,
-  minPlanetRadius: number,
-  minMoonRadius: number
+  earthLikeSceneRadius: number,
+  minPlanetSceneRadius: number,
+  minMoonSceneRadius: number
 ): OrbitingPlanet => {
   const radiusKm = getPlanetRadiusKm(planet);
   const semiMajorAxisKm = getSemiMajorAxisKm(planet, index);
   const orbitAngle = (index / Math.max(total, 1)) * Math.PI * 2;
   const orbitRadius = semiMajorAxisKm * sceneScale;
-  const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
+  const radius = computeSceneRadiusFromKm(radiusKm, earthLikeSceneRadius, minPlanetSceneRadius);
   const planetId = planet.id ?? `planet-${index + 1}`;
   const planetType = getPlanetType(planet);
 
@@ -268,7 +281,7 @@ const buildPlanetModel = (
     const moonAngle = (moonIndex / Math.max(planet.moons?.length ?? 1, 1)) * Math.PI * 2 + Math.PI / 4;
     return {
       id: `${planetId}-moon-${moonIndex + 1}`,
-      radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
+      radius: computeSceneRadiusFromKm(moonRadiusKm, earthLikeSceneRadius, minMoonSceneRadius),
       orbitRadius: moonOrbitRadius,
       orbitAngle: moonAngle,
       type: getMoonType(moon as MoonSource)
@@ -1138,9 +1151,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const getFleetName = useFleetName();
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
+  const earthLikeSceneRadius = EARTH_LIKE_SCENE_RADIUS * clampedScale;
   const orbitThickness = ORBIT_THICKNESS * clampedScale;
-  const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
-  const minMoonRadius = minPlanetRadius / 3;
+  const minPlanetSceneRadius = MIN_PLANET_SCENE_RADIUS * clampedScale;
+  const minMoonSceneRadius = MIN_MOON_SCENE_RADIUS * clampedScale;
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
   const focusDistanceFloor = 2.5 * clampedScale;
   const baseCameraDistance = 12 * clampedScale;
@@ -1192,10 +1206,11 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       index,
       sourcePlanets.length,
       sceneScale,
-      minPlanetRadius,
-      minMoonRadius
+      earthLikeSceneRadius,
+      minPlanetSceneRadius,
+      minMoonSceneRadius
     ));
-  }, [minMoonRadius, minPlanetRadius, sceneScale, sourcePlanets]);
+  }, [earthLikeSceneRadius, minMoonSceneRadius, minPlanetSceneRadius, sceneScale, sourcePlanets]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
