@@ -7,7 +7,7 @@
  * Canonical order is always by ID (lexicographic) for all entity types.
  */
 
-import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage, Station } from '../../shared/types';
+import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage, Station, GroundBuilding } from '../../shared/types';
 import { sorted } from '../../shared/sorting';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
@@ -39,6 +39,7 @@ export const canonicalizeState = (state: GameState): GameState => {
         fleets: canonicalizeFleets(state.fleets),
         stations: canonicalizeStations(state.stations ?? []),
         armies: canonicalizeArmies(state.armies),
+        groundBuildings: canonicalizeGroundBuildings(state.groundBuildings ?? []),
         battles: canonicalizeBattles(state.battles),
         logs: canonicalizeLogs(state.logs),
         messages: canonicalizeMessages(state.messages)
@@ -75,6 +76,10 @@ export const canonicalizeStations = (stations: Station[]): Station[] => {
  */
 export const canonicalizeArmies = (armies: Army[]): Army[] => {
     return sorted(armies, (a, b) => compareIds(a.id, b.id));
+};
+
+export const canonicalizeGroundBuildings = (buildings: GroundBuilding[]): GroundBuilding[] => {
+    return sorted(buildings, (a, b) => compareIds(a.id, b.id));
 };
 
 /**

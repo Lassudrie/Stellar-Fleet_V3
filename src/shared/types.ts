@@ -151,7 +151,7 @@ export interface PlanetSurfaceConfig {
 export interface PlanetSurfaceDescriptor {
   seed: number; // uint32
   config: PlanetSurfaceConfig;
-  astroRef?: { planetIndex: number; moonIndex?: number };
+  astroRef: { planetIndex: number; moonIndex?: number };
 }
 
 export const enum FeatureBits {
@@ -164,7 +164,7 @@ export const enum FeatureBits {
 
 export interface PlanetSurfaceTile {
   elev: number;        // int16-ish (implementation chooses encoding)
-  temp: number;        // int16-ish (implementation chooses encoding)
+  tempC2: number;      // int16: local temperature in °C*2 (stable encoding)
   moist: number;       // uint8 0..255
   biome: Biome;
   featureBits: number; // bitset
@@ -186,6 +186,22 @@ export interface PlanetSurfaceMap {
   seaLevelElev: number;
   tiles: PlanetSurfaceTile[]; // length w*h (or derived from typed buffers internally)
   settlements: Settlement[];
+}
+
+export interface SurfacePos {
+  bodyId: string; // planetId or moonId
+  q: number;
+  r: number;
+}
+
+export type GroundBuildingType = 'city' | 'outpost' | 'factory' | 'mine';
+
+export interface GroundBuilding {
+  id: string;
+  factionId: FactionId;
+  type: GroundBuildingType;
+  surfacePos: SurfacePos;
+  name?: string;
 }
 
 // Helper to pass a few derived orbit/HZ values into planet logic
@@ -273,6 +289,11 @@ export interface Army {
   morale: number;
   state: ArmyState;
   containerId: string;
+  /**
+   * Persisted surface position when DEPLOYED on a planet/moon surface.
+   * Authoritative gameplay state (not derived).
+   */
+  surfacePos?: SurfacePos;
 }
 
 export interface StarSystem {
@@ -455,6 +476,10 @@ export interface GameState {
    * Stored in saves to freeze surface generation results across algorithm evolution.
    */
   planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
+  /**
+   * Persisted ground buildings placed on planet surfaces.
+   */
+  groundBuildings?: GroundBuilding[];
   objectives: GameObjectives;
   rules: GameplayRules;
 }

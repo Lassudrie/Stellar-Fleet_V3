@@ -11,6 +11,7 @@ import { generateStellarSystem } from './stellar';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { sorted } from '../../shared/sorting';
 import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
+import { normalizeSurfacePositions } from '../planetSurface/positions';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -673,6 +674,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       selectedFleetId: null,
       winnerFactionId: null,
       planetSurfaceDescriptorsByBodyId,
+      groundBuildings: [],
       objectives: {
           conditions: scenario.objectives.win,
           maxTurns: scenario.objectives.maxTurns
@@ -681,5 +683,6 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       aiState: undefined 
   };
 
-  return { state, rng };
+  const normalizedState = normalizeSurfacePositions(state);
+  return { state: normalizedState, rng };
 };

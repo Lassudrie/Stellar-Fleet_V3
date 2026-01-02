@@ -16,7 +16,7 @@ const hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number => {
   // Stable hash of the essential generated output.
   let h = fnv1a32(`${map.bodyId}|${map.systemId}|${map.seaLevelElev}|${map.descriptor.seed}`);
   for (const t of map.tiles) {
-    h = fnv1a32(`${h}|${t.elev}|${t.temp}|${t.moist}|${t.biome}|${t.featureBits}`);
+    h = fnv1a32(`${h}|${t.elev}|${t.tempC2}|${t.moist}|${t.biome}|${t.featureBits}`);
   }
   for (const s of map.settlements) {
     h = fnv1a32(`${h}|${s.id}|${s.kind}|${s.factionId ?? ''}|${s.coord.q},${s.coord.r}|${s.size}`);

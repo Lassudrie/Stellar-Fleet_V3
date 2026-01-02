@@ -23,7 +23,10 @@ import {
   GameMessage,
   Station,
   StationType,
-  PlanetSurfaceDescriptor
+  PlanetSurfaceDescriptor,
+  GroundBuilding,
+  GroundBuildingType,
+  SurfacePos
 } from '../shared/types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -41,6 +44,7 @@ import { COLORS, SHIP_STATS } from '../content/data/static';
 import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
+import { normalizeSurfacePositions } from './planetSurface/positions';
 
 // --- HELPERS ---
 
@@ -236,6 +240,47 @@ const sanitizeOwnerRecord = (
   }, {});
 };
 
+const GROUND_BUILDING_TYPES = new Set<GroundBuildingType>(['city', 'outpost', 'factory', 'mine']);
+
+const sanitizeSurfacePos = (value: unknown, validBodyIds: Set<string>): SurfacePos | null => {
+  if (!value || typeof value !== 'object') return null;
+  const p: any = value;
+  if (typeof p.bodyId !== 'string' || !validBodyIds.has(p.bodyId)) return null;
+  if (!isFiniteNumber(p.q) || !isFiniteNumber(p.r)) return null;
+  return { bodyId: p.bodyId, q: Math.floor(p.q), r: Math.floor(p.r) };
+};
+
+const sanitizeGroundBuildings = (
+  value: unknown,
+  validBodyIds: Set<string>,
+  validFactionIds: Set<FactionId>
+): GroundBuilding[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error("Field 'groundBuildings' must be an array.");
+  }
+  const out: GroundBuilding[] = [];
+  value.forEach((entry: any, index: number) => {
+    if (typeof entry?.id !== 'string') {
+      console.warn(`[Serialization] GroundBuilding entry at index ${index} missing id; skipping.`);
+      return;
+    }
+    if (typeof entry.factionId !== 'string' || !validFactionIds.has(entry.factionId)) return;
+    if (!GROUND_BUILDING_TYPES.has(entry.type)) return;
+    const surfacePos = sanitizeSurfacePos(entry.surfacePos, validBodyIds);
+    if (!surfacePos) return;
+
+    out.push({
+      id: entry.id,
+      factionId: entry.factionId,
+      type: entry.type,
+      surfacePos,
+      name: typeof entry.name === 'string' ? entry.name : undefined
+    });
+  });
+  return out.length > 0 ? out : undefined;
+};
+
 const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescriptor | null => {
   if (!value || typeof value !== 'object') return null;
   const d: any = value;
@@ -254,13 +299,11 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
   if (!isFiniteNumber(generatorVersion) || generatorVersion <= 0) return null;
 
   const astroRef = d.astroRef;
-  if (astroRef !== undefined) {
-    if (!astroRef || typeof astroRef !== 'object') return null;
-    const planetIndex = (astroRef as any).planetIndex;
-    const moonIndex = (astroRef as any).moonIndex;
-    if (!isFiniteNumber(planetIndex) || planetIndex < 0) return null;
-    if (moonIndex !== undefined && (!isFiniteNumber(moonIndex) || moonIndex < 0)) return null;
-  }
+  if (!astroRef || typeof astroRef !== 'object') return null;
+  const planetIndex = (astroRef as any).planetIndex;
+  const moonIndex = (astroRef as any).moonIndex;
+  if (!isFiniteNumber(planetIndex) || planetIndex < 0) return null;
+  if (moonIndex !== undefined && (!isFiniteNumber(moonIndex) || moonIndex < 0)) return null;
 
   return {
     seed: (d.seed >>> 0),
@@ -270,12 +313,10 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
       wrapX,
       generatorVersion: Math.floor(generatorVersion)
     },
-    astroRef: astroRef
-      ? {
-          planetIndex: Math.floor((astroRef as any).planetIndex),
-          moonIndex: (astroRef as any).moonIndex !== undefined ? Math.floor((astroRef as any).moonIndex) : undefined
-        }
-      : undefined
+    astroRef: {
+      planetIndex: Math.floor((astroRef as any).planetIndex),
+      moonIndex: (astroRef as any).moonIndex !== undefined ? Math.floor((astroRef as any).moonIndex) : undefined
+    }
   };
 };
 
@@ -469,7 +510,8 @@ export const serializeGameState = (state: GameState): string => {
       maxStrength: a.maxStrength,
       morale: a.morale,
       state: a.state,
-      containerId: a.containerId
+      containerId: a.containerId,
+      surfacePos: a.surfacePos
     })),
     lasers: state.lasers.map(l => ({
       ...l,
@@ -493,6 +535,7 @@ export const serializeGameState = (state: GameState): string => {
     aiState: aiStateDto,
     aiStates: aiStatesDto,
     planetSurfaceDescriptorsByBodyId: state.planetSurfaceDescriptorsByBodyId,
+    groundBuildings: state.groundBuildings,
     objectives: state.objectives,
     rules: state.rules
   };
@@ -710,6 +753,7 @@ export const deserializeGameState = (json: string): GameState => {
       dto.planetSurfaceDescriptorsByBodyId,
       planetIds
     );
+    const groundBuildings = sanitizeGroundBuildings(dto.groundBuildings, planetIds, validFactionIds);
 
     const stationsDto = Array.isArray(dto.stations) ? dto.stations : [];
     if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
@@ -776,6 +820,15 @@ export const deserializeGameState = (json: string): GameState => {
         if (a.state === ArmyState.DEPLOYED && !planetIds.has(a.containerId)) return null;
         if (a.state !== ArmyState.DEPLOYED && !fleetIds.has(a.containerId)) return null;
 
+        const surfacePos =
+          a.state === ArmyState.DEPLOYED
+            ? sanitizeSurfacePos(a.surfacePos, planetIds)
+            : null;
+        const normalizedSurfacePos =
+          surfacePos && surfacePos.bodyId === a.containerId
+            ? surfacePos
+            : undefined;
+
         return {
           id: a.id,
           factionId,
@@ -783,7 +836,8 @@ export const deserializeGameState = (json: string): GameState => {
           maxStrength,
           morale,
           state: a.state,
-          containerId: a.containerId
+          containerId: a.containerId,
+          surfacePos: normalizedSurfacePos
         };
       })
       .filter((army): army is Army => Boolean(army));
@@ -1002,11 +1056,12 @@ export const deserializeGameState = (json: string): GameState => {
       aiStates: migratedAiStates,
       aiState: primaryAiState,
       planetSurfaceDescriptorsByBodyId,
+      groundBuildings,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
 
-    return state;
+    return normalizeSurfacePositions(state);
   } catch (e) {
     throw new Error(`Error reconstructing game state: ${(e as Error).message}`);
   }

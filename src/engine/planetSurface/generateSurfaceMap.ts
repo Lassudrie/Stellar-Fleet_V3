@@ -129,7 +129,7 @@ const placeSettlements = (params: {
     return out;
   };
 
-  const tempC = (t: number): number => t / 2;
+  const tempC = (tC2: number): number => tC2 / 2;
 
   const scoreSite = (idx: number, existing: number[]): number => {
     const tile = tiles[idx];
@@ -137,7 +137,7 @@ const placeSettlements = (params: {
     const c = indexToAxial(idx, w);
     const ns = neighborsAxial(c, w, h, wrapX);
     const nearWater = ns.some(nc => isWaterBiome(tiles[axialToIndex(nc, w)].biome)) ? 1 : 0;
-    const t = tempC(tile.temp);
+    const t = tempC(tile.tempC2);
     const tempComfort = 1 - clamp(Math.abs(t - 18) / 45, 0, 1);
 
     let minDist = Infinity;
@@ -268,7 +268,7 @@ const addRivers = (params: {
   const threshold = Math.max(25, Math.floor(n / 320));
   for (let i = 0; i < n; i += 1) {
     if (tiles[i].elev <= seaLevelElev) continue;
-    if (tiles[i].temp <= 0) continue; // <= 0°C
+    if (tiles[i].tempC2 <= 0) continue; // <= 0°C
     if (acc[i] >= threshold) {
       tiles[i].featureBits |= FeatureBits.River;
     }
@@ -382,7 +382,7 @@ export const generateSurfaceMap = (params: {
 
     return {
       elev: Math.round(elev[i] * 1000), // stable encoding (int-ish)
-      temp: tempC2[i],
+      tempC2: tempC2[i],
       moist: moistU8[i],
       biome,
       featureBits: 0
@@ -402,7 +402,7 @@ export const generateSurfaceMap = (params: {
   for (let i = 0; i < n; i += 1) {
     if (isWaterBiome(tiles[i].biome)) continue;
     const elevRel = (elev[i] - seaLevelElev);
-    const t = tiles[i].temp / 2;
+    const t = tiles[i].tempC2 / 2;
     const m = tiles[i].moist;
 
     if (env.surfaceClass === 'airless') {

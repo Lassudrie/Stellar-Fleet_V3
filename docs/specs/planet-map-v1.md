@@ -77,7 +77,7 @@ export interface PlanetSurfaceConfig {
 export interface PlanetSurfaceDescriptor {
   seed: number;                 // uint32
   config: PlanetSurfaceConfig;
-  astroRef?: { planetIndex: number; moonIndex?: number }; // recommandé pour robustesse
+  astroRef: { planetIndex: number; moonIndex?: number }; // requis (lien stable vers astro)
 }
 
 export const enum FeatureBits {
@@ -90,7 +90,7 @@ export const enum FeatureBits {
 
 export interface PlanetSurfaceTile {
   elev: number;        // int16 (ou float32 si vous préférez)
-  temp: number;        // int16 (ex: °C*2) ou int16 (K*10). Choisir 1 encoding et le figer.
+  tempC2: number;      // int16: température locale en °C*2 (encoding figé)
   moist: number;       // uint8 0..255
   biome: Biome;
   featureBits: number; // bitset
@@ -112,6 +112,12 @@ export interface PlanetSurfaceMap {
   seaLevelElev: number;            // seuil “mer” pour cohérence et rivières
   tiles: PlanetSurfaceTile[];      // longueur w*h (ou buffers typés internes)
   settlements: Settlement[];
+}
+
+export interface SurfacePos {
+  bodyId: string; // planetId (ou moonId)
+  q: number;
+  r: number;
 }
 ```
 
@@ -153,7 +159,7 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
 Le pipeline standard produit trois champs continus puis discrétise :
 
 - Altitude (elev) → Mer/continents/montagnes/cratères
-- Température locale (temp) → gradient latitude/altitude + contraintes atmosphère/albédo
+- Température locale (tempC2) → gradient latitude/altitude + contraintes atmosphère/albédo
 - Humidité (moist) → distance à l’eau + facteur atmosphère/pression + option “rain shadow”
 
 Puis : classification biomes + rivières + features (villes).

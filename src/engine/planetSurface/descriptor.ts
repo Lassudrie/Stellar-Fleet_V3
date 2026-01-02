@@ -76,7 +76,8 @@ export const createPlanetSurfaceDescriptor = (params: {
   return {
     seed,
     config,
-    astroRef
+    // Contract requires an astroRef; fall back deterministically for custom bodies.
+    astroRef: astroRef ?? { planetIndex: 0 }
   };
 };
 
