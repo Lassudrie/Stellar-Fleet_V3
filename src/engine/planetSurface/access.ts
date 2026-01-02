@@ -2,6 +2,8 @@ import type { GameState, MoonData, PlanetData, PlanetSurfaceDescriptor, PlanetSu
 import { getPlanetById } from '../planets';
 import { generateSurfaceMap } from './generateSurfaceMap';
 
+const surfaceCache = new WeakMap<GameState, Map<string, PlanetSurfaceMap>>();
+
 export const getSurfaceDescriptor = (state: GameState, bodyId: string): PlanetSurfaceDescriptor | null => {
   return state.planetSurfaceDescriptorsByBodyId?.[bodyId] ?? null;
 };
@@ -39,7 +41,11 @@ export const generateSurfaceMapForState = (
   const astro = getAstroForBody(state, bodyId, descriptor);
   if (!astro) return null;
 
-  return generateSurfaceMap({
+  const cachedByBody = surfaceCache.get(state);
+  const cachedMap = cachedByBody?.get(bodyId);
+  if (cachedMap) return cachedMap;
+
+  const surfaceMap = generateSurfaceMap({
     systemId: astro.systemId,
     bodyId,
     descriptor,
@@ -47,6 +53,14 @@ export const generateSurfaceMapForState = (
     moonData: astro.moonData,
     ownerFactionId: astro.ownerFactionId
   });
+
+  const cache = cachedByBody ?? new Map<string, PlanetSurfaceMap>();
+  if (!cachedByBody) {
+    surfaceCache.set(state, cache);
+  }
+  cache.set(bodyId, surfaceMap);
+
+  return surfaceMap;
 };
 
 export const getTileAt = (
@@ -68,4 +82,3 @@ export const getTileAt = (
   const idx = rr * w + qq;
   return { descriptor, tile: map.tiles[idx] };
 };
-
