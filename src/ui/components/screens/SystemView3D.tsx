@@ -818,6 +818,7 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
   const selectionRingGeometry = useDisposableMemo(() => new RingGeometry(0.9, 1.15, 32), []);
 
   const fleetIconScale = 0.45 * clampedScale;
+  const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
   const fleetRingSpacing = Math.max(fleetIconScale * 4, clampedScale * 1.1);
   const fleetRingCapacity = 12;
   const fleetRingBase = useMemo(() => {
@@ -833,9 +834,9 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
     baseRadius: fleetRingBase,
     ringSpacing: fleetRingSpacing,
     maxPerRing: fleetRingCapacity,
-    yOffset: fleetIconScale * 0.35,
+    yOffset: eclipticEpsilon,
     rotationSpeed: 0.12
-  }, day), [day, fleetRingBase, fleetRingSpacing, fleets, fleetIconScale]);
+  }, day), [day, eclipticEpsilon, fleetRingBase, fleetRingSpacing, fleets]);
 
   const stationLayouts = useMemo(() => {
     const orderedStations = [...stations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
@@ -872,7 +873,7 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
 
   return (
     <group name="SystemEntitiesLayer">
-      {fleetLayouts.map(({ entity: fleet, position }) => {
+      {fleetLayouts.map(({ entity: fleet, position, angle }) => {
         const objectId = makeObjectId('fleet', fleet.id);
         const isHovered = hoveredObjectId === objectId;
         const isSelected = selectedFleetId === fleet.id || selectedObjectId === objectId;
@@ -881,7 +882,7 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
         const shouldShowShips = isSelected;
 
         return (
-          <group key={fleet.id} position={position}>
+          <group key={fleet.id} position={position} rotation={[0, angle, 0]}>
             <SystemFleetMesh
               fleet={fleet}
               color={color}
@@ -1405,6 +1406,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setSelectedObjectId(null);
   }, [starSystem.id]);
   const fleetIconScale = 0.45 * clampedScale;
+  const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
   const stationIconScale = 0.55 * clampedScale;
   const fleetLayoutConfig = useMemo(() => {
     if (!planets.length) {
@@ -1412,7 +1414,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         baseRadius: Math.max(starRadius * 4.5, focusDistanceFloor * 1.5),
         ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
         maxPerRing: 12,
-        yOffset: fleetIconScale * 0.35,
+        yOffset: eclipticEpsilon,
         rotationSpeed: 0.12
       };
     }
@@ -1422,10 +1424,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       baseRadius: Math.min(unclamped, firstOrbitRadius * 0.7),
       ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
       maxPerRing: 12,
-      yOffset: fleetIconScale * 0.35,
+      yOffset: eclipticEpsilon,
       rotationSpeed: 0.12
     };
-  }, [clampedScale, fleetIconScale, focusDistanceFloor, planets, starRadius]);
+  }, [clampedScale, eclipticEpsilon, fleetIconScale, focusDistanceFloor, planets, starRadius]);
   const fleetLayoutsForFocus = useMemo(
     () => layoutTacticalRing(systemFleets, fleetLayoutConfig, day),
     [day, fleetLayoutConfig, systemFleets]
