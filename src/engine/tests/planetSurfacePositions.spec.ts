@@ -7,7 +7,7 @@ import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
 import { generateSurfaceMapForState } from '../planetSurface/access';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { ArmyState, FleetState, ShipType, type FactionState, type Fleet, type GameState, type PlanetBody } from '../../shared/types';
-import { phaseMovement } from '../turn/phases/03_movement';
+import { phaseMovement } from '../runTurn';
 
 interface TestCase {
   name: string;

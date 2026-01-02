@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { phaseCleanup } from '../turn/phases/07_cleanup';
+import { phaseCleanup, TurnContext } from '../runTurn';
 import { RNG } from '../rng';
 import { SHIP_STATS } from '../../content/data/static';
 import {
@@ -12,7 +12,6 @@ import {
   ShipEntity,
   ShipType
 } from '../../shared/types';
-import { TurnContext } from '../turn/types';
 
 interface TestCase {
   name: string;
