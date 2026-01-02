@@ -6,6 +6,7 @@ import { canonicalizeMessages } from '../../state/canonicalize';
 import { sorted } from '../../../shared/sorting';
 import { generateSurfaceMapForState } from '../../planetSurface/access';
 import { neighborsAxial } from '../../planetSurface/hex';
+import { isPassable, relocateSurfacePosDeterministic } from '../../planetSurface/validation';
 import { deriveTerrainType } from '../../ground/terrain';
 import { computeSupplyDistanceMapForBody, SUPPLY_RADIUS } from '../../ground/supply';
 import { computeZocSnapshotForBody } from '../../ground/zoc';
@@ -76,33 +77,105 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         if (!surfaceMap) return;
         const { w, h, wrapX } = surfaceMap.descriptor.config;
 
-        // --- Occupancy (no stacking) ---
+        // --- Pre-cleanup: remove already-out-of-combat units so they don't block movement/retreat/ownership ---
+        bodyArmies.forEach(armyBase => {
+            const current = armiesById.get(armyBase.id) ?? armyBase;
+            if (removeArmyIds.has(current.id)) return;
+            if (current.state !== ArmyState.DEPLOYED) return;
+            if (current.containerId !== bodyId) return;
+            if (!current.surfacePos) return;
+            if (outOfCombat(current)) {
+                removeArmyIds.add(current.id);
+            }
+        });
+
+        const bodyArmiesLive = bodyArmies
+            .map(a => armiesById.get(a.id) ?? a)
+            .filter(a => a.state === ArmyState.DEPLOYED && a.containerId === bodyId && a.surfacePos && !removeArmyIds.has(a.id));
+
+        // --- Occupancy (no stacking) with deterministic destacking ---
         const occupancy = new Map<string, string>(); // hexKey -> armyId
-        bodyArmies.forEach(army => {
+        const stacks = new Map<string, string[]>(); // hexKey -> armyIds
+        const originByKey = new Map<string, HexCoord>();
+        bodyArmiesLive.forEach(army => {
             if (!army.surfacePos) return;
-            const coord: HexCoord = { q: army.surfacePos.q, r: army.surfacePos.r };
+            const origin: HexCoord = { q: army.surfacePos.q, r: army.surfacePos.r };
+            const key = hexKey(origin);
+            const ids = stacks.get(key) ?? [];
+            ids.push(army.id);
+            stacks.set(key, ids);
+            if (!originByKey.has(key)) originByKey.set(key, origin);
+        });
+
+        // Place primary occupant per hex (lexicographically smallest id)
+        stacks.forEach((ids, key) => {
+            ids.sort((a, b) => a.localeCompare(b));
+            occupancy.set(key, ids[0]);
+        });
+
+        const isOccupied = (coord: HexCoord): boolean => occupancy.has(hexKey(coord));
+        const deleteIfMatches = (coord: HexCoord, armyId: string): void => {
             const key = hexKey(coord);
-            const existing = occupancy.get(key);
-            if (!existing) {
-                occupancy.set(key, army.id);
-            } else {
-                // Deterministic: keep lexicographically smallest id; others are considered blocked.
-                const keep = existing.localeCompare(army.id) <= 0 ? existing : army.id;
-                occupancy.set(key, keep);
+            if (occupancy.get(key) === armyId) occupancy.delete(key);
+        };
+
+        // Resolve stacks by relocating non-primary occupants to the nearest free passable tile.
+        stacks.forEach((ids, key) => {
+            if (ids.length <= 1) return;
+            ids.sort((a, b) => a.localeCompare(b));
+            const origin = originByKey.get(key);
+            if (!origin) return;
+            const extras = ids.slice(1);
+            extras.forEach(extraId => {
+                const relocated = relocateSurfacePosDeterministic({
+                    state,
+                    entityId: extraId,
+                    kind: 'army',
+                    bodyId,
+                    origin,
+                    predicate: (biome) => isPassable(biome),
+                    isOccupied: (q, r) => occupancy.has(hexKey({ q, r }))
+                });
+
+                if (!relocated) {
+                    removeArmyIds.add(extraId);
+                    nextLogs.push({
+                        id: ctx.rng.id('log'),
+                        day: ctx.turn,
+                        type: 'info',
+                        text: `[SYSTEM] Ground stacking on ${bodyId} at (${origin.q},${origin.r}) could not be resolved; removing ${extraId}.`
+                    });
+                    return;
+                }
+
+                const extraArmy = armiesById.get(extraId);
+                if (extraArmy && extraArmy.surfacePos) {
+                    armiesById.set(extraId, {
+                        ...extraArmy,
+                        surfacePos: { bodyId, q: relocated.q, r: relocated.r }
+                    });
+                }
+                occupancy.set(hexKey(relocated), extraId);
                 nextLogs.push({
                     id: ctx.rng.id('log'),
                     day: ctx.turn,
                     type: 'info',
-                    text: `[SYSTEM] Ground stacking detected on ${bodyId} at (${coord.q},${coord.r}). Keeping ${keep}.`
+                    text: `[SYSTEM] Ground stacking resolved on ${bodyId} at (${origin.q},${origin.r}): relocated ${extraId} to (${relocated.q},${relocated.r}).`
                 });
-            }
+            });
         });
 
-        const isOccupied = (coord: HexCoord): boolean => Boolean(occupancy.get(hexKey(coord)));
+        // Stable per-body list after stacking resolution/removals
+        const bodyArmiesResolved = sorted(
+            bodyArmies
+                .map(a => armiesById.get(a.id) ?? a)
+                .filter(a => a.state === ArmyState.DEPLOYED && a.containerId === bodyId && a.surfacePos && !removeArmyIds.has(a.id)),
+            (a, b) => a.id.localeCompare(b.id)
+        );
 
         // --- Supply maps per faction involved on this body ---
         const factionIdsOnBody = sorted(
-            Array.from(new Set(bodyArmies.map(a => a.factionId))),
+            Array.from(new Set(bodyArmiesResolved.map(a => a.factionId))),
             (a, b) => a.localeCompare(b)
         );
         const supplyByFaction = new Map<FactionId, Uint16Array | null>();
@@ -119,20 +192,20 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         };
 
         // Snapshot ZOC before movement
-        const zocPre = computeZocSnapshotForBody(state, bodyId, bodyArmies) ?? null;
+        const zocPre = computeZocSnapshotForBody(state, bodyId, bodyArmiesResolved) ?? null;
 
         // --- Execute move orders ---
-        bodyArmies.forEach(army => {
+        bodyArmiesResolved.forEach(army => {
             if (!army.surfacePos) return;
             if (removeArmyIds.has(army.id)) return;
-            const current = armiesById.get(army.id);
-            if (!current) return;
+            const current = armiesById.get(army.id) ?? army;
+            if (!current.surfacePos) return;
             if (current.groundOrder?.type !== 'move') return;
             if (outOfCombat(current)) return;
 
             const supplied = isArmySupplied(current);
             // Remove self from occupancy before pathing
-            occupancy.delete(hexKey({ q: current.surfacePos.q, r: current.surfacePos.r }));
+            deleteIfMatches({ q: current.surfacePos.q, r: current.surfacePos.r }, current.id);
 
             const target: HexCoord = { q: current.groundOrder.to.q, r: current.groundOrder.to.r };
             const result = executeMoveOrder({
@@ -144,17 +217,24 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 isOccupied
             });
 
-            // Re-add occupancy at final position (or original if no move)
-            const finalPos = result.updatedArmy.surfacePos ?? current.surfacePos;
-            occupancy.set(hexKey({ q: finalPos.q, r: finalPos.r }), current.id);
-
-            armiesById.set(current.id, result.updatedArmy);
-            moveStatsByArmyId.set(current.id, {
+            const updatedArmy = result.updatedArmy;
+            armiesById.set(updatedArmy.id, updatedArmy);
+            moveStatsByArmyId.set(updatedArmy.id, {
                 mpEff: result.mpEff,
                 mpUsedCenti: result.mpUsedCenti,
                 used75pct: result.used75pct,
                 supplied
             });
+
+            // If the unit became out-of-combat due to fatigue, remove it immediately.
+            if (outOfCombat(updatedArmy)) {
+                removeArmyIds.add(updatedArmy.id);
+                return;
+            }
+
+            // Re-add occupancy at final position (or original if no move)
+            const finalPos = updatedArmy.surfacePos ?? current.surfacePos;
+            occupancy.set(hexKey({ q: finalPos.q, r: finalPos.r }), updatedArmy.id);
 
             if (result.moved) {
                 nextLogs.push({
@@ -167,7 +247,15 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         });
 
         // Snapshot ZOC after movement (used for retreat heuristics)
-        const postMoveArmies = bodyArmies.map(a => armiesById.get(a.id) ?? a).filter(a => a.state === ArmyState.DEPLOYED);
+        const postMoveArmies = bodyArmiesResolved
+            .map(a => armiesById.get(a.id) ?? a)
+            .filter(
+                a =>
+                    a.state === ArmyState.DEPLOYED &&
+                    a.containerId === bodyId &&
+                    a.surfacePos &&
+                    !removeArmyIds.has(a.id)
+            );
         const zocPost = computeZocSnapshotForBody(state, bodyId, postMoveArmies) ?? null;
 
         // --- Execute attack orders ---
@@ -219,8 +307,6 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             const defenderStartKey = hexKey(defenderHex);
 
             if (engagement.defenderBroke && !outOfCombat(defenderAfter)) {
-                // Free current defender occupancy before retreat
-                occupancy.delete(defenderStartKey);
                 const outcome = chooseDefenderRetreat({
                     state,
                     defender: defenderAfter,
@@ -229,6 +315,8 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                     isOccupied
                 });
                 if (outcome.type === 'retreat') {
+                    // Free defender origin and occupy retreat destination.
+                    deleteIfMatches(defenderHex, defenderAfter.id);
                     defenderAfter = {
                         ...defenderAfter,
                         surfacePos: { bodyId, q: outcome.to.q, r: outcome.to.r }
@@ -246,7 +334,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 const attackerFrom = { q: attacker.surfacePos.q, r: attacker.surfacePos.r };
                 // If defenderStart is now free, advance
                 if (!occupancy.get(defenderStartKey)) {
-                    occupancy.delete(hexKey(attackerFrom));
+                    deleteIfMatches(attackerFrom, attackerAfter.id);
                     occupancy.set(defenderStartKey, attackerAfter.id);
                     attackerAfter = {
                         ...attackerAfter,
@@ -258,8 +346,14 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             armiesById.set(attackerAfter.id, attackerAfter);
             armiesById.set(defenderAfter.id, defenderAfter);
 
-            if (outOfCombat(attackerAfter)) removeArmyIds.add(attackerAfter.id);
-            if (outOfCombat(defenderAfter)) removeArmyIds.add(defenderAfter.id);
+            if (outOfCombat(attackerAfter)) {
+                removeArmyIds.add(attackerAfter.id);
+                if (attackerAfter.surfacePos) deleteIfMatches({ q: attackerAfter.surfacePos.q, r: attackerAfter.surfacePos.r }, attackerAfter.id);
+            }
+            if (outOfCombat(defenderAfter)) {
+                removeArmyIds.add(defenderAfter.id);
+                if (defenderAfter.surfacePos) deleteIfMatches({ q: defenderAfter.surfacePos.q, r: defenderAfter.surfacePos.r }, defenderAfter.id);
+            }
 
             nextLogs.push({
                 id: ctx.rng.id('log'),

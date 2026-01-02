@@ -33,6 +33,7 @@ export const computeZocSnapshotFromArmies = (params: {
     if (army.state !== 'DEPLOYED') return;
     if (army.containerId !== bodyId) return;
     if (!army.surfacePos) return;
+    if (army.members <= 0) return;
     if (army.condition < 0.3) return;
     const q = army.surfacePos.q;
     const r = army.surfacePos.r;
