@@ -1,4 +1,4 @@
-# Spécification du format de sauvegarde `SaveFileV3`
+# Spécification du format de sauvegarde `SaveFileV4`
 
 **Version :** 1.0  
 **Statut :** Brouillon
@@ -6,18 +6,18 @@
 ---
 
 ## 1. Objectif et enveloppe
-`SaveFileV3` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
+`SaveFileV4` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
 
 ### 1.1. Conteneur racine
 ```json
 {
-  "version": 3,
+  "version": 4,
   "createdAt": "<timestamp ISO 8601>",
   "state": { /* GameStateDTO */ }
 }
 ```
 
-- `version` : entier **obligatoire** fixé à `3` lors de l’écriture.
+- `version` : entier **obligatoire** fixé à `4` lors de l’écriture.
 - `createdAt` : horodatage ISO 8601 généré au moment de la sérialisation.
 - `state` : objet `GameStateDTO` complet (voir ci‑dessous).
 
@@ -43,7 +43,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
 - `stations`: structures orbitales (id, systemId, factionId, type, anchorBodyId?, slotIndex?).
-- `armies` : armées embarquées ou déployées (`ArmyState`, force, morale, conteneur).
+- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, position surface optionnelle, ordres).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
 - `lasers` : tirs (`start`, `end`, couleur, durée de vie) conservés pour l’animation.
 - `logs` : journaux texte.
@@ -62,21 +62,27 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - **Points de vie et consommables** : `hp` est clampé à `[0, maxHp]`; les munitions (`offensiveMissiles`, `torpedoes`, `interceptors`) sont remises à leur stock du vaisseau quand la valeur est manquante ou invalide.
 - **Kill history & messages** : les entrées sont assainies (`id` par défaut, dates numériques, chaînes forcées) pour éviter les charges arbitraires.
 
-## 4. Politique de migration v2 → v3
-- **Compatibilité ascendante** : le chargeur accepte encore les enveloppes v2 (`version: 2`), en traitant `state` comme un `GameStateDTO` identique. La sauvegarde est réécrite en v3 lors de la prochaine sérialisation.
-- **Renommages pris en charge** :
-  - `owner` → `ownerFactionId` sur les systèmes.
-  - `faction` → `factionId` sur les flottes, armées et snapshots de bataille.
-  - `winner` → `winnerFactionId` sur les batailles et l’état global.
-- **IA héritée** : si seul `aiState` (global) existe, il est re‑mappé vers `aiStates` en utilisant la faction IA principale quand elle est détectée. Les états par faction déjà présents sont conservés en priorité.
-- **RNG** : un `rngState` manquant est dérivé de `seed` pour éviter une rupture de génération.
-- **Normalisation des couleurs** : une couleur manquante sur un système est remplacée par celle de la faction propriétaire ou par un fallback (`COLORS.star`), avec avertissement console.
+## 4. Politique de migration v3 → v4 (combat terrestre sur surface map)
+
+V4 introduit une refonte des unités terrestres : `strength/maxStrength/morale` sont remplacés par le profil strict `members/maxMembers/attack/defense/condition`, ainsi que des métadonnées de type/ordres.
+
+### 4.1. Règles de migration de `ArmyDTO`
+
+Si une entrée `ArmyDTO` est issue d’une ancienne sauvegarde (v3 ou antérieure) :
+- `maxMembers = maxStrength`
+- `members = strength`
+- `condition = clamp(morale, 0, 1)` (fallback `1`)
+- `unitType` : valeur par défaut si absent
+- `attack/defense` : initialisés à partir des tables statiques `GROUND_UNIT_STATS[unitType]`
+- `groundOrder/posture` : absents par défaut
+
+Les champs legacy `strength/maxStrength/morale` ne sont plus écrits en V4.
 
 ## 5. Gestion des champs manquants
 - `factions` ou `playerFactionId` absents : injection de factions par défaut (Blue/Red) et sélection du joueur sur la première faction disponible.
 - `systems`, `fleets`, `armies`, `lasers`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
 - `stateStartTurn`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
-- `maxStrength` et `morale` des armées : dérivés respectivement de `strength` et `1` si omis.
+- `members/maxMembers/condition` : si absents (legacy), reconstruits via la politique de migration ci-dessus.
 - `objectives` et `rules` : valeurs par défaut si manquantes (`conditions: []`, règles activées).
 - **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
 

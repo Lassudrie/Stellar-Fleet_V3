@@ -24,6 +24,20 @@ export enum ArmyState {
   IN_TRANSIT = 'IN_TRANSIT',
 }
 
+// --- Ground Units (Surface Map) ---
+
+export type GroundUnitType =
+  | 'light_infantry'
+  | 'mechanized_infantry'
+  | 'heavy_armor'
+  | 'artillery';
+
+export type GroundPosture = 'normal' | 'prepared_defense';
+
+export type GroundOrder =
+  | { type: 'move'; to: SurfacePos }
+  | { type: 'attack'; targetArmyId: string };
+
 export enum ShipType {
   CARRIER = 'carrier',
   CRUISER = 'cruiser',
@@ -284,9 +298,6 @@ export interface ShipEntity {
 export interface Army {
   id: string;
   factionId: FactionId; // Renamed from faction
-  strength: number;
-  maxStrength: number;
-  morale: number;
   state: ArmyState;
   containerId: string;
   /**
@@ -294,6 +305,18 @@ export interface Army {
    * Authoritative gameplay state (not derived).
    */
   surfacePos?: SurfacePos;
+
+  // --- Metadata (not part of combat formulas) ---
+  unitType: GroundUnitType;
+  posture?: GroundPosture;
+  groundOrder?: GroundOrder;
+
+  // --- Strict combat profile (used by ground resolver) ---
+  maxMembers: number;  // MM
+  members: number;     // M
+  attack: number;      // A
+  defense: number;     // D
+  condition: number;   // C in [0..1]
 }
 
 export interface StarSystem {

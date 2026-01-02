@@ -25,6 +25,10 @@ export type GameCommand =
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
   | { type: 'MOVE_ARMY_ON_SURFACE'; armyId: string; to: { bodyId: string; q: number; r: number } }
+  | { type: 'ORDER_GROUND_MOVE'; armyId: string; to: { bodyId: string; q: number; r: number } }
+  | { type: 'ORDER_GROUND_ATTACK'; attackerId: string; targetArmyId: string }
+  | { type: 'SET_GROUND_POSTURE'; armyId: string; posture: 'normal' | 'prepared_defense' }
+  | { type: 'CANCEL_GROUND_ORDER'; armyId: string }
   | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: { bodyId: string; q: number; r: number }; name?: string }
   | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
   | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
@@ -79,6 +83,70 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
     const ok = (nextState: GameState, events?: string[]): CommandResult => ({ ok: true, state: nextState, events });
 
     switch (command.type) {
+        case 'ORDER_GROUND_MOVE': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army) return fail('Army not found');
+            if (army.state !== ArmyState.DEPLOYED) return fail('Army is not deployed on a planet surface.');
+
+            const bodyId = command.to.bodyId;
+            if (army.containerId !== bodyId) return fail('Army is not on the target body.');
+
+            const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
+            if (!descriptor) return fail('Missing surface descriptor for body.');
+
+            const q = Math.floor(command.to.q);
+            const r = Math.floor(command.to.r);
+            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+
+            const tileResult = getTileAt(state, bodyId, q, r);
+            if (!tileResult) return fail('Unable to resolve target tile.');
+            if (!isPassable(tileResult.tile.biome)) return fail('Target tile is not passable.');
+
+            return ok({
+                ...state,
+                armies: state.armies.map(a => a.id === army.id
+                    ? ({ ...a, groundOrder: { type: 'move', to: { bodyId, q, r } } })
+                    : a)
+            });
+        }
+
+        case 'ORDER_GROUND_ATTACK': {
+            const attacker = state.armies.find(a => a.id === command.attackerId);
+            const defender = state.armies.find(a => a.id === command.targetArmyId);
+            if (!attacker) return fail('Attacker army not found');
+            if (!defender) return fail('Target army not found');
+            if (attacker.id === defender.id) return fail('Invalid target');
+            if (attacker.state !== ArmyState.DEPLOYED || defender.state !== ArmyState.DEPLOYED) {
+                return fail('Both armies must be deployed on a planet surface.');
+            }
+            if (attacker.containerId !== defender.containerId) return fail('Armies are not on the same body.');
+
+            return ok({
+                ...state,
+                armies: state.armies.map(a => a.id === attacker.id
+                    ? ({ ...a, groundOrder: { type: 'attack', targetArmyId: defender.id } })
+                    : a)
+            });
+        }
+
+        case 'SET_GROUND_POSTURE': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army) return fail('Army not found');
+            return ok({
+                ...state,
+                armies: state.armies.map(a => a.id === army.id ? ({ ...a, posture: command.posture }) : a)
+            });
+        }
+
+        case 'CANCEL_GROUND_ORDER': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army) return fail('Army not found');
+            return ok({
+                ...state,
+                armies: state.armies.map(a => a.id === army.id ? ({ ...a, groundOrder: undefined }) : a)
+            });
+        }
+
         case 'MOVE_ARMY_ON_SURFACE': {
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');

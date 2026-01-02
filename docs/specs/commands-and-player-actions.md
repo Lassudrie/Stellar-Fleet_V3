@@ -75,6 +75,40 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
   - Déplace l’armée vers `toPlanetId` (champ `containerId`).
   - Ajoute un log de mouvement (texte par défaut ou `reason` personnalisé).
 
+---
+
+## Commandes terrestres (Surface Map)
+
+Ces commandes posent des **ordres** exécutés plus tard par `phaseGround`. Elles ne déplacent ni ne résolvent de combat immédiatement.
+
+### ORDER_GROUND_MOVE
+- **Entrée** : `armyId`, `to` (`{ bodyId, q, r }`).
+- **Préconditions/erreurs** :
+  - L’armée doit exister.
+  - L’armée doit être `ArmyState.DEPLOYED`.
+  - `to.bodyId` doit correspondre au `containerId` de l’armée (même body).
+  - Les coordonnées doivent être dans les bornes de la surface map et viser un hex passable.
+  - En cas d’échec, la commande retourne une erreur explicite (`Army not found`, `Army is not deployed...`, etc.).
+- **Effets** : assigne `army.groundOrder = { type:'move', to }`.
+
+### ORDER_GROUND_ATTACK
+- **Entrée** : `attackerId`, `targetArmyId`.
+- **Préconditions/erreurs** :
+  - Les deux armées doivent exister et être `DEPLOYED`.
+  - Elles doivent être sur le même `bodyId`.
+  - Le moteur ne valide pas ici l’adjacence (elle est validée en `phaseGround`), mais peut refuser si `targetArmyId === attackerId`.
+- **Effets** : assigne `attacker.groundOrder = { type:'attack', targetArmyId }`.
+
+### SET_GROUND_POSTURE
+- **Entrée** : `armyId`, `posture` (`'normal'|'prepared_defense'`).
+- **Préconditions/erreurs** : l’armée doit exister.
+- **Effets** : met à jour `army.posture`.
+
+### CANCEL_GROUND_ORDER
+- **Entrée** : `armyId`.
+- **Préconditions/erreurs** : l’armée doit exister.
+- **Effets** : `army.groundOrder = undefined`.
+
 ## Actions joueur hors `GameCommand`
 
 Ces actions sont validées côté moteur puis modifient directement l’état sans passer par `applyCommand`.

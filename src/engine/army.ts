@@ -1,19 +1,20 @@
 
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody } from '../shared/types';
+import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody, GroundUnitType } from '../shared/types';
 import { RNG } from './rng';
 import { logger } from '../shared/devLogger';
 import { getPlanetById } from './planets';
 import { sorted } from '../shared/sorting';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 
-export const MIN_ARMY_CREATION_STRENGTH = 10000;
-export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(100, Math.floor(maxStrength * 0.2));
+export const MIN_ARMY_CREATION_MEMBERS = 10000;
 
 /**
  * Creates a new Army entity.
- * Enforces the rule: Minimum 10,000 soldiers.
+ * Enforces the rule: Minimum 10,000 members.
  * 
  * @param factionId The faction owning the army.
- * @param strength Number of soldiers.
+ * @param unitType Unit archetype (drives default stats).
+ * @param members Number of members.
  * @param containerId ID of the Fleet (if embarked) or Planet/Moon (if deployed).
  * @param initialState Initial state (default: EMBARKED).
  * @param rng Random Number Generator for ID creation.
@@ -21,15 +22,16 @@ export const ARMY_DESTROY_THRESHOLD = (maxStrength: number): number => Math.max(
  */
 export const createArmy = (
   factionId: FactionId,
-  strength: number,
+  unitType: GroundUnitType,
+  members: number,
   containerId: string,
   initialState: ArmyState,
   rng: RNG
 ): Army | null => {
   
   // Rule Check: Minimum Strength
-  if (strength < MIN_ARMY_CREATION_STRENGTH) {
-    logger.error(`[Army] Creation Failed: Army strength ${strength} is below minimum of ${MIN_ARMY_CREATION_STRENGTH}.`);
+  if (members < MIN_ARMY_CREATION_MEMBERS) {
+    logger.error(`[Army] Creation Failed: Army members ${members} is below minimum of ${MIN_ARMY_CREATION_MEMBERS}.`);
     return null;
   }
 
@@ -39,17 +41,23 @@ export const createArmy = (
     return null;
   }
 
+  const defaults = GROUND_UNIT_STATS[unitType];
+  const maxMembers = Math.max(Math.floor(members), defaults.defaultMaxMembers);
   const army: Army = {
     id: rng.id('army'),
     factionId,
-    strength: Math.floor(strength), // Ensure integer
-    maxStrength: Math.floor(strength),
-    morale: 1,
+    unitType,
+    posture: 'normal',
+    maxMembers: Math.floor(maxMembers),
+    members: Math.min(Math.floor(members), Math.floor(maxMembers)),
+    attack: defaults.baseAttack,
+    defense: defaults.baseDefense,
+    condition: 1,
     state: initialState,
     containerId
   };
 
-  logger.debug(`[Army] Created Army ${army.id} (${factionId}) with ${strength} soldiers. State: ${initialState}. Container: ${containerId}`);
+  logger.debug(`[Army] Created Army ${army.id} (${factionId}) type=${unitType} with ${members} members. State: ${initialState}. Container: ${containerId}`);
   return army;
 };
 
@@ -58,11 +66,12 @@ export const createArmy = (
  * Ensures the army is in a valid location based on its state.
  */
 export const validateArmyState = (army: Army, state: GameState): boolean => {
-  // 1. Strength Integrity
-  if (army.maxStrength < MIN_ARMY_CREATION_STRENGTH) {
-    // console.warn(`[Army] Invalid Strength: Army ${army.id} has ${army.strength} soldiers.`);
-    return false;
-  }
+  // 1. Profile integrity
+  if (army.maxMembers < 0) return false;
+  if (army.members < 0) return false;
+  if (army.members > army.maxMembers) return false;
+  if (!Number.isFinite(army.attack) || !Number.isFinite(army.defense)) return false;
+  if (!Number.isFinite(army.condition) || army.condition < 0 || army.condition > 1) return false;
 
   // 2. Location Integrity
   if (army.state === ArmyState.DEPLOYED) {
@@ -187,9 +196,9 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
         }
 
         if (isValid) {
-            const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
-            if (army.strength <= destructionThreshold) {
-                logs.push(`Army ${army.id} removed due to critical strength (${army.strength} <= ${destructionThreshold}).`);
+            const outOfCombat = army.members === 0 || army.condition < 0.20;
+            if (outOfCombat) {
+                logs.push(`Army ${army.id} removed as out of combat (members=${army.members}, condition=${army.condition.toFixed(2)}).`);
                 isValid = false;
             }
         }

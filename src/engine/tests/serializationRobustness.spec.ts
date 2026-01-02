@@ -101,9 +101,12 @@ const createBaseState = (): GameState => {
     {
       id: 'army-bad',
       factionId: 'blue',
-      strength: 'bad',
-      maxStrength: 'bad',
-      morale: 1,
+      unitType: 'mechanized_infantry',
+      maxMembers: -5,
+      members: 10,
+      attack: 1,
+      defense: 1,
+      condition: 1,
       state: ArmyState.DEPLOYED,
       containerId: planetId
     }

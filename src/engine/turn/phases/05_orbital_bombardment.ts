@@ -28,7 +28,7 @@ export const phaseOrbitalBombardment = (state: GameState, ctx: TurnContext): Gam
   const nextArmies = state.armies.map(army => {
     const update = result.updates.get(army.id);
     if (!update) return army;
-    return { ...army, strength: update.strength, morale: update.morale };
+    return { ...army, members: update.members, condition: update.condition };
   });
 
   const nextLogs = [...state.logs];

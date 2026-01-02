@@ -26,7 +26,10 @@ import {
   PlanetSurfaceDescriptor,
   GroundBuilding,
   GroundBuildingType,
-  SurfacePos
+  SurfacePos,
+  GroundOrder,
+  GroundPosture,
+  GroundUnitType
 } from '../shared/types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -41,6 +44,7 @@ import {
   GameMessageDTO
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../content/data/static';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { generateStellarSystem } from './worldgen/stellar';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
@@ -248,6 +252,34 @@ const sanitizeSurfacePos = (value: unknown, validBodyIds: Set<string>): SurfaceP
   if (typeof p.bodyId !== 'string' || !validBodyIds.has(p.bodyId)) return null;
   if (!isFiniteNumber(p.q) || !isFiniteNumber(p.r)) return null;
   return { bodyId: p.bodyId, q: Math.floor(p.q), r: Math.floor(p.r) };
+};
+
+const GROUND_UNIT_TYPES = new Set<GroundUnitType>([
+  'light_infantry',
+  'mechanized_infantry',
+  'heavy_armor',
+  'artillery'
+]);
+
+const GROUND_POSTURES = new Set<GroundPosture>(['normal', 'prepared_defense']);
+
+const sanitizeGroundOrder = (
+  value: unknown,
+  validBodyIds: Set<string>
+): GroundOrder | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') return undefined;
+  const o: any = value;
+  if (o.type === 'move') {
+    const to = sanitizeSurfacePos(o.to, validBodyIds);
+    if (!to) return undefined;
+    return { type: 'move', to };
+  }
+  if (o.type === 'attack') {
+    if (typeof o.targetArmyId !== 'string' || o.targetArmyId.length === 0) return undefined;
+    return { type: 'attack', targetArmyId: o.targetArmyId };
+  }
+  return undefined;
 };
 
 const sanitizeGroundBuildings = (
@@ -506,9 +538,14 @@ export const serializeGameState = (state: GameState): string => {
     armies: state.armies.map(a => ({
       id: a.id,
       factionId: a.factionId,
-      strength: a.strength,
-      maxStrength: a.maxStrength,
-      morale: a.morale,
+      unitType: a.unitType,
+      posture: a.posture ?? 'normal',
+      groundOrder: a.groundOrder,
+      maxMembers: a.maxMembers,
+      members: a.members,
+      attack: a.attack,
+      defense: a.defense,
+      condition: a.condition,
       state: a.state,
       containerId: a.containerId,
       surfacePos: a.surfacePos
@@ -557,7 +594,11 @@ export const deserializeGameState = (json: string): GameState => {
     throw new Error("File is not valid JSON.");
   }
 
-  if (raw && typeof raw === 'object' && raw.version !== undefined) {
+  const saveVersion: number | undefined = raw && typeof raw === 'object' && raw.version !== undefined
+    ? Number(raw.version)
+    : undefined;
+
+  if (saveVersion !== undefined) {
     if (!isFiniteNumber(raw.version)) {
       throw new Error('Save file version must be a number.');
     }
@@ -811,11 +852,36 @@ export const deserializeGameState = (json: string): GameState => {
         if (!isEnumValue(ARMY_STATES, a.state)) return null;
         if (typeof a.containerId !== 'string') return null;
 
-        const maxStrength = isFiniteNumber(a.maxStrength) ? a.maxStrength : (isFiniteNumber(a.strength) ? a.strength : null);
-        if (maxStrength === null || maxStrength < 0) return null;
-        const strength = isFiniteNumber(a.strength) ? a.strength : maxStrength;
-        const clampedStrength = Math.min(Math.max(strength, 0), maxStrength);
-        const morale = isFiniteNumber(a.morale) ? Math.max(0, Math.min(1, a.morale)) : 1;
+        // --- V4 ground unit fields (with V3 migration) ---
+        const unitType: GroundUnitType =
+          typeof a.unitType === 'string' && GROUND_UNIT_TYPES.has(a.unitType as GroundUnitType)
+            ? (a.unitType as GroundUnitType)
+            : 'mechanized_infantry';
+        const defaults = GROUND_UNIT_STATS[unitType];
+
+        const legacyMaxStrength = isFiniteNumber(a.maxStrength)
+          ? a.maxStrength
+          : (isFiniteNumber(a.strength) ? a.strength : null);
+        const legacyStrength = isFiniteNumber(a.strength) ? a.strength : legacyMaxStrength;
+        const legacyMorale = isFiniteNumber(a.morale) ? Math.max(0, Math.min(1, a.morale)) : 1;
+
+        const maxMembersRaw =
+          isFiniteNumber(a.maxMembers) ? a.maxMembers : legacyMaxStrength ?? defaults.defaultMaxMembers;
+        if (!Number.isFinite(maxMembersRaw) || maxMembersRaw < 0) return null;
+        const maxMembers = Math.floor(maxMembersRaw);
+
+        const membersRaw =
+          isFiniteNumber(a.members) ? a.members : legacyStrength ?? maxMembers;
+        const members = Math.min(Math.max(Math.floor(membersRaw), 0), maxMembers);
+
+        const attack = isFiniteNumber(a.attack) ? a.attack : defaults.baseAttack;
+        const defense = isFiniteNumber(a.defense) ? a.defense : defaults.baseDefense;
+        const condition = isFiniteNumber(a.condition) ? Math.max(0, Math.min(1, a.condition)) : legacyMorale;
+
+        const posture: GroundPosture | undefined =
+          typeof a.posture === 'string' && GROUND_POSTURES.has(a.posture as GroundPosture)
+            ? (a.posture as GroundPosture)
+            : undefined;
 
         if (a.state === ArmyState.DEPLOYED && !planetIds.has(a.containerId)) return null;
         if (a.state !== ArmyState.DEPLOYED && !fleetIds.has(a.containerId)) return null;
@@ -829,12 +895,19 @@ export const deserializeGameState = (json: string): GameState => {
             ? surfacePos
             : undefined;
 
+        const groundOrder = sanitizeGroundOrder(a.groundOrder, planetIds);
+
         const baseArmy: Army = {
           id: a.id,
           factionId,
-          strength: clampedStrength,
-          maxStrength,
-          morale,
+          unitType,
+          posture,
+          groundOrder,
+          maxMembers,
+          members,
+          attack,
+          defense,
+          condition,
           state: a.state,
           containerId: a.containerId,
           ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {})

@@ -227,27 +227,27 @@ const UI: React.FC<UIProps> = ({
 
       const systemPlanetIds = new Set(targetSystem.planets.filter(planet => planet.isSolid).map(planet => planet.id));
 
-      const aggregates: Record<FactionId, { count: number, currentStrength: number, maxStrength: number, moraleSum: number }> = {};
+      const aggregates: Record<FactionId, { count: number, currentMembers: number, maxMembers: number, conditionSum: number }> = {};
 
       gameState.armies.forEach(army => {
           if (systemPlanetIds.has(army.containerId) && army.state === ArmyState.DEPLOYED) {
               if (!aggregates[army.factionId]) {
-                  aggregates[army.factionId] = { count: 0, currentStrength: 0, maxStrength: 0, moraleSum: 0 };
+                  aggregates[army.factionId] = { count: 0, currentMembers: 0, maxMembers: 0, conditionSum: 0 };
               }
               const bucket = aggregates[army.factionId];
               bucket.count += 1;
-              bucket.currentStrength += army.strength;
-              bucket.maxStrength += army.maxStrength;
-              bucket.moraleSum += army.morale;
+              bucket.currentMembers += army.members;
+              bucket.maxMembers += army.maxMembers;
+              bucket.conditionSum += army.condition;
           }
       });
 
       const summaries = Object.entries(aggregates).reduce<Record<FactionId, GroundForceSummaryEntry>>((acc, [factionId, bucket]) => {
           if (bucket.count === 0) return acc;
 
-          const losses = bucket.maxStrength - bucket.currentStrength;
-          const lossPercent = bucket.maxStrength > 0 ? (losses / bucket.maxStrength) * 100 : 0;
-          const averageMoralePercent = (bucket.moraleSum / bucket.count) * 100;
+          const losses = bucket.maxMembers - bucket.currentMembers;
+          const lossPercent = bucket.maxMembers > 0 ? (losses / bucket.maxMembers) * 100 : 0;
+          const averageMoralePercent = (bucket.conditionSum / bucket.count) * 100;
 
           const faction = factionLookup[factionId];
           const fallbackColor = factionId === playerFactionId ? '#93c5fd' : '#f87171';
@@ -258,8 +258,8 @@ const UI: React.FC<UIProps> = ({
               color: faction?.color ?? fallbackColor,
               isPlayer: factionId === playerFactionId,
               count: bucket.count,
-              currentStrength: bucket.currentStrength,
-              maxStrength: bucket.maxStrength,
+              currentStrength: bucket.currentMembers,
+              maxStrength: bucket.maxMembers,
               losses,
               lossPercent,
               averageMoralePercent,

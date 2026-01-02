@@ -18,6 +18,28 @@ const factions: FactionState[] = [
   { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }
 ];
 
+const createArmy = (params: {
+  id: string;
+  factionId: string;
+  members: number;
+  state: ArmyState;
+  containerId: string;
+  surfacePos?: { bodyId: string; q: number; r: number };
+}): any => ({
+  id: params.id,
+  factionId: params.factionId,
+  unitType: 'mechanized_infantry',
+  posture: 'normal',
+  maxMembers: params.members,
+  members: params.members,
+  attack: 1,
+  defense: 1,
+  condition: 1,
+  state: params.state,
+  containerId: params.containerId,
+  ...(params.surfacePos ? { surfacePos: params.surfacePos } : {})
+});
+
 const createStateWithOneSurface = (worldSeed: number, systemId: string): { state: GameState; body: PlanetBody } => {
   const astro = generateStellarSystem({ worldSeed, systemId });
   const system = {
@@ -94,16 +116,14 @@ const tests: TestCase[] = [
 
       const withEntities: GameState = {
         ...base,
-        armies: [{
+        armies: [createArmy({
           id: 'army-1',
           factionId: 'blue',
-          strength: 10000,
-          maxStrength: 10000,
-          morale: 1,
+          members: 10000,
           state: ArmyState.DEPLOYED,
           containerId: body.id,
           surfacePos: { bodyId: body.id, q: land.q, r: land.r }
-        }],
+        })],
         groundBuildings: [{
           id: 'bld-1',
           factionId: 'blue',
@@ -158,16 +178,14 @@ const tests: TestCase[] = [
 
       const state: GameState = {
         ...base,
-        armies: [{
+        armies: [createArmy({
           id: 'army-1',
           factionId: 'blue',
-          strength: 10000,
-          maxStrength: 10000,
-          morale: 1,
+          members: 10000,
           state: ArmyState.DEPLOYED,
           containerId: body.id,
           surfacePos: { bodyId: body.id, q: landA.q, r: landA.r }
-        }]
+        })]
       };
 
       const fail = applyCommand(state, { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: water.q, r: water.r } }, new RNG(5));
@@ -184,16 +202,14 @@ const tests: TestCase[] = [
       const { state: base, body } = createStateWithOneSurface(99, 'sys_reloc');
       const save = JSON.parse(serializeGameState({
         ...base,
-        armies: [{
+        armies: [createArmy({
           id: 'army-1',
           factionId: 'blue',
-          strength: 10000,
-          maxStrength: 10000,
-          morale: 1,
+          members: 10000,
           state: ArmyState.DEPLOYED,
           containerId: body.id,
           surfacePos: { bodyId: body.id, q: 9999, r: 9999 } // out of bounds
-        }]
+        })]
       }));
 
       const restoredA = deserializeGameState(JSON.stringify(save));
@@ -224,29 +240,25 @@ const tests: TestCase[] = [
 
       // Ensure defenders exist so the invasion prioritization logic has a target.
       const defenderLand = pickAnyTile(base, body.id, b => !isWater(b));
-      const defenderArmy = {
+      const defenderArmy = createArmy({
         id: 'army-def',
         factionId: 'red',
-        strength: 9000,
-        maxStrength: 9000,
-        morale: 1,
+        members: 9000,
         state: ArmyState.DEPLOYED,
         containerId: body.id,
         surfacePos: { bodyId: body.id, q: defenderLand.q, r: defenderLand.r }
-      };
+      });
 
       const attackerArmyId = 'army-atk';
       const fleetId = 'fleet-inv';
 
-      const attackerArmy = {
+      const attackerArmy = createArmy({
         id: attackerArmyId,
         factionId: 'blue',
-        strength: 10000,
-        maxStrength: 10000,
-        morale: 1,
+        members: 10000,
         state: ArmyState.EMBARKED,
         containerId: fleetId
-      };
+      });
 
       const fleet: Fleet = {
         id: fleetId,
