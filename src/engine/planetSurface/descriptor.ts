@@ -6,6 +6,8 @@ export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 1;
 const clampInt = (x: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, Math.round(x)));
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export const deriveSurfaceSeed = (params: {
   gameSeed: number;
   systemId: string;
@@ -37,14 +39,16 @@ export const parseAstroRefFromBodyId = (
   // Canonical IDs used by engine/planets.ts:
   // - planet-${systemId}-${planetIndex+1}
   // - moon-${systemId}-${planetIndex+1}-${moonIndex+1}
-  const planetMatch = new RegExp(`^planet-${systemId}-(\\d+)$`).exec(bodyId);
+  const safeSystemId = escapeRegExp(systemId);
+
+  const planetMatch = new RegExp(`^planet-${safeSystemId}-(\\d+)$`).exec(bodyId);
   if (planetMatch) {
     const planetIndex = Number(planetMatch[1]) - 1;
     if (Number.isFinite(planetIndex) && planetIndex >= 0) return { planetIndex };
     return undefined;
   }
 
-  const moonMatch = new RegExp(`^moon-${systemId}-(\\d+)-(\\d+)$`).exec(bodyId);
+  const moonMatch = new RegExp(`^moon-${safeSystemId}-(\\d+)-(\\d+)$`).exec(bodyId);
   if (moonMatch) {
     const planetIndex = Number(moonMatch[1]) - 1;
     const moonIndex = Number(moonMatch[2]) - 1;

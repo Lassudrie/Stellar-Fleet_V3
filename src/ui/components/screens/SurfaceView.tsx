@@ -36,6 +36,9 @@ type CameraState = { zoom: number; offset: { x: number; y: number } };
 const HEX_SIZE = 12;
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 2.6;
+const CLICK_DRAG_THRESHOLD_PX = 6;
+const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
+const PAN_MARGIN_PX = 40;
 
 const biomeColors: Record<Biome, string> = {
   ocean: '#0ea5e9',
@@ -55,6 +58,12 @@ const biomeColors: Record<Biome, string> = {
 };
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const sameHex = (a: HexCoord | null, b: HexCoord | null): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.q === b.q && a.r === b.r;
+};
 
 const wrapQ = (q: number, w: number, wrapX: boolean): number => {
   if (!wrapX) return q;
@@ -96,10 +105,38 @@ const roundAxial = ({ q, r }: { q: number; r: number }): HexCoord => {
   return { q: rx, r: rz };
 };
 
-const computeMapSizePx = (config: PlanetSurfaceMap['descriptor']['config'], size: number) => {
-  const width = Math.sqrt(3) * size * (config.w + 0.5);
-  const height = size * 1.5 * (config.h - 1) + size * 2;
-  return { width, height };
+type MapBoundsPx = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
+const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['config'], size: number): MapBoundsPx => {
+  // For pointy-top axial coords:
+  // - center x = size * (sqrt(3)*q + sqrt(3)/2*r)
+  // - center y = size * (3/2*r)
+  // Hex polygon bounds from center:
+  // - half width = sqrt(3)/2 * size
+  // - half height = size
+  const halfW = (Math.sqrt(3) / 2) * size;
+  const minX = -halfW;
+  const minY = -size;
+
+  const bottomRight = axialToPixel(config.w - 1, config.h - 1, size);
+  const maxX = bottomRight.x + halfW;
+  const maxY = bottomRight.y + size;
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
 };
 
 const normalizePos = (pos: SurfacePos | undefined, config: PlanetSurfaceMap['descriptor']['config']): HexCoord | null => {
@@ -145,7 +182,16 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const panRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+  const drawRafRef = useRef<number | null>(null);
+  const panRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    didPan: boolean;
+    movedSq: number;
+  } | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [camera, setCamera] = useState<CameraState>({ zoom: 1, offset: { x: 0, y: 0 } });
   const [hovered, setHovered] = useState<HexCoord | null>(null);
@@ -179,17 +225,64 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
-    const { width, height } = computeMapSizePx(activeMapConfig, HEX_SIZE);
+    const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
     setCamera({
       zoom: 1,
       offset: {
-        x: (viewport.width - width) / 2,
-        y: (viewport.height - height) / 2
+        x: (viewport.width - bounds.width) / 2 - bounds.minX,
+        y: (viewport.height - bounds.height) / 2 - bounds.minY
       }
     });
     setHovered(null);
     setSelected(null);
   }, [map?.bodyId, activeMapConfig, viewport.width, viewport.height]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const nextWidth = Math.max(1, Math.floor(viewport.width * dpr));
+    const nextHeight = Math.max(1, Math.floor(viewport.height * dpr));
+
+    if (canvas.width !== nextWidth) canvas.width = nextWidth;
+    if (canvas.height !== nextHeight) canvas.height = nextHeight;
+
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
+  }, [viewport.width, viewport.height]);
+
+  const clampOffset = useCallback(
+    (offset: { x: number; y: number }, zoom: number): { x: number; y: number } => {
+      if (!activeMapConfig) return offset;
+
+      const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
+      const mapW = bounds.width * zoom;
+      const mapH = bounds.height * zoom;
+
+      let x = offset.x;
+      let y = offset.y;
+
+      if (mapW <= viewport.width) {
+        x = (viewport.width - mapW) / 2 - bounds.minX * zoom;
+      } else {
+        const minX = viewport.width - PAN_MARGIN_PX - bounds.maxX * zoom;
+        const maxX = PAN_MARGIN_PX - bounds.minX * zoom;
+        x = clamp(x, minX, maxX);
+      }
+
+      if (mapH <= viewport.height) {
+        y = (viewport.height - mapH) / 2 - bounds.minY * zoom;
+      } else {
+        const minY = viewport.height - PAN_MARGIN_PX - bounds.maxY * zoom;
+        const maxY = PAN_MARGIN_PX - bounds.minY * zoom;
+        y = clamp(y, minY, maxY);
+      }
+
+      return { x, y };
+    },
+    [activeMapConfig, viewport.height, viewport.width]
+  );
 
   const normalizedArmies = useMemo(() => {
     if (!map || !activeMapConfig) return [];
@@ -234,13 +327,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const y = clientY - rect.top;
     const worldX = (x - camera.offset.x) / camera.zoom;
     const worldY = (y - camera.offset.y) / camera.zoom;
+
+    const bounds = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
+    if (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY || worldY > bounds.maxY) return null;
+
     const axial = pixelToAxial(worldX, worldY, HEX_SIZE);
     const rounded = roundAxial(axial);
     const normalized = normalizePos({ ...rounded, bodyId: map.bodyId }, map.descriptor.config);
     return normalized;
   }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
 
-  const drawHex = (ctx: CanvasRenderingContext2D, center: { x: number; y: number }, size: number, options: { fill?: string; stroke?: string }) => {
+  const drawHex = (
+    ctx: CanvasRenderingContext2D,
+    center: { x: number; y: number },
+    size: number,
+    options: { fill?: string; stroke?: string; lineWidth?: number }
+  ) => {
     ctx.beginPath();
     for (let i = 0; i < 6; i += 1) {
       const angle = Math.PI / 180 * (60 * i - 30);
@@ -256,7 +358,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }
     if (options.stroke) {
       ctx.strokeStyle = options.stroke;
-      ctx.lineWidth = 0.75;
+      if (typeof options.lineWidth === 'number') ctx.lineWidth = options.lineWidth;
       ctx.stroke();
     }
   };
@@ -269,10 +371,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = viewport.width * dpr;
-    canvas.height = viewport.height * dpr;
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -284,13 +382,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     for (let r = 0; r < activeMapConfig.h; r += 1) {
       for (let q = 0; q < activeMapConfig.w; q += 1) {
         const tile = map.tiles[r * activeMapConfig.w + q];
+        if (!tile) continue;
         const { x, y } = axialToPixel(q, r, HEX_SIZE);
         const center = {
           x: x * camera.zoom + camera.offset.x,
           y: y * camera.zoom + camera.offset.y
         };
         const color = biomeColors[tile.biome] ?? '#334155';
-        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke });
+        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 });
       }
     }
 
@@ -347,9 +446,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
       };
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      drawHex(ctx, center, hexSize * 1.02, { stroke: color });
+      drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
     };
 
     if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');
@@ -359,7 +456,19 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   }, [activeMapConfig, camera.offset.x, camera.offset.y, camera.zoom, hovered, map, normalizedArmies, normalizedBuildings, playerFactionId, selected, settlements, viewport.height, viewport.width]);
 
   useEffect(() => {
-    draw();
+    const rafId = window.requestAnimationFrame(() => {
+      drawRafRef.current = null;
+      draw();
+    });
+
+    drawRafRef.current = rafId;
+
+    return () => {
+      if (drawRafRef.current !== null) {
+        window.cancelAnimationFrame(drawRafRef.current);
+        drawRafRef.current = null;
+      }
+    };
   }, [draw]);
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -376,59 +485,94 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     setCamera(prev => {
       const nextZoom = clamp(prev.zoom * zoomFactor, MIN_ZOOM, MAX_ZOOM);
       const scale = nextZoom / prev.zoom;
+      const nextOffset = {
+        x: focusX - (focusX - prev.offset.x) * scale,
+        y: focusY - (focusY - prev.offset.y) * scale
+      };
       return {
         zoom: nextZoom,
         offset: {
-          x: focusX - (focusX - prev.offset.x) * scale,
-          y: focusY - (focusY - prev.offset.y) * scale
+          ...clampOffset(nextOffset, nextZoom)
         }
       };
     });
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0) return;
+    if (!canvasRef.current) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     panRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       offsetX: camera.offset.x,
-      offsetY: camera.offset.y
+      offsetY: camera.offset.y,
+      didPan: false,
+      movedSq: 0
     };
-    setIsPanning(true);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (panRef.current && panRef.current.pointerId === event.pointerId) {
-      setCamera(prev => ({
-        ...prev,
-        offset: {
-          x: panRef.current!.offsetX + (event.clientX - panRef.current!.startX),
-          y: panRef.current!.offsetY + (event.clientY - panRef.current!.startY)
-        }
-      }));
+      const dx = event.clientX - panRef.current.startX;
+      const dy = event.clientY - panRef.current.startY;
+      const movedSq = dx * dx + dy * dy;
+
+      panRef.current.movedSq = movedSq;
+
+      if (!panRef.current.didPan && movedSq >= CLICK_DRAG_THRESHOLD_SQ) {
+        panRef.current.didPan = true;
+        setIsPanning(true);
+      }
+
+      if (panRef.current.didPan) {
+        const nextOffset = {
+          x: panRef.current.offsetX + dx,
+          y: panRef.current.offsetY + dy
+        };
+
+        setCamera(prev => ({
+          ...prev,
+          offset: clampOffset(nextOffset, prev.zoom)
+        }));
+      }
       return;
     }
 
+    if (!map) return;
+
     const coord = pickCoord(event.clientX, event.clientY);
-    setHovered(coord);
+    setHovered(prev => (sameHex(prev, coord) ? prev : coord));
   };
 
   const clearPan = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (panRef.current) {
-      if (event.pointerId === panRef.current.pointerId) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-        panRef.current = null;
-        setIsPanning(false);
-      }
+    if (!panRef.current) return;
+    if (event.pointerId !== panRef.current.pointerId) return;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released/canceled; ignore.
     }
+    panRef.current = null;
+    setIsPanning(false);
   };
 
-  const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!map) return;
-    const coord = pickCoord(event.clientX, event.clientY);
-    setSelected(coord);
+  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const pan = panRef.current;
+    if (pan && pan.pointerId === event.pointerId) {
+      const isClick = !pan.didPan && pan.movedSq < CLICK_DRAG_THRESHOLD_SQ;
+
+      clearPan(event);
+
+      if (isClick && map) {
+        const coord = pickCoord(event.clientX, event.clientY);
+        setSelected(coord);
+      }
+      return;
+    }
+
+    clearPan(event);
   };
 
   const activeCoord = selected ?? hovered;
@@ -484,7 +628,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     );
   }
 
-  const mapSizePx = computeMapSizePx(map.descriptor.config, HEX_SIZE);
+  const mapBoundsPx = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
   const primaryButtonClasses = (target: 'GAME' | 'SYSTEM_VIEW') =>
     `rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
       primaryReturn === target
@@ -497,16 +641,16 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       <div ref={containerRef} className="absolute inset-0">
         <canvas
           ref={canvasRef}
-          className={`w-full h-full ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`w-full h-full touch-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
           onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={clearPan}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={clearPan}
           onPointerLeave={(event) => {
             clearPan(event);
             setHovered(null);
           }}
-          onClick={handleClick}
         />
       </div>
 
@@ -547,27 +691,49 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
           <div className="mt-3 flex flex-wrap gap-2">
             <button
-              onClick={() => setCamera(prev => ({ ...prev, zoom: clamp(prev.zoom * 1.15, MIN_ZOOM, MAX_ZOOM) }))}
+              onClick={() => {
+                const focusX = viewport.width / 2;
+                const focusY = viewport.height / 2;
+                setCamera(prev => {
+                  const nextZoom = clamp(prev.zoom * 1.15, MIN_ZOOM, MAX_ZOOM);
+                  const scale = nextZoom / prev.zoom;
+                  const nextOffset = {
+                    x: focusX - (focusX - prev.offset.x) * scale,
+                    y: focusY - (focusY - prev.offset.y) * scale
+                  };
+                  return { zoom: nextZoom, offset: clampOffset(nextOffset, nextZoom) };
+                });
+              }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >
               {t('surfaceView.zoomIn')}
             </button>
             <button
-              onClick={() => setCamera(prev => ({ ...prev, zoom: clamp(prev.zoom / 1.15, MIN_ZOOM, MAX_ZOOM) }))}
+              onClick={() => {
+                const focusX = viewport.width / 2;
+                const focusY = viewport.height / 2;
+                setCamera(prev => {
+                  const nextZoom = clamp(prev.zoom / 1.15, MIN_ZOOM, MAX_ZOOM);
+                  const scale = nextZoom / prev.zoom;
+                  const nextOffset = {
+                    x: focusX - (focusX - prev.offset.x) * scale,
+                    y: focusY - (focusY - prev.offset.y) * scale
+                  };
+                  return { zoom: nextZoom, offset: clampOffset(nextOffset, nextZoom) };
+                });
+              }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >
               {t('surfaceView.zoomOut')}
             </button>
             <button
               onClick={() => {
-                const { width, height } = mapSizePx;
-                setCamera({
-                  zoom: 1,
-                  offset: {
-                    x: (viewport.width - width) / 2,
-                    y: (viewport.height - height) / 2
-                  }
-                });
+                const { width, height, minX, minY } = mapBoundsPx;
+                const nextOffset = {
+                  x: (viewport.width - width) / 2 - minX,
+                  y: (viewport.height - height) / 2 - minY
+                };
+                setCamera({ zoom: 1, offset: clampOffset(nextOffset, 1) });
               }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >

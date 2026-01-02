@@ -6,7 +6,8 @@ import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
 import { generateSurfaceMapForState } from '../planetSurface/access';
 import { deserializeGameState, serializeGameState } from '../serialization';
-import { ArmyState, type FactionState, type GameState, type PlanetBody } from '../../shared/types';
+import { ArmyState, FleetState, ShipType, type FactionState, type Fleet, type GameState, type PlanetBody } from '../../shared/types';
+import { phaseMovement } from '../turn/phases/03_movement';
 
 interface TestCase {
   name: string;
@@ -206,6 +207,88 @@ const tests: TestCase[] = [
       assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h);
       const biome = map.tiles[pos.r * w + pos.q].biome;
       assert.ok(!isWater(biome), `Relocated biome must be passable, got ${biome}`);
+    }
+  },
+  {
+    name: 'Movement phase assigns surfacePos to armies auto-deployed during invasion',
+    run: () => {
+      const { state: base, body } = createStateWithOneSurface(1234, 'sys_invade');
+
+      // Turn the system/planet into an enemy-held world to make it eligible for invasion.
+      const system = base.systems[0];
+      const enemySystem = {
+        ...system,
+        ownerFactionId: 'red',
+        planets: system.planets.map(p => ({ ...p, ownerFactionId: 'red' }))
+      };
+
+      // Ensure defenders exist so the invasion prioritization logic has a target.
+      const defenderLand = pickAnyTile(base, body.id, b => !isWater(b));
+      const defenderArmy = {
+        id: 'army-def',
+        factionId: 'red',
+        strength: 9000,
+        maxStrength: 9000,
+        morale: 1,
+        state: ArmyState.DEPLOYED,
+        containerId: body.id,
+        surfacePos: { bodyId: body.id, q: defenderLand.q, r: defenderLand.r }
+      };
+
+      const attackerArmyId = 'army-atk';
+      const fleetId = 'fleet-inv';
+
+      const attackerArmy = {
+        id: attackerArmyId,
+        factionId: 'blue',
+        strength: 10000,
+        maxStrength: 10000,
+        morale: 1,
+        state: ArmyState.EMBARKED,
+        containerId: fleetId
+      };
+
+      const fleet: Fleet = {
+        id: fleetId,
+        factionId: 'blue',
+        ships: [{
+          id: 'ship-1',
+          type: ShipType.TRANSPORTER,
+          hp: 100,
+          maxHp: 100,
+          fuel: 100,
+          carriedArmyId: attackerArmyId
+        }],
+        position: enemySystem.position,
+        state: FleetState.MOVING,
+        targetSystemId: enemySystem.id,
+        targetPosition: enemySystem.position,
+        radius: 1,
+        stateStartTurn: base.day,
+        invasionTargetSystemId: enemySystem.id,
+        invasionTargetPlanetId: body.id
+      };
+
+      const state: GameState = {
+        ...base,
+        systems: [enemySystem],
+        fleets: [fleet],
+        armies: [defenderArmy, attackerArmy]
+      };
+
+      const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
+      const landed = next.armies.find(a => a.id === attackerArmyId);
+      assert.ok(landed, 'Expected attacker army to exist after movement phase');
+      assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected attacker army to be deployed by invasion logic');
+      assert.strictEqual(landed.containerId, body.id, 'Expected attacker army to be deployed onto the target body');
+      assert.ok(landed.surfacePos, 'Expected normalizeSurfacePositions to assign surfacePos');
+
+      const map = generateSurfaceMapForState(next, body.id)!;
+      const { w, h } = map.descriptor.config;
+      const pos = landed.surfacePos!;
+      assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h, 'surfacePos should be inside the grid');
+      const biome = map.tiles[pos.r * w + pos.q].biome;
+      assert.ok(!isWater(biome), `surfacePos should be passable, got biome '${biome}'`);
     }
   }
 ];
