@@ -936,7 +936,7 @@ const tests: TestCase[] = [
         members: 1500,
         attack: 1,
         defense: 1,
-        condition: 0.5,
+        condition: 0.19,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
       };

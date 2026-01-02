@@ -14,18 +14,21 @@ export interface GroundBattleResult {
 
 const MAX_CASUALTY_FRACTION_PER_TURN = 0.35;
 const CONDITION_LOSS_MULTIPLIER = 0.6;
-const MIN_CONDITION_FACTOR = 0.25;
-const MAX_CONDITION_FACTOR = 2;
+const MIN_CONDITION_POWER_FACTOR = 0.25;
+const MAX_CONDITION_POWER_FACTOR = 2;
 
 /**
  * Helper to calculate total ground power
  */
-const clampConditionFactor = (condition: number): number => {
-    return Math.min(MAX_CONDITION_FACTOR, Math.max(MIN_CONDITION_FACTOR, condition));
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+// NOTE: This factor is used only for *power weighting* (legacy resolver), not for persisting condition.
+const clampConditionPowerFactor = (condition: number): number => {
+    return Math.min(MAX_CONDITION_POWER_FACTOR, Math.max(MIN_CONDITION_POWER_FACTOR, condition));
 };
 
 const calculatePower = (armies: Army[]): number => {
-    return armies.reduce((sum, army) => sum + army.members * clampConditionFactor(army.condition), 0);
+    return armies.reduce((sum, army) => sum + army.members * clampConditionPowerFactor(army.condition), 0);
 };
 
 const calculateTotalMembers = (armies: Army[]): number => armies.reduce((sum, army) => sum + army.members, 0);
@@ -68,7 +71,7 @@ const applyLosses = (
         const loss = Math.max(0, Math.min(army.members, plannedLoss, remainingLoss));
         const newMembers = Math.max(0, army.members - loss);
         const conditionPenalty = loss > 0 ? lossFraction * CONDITION_LOSS_MULTIPLIER : 0;
-        const newCondition = clampConditionFactor(army.condition * (1 - conditionPenalty));
+        const newCondition = clamp01(army.condition * (1 - conditionPenalty));
 
         appliedLoss += army.members - newMembers;
         remainingLoss -= loss;
