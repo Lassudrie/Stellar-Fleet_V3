@@ -10,14 +10,14 @@ export interface ZocSnapshot {
   zocByFactionId: Map<FactionId, Uint8Array>;
 }
 
-export const computeZocSnapshotForBody = (
-  state: GameState,
-  bodyId: string,
-  armies: Army[]
-): ZocSnapshot | null => {
-  const map = generateSurfaceMapForState(state, bodyId);
-  if (!map) return null;
-  const { w, h, wrapX } = map.descriptor.config;
+export const computeZocSnapshotFromArmies = (params: {
+  bodyId: string;
+  w: number;
+  h: number;
+  wrapX: boolean;
+  armies: Army[];
+}): ZocSnapshot => {
+  const { bodyId, w, h, wrapX, armies } = params;
   const size = w * h;
   const zocByFactionId = new Map<FactionId, Uint8Array>();
 
@@ -29,7 +29,6 @@ export const computeZocSnapshotForBody = (
     return arr;
   };
 
-  // Units project ZOC if condition >= 0.3 onto adjacent hexes.
   armies.forEach(army => {
     if (army.state !== 'DEPLOYED') return;
     if (army.containerId !== bodyId) return;
@@ -46,6 +45,17 @@ export const computeZocSnapshotForBody = (
   });
 
   return { bodyId, w, h, wrapX, zocByFactionId };
+};
+
+export const computeZocSnapshotForBody = (
+  state: GameState,
+  bodyId: string,
+  armies: Army[]
+): ZocSnapshot | null => {
+  const map = generateSurfaceMapForState(state, bodyId);
+  if (!map) return null;
+  const { w, h, wrapX } = map.descriptor.config;
+  return computeZocSnapshotFromArmies({ bodyId, w, h, wrapX, armies });
 };
 
 export const isInEnemyZoc = (

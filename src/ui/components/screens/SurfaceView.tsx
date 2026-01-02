@@ -15,6 +15,16 @@ import {
 import { useI18n } from '../../i18n';
 import { fnv1a32 } from '../../../engine/planetSurface/hash32';
 import type { GameCommand } from '../../../engine/commands';
+import { computeEffectiveMP } from '../../../engine/ground/movement';
+import { computeSupplyDistanceMapFromSurfaceMap, isSupplied, SUPPLY_RADIUS } from '../../../engine/ground/supply';
+import { computeZocSnapshotFromArmies, isInEnemyZoc } from '../../../engine/ground/zoc';
+import { computeReachable, findPathWithCost } from '../../../engine/ground/pathfinding';
+import { deriveTerrainTypeFromSurfaceMap, MOVE_COST } from '../../../engine/ground/terrain';
+import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
+import { previewEngagement } from '../../../engine/ground/combat';
+import { neighborsAxial } from '../../../engine/planetSurface/hex';
+import { isPassable } from '../../../engine/planetSurface/validation';
+import { hexKey as engineHexKey } from '../../../engine/ground/utils';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
@@ -60,6 +70,14 @@ const biomeColors: Record<Biome, string> = {
 };
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const clampAffinity = (v: number | undefined): number => clamp(v ?? 1, 0.7, 1.3);
+
+const approxRngRange = (r0: number, eps = 0.08): { min: number; max: number } => {
+  const min = r0 * ((1 - eps) / (1 + eps));
+  const max = r0 * ((1 + eps) / (1 - eps));
+  return { min, max };
+};
 
 const sameHex = (a: HexCoord | null, b: HexCoord | null): boolean => {
   if (a === b) return true;
@@ -202,6 +220,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
+  const [showReachable, setShowReachable] = useState(true);
+  const [showZoc, setShowZoc] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -322,6 +343,13 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }));
   }, [activeMapConfig, map]);
 
+  const occupancy = useMemo(() => {
+    if (!map) return new Set<string>();
+    const set = new Set<string>();
+    normalizedArmies.forEach(m => set.add(engineHexKey(m.coord)));
+    return set;
+  }, [map, normalizedArmies]);
+
   const pickCoord = useCallback((clientX: number, clientY: number): HexCoord | null => {
     if (!map) return null;
     const canvas = canvasRef.current;
@@ -368,113 +396,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }
   };
 
-  const draw = useCallback(() => {
-    if (!map || !activeMapConfig) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-
-    ctx.save();
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, viewport.width, viewport.height);
-
-    const hexSize = HEX_SIZE * camera.zoom;
-    const gridStroke = 'rgba(148, 163, 184, 0.22)';
-
-    for (let r = 0; r < activeMapConfig.h; r += 1) {
-      for (let q = 0; q < activeMapConfig.w; q += 1) {
-        const tile = map.tiles[r * activeMapConfig.w + q];
-        if (!tile) continue;
-        const { x, y } = axialToPixel(q, r, HEX_SIZE);
-        const center = {
-          x: x * camera.zoom + camera.offset.x,
-          y: y * camera.zoom + camera.offset.y
-        };
-        const color = biomeColors[tile.biome] ?? '#334155';
-        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 });
-      }
-    }
-
-    settlements.forEach(settlement => {
-      const { x, y } = axialToPixel(settlement.coord.q, settlement.coord.r, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      ctx.beginPath();
-      ctx.fillStyle = settlement.factionId ? (factionIndex[settlement.factionId]?.color ?? '#fcd34d') : '#fcd34d';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1;
-      ctx.arc(center.x, center.y, Math.max(3, hexSize * 0.18), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    normalizedBuildings.forEach(marker => {
-      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      const size = Math.max(3, hexSize * 0.2);
-      ctx.fillStyle = marker.faction?.color ?? '#e2e8f0';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.rect(center.x - size, center.y - size, size * 2, size * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    normalizedArmies.forEach(marker => {
-      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      const radius = Math.max(3.5, hexSize * 0.22);
-      ctx.beginPath();
-      ctx.fillStyle = marker.faction?.color ?? '#93c5fd';
-      ctx.strokeStyle = marker.army.factionId === playerFactionId ? '#bfdbfe' : '#0f172a';
-      ctx.lineWidth = 1.2;
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    const drawHighlight = (coord: HexCoord, color: string) => {
-      const { x, y } = axialToPixel(coord.q, coord.r, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
-    };
-
-    if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');
-    if (selected) drawHighlight(selected, 'rgba(59, 130, 246, 0.9)');
-
-    ctx.restore();
-  }, [activeMapConfig, camera.offset.x, camera.offset.y, camera.zoom, hovered, map, normalizedArmies, normalizedBuildings, playerFactionId, selected, settlements, viewport.height, viewport.width]);
-
-  useEffect(() => {
-    const rafId = window.requestAnimationFrame(() => {
-      drawRafRef.current = null;
-      draw();
-    });
-
-    drawRafRef.current = rafId;
-
-    return () => {
-      if (drawRafRef.current !== null) {
-        window.cancelAnimationFrame(drawRafRef.current);
-        drawRafRef.current = null;
-      }
-    };
-  }, [draw]);
+  // draw() is defined later, after overlay computations.
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
     event.preventDefault();
@@ -615,6 +537,310 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!body || army.containerId !== body.id) return null;
     return army;
   }, [armies, body, selectedArmyId]);
+
+  const selectedArmyCoord = useMemo(() => {
+    if (!selectedArmy || !activeMapConfig) return null;
+    return normalizePos(selectedArmy.surfacePos, activeMapConfig);
+  }, [activeMapConfig, selectedArmy]);
+
+  const supplyByFaction = useMemo(() => {
+    if (!map) return new Map<FactionId, Uint16Array>();
+    const mapByFaction = new Map<FactionId, Uint16Array>();
+    const factionIds = Array.from(new Set(normalizedArmies.map(m => m.army.factionId)));
+    factionIds.forEach(fid => {
+      mapByFaction.set(fid, computeSupplyDistanceMapFromSurfaceMap(map, buildings, fid));
+    });
+    return mapByFaction;
+  }, [buildings, map, normalizedArmies]);
+
+  const isArmySupplied = useCallback((army: Army, coord: HexCoord | null): boolean => {
+    if (!map || !coord) return false;
+    const dist = supplyByFaction.get(army.factionId) ?? null;
+    return isSupplied(dist, coord, map, SUPPLY_RADIUS);
+  }, [map, supplyByFaction]);
+
+  const zocSnapshot = useMemo(() => {
+    if (!map) return null;
+    const { w, h, wrapX } = map.descriptor.config;
+    const armiesOnBody = normalizedArmies.map(m => m.army);
+    return computeZocSnapshotFromArmies({ bodyId: map.bodyId, w, h, wrapX, armies: armiesOnBody });
+  }, [map, normalizedArmies]);
+
+  const enemyZocMask = useMemo(() => {
+    if (!map || !zocSnapshot) return null;
+    const { w, h } = map.descriptor.config;
+    const mask = new Uint8Array(w * h);
+    for (const [factionId, arr] of zocSnapshot.zocByFactionId.entries()) {
+      if (factionId === playerFactionId) continue;
+      for (let i = 0; i < mask.length; i += 1) {
+        if (arr[i]) mask[i] = 1;
+      }
+    }
+    return mask;
+  }, [map, playerFactionId, zocSnapshot]);
+
+  const movementStepCostCenti = useCallback((from: HexCoord, to: HexCoord, army: Army): number => {
+    if (!map || !zocSnapshot) return 0;
+    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, to);
+    const baseCost = MOVE_COST[terrain];
+    const affinity = clampAffinity(GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain]);
+    let cost = Math.round(baseCost * affinity * 100);
+
+    const curEnemy = isInEnemyZoc(zocSnapshot, from, army.factionId);
+    const nextEnemy = isInEnemyZoc(zocSnapshot, to, army.factionId);
+    if (!curEnemy && nextEnemy) cost += 100;
+    if (curEnemy && !nextEnemy) cost += 100;
+
+    return cost;
+  }, [buildings, map, zocSnapshot]);
+
+  const movePreview = useMemo(() => {
+    if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
+    if (orderMode !== 'move') return null;
+    if (!zocSnapshot) return null;
+
+    const supplied = isArmySupplied(selectedArmy, selectedArmyCoord);
+    const mpEff = computeEffectiveMP(selectedArmy, supplied);
+    const mpCenti = mpEff * 100;
+
+    const blocked = (c: HexCoord): boolean => {
+      if (c.q === selectedArmyCoord.q && c.r === selectedArmyCoord.r) return false;
+      return occupancy.has(engineHexKey(c));
+    };
+
+    const res = findPathWithCost({
+      from: selectedArmyCoord,
+      to: hovered,
+      w: map.descriptor.config.w,
+      h: map.descriptor.config.h,
+      wrapX: map.descriptor.config.wrapX,
+      isBlocked: blocked,
+      stepCostCenti: (a, b) => movementStepCostCenti(a, b, selectedArmy)
+    });
+
+    if (!res) return { path: null, costCenti: null, mpEff, mpCenti, supplied };
+    return { path: res.path, costCenti: res.costCenti, mpEff, mpCenti, supplied };
+  }, [hovered, isArmySupplied, map, movementStepCostCenti, occupancy, orderMode, selectedArmy, selectedArmyCoord, zocSnapshot]);
+
+  const reachableCosts = useMemo(() => {
+    if (!map || !selectedArmy || !selectedArmyCoord || !showReachable) return null;
+    if (!zocSnapshot) return null;
+    const supplied = isArmySupplied(selectedArmy, selectedArmyCoord);
+    const mpEff = computeEffectiveMP(selectedArmy, supplied);
+    const mpCenti = mpEff * 100;
+    const blocked = (c: HexCoord): boolean => {
+      if (c.q === selectedArmyCoord.q && c.r === selectedArmyCoord.r) return false;
+      return occupancy.has(engineHexKey(c));
+    };
+    return computeReachable({
+      from: selectedArmyCoord,
+      w: map.descriptor.config.w,
+      h: map.descriptor.config.h,
+      wrapX: map.descriptor.config.wrapX,
+      isBlocked: blocked,
+      stepCostCenti: (a, b) => movementStepCostCenti(a, b, selectedArmy),
+      maxCostCenti: mpCenti
+    });
+  }, [isArmySupplied, map, movementStepCostCenti, occupancy, selectedArmy, selectedArmyCoord, showReachable, zocSnapshot]);
+
+  const combatPreview = useMemo(() => {
+    if (!map || !selectedArmy || !selectedArmyCoord || !hovered || !showPreview) return null;
+
+    const enemy = normalizedArmies
+      .filter(m => m.coord.q === hovered.q && m.coord.r === hovered.r)
+      .map(m => m.army)
+      .find(a => a.factionId !== playerFactionId);
+    if (!enemy) return null;
+    if (!enemy.surfacePos) return null;
+
+    const adjacent = neighborsAxial(selectedArmyCoord, map.descriptor.config.w, map.descriptor.config.h, map.descriptor.config.wrapX)
+      .some(n => n.q === hovered.q && n.r === hovered.r);
+    if (!adjacent) return null;
+
+    const terrainType = deriveTerrainTypeFromSurfaceMap(map, buildings, hovered);
+    const suppliedAtt = isArmySupplied(selectedArmy, selectedArmyCoord);
+    const suppliedDef = isArmySupplied(enemy, hovered);
+
+    const preview = previewEngagement(selectedArmy, enemy, {
+      turn: 0,
+      terrainType,
+      attackerStatus: { outOfSupply: !suppliedAtt },
+      defenderStatus: { outOfSupply: !suppliedDef }
+    });
+
+    const rRange = approxRngRange(preview.r, 0.08);
+    return { enemy, terrainType, preview, rRange };
+  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, showPreview]);
+
+  const draw = useCallback(() => {
+    if (!map || !activeMapConfig) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, viewport.width, viewport.height);
+
+    const hexSize = HEX_SIZE * camera.zoom;
+    const gridStroke = 'rgba(148, 163, 184, 0.22)';
+
+    for (let r = 0; r < activeMapConfig.h; r += 1) {
+      for (let q = 0; q < activeMapConfig.w; q += 1) {
+        const tile = map.tiles[r * activeMapConfig.w + q];
+        if (!tile) continue;
+        const { x, y } = axialToPixel(q, r, HEX_SIZE);
+        const center = {
+          x: x * camera.zoom + camera.offset.x,
+          y: y * camera.zoom + camera.offset.y
+        };
+        const color = biomeColors[tile.biome] ?? '#334155';
+        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 });
+      }
+    }
+
+    // --- Overlays ---
+    if (showZoc && enemyZocMask) {
+      for (let r = 0; r < activeMapConfig.h; r += 1) {
+        for (let q = 0; q < activeMapConfig.w; q += 1) {
+          const idx = r * activeMapConfig.w + q;
+          if (!enemyZocMask[idx]) continue;
+          const { x, y } = axialToPixel(q, r, HEX_SIZE);
+          const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
+          drawHex(ctx, center, hexSize, { fill: 'rgba(244, 63, 94, 0.10)' });
+        }
+      }
+    }
+
+    if (reachableCosts) {
+      reachableCosts.forEach((_cost, key) => {
+        const [qStr, rStr] = key.split('|');
+        const q = Number(qStr);
+        const r = Number(rStr);
+        if (!Number.isFinite(q) || !Number.isFinite(r)) return;
+        const tile = map.tiles[r * activeMapConfig.w + q];
+        if (!tile || !isPassable(tile.biome)) return;
+        const { x, y } = axialToPixel(q, r, HEX_SIZE);
+        const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
+        drawHex(ctx, center, hexSize, { fill: 'rgba(56, 189, 248, 0.10)' });
+      });
+    }
+
+    if (movePreview?.path && movePreview.path.length > 1) {
+      ctx.beginPath();
+      movePreview.path.forEach((c, i) => {
+        const { x, y } = axialToPixel(c.q, c.r, HEX_SIZE);
+        const px = x * camera.zoom + camera.offset.x;
+        const py = y * camera.zoom + camera.offset.y;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
+      ctx.lineWidth = Math.max(2, hexSize * 0.08);
+      ctx.stroke();
+    }
+
+    settlements.forEach(settlement => {
+      const { x, y } = axialToPixel(settlement.coord.q, settlement.coord.r, HEX_SIZE);
+      const center = {
+        x: x * camera.zoom + camera.offset.x,
+        y: y * camera.zoom + camera.offset.y
+      };
+      ctx.beginPath();
+      ctx.fillStyle = settlement.factionId ? (factionIndex[settlement.factionId]?.color ?? '#fcd34d') : '#fcd34d';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1;
+      ctx.arc(center.x, center.y, Math.max(3, hexSize * 0.18), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    normalizedBuildings.forEach(marker => {
+      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
+      const center = {
+        x: x * camera.zoom + camera.offset.x,
+        y: y * camera.zoom + camera.offset.y
+      };
+      const size = Math.max(3, hexSize * 0.2);
+      ctx.fillStyle = marker.faction?.color ?? '#e2e8f0';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.rect(center.x - size, center.y - size, size * 2, size * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    normalizedArmies.forEach(marker => {
+      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
+      const center = {
+        x: x * camera.zoom + camera.offset.x,
+        y: y * camera.zoom + camera.offset.y
+      };
+      const radius = Math.max(3.5, hexSize * 0.22);
+      ctx.beginPath();
+      ctx.fillStyle = marker.faction?.color ?? '#93c5fd';
+      ctx.strokeStyle = marker.army.factionId === playerFactionId ? '#bfdbfe' : '#0f172a';
+      ctx.lineWidth = 1.2;
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    const drawHighlight = (coord: HexCoord, color: string) => {
+      const { x, y } = axialToPixel(coord.q, coord.r, HEX_SIZE);
+      const center = {
+        x: x * camera.zoom + camera.offset.x,
+        y: y * camera.zoom + camera.offset.y
+      };
+      drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
+    };
+
+    if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');
+    if (selected) drawHighlight(selected, 'rgba(59, 130, 246, 0.9)');
+    if (selectedArmyCoord) drawHighlight(selectedArmyCoord, 'rgba(56, 189, 248, 0.9)');
+
+    ctx.restore();
+  }, [
+    activeMapConfig,
+    camera.offset.x,
+    camera.offset.y,
+    camera.zoom,
+    enemyZocMask,
+    factionIndex,
+    hovered,
+    map,
+    movePreview,
+    normalizedArmies,
+    normalizedBuildings,
+    playerFactionId,
+    reachableCosts,
+    selected,
+    selectedArmyCoord,
+    settlements,
+    showZoc,
+    viewport.height,
+    viewport.width
+  ]);
+
+  useEffect(() => {
+    const rafId = window.requestAnimationFrame(() => {
+      drawRafRef.current = null;
+      draw();
+    });
+
+    drawRafRef.current = rafId;
+
+    return () => {
+      if (drawRafRef.current !== null) {
+        window.cancelAnimationFrame(drawRafRef.current);
+        drawRafRef.current = null;
+      }
+    };
+  }, [draw]);
 
   useEffect(() => {
     // Auto-select a friendly army when clicking an occupied tile.
@@ -780,6 +1006,30 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             >
               {t('surfaceView.resetView')}
             </button>
+            <button
+              onClick={() => setShowReachable(v => !v)}
+              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                showReachable ? 'bg-sky-800/60 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
+              }`}
+            >
+              Reachable
+            </button>
+            <button
+              onClick={() => setShowZoc(v => !v)}
+              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                showZoc ? 'bg-rose-900/40 border-rose-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
+              }`}
+            >
+              ZOC
+            </button>
+            <button
+              onClick={() => setShowPreview(v => !v)}
+              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                showPreview ? 'bg-emerald-900/30 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
+              }`}
+            >
+              Preview
+            </button>
           </div>
         </div>
 
@@ -899,6 +1149,75 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                   {orderMode === 'move' && 'Click a hex to set a move order.'}
                   {orderMode === 'attack' && 'Click an enemy unit hex to set an attack order.'}
                 </div>
+
+                {orderMode === 'move' && movePreview && (
+                  <div className="text-[11px] text-slate-300 space-y-1">
+                    <div>
+                      MP: <span className="font-mono">{movePreview.mpEff}</span>{' '}
+                      (<span className="text-slate-400">{movePreview.supplied ? 'supplied' : 'out of supply'}</span>)
+                    </div>
+                    <div>
+                      Cost:{' '}
+                      <span className="font-mono">
+                        {movePreview.costCenti === null ? '—' : `${(movePreview.costCenti / 100).toFixed(2)} MP`}
+                      </span>
+                    </div>
+                    {movePreview.costCenti !== null && (
+                      <div className="text-slate-400">
+                        Used: {((movePreview.costCenti / Math.max(1, movePreview.mpCenti)) * 100).toFixed(0)}%
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {combatPreview && (
+              <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combat preview</div>
+                  <div className="text-[10px] text-slate-500">{combatPreview.terrainType}</div>
+                </div>
+                <div className="text-[11px] text-slate-200">
+                  Target: <span className="font-mono">{combatPreview.enemy.id}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
+                    <div className="text-slate-400">R (mean)</div>
+                    <div className="font-mono text-slate-100">{combatPreview.preview.r.toFixed(2)}</div>
+                    <div className="text-slate-500 font-mono">
+                      [{combatPreview.rRange.min.toFixed(2)}..{combatPreview.rRange.max.toFixed(2)}]
+                    </div>
+                  </div>
+                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
+                    <div className="text-slate-400">BreakChance</div>
+                    <div className="font-mono text-slate-100">{(combatPreview.preview.breakChance * 100).toFixed(1)}%</div>
+                    <div className="text-slate-500">defender</div>
+                  </div>
+                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
+                    <div className="text-slate-400">Losses (est.)</div>
+                    <div className="font-mono text-slate-100">A {combatPreview.preview.lossesAtt}</div>
+                    <div className="font-mono text-slate-100">D {combatPreview.preview.lossesDef}</div>
+                  </div>
+                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
+                    <div className="text-slate-400">K</div>
+                    <div className="font-mono text-slate-100">A {combatPreview.preview.kAtt.kFinal.toFixed(2)}</div>
+                    <div className="font-mono text-slate-100">D {combatPreview.preview.kDef.kFinal.toFixed(2)}</div>
+                  </div>
+                </div>
+                <details className="text-[11px] text-slate-300">
+                  <summary className="cursor-pointer text-slate-400">K breakdown</summary>
+                  <div className="mt-2 space-y-1">
+                    <div className="font-semibold text-slate-200">Attacker</div>
+                    <div className="font-mono text-slate-300">
+                      terrainBase={combatPreview.preview.kAtt.kTerrainBase.toFixed(2)} affinity={combatPreview.preview.kAtt.kAffinity.toFixed(2)} situation={combatPreview.preview.kAtt.kSituationClamped.toFixed(2)} status={combatPreview.preview.kAtt.kStatusClamped.toFixed(2)} final={combatPreview.preview.kAtt.kFinal.toFixed(2)}
+                    </div>
+                    <div className="font-semibold text-slate-200 mt-2">Defender</div>
+                    <div className="font-mono text-slate-300">
+                      terrainBase={combatPreview.preview.kDef.kTerrainBase.toFixed(2)} affinity={combatPreview.preview.kDef.kAffinity.toFixed(2)} situation={combatPreview.preview.kDef.kSituationClamped.toFixed(2)} status={combatPreview.preview.kDef.kStatusClamped.toFixed(2)} final={combatPreview.preview.kDef.kFinal.toFixed(2)}
+                    </div>
+                  </div>
+                </details>
               </div>
             )}
 

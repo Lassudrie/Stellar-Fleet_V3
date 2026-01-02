@@ -77,6 +77,52 @@ export interface PathResult {
   costCenti: number;
 }
 
+export interface ReachableParams {
+  from: HexCoord;
+  w: number;
+  h: number;
+  wrapX: boolean;
+  isBlocked: (coord: HexCoord) => boolean;
+  stepCostCenti: (from: HexCoord, to: HexCoord) => number;
+  maxCostCenti: number;
+}
+
+export const computeReachable = (params: ReachableParams): Map<string, number> => {
+  const { from, w, h, wrapX, isBlocked, stepCostCenti, maxCostCenti } = params;
+  const startKey = hexKey(from);
+  const dist = new Map<string, number>();
+  dist.set(startKey, 0);
+
+  const heap = new MinHeap();
+  heap.push({ q: from.q, r: from.r, cost: 0 });
+
+  while (heap.size > 0) {
+    const cur = heap.pop()!;
+    const curCoord: HexCoord = { q: cur.q, r: cur.r };
+    const curKey = hexKey(curCoord);
+    const best = dist.get(curKey);
+    if (best === undefined || cur.cost !== best) continue;
+    if (cur.cost > maxCostCenti) continue;
+
+    const ns = neighborsAxial(curCoord, w, h, wrapX);
+    for (const n of ns) {
+      const nKey = hexKey(n);
+      if (nKey !== startKey && isBlocked(n)) continue;
+      const step = stepCostCenti(curCoord, n);
+      if (!Number.isFinite(step) || step <= 0) continue;
+      const nextCost = cur.cost + step;
+      if (nextCost > maxCostCenti) continue;
+      const known = dist.get(nKey);
+      if (known === undefined || nextCost < known) {
+        dist.set(nKey, nextCost);
+        heap.push({ q: n.q, r: n.r, cost: nextCost });
+      }
+    }
+  }
+
+  return dist;
+};
+
 export const findPathWithCost = (params: FindPathParams): PathResult | null => {
   const { from, to, w, h, wrapX, isBlocked, stepCostCenti } = params;
   const startKey = hexKey(from);

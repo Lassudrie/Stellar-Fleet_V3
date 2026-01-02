@@ -1,4 +1,4 @@
-import type { FactionId, GameState, HexCoord, PlanetSurfaceMap } from '../../shared/types';
+import type { FactionId, GameState, GroundBuilding, HexCoord, PlanetSurfaceMap } from '../../shared/types';
 import { generateSurfaceMapForState } from '../planetSurface/access';
 import { neighborsAxial } from '../planetSurface/hex';
 import { isPassable } from '../planetSurface/validation';
@@ -14,6 +14,14 @@ export const computeSupplyDistanceMapForBody = (
 ): Uint16Array | null => {
   const map = generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
+  return computeSupplyDistanceMapFromSurfaceMap(map, state.groundBuildings ?? [], factionId);
+};
+
+export const computeSupplyDistanceMapFromSurfaceMap = (
+  map: PlanetSurfaceMap,
+  buildings: GroundBuilding[],
+  factionId: FactionId
+): Uint16Array => {
   const { w, h, wrapX } = map.descriptor.config;
   const size = w * h;
   const dist = new Uint16Array(size);
@@ -42,9 +50,9 @@ export const computeSupplyDistanceMapForBody = (
     enqueue(coord, 0);
   });
 
-  (state.groundBuildings ?? []).forEach(b => {
+  buildings.forEach(b => {
     if (b.factionId !== factionId) return;
-    if (b.surfacePos.bodyId !== bodyId) return;
+    if (b.surfacePos.bodyId !== map.bodyId) return;
     const q = b.surfacePos.q;
     const r = b.surfacePos.r;
     if (q < 0 || q >= w || r < 0 || r >= h) return;

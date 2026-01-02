@@ -1,4 +1,4 @@
-import type { Biome, GameState, HexCoord } from '../../shared/types';
+import type { Biome, GameState, GroundBuilding, HexCoord, PlanetSurfaceMap } from '../../shared/types';
 import { generateSurfaceMapForState, getTileAt } from '../planetSurface/access';
 
 export type TerrainType =
@@ -55,6 +55,30 @@ export const biomeToTerrainType = (biome: Biome): TerrainType => {
     case 'ocean': return 'Coastal'; // Ocean is impassable; TerrainType used only for display/affinity.
     default: return 'Open';
   }
+};
+
+export const deriveTerrainTypeFromSurfaceMap = (
+  map: PlanetSurfaceMap,
+  buildings: GroundBuilding[],
+  coord: HexCoord
+): TerrainType => {
+  const { w, h, wrapX } = map.descriptor.config;
+  const q = wrapX ? ((coord.q % w) + w) % w : coord.q;
+  const r = coord.r;
+  if (r < 0 || r >= h) return 'Open';
+  if (!wrapX && (q < 0 || q >= w)) return 'Open';
+
+  const hasBuilding = buildings.some(
+    b => b.surfacePos.bodyId === map.bodyId && b.surfacePos.q === q && b.surfacePos.r === r
+  );
+  if (hasBuilding) return 'Urban';
+
+  const hasSettlement = map.settlements.some(s => s.coord.q === q && s.coord.r === r);
+  if (hasSettlement) return 'Urban';
+
+  const tile = map.tiles[r * w + q];
+  if (!tile) return 'Open';
+  return biomeToTerrainType(tile.biome);
 };
 
 export const deriveTerrainType = (
