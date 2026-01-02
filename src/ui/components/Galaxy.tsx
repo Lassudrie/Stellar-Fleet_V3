@@ -5,7 +5,6 @@ import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'thr
 import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem } from '../../shared/types';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
-import { getSystemStarScale, STAR_HITBOX_BASE_SCALE, STAR_ICON_BASE_SCALE } from './starScale';
 import { findOrbitingSystem } from './ui/orbiting';
 import { GAS_GIANT_ICON } from '../constants/icons';
 
@@ -362,17 +361,14 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             <sphereGeometry args={[0.25, 16, 16]} />
             <meshBasicMaterial />
             
-            {systems.map((sys) => {
-                const starScale = getSystemStarScale(sys);
-                return (
-                    <Instance 
-                        key={`vis-${sys.id}`}
-                        position={[sys.position.x, sys.position.y, sys.position.z]} 
-                        scale={[STAR_ICON_BASE_SCALE * starScale, STAR_ICON_BASE_SCALE * starScale, STAR_ICON_BASE_SCALE * starScale]}
-                        color={sys.color} 
-                    />
-                );
-            })}
+            {systems.map((sys) => (
+                <Instance 
+                    key={`vis-${sys.id}`}
+                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    scale={[1.5, 1.5, 1.5]}
+                    color={sys.color} 
+                />
+            ))}
         </Instances>
 
         {battleSystems.length > 0 && (
@@ -393,22 +389,19 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             <sphereGeometry args={[3.5, 8, 8]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             
-            {systems.map((sys) => {
-                const starScale = getSystemStarScale(sys);
-                return (
-                    <Instance 
-                        key={`hit-${sys.id}`}
-                        position={[sys.position.x, sys.position.y, sys.position.z]} 
-                        scale={[STAR_HITBOX_BASE_SCALE * starScale, STAR_HITBOX_BASE_SCALE * starScale, STAR_HITBOX_BASE_SCALE * starScale]} 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onSystemClick(sys, e);
-                        }}
-                        onPointerOver={() => document.body.style.cursor = 'pointer'}
-                        onPointerOut={() => document.body.style.cursor = 'auto'}
-                    />
-                );
-            })}
+            {systems.map((sys) => (
+                <Instance 
+                    key={`hit-${sys.id}`}
+                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    scale={[1, 1, 1]} 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onSystemClick(sys, e);
+                    }}
+                    onPointerOver={() => document.body.style.cursor = 'pointer'}
+                    onPointerOut={() => document.body.style.cursor = 'auto'}
+                />
+            ))}
         </Instances>
 
         {systems.map((sys) => (
