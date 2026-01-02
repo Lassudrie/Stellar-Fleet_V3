@@ -9,6 +9,7 @@ import {
   HexCoord,
   PlanetBody,
   PlanetSurfaceMap,
+  SettlementType,
   StarSystem,
   SurfacePos
 } from '../../../shared/types';
@@ -68,6 +69,28 @@ const biomeColors: Record<Biome, string> = {
   volcanic: '#ef4444',
   cratered: '#78350f'
 };
+
+type SettlementMarkerShape = 'circle' | 'square' | 'diamond' | 'triangle' | 'hex';
+
+const SETTLEMENT_MARKER_STYLE: Record<SettlementType, {
+  shape: SettlementMarkerShape;
+  sizeFactor: number;
+  fill: string;
+  ring: 'none' | 'single' | 'double';
+  labelZoom: number;
+  labelScale: number;
+}> = {
+  outpost: { shape: 'triangle', sizeFactor: 0.15, fill: 'rgba(180, 180, 180, 0.85)', ring: 'none', labelZoom: 1.8, labelScale: 0.85 },
+  colony: { shape: 'circle', sizeFactor: 0.16, fill: 'rgba(195, 195, 195, 0.90)', ring: 'none', labelZoom: 1.65, labelScale: 0.90 },
+  frontierTown: { shape: 'square', sizeFactor: 0.18, fill: 'rgba(210, 210, 210, 0.92)', ring: 'none', labelZoom: 1.35, labelScale: 0.95 },
+  city: { shape: 'diamond', sizeFactor: 0.21, fill: 'rgba(225, 225, 225, 0.94)', ring: 'none', labelZoom: 1.05, labelScale: 1.00 },
+  metropolis: { shape: 'circle', sizeFactor: 0.24, fill: 'rgba(240, 240, 240, 0.96)', ring: 'single', labelZoom: 0.90, labelScale: 1.15 },
+  megalopolis: { shape: 'hex', sizeFactor: 0.28, fill: 'rgba(248, 248, 248, 0.98)', ring: 'double', labelZoom: 0.80, labelScale: 1.25 }
+};
+
+const SETTLEMENT_MARKER_STROKE = 'rgba(30, 30, 30, 0.95)';
+const SETTLEMENT_LABEL_FILL = 'rgba(250, 250, 250, 0.95)';
+const SETTLEMENT_LABEL_STROKE = 'rgba(20, 20, 20, 0.85)';
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -743,19 +766,93 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       ctx.stroke();
     }
 
+    const labelGrid = new Set<string>();
+    const labelCell = Math.max(70, hexSize * 3.2);
+
     settlements.forEach(settlement => {
       const { x, y } = axialToPixel(settlement.coord.q, settlement.coord.r, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
       };
-      ctx.beginPath();
-      ctx.fillStyle = settlement.factionId ? (factionIndex[settlement.factionId]?.color ?? '#fcd34d') : '#fcd34d';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1;
-      ctx.arc(center.x, center.y, Math.max(3, hexSize * 0.18), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+
+      const style = SETTLEMENT_MARKER_STYLE[settlement.type] ?? SETTLEMENT_MARKER_STYLE.city;
+      const size = Math.max(3, hexSize * style.sizeFactor);
+      const stroke = SETTLEMENT_MARKER_STROKE;
+
+      if (style.shape === 'hex') {
+        drawHex(ctx, center, size, {
+          fill: style.fill,
+          stroke,
+          lineWidth: Math.max(1, size * 0.12)
+        });
+      } else {
+        ctx.beginPath();
+        if (style.shape === 'circle') {
+          ctx.arc(center.x, center.y, size, 0, Math.PI * 2);
+        } else if (style.shape === 'square') {
+          ctx.rect(center.x - size, center.y - size, size * 2, size * 2);
+        } else if (style.shape === 'diamond') {
+          ctx.moveTo(center.x, center.y - size);
+          ctx.lineTo(center.x + size, center.y);
+          ctx.lineTo(center.x, center.y + size);
+          ctx.lineTo(center.x - size, center.y);
+          ctx.closePath();
+        } else if (style.shape === 'triangle') {
+          ctx.moveTo(center.x, center.y - size);
+          ctx.lineTo(center.x + size, center.y + size);
+          ctx.lineTo(center.x - size, center.y + size);
+          ctx.closePath();
+        }
+        ctx.fillStyle = style.fill;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = Math.max(1, size * 0.12);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      if (style.ring === 'single') {
+        ctx.beginPath();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = Math.max(1, size * 0.10);
+        ctx.arc(center.x, center.y, size * 1.55, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (style.ring === 'double') {
+        drawHex(ctx, center, size * 1.55, { stroke, lineWidth: Math.max(1, size * 0.10) });
+        drawHex(ctx, center, size * 1.05, { stroke, lineWidth: Math.max(1, size * 0.08) });
+      }
+
+      // Capital overlay (grayscale cross)
+      if (settlement.isCapital) {
+        ctx.beginPath();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = Math.max(1, size * 0.18);
+        ctx.moveTo(center.x - size * 0.55, center.y);
+        ctx.lineTo(center.x + size * 0.55, center.y);
+        ctx.moveTo(center.x, center.y - size * 0.55);
+        ctx.lineTo(center.x, center.y + size * 0.55);
+        ctx.stroke();
+      }
+
+      // Labels
+      if (camera.zoom >= style.labelZoom) {
+        const fontPx = Math.round(clamp(hexSize * 0.45 * style.labelScale, 9, 18));
+        const lx = center.x;
+        const ly = center.y - size * 1.2;
+
+        const cellKey = `${Math.floor(lx / labelCell)},${Math.floor(ly / labelCell)}`;
+        if (!labelGrid.has(cellKey)) {
+          labelGrid.add(cellKey);
+          ctx.font = `${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.lineWidth = Math.max(2, fontPx * 0.25);
+          ctx.strokeStyle = SETTLEMENT_LABEL_STROKE;
+          ctx.fillStyle = SETTLEMENT_LABEL_FILL;
+          ctx.strokeText(settlement.name, lx, ly);
+          ctx.fillText(settlement.name, lx, ly);
+        }
+      }
     });
 
     normalizedBuildings.forEach(marker => {
