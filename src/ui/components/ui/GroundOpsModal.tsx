@@ -17,6 +17,7 @@ interface GroundOpsModalProps {
   playerFactionId: FactionId;
   day: number;
   onTransfer: (armyId: string, fromPlanetId: string, toPlanetId: string) => void;
+  onOpenSurfaceView: (planetId: string) => void;
   onClose: () => void;
 }
 
@@ -28,6 +29,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
   playerFactionId,
   day,
   onTransfer,
+  onOpenSurfaceView,
   onClose
 }) => {
   const { t } = useI18n();
@@ -157,6 +159,12 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="text-sm font-semibold text-white">{planet.name}</div>
+                        <button
+                          onClick={() => onOpenSurfaceView(planet.id)}
+                          className="text-[10px] uppercase rounded border border-slate-600 px-2 py-1 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors"
+                        >
+                          {t('groundOps.viewSurface')}
+                        </button>
                         {isBombarded && (
                           <span className="text-[10px] uppercase text-red-200 bg-red-900/40 border border-red-500/40 px-2 py-0.5 rounded">
                             {t('groundOps.bombardment')}

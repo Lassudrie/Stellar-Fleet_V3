@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting } from '../shared/types';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState } from '../shared/types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -9,6 +9,7 @@ import MainMenu from './components/screens/MainMenu';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
+import SurfaceView from './components/screens/SurfaceView';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
@@ -22,6 +23,8 @@ import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/sorting';
+import { generateSurfaceMapForState } from '../engine/planetSurface/access';
+import { resolveSurfaceContext } from './navigation/surfaceNavigation';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
 
@@ -34,14 +37,17 @@ const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW' | 'SURFACE_VIEW'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
+  const [surfaceViewBodyId, setSurfaceViewBodyId] = useState<string | null>(null);
+  const [surfaceViewSystem, setSurfaceViewSystem] = useState<StarSystem | null>(null);
+  const [surfaceReturnTarget, setSurfaceReturnTarget] = useState<'GAME' | 'SYSTEM_VIEW'>('GAME');
   const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
   const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
-  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | null>(null);
+  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW' | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
 
   // UI State
@@ -160,7 +166,7 @@ const App: React.FC = () => {
       return () => clearTransitionTimer();
   }, [clearTransitionTimer]);
 
-  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW', prepare?: () => void) => {
+  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW', prepare?: () => void) => {
       clearTransitionTimer();
       prepare?.();
       setPendingScreen(nextScreen);
@@ -495,6 +501,57 @@ const App: React.FC = () => {
       });
   };
 
+  const handleOpenSurfaceView = (bodyId?: string | null, options?: { systemHint?: StarSystem | null; returnTo?: 'GAME' | 'SYSTEM_VIEW' }) => {
+      if (!viewGameState) {
+          console.warn('[App] handleOpenSurfaceView: viewGameState not ready');
+          return;
+      }
+
+      const context = resolveSurfaceContext({
+          systems: viewGameState.systems,
+          bodyId: bodyId ?? null,
+          preferredSystemId: options?.systemHint?.id ?? targetSystem?.id ?? systemViewSystem?.id ?? null
+      });
+
+      if (!context) {
+          console.warn('[App] handleOpenSurfaceView: No solid body available for surface view');
+          return;
+      }
+
+      setSurfaceViewSystem(context.system);
+      setSystemViewSystem(context.system);
+      setSurfaceViewBodyId(context.body.id);
+      setSurfaceReturnTarget(options?.returnTo ?? 'GAME');
+
+      beginScreenTransition('SURFACE_VIEW', () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+      });
+  };
+
+  const handleSelectSurfaceBody = (bodyId: string) => {
+      if (!viewGameState) return;
+      const context = resolveSurfaceContext({
+          systems: viewGameState.systems,
+          bodyId,
+          preferredSystemId: surfaceViewSystem?.id ?? null
+      });
+      if (!context) return;
+      setSurfaceViewSystem(context.system);
+      setSurfaceViewBodyId(context.body.id);
+  };
+
+  const handleLeaveSurfaceView = (destination: 'GAME' | 'SYSTEM_VIEW') => {
+      const nextSystem = surfaceViewSystem;
+      beginScreenTransition(destination, () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+          if (destination === 'SYSTEM_VIEW' && nextSystem) {
+              setSystemViewSystem(nextSystem);
+          }
+      });
+  };
+
   const handleSystemCameraStateChange = useCallback((systemId: string, state: SystemCameraState) => {
       setSystemViewCameraBySystem(prev => ({
           ...prev,
@@ -728,9 +785,43 @@ const App: React.FC = () => {
       }
   };
 
+  const surfaceSystem = useMemo(() => {
+      if (!surfaceViewSystem) return null;
+      if (!viewGameState) return surfaceViewSystem;
+      return viewGameState.systems.find(sys => sys.id === surfaceViewSystem.id) ?? surfaceViewSystem;
+  }, [surfaceViewSystem, viewGameState]);
+
+  const surfaceBody = useMemo(() => {
+      if (!surfaceSystem || !surfaceViewBodyId) return null;
+      return surfaceSystem.planets.find(planet => planet.id === surfaceViewBodyId) ?? null;
+  }, [surfaceSystem, surfaceViewBodyId]);
+
+  const surfaceMap = useMemo(() => {
+      if (screen !== 'SURFACE_VIEW') return null;
+      if (!viewGameState || !surfaceViewBodyId) return null;
+      return generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
+  }, [screen, surfaceViewBodyId, viewGameState]);
+
+  const surfaceArmies = useMemo(() => {
+      if (!viewGameState || !surfaceViewBodyId) return [];
+      return viewGameState.armies.filter(
+          army => army.containerId === surfaceViewBodyId && army.state === ArmyState.DEPLOYED
+      );
+  }, [surfaceViewBodyId, viewGameState]);
+
+  const surfaceBuildings = useMemo(() => {
+      if (!viewGameState || !surfaceViewBodyId) return [];
+      return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === surfaceViewBodyId);
+  }, [surfaceViewBodyId, viewGameState]);
+
+  const surfaceBodies = useMemo(
+      () => surfaceSystem?.planets.filter(planet => planet.isSolid) ?? [],
+      [surfaceSystem]
+  );
+
   if (loading) return <LoadingScreen />;
 
-  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW';
+  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW' || pendingScreen === 'SURFACE_VIEW';
 
   const transitionOverlayElement = (
     <div
@@ -778,12 +869,25 @@ const App: React.FC = () => {
                                 {systemViewSystem.astro ? t('systemView.astroLoaded') : t('systemView.noAstro')}
                             </div>
                         </div>
-                        <button
-                            onClick={handleReturnToGalaxy}
-                            className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
-                        >
-                            {t('systemView.backToGalaxy')}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {systemViewSystem.planets.some(planet => planet.isSolid) && (
+                                <button
+                                    onClick={() => handleOpenSurfaceView(
+                                        systemViewSystem.planets.find(planet => planet.isSolid)?.id ?? null,
+                                        { systemHint: systemViewSystem, returnTo: 'SYSTEM_VIEW' }
+                                    )}
+                                    className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
+                                >
+                                    {t('systemView.openSurface')}
+                                </button>
+                            )}
+                            <button
+                                onClick={handleReturnToGalaxy}
+                                className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
+                            >
+                                {t('systemView.backToGalaxy')}
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div className="pointer-events-auto m-4 self-start">
@@ -795,6 +899,29 @@ const App: React.FC = () => {
                     </button>
                 </div>
             </div>
+            {transitionOverlayElement}
+        </div>
+      );
+  }
+
+  if (screen === 'SURFACE_VIEW') {
+      if (!viewGameState) return null;
+      return (
+        <div className="relative w-full h-screen">
+            <SurfaceView
+              map={surfaceMap}
+              system={surfaceSystem}
+              body={surfaceBody}
+              armies={surfaceArmies}
+              buildings={surfaceBuildings}
+              factions={viewGameState.factions}
+              playerFactionId={viewGameState.playerFactionId}
+              availableBodies={surfaceBodies}
+              primaryReturn={surfaceReturnTarget}
+              onSelectBody={handleSelectSurfaceBody}
+              onBackToGalaxy={() => handleLeaveSurfaceView('GAME')}
+              onBackToSystem={surfaceSystem ? () => handleLeaveSurfaceView('SYSTEM_VIEW') : undefined}
+            />
             {transitionOverlayElement}
         </div>
       );
@@ -857,6 +984,7 @@ const App: React.FC = () => {
                     onOpenGroundOps={handleOpenGroundOps}
                     onCloseMenu={handleCloseMenu}
                     onOpenSystemView={handleOpenSystemView}
+                    onOpenSurfaceView={(bodyId) => handleOpenSurfaceView(bodyId, { systemHint: targetSystem, returnTo: 'GAME' })}
                     fleetPickerMode={fleetPickerMode}
                     onOpenSystemDetails={handleOpenSystemDetails}
                     systemDetailSystem={systemDetailSystem}

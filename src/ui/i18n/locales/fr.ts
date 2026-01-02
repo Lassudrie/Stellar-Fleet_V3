@@ -101,10 +101,12 @@ export const fr = {
   'ctx.cancel': 'Annuler',
   'ctx.systemDetails': 'Détails du système',
   'ctx.viewSystem': 'Visualiser le système',
+  'ctx.viewSurface': 'Vue surface',
 
   // System View
   'systemView.currentSystem': 'Vue du système',
   'systemView.backToGalaxy': 'Retour à la galaxie',
+  'systemView.openSurface': 'Ouvrir la vue surface',
   'systemView.astroLoaded': 'Données astro procédurales chargées',
   'systemView.noAstro': 'Aucune donnée astro chargée',
   'systemView.bodyInfo.title': 'Infos corps',
@@ -152,6 +154,28 @@ export const fr = {
   'systemView.stationInfo.clearSelection': 'Effacer la s\u00e9lection',
   'systemView.stationInfo.unnamedStation': 'Station {{code}}',
   'systemView.actions.resetCamera': 'Réinitialiser la caméra',
+
+  // Surface View
+  'surfaceView.header': 'Vue surface',
+  'surfaceView.noData': 'Aucune donnée de surface disponible pour ce corps.',
+  'surfaceView.backToGalaxy': 'Retour à la galaxie',
+  'surfaceView.backToSystem': 'Retour à la vue système',
+  'surfaceView.mapSize': 'Grille {{width}} × {{height}}',
+  'surfaceView.zoomIn': 'Zoom avant',
+  'surfaceView.zoomOut': 'Zoom arrière',
+  'surfaceView.resetView': 'Réinitialiser la vue',
+  'surfaceView.tilePanel': 'Détails de tuile',
+  'surfaceView.tileCoordinate': 'Hex Q{{q}} / R{{r}}',
+  'surfaceView.hoverHint': 'Survolez une tuile pour voir le terrain.',
+  'surfaceView.zoomLevel': 'Zoom ×{{value}}',
+  'surfaceView.tileBiome': 'Biome',
+  'surfaceView.tileElevation': 'Altitude',
+  'surfaceView.tileTemperature': 'Température',
+  'surfaceView.tileMoisture': 'Humidité',
+  'surfaceView.armies': 'Forces au sol',
+  'surfaceView.noArmies': 'Aucune armée positionnée ici.',
+  'surfaceView.buildings': 'Installations',
+  'surfaceView.noBuildings': 'Aucun bâtiment présent.',
 
   // System Detail Modal
   'system.value.unknown': 'Inconnu',
@@ -268,6 +292,7 @@ export const fr = {
   'groundOps.system': 'Systeme: {{system}}',
   'groundOps.transports': 'Transports disponibles: {{count}}',
   'groundOps.transportsNone': 'Aucun transport en orbite.',
+  'groundOps.viewSurface': 'Ouvrir la vue surface',
   'groundOps.noLandingZones': 'Aucun corps solide pour les operations au sol.',
   'groundOps.owner': 'Controle',
   'groundOps.neutral': 'Neutre',
@@ -290,6 +315,7 @@ export const fr = {
   'invasion.cancel': 'Annuler',
   'invasion.selectPlanet': 'Planète cible',
   'invasion.noSolidPlanets': 'Aucune planète solide disponible',
+  'invasion.viewSurface': 'Inspecter la surface',
 
   // Battle Screen
   'battle.reportTitle': 'Rapport de Bataille',

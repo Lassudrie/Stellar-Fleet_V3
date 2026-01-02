@@ -14,9 +14,10 @@ interface InvasionModalProps {
   onConfirm: (fleetId: string, planetId: string | null) => void; // Changed: returns FleetID now
   onClose: () => void;
   playerFactionId: string;
+  onOpenSurfaceView: (planetId: string) => void;
 }
 
-const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId }) => {
+const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId, onOpenSurfaceView }) => {
   const { t } = useI18n();
   const getFleetName = useFleetName();
   const solidPlanets = useMemo(() => targetSystem.planets.filter(planet => planet.isSolid), [targetSystem]);
@@ -80,6 +81,13 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
               ))}
               {solidPlanets.length === 0 && <option value="">{t('invasion.noSolidPlanets')}</option>}
             </select>
+            <button
+              disabled={!selectedPlanetId}
+              onClick={() => selectedPlanetId && onOpenSurfaceView(selectedPlanetId)}
+              className="text-[10px] uppercase rounded border border-slate-600 px-2 py-1 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t('invasion.viewSurface')}
+            </button>
           </div>
           {invasionCandidates.length === 0 ? (
             <div className="text-center py-8 text-slate-500 italic text-sm border border-dashed border-slate-700 rounded">
