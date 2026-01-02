@@ -1,6 +1,6 @@
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
 import { distSq } from '../../../engine/math/vec3';
-import { Fleet, FleetState, StarSystem } from '../../../shared/types';
+import { Fleet, FleetState, StarSystem } from '../../../shared/shared';
 
 /**
  * Identify the system a fleet is orbiting using the shared ORBIT_RADIUS * 3 proximity window.

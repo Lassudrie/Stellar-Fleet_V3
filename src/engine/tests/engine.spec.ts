@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { resolveGroundConflict } from '../conquest';
 import { sanitizeArmies } from '../army';
-import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
-import { resolveBattle } from '../battle';
+import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
+import { detectNewBattles, resolveBattle } from '../battle';
 import { SHIP_STATS } from '../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
 import { applyCommand, GameCommand } from '../commands';
@@ -20,16 +20,19 @@ import {
   GameplayRules,
   GameState,
   PlanetBody,
+  PlanetData,
   AIState,
   ShipEntity,
   ShipType,
   StarSystem
-} from '../../shared/types';
+} from '../../shared/shared';
+import { shortId } from '../../shared/shared';
 import { Vec3 } from '../math/vec3';
 import { GameEngine } from '../GameEngine';
 import { runTurn } from '../runTurn';
 import { RNG } from '../rng';
-import { phaseBattleResolution, phaseCleanup, phaseGround, phaseBattleDetection, phaseOrbitalBombardment } from '../runTurn';
+import type { TurnContext } from '../runTurn';
+import { phaseBattleResolution, phaseCleanup, phaseGround, phaseBattleDetection, phaseMovement, phaseOrbitalBombardment } from '../runTurn';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../battle';
@@ -39,7 +42,15 @@ import { resolveFleetMovement } from '../movement';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { findNearestSystem } from '../world';
-import { FuelShortageError } from '../logistics/fuel';
+import { FuelShortageError, quantizeFuel } from '../logistics/fuel';
+import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../fogOfWar';
+import { SpatialIndex } from '../spatialIndex';
+import { deepFreezeDev } from '../state';
+import { buildPlanetBodies } from '../planets';
+import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState } from '../planetSurface';
+import { deriveTerrainType, resolveEngagement, rollTriangularCentered } from '../ground';
+import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
+import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
 
 interface TestCase {
   name: string;
@@ -2753,6 +2764,1549 @@ const tests: TestCase[] = [
     }
   }
 ];
+
+// ============================================================
+// Additional consolidated engine tests (was: engine/tests/*.spec.ts)
+// ============================================================
+
+// --- rangeConsistency.spec.ts ---
+
+tests.push(
+  {
+    name: 'Squared capture range matches base constant and orbit proximity stays in sync',
+    run: () => {
+      assert.strictEqual(CAPTURE_RANGE_SQ, CAPTURE_RANGE * CAPTURE_RANGE, 'CAPTURE_RANGE_SQ should match squared base range');
+      assert.strictEqual(
+        ORBIT_PROXIMITY_RANGE_SQ >= CAPTURE_RANGE_SQ,
+        true,
+        'Orbit proximity envelope should not be narrower than capture range'
+      );
+    }
+  },
+  {
+    name: 'Fleets within capture range contest orbit and trigger battle detection',
+    run: () => {
+      const inRange = CAPTURE_RANGE - 0.1;
+      const localFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const system: StarSystem = {
+        id: 'alpha',
+        name: 'alpha',
+        position: { x: 0, y: 0, z: 0 },
+        color: '#ffffff',
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: []
+      };
+
+      const mkFleet = (id: string, factionId: string, x: number): Fleet => ({
+        id,
+        factionId,
+        ships: [
+          {
+            id: `${id}-ship`,
+            type: ShipType.FRIGATE,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: null
+          }
+        ],
+        position: { x, y: 0, z: 0 },
+        state: FleetState.ORBIT,
+        targetSystemId: null,
+        targetPosition: null,
+        radius: 1,
+        stateStartTurn: 0
+      });
+
+      const state: GameState = {
+        scenarioId: 'test',
+        playerFactionId: 'blue',
+        factions: localFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [system],
+        fleets: [mkFleet('fleet-blue', 'blue', inRange), mkFleet('fleet-red', 'red', -inRange)],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        aiStates: {},
+        objectives: { conditions: [] },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
+      };
+
+      const rng = new RNG(123);
+      const orbitContested = isOrbitContested(state.systems[0], state.fleets);
+      const battles = detectNewBattles(state, rng, 0);
+
+      assert.strictEqual(orbitContested, true, 'Orbit should be contested when fleets are inside capture range');
+      assert.strictEqual(battles.length, 1, 'Battle should be scheduled when multiple factions contest a system');
+    }
+  },
+  {
+    name: 'Fleets outside capture range neither contest nor trigger battles',
+    run: () => {
+      const outOfRange = CAPTURE_RANGE + 0.01;
+      const localFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const system: StarSystem = {
+        id: 'alpha',
+        name: 'alpha',
+        position: { x: 0, y: 0, z: 0 },
+        color: '#ffffff',
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: []
+      };
+
+      const mkFleet = (id: string, factionId: string, x: number): Fleet => ({
+        id,
+        factionId,
+        ships: [
+          {
+            id: `${id}-ship`,
+            type: ShipType.FRIGATE,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: null
+          }
+        ],
+        position: { x, y: 0, z: 0 },
+        state: FleetState.ORBIT,
+        targetSystemId: null,
+        targetPosition: null,
+        radius: 1,
+        stateStartTurn: 0
+      });
+
+      const state: GameState = {
+        scenarioId: 'test',
+        playerFactionId: 'blue',
+        factions: localFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [system],
+        fleets: [mkFleet('fleet-blue', 'blue', outOfRange), mkFleet('fleet-red', 'red', -outOfRange)],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        aiStates: {},
+        objectives: { conditions: [] },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
+      };
+
+      const rng = new RNG(321);
+      const orbitContested = isOrbitContested(state.systems[0], state.fleets);
+      const battles = detectNewBattles(state, rng, 0);
+
+      assert.strictEqual(orbitContested, false, 'Orbit should not be contested just outside capture range');
+      assert.strictEqual(battles.length, 0, 'No battle should be scheduled when fleets are out of range');
+    }
+  }
+);
+
+// --- stellarSystemGen.spec.ts ---
+
+const engine_isFiniteNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+tests.push(
+  {
+    name: 'Stellar system generation is deterministic for same inputs',
+    run: () => {
+      const a = generateStellarSystem({ worldSeed: 42, systemId: 'sys_test_1' });
+      const b = generateStellarSystem({ worldSeed: 42, systemId: 'sys_test_1' });
+      assert.deepStrictEqual(a, b);
+    }
+  },
+  {
+    name: 'Per-system astro generation is isolated from call order',
+    run: () => {
+      const a1 = generateStellarSystem({ worldSeed: 123, systemId: 'sys_A' });
+      const b1 = generateStellarSystem({ worldSeed: 123, systemId: 'sys_B' });
+
+      const b2 = generateStellarSystem({ worldSeed: 123, systemId: 'sys_B' });
+      const a2 = generateStellarSystem({ worldSeed: 123, systemId: 'sys_A' });
+
+      assert.deepStrictEqual(a1, a2);
+      assert.deepStrictEqual(b1, b2);
+    }
+  },
+  {
+    name: 'Generated astro payload respects basic numeric invariants',
+    run: () => {
+      for (let seed = 1; seed <= 50; seed++) {
+        const sys = generateStellarSystem({ worldSeed: seed, systemId: `sys_${seed}` });
+
+        assert.ok(engine_isFiniteNumber(sys.seed));
+        assert.ok(sys.starCount >= 1 && sys.starCount <= 3);
+        assert.ok(Array.isArray(sys.stars) && sys.stars.length >= 1);
+        assert.ok(Array.isArray(sys.planets));
+        assert.ok(sys.planets.length <= 10);
+
+        assert.ok(engine_isFiniteNumber(sys.derived.luminosityTotalLSun) && sys.derived.luminosityTotalLSun > 0);
+        assert.ok(engine_isFiniteNumber(sys.derived.snowLineAu) && sys.derived.snowLineAu >= 0);
+        assert.ok(engine_isFiniteNumber(sys.derived.hzInnerAu) && sys.derived.hzInnerAu >= 0);
+        assert.ok(engine_isFiniteNumber(sys.derived.hzOuterAu) && sys.derived.hzOuterAu >= sys.derived.hzInnerAu);
+
+        for (const star of sys.stars) {
+          assert.ok(engine_isFiniteNumber(star.massSun) && star.massSun > 0);
+          assert.ok(engine_isFiniteNumber(star.radiusSun) && star.radiusSun > 0);
+          assert.ok(engine_isFiniteNumber(star.luminositySun) && star.luminositySun > 0);
+          assert.ok(engine_isFiniteNumber(star.teffK) && star.teffK > 0);
+        }
+
+        let lastA = 0;
+        for (const planet of sys.planets) {
+          assert.ok(engine_isFiniteNumber(planet.semiMajorAxisAu));
+          assert.ok(planet.semiMajorAxisAu >= 0.03 && planet.semiMajorAxisAu <= 60);
+          assert.ok(planet.semiMajorAxisAu >= lastA);
+          lastA = planet.semiMajorAxisAu;
+
+          assert.ok(engine_isFiniteNumber(planet.massEarth) && planet.massEarth > 0);
+          assert.ok(engine_isFiniteNumber(planet.radiusEarth) && planet.radiusEarth > 0);
+          assert.ok(engine_isFiniteNumber(planet.gravityG) && planet.gravityG > 0);
+
+          const expectedG = planet.massEarth / (planet.radiusEarth * planet.radiusEarth);
+          assert.ok(Math.abs(planet.gravityG - expectedG) < 1e-9);
+
+          assert.ok(engine_isFiniteNumber(planet.temperatureK));
+          assert.ok(planet.temperatureK >= 30 && planet.temperatureK <= 2000);
+
+          for (const moon of planet.moons) {
+            assert.ok(engine_isFiniteNumber(moon.orbitDistanceRp));
+            assert.ok(moon.orbitDistanceRp >= 6 && moon.orbitDistanceRp <= 400);
+            assert.ok(engine_isFiniteNumber(moon.massEarth) && moon.massEarth >= 0);
+            assert.ok(engine_isFiniteNumber(moon.radiusEarth) && moon.radiusEarth > 0);
+            assert.ok(engine_isFiniteNumber(moon.gravityG) && moon.gravityG >= 0);
+            assert.ok(engine_isFiniteNumber(moon.temperatureK));
+            assert.ok(moon.temperatureK >= 30 && moon.temperatureK <= 2000);
+          }
+        }
+      }
+    }
+  }
+);
+
+// --- planetSurfaceGen.spec.ts ---
+
+const engine_hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number => {
+  let h = fnv1a32(`${map.bodyId}|${map.systemId}|${map.seaLevelElev}|${map.descriptor.seed}`);
+  for (const t of map.tiles) {
+    h = fnv1a32(`${h}|${t.elev}|${t.tempC2}|${t.moist}|${t.biome}|${t.featureBits}`);
+  }
+  for (const s of map.settlements) {
+    h = fnv1a32(`${h}|${s.id}|${s.type}|${s.factionId ?? ''}|${s.coord.q},${s.coord.r}|${s.population}|${s.isCapital ? 1 : 0}`);
+  }
+  return h >>> 0;
+};
+
+const engine_getFirstSolidPlanet = (
+  worldSeed: number,
+  systemId: string
+): { body: PlanetBody; planetData: PlanetData } => {
+  const astro = generateStellarSystem({ worldSeed, systemId });
+  const system = { id: systemId, name: 'Test', ownerFactionId: null as any };
+  const bodies = buildPlanetBodies(system, astro, []);
+  const first = bodies.find(b => b.isSolid && b.bodyType === 'planet');
+  assert.ok(first, 'Expected at least one solid planet body');
+
+  const match = new RegExp(`^planet-${systemId}-(\\d+)$`).exec(first.id);
+  assert.ok(match, `Expected a canonical planet id, got ${first.id}`);
+  const planetIndex = Number(match[1]) - 1;
+  assert.ok(Number.isFinite(planetIndex) && planetIndex >= 0);
+  const planetData = astro.planets[planetIndex];
+  assert.ok(planetData, 'Expected matching planet data');
+  return { body: first, planetData };
+};
+
+tests.push(
+  {
+    name: 'Planet surface generation is deterministic for same descriptor + astro inputs',
+    run: () => {
+      const worldSeed = 42;
+      const systemId = 'sys_surface_test';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+      const a = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: 'blue' });
+      const b = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: 'blue' });
+      assert.strictEqual(engine_hashSurface(a), engine_hashSurface(b));
+    }
+  },
+  {
+    name: 'Generated surface respects grid dimensions and tile count',
+    run: () => {
+      const worldSeed = 7;
+      const systemId = 'sys_surface_dims';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+      assert.ok(map.tiles.length === descriptor.config.w * descriptor.config.h);
+    }
+  },
+  {
+    name: 'Settlements never spawn on water tiles',
+    run: () => {
+      const worldSeed = 99;
+      const systemId = 'sys_surface_settlements';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: 'blue' });
+
+      const w = descriptor.config.w;
+      for (const s of map.settlements) {
+        const idx = s.coord.r * w + s.coord.q;
+        const biome = map.tiles[idx].biome;
+        assert.ok(biome !== 'ocean' && biome !== 'coast' && biome !== 'lake', `Settlement spawned on water biome '${biome}'`);
+      }
+    }
+  },
+  {
+    name: 'Water fraction roughly matches derived waterFraction (quantile sea level invariant)',
+    run: () => {
+      const worldSeed = 123;
+      const systemId = 'sys_surface_water';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const params = deriveSurfaceParamsFromPlanet(planetData);
+      const water = map.tiles.filter(t => t.biome === 'ocean' || t.biome === 'coast' || t.biome === 'lake').length;
+      const frac = water / map.tiles.length;
+
+      assert.ok(Math.abs(frac - params.waterFraction) < 0.08, `Water fraction ${frac} deviates from expected ${params.waterFraction}`);
+    }
+  }
+);
+
+// --- planetSurfacePositions.spec.ts ---
+
+const engine_ps_isWater = (biome: string): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+
+const engine_ps_createArmy = (params: {
+  id: string;
+  factionId: string;
+  members: number;
+  state: ArmyState;
+  containerId: string;
+  surfacePos?: { bodyId: string; q: number; r: number };
+}): any => ({
+  id: params.id,
+  factionId: params.factionId,
+  unitType: 'mechanized_infantry',
+  posture: 'normal',
+  maxMembers: params.members,
+  members: params.members,
+  attack: 1,
+  defense: 1,
+  condition: 1,
+  state: params.state,
+  containerId: params.containerId,
+  ...(params.surfacePos ? { surfacePos: params.surfacePos } : {})
+});
+
+const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string): { state: GameState; body: PlanetBody } => {
+  const astro = generateStellarSystem({ worldSeed, systemId });
+  const system = {
+    id: systemId,
+    name: systemId,
+    position: { x: 0, y: 0, z: 0 },
+    color: '#ffffff',
+    size: 1,
+    ownerFactionId: 'blue',
+    resourceType: 'none' as const,
+    isHomeworld: false,
+    astro,
+    planets: [] as PlanetBody[]
+  };
+
+  system.planets = buildPlanetBodies({ id: system.id, name: system.name, ownerFactionId: system.ownerFactionId }, astro, []);
+  const body = system.planets.find(p => p.isSolid && p.bodyType === 'planet')!;
+  assert.ok(body, 'Expected a solid planet body');
+
+  const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+
+  const singleFaction: FactionState[] = [{ id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }];
+
+  const state: GameState = {
+    scenarioId: 'test',
+    scenarioTitle: 'Test',
+    playerFactionId: 'blue',
+    factions: singleFaction,
+    seed: worldSeed,
+    rngState: worldSeed,
+    startYear: 0,
+    day: 1,
+    systems: [system],
+    fleets: [],
+    stations: [],
+    armies: [],
+    lasers: [],
+    battles: [],
+    logs: [],
+    messages: [],
+    selectedFleetId: null,
+    winnerFactionId: null,
+    planetSurfaceDescriptorsByBodyId: {
+      [body.id]: descriptor
+    },
+    groundBuildings: [],
+    objectives: { conditions: [] },
+    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
+  };
+
+  return { state, body };
+};
+
+const engine_ps_pickAnyTile = (
+  state: GameState,
+  bodyId: string,
+  predicate: (biome: string) => boolean
+): { q: number; r: number } => {
+  const map = generateSurfaceMapForState(state, bodyId);
+  assert.ok(map, 'Expected surface map');
+  const { w } = map.descriptor.config;
+  for (let i = 0; i < map.tiles.length; i += 1) {
+    const t = map.tiles[i];
+    if (!predicate(t.biome)) continue;
+    return { q: i % w, r: Math.floor(i / w) };
+  }
+  throw new Error('No matching tile found');
+};
+
+tests.push(
+  {
+    name: 'save/load preserves valid army.surfacePos and groundBuildings.surfacePos',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(42, 'sys_surface_pos');
+
+      const land = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b));
+      const buildingSpot = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b) && b !== 'mountain' && b !== 'ice');
+
+      const withEntities: GameState = {
+        ...base,
+        armies: [
+          engine_ps_createArmy({
+            id: 'army-1',
+            factionId: 'blue',
+            members: 10000,
+            state: ArmyState.DEPLOYED,
+            containerId: body.id,
+            surfacePos: { bodyId: body.id, q: land.q, r: land.r }
+          })
+        ],
+        groundBuildings: [
+          {
+            id: 'bld-1',
+            factionId: 'blue',
+            type: 'outpost',
+            surfacePos: { bodyId: body.id, q: buildingSpot.q, r: buildingSpot.r }
+          }
+        ]
+      };
+
+      const roundTrip = deserializeGameState(serializeGameState(withEntities));
+      assert.deepStrictEqual(roundTrip.armies[0].surfacePos, withEntities.armies[0].surfacePos);
+      assert.deepStrictEqual(roundTrip.groundBuildings?.[0].surfacePos, withEntities.groundBuildings?.[0].surfacePos);
+    }
+  },
+  {
+    name: 'BUILD_AT rejects water tiles and rejects already-occupied building tiles',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(7, 'sys_build');
+      const water = engine_ps_pickAnyTile(base, body.id, b => engine_ps_isWater(b));
+      const land = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b) && b !== 'mountain' && b !== 'ice');
+
+      const fail = applyCommand(
+        base,
+        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: water.q, r: water.r } },
+        new RNG(1)
+      );
+      assert.ok(!fail.ok, 'Expected BUILD_AT on water to fail');
+
+      const ok1 = applyCommand(
+        base,
+        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: land.q, r: land.r } },
+        new RNG(2)
+      );
+      assert.ok(ok1.ok, 'Expected BUILD_AT on land to succeed');
+      assert.ok(ok1.state.groundBuildings && ok1.state.groundBuildings.length === 1);
+
+      const ok2 = applyCommand(
+        ok1.state,
+        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'mine', at: { bodyId: body.id, q: land.q, r: land.r } },
+        new RNG(3)
+      );
+      assert.ok(!ok2.ok, 'Expected second building on same tile to fail');
+    }
+  },
+  {
+    name: 'MOVE_ARMY_ON_SURFACE rejects non-passable tiles and updates position on success',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(11, 'sys_move');
+      const landA = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b));
+      const map = generateSurfaceMapForState(base, body.id)!;
+      const { w } = map.descriptor.config;
+      let landB: { q: number; r: number } | null = null;
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        const t = map.tiles[i];
+        if (engine_ps_isWater(t.biome)) continue;
+        const q = i % w;
+        const r = Math.floor(i / w);
+        if (q === landA.q && r === landA.r) continue;
+        landB = { q, r };
+        break;
+      }
+      if (!landB) landB = landA;
+      const water = engine_ps_pickAnyTile(base, body.id, b => engine_ps_isWater(b));
+
+      const state: GameState = {
+        ...base,
+        armies: [
+          engine_ps_createArmy({
+            id: 'army-1',
+            factionId: 'blue',
+            members: 10000,
+            state: ArmyState.DEPLOYED,
+            containerId: body.id,
+            surfacePos: { bodyId: body.id, q: landA.q, r: landA.r }
+          })
+        ]
+      };
+
+      const fail = applyCommand(
+        state,
+        { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: water.q, r: water.r } },
+        new RNG(5)
+      );
+      assert.ok(!fail.ok, 'Expected move onto water to fail');
+
+      const ok = applyCommand(
+        state,
+        { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: landB.q, r: landB.r } },
+        new RNG(6)
+      );
+      assert.ok(ok.ok, 'Expected move onto land to succeed');
+      assert.deepStrictEqual(ok.state.armies[0].surfacePos, { bodyId: body.id, q: landB.q, r: landB.r });
+    }
+  },
+  {
+    name: 'Invalid positions are deterministically relocalized on load',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(99, 'sys_reloc');
+      const save = JSON.parse(
+        serializeGameState({
+          ...base,
+          armies: [
+            engine_ps_createArmy({
+              id: 'army-1',
+              factionId: 'blue',
+              members: 10000,
+              state: ArmyState.DEPLOYED,
+              containerId: body.id,
+              surfacePos: { bodyId: body.id, q: 9999, r: 9999 }
+            })
+          ]
+        })
+      );
+
+      const restoredA = deserializeGameState(JSON.stringify(save));
+      const restoredB = deserializeGameState(JSON.stringify(save));
+      assert.deepStrictEqual(restoredA.armies[0].surfacePos, restoredB.armies[0].surfacePos, 'Relocation should be deterministic');
+
+      const map = generateSurfaceMapForState(restoredA, body.id)!;
+      const { w, h } = map.descriptor.config;
+      const pos = restoredA.armies[0].surfacePos!;
+      assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h);
+      const biome = map.tiles[pos.r * w + pos.q].biome;
+      assert.ok(!engine_ps_isWater(biome), `Relocated biome must be passable, got ${biome}`);
+    }
+  },
+  {
+    name: 'Movement phase assigns surfacePos to armies auto-deployed during invasion',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(1234, 'sys_invade');
+
+      const system = base.systems[0];
+      const enemySystem = {
+        ...system,
+        ownerFactionId: 'red',
+        planets: system.planets.map(p => ({ ...p, ownerFactionId: 'red' }))
+      };
+
+      const defenderLand = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b));
+      const defenderArmy = engine_ps_createArmy({
+        id: 'army-def',
+        factionId: 'red',
+        members: 9000,
+        state: ArmyState.DEPLOYED,
+        containerId: body.id,
+        surfacePos: { bodyId: body.id, q: defenderLand.q, r: defenderLand.r }
+      });
+
+      const attackerArmyId = 'army-atk';
+      const fleetId = 'fleet-inv';
+
+      const attackerArmy = engine_ps_createArmy({
+        id: attackerArmyId,
+        factionId: 'blue',
+        members: 10000,
+        state: ArmyState.EMBARKED,
+        containerId: fleetId
+      });
+
+      const fleet: Fleet = {
+        id: fleetId,
+        factionId: 'blue',
+        ships: [
+          {
+            id: 'ship-1',
+            type: ShipType.TRANSPORTER,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: attackerArmyId
+          }
+        ],
+        position: enemySystem.position,
+        state: FleetState.MOVING,
+        targetSystemId: enemySystem.id,
+        targetPosition: enemySystem.position,
+        radius: 1,
+        stateStartTurn: base.day,
+        invasionTargetSystemId: enemySystem.id,
+        invasionTargetPlanetId: body.id
+      };
+
+      const state: GameState = {
+        ...base,
+        systems: [enemySystem],
+        fleets: [fleet],
+        armies: [defenderArmy, attackerArmy]
+      };
+
+      const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
+      const landed = next.armies.find(a => a.id === attackerArmyId);
+      assert.ok(landed, 'Expected attacker army to exist after movement phase');
+      assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected attacker army to be deployed by invasion logic');
+      assert.strictEqual(landed.containerId, body.id, 'Expected attacker army to be deployed onto the target body');
+      assert.ok(landed.surfacePos, 'Expected normalizeSurfacePositions to assign surfacePos');
+
+      const map = generateSurfaceMapForState(next, body.id)!;
+      const { w, h } = map.descriptor.config;
+      const pos = landed.surfacePos!;
+      assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h, 'surfacePos should be inside the grid');
+      const biome = map.tiles[pos.r * w + pos.q].biome;
+      assert.ok(!engine_ps_isWater(biome), `surfacePos should be passable, got biome '${biome}'`);
+    }
+  }
+);
+
+// --- fogOfWar.spec.ts ---
+
+tests.push(
+  {
+    name: 'Fog of war: system ownership + borders remain known, fleets obey visibility',
+    run: () => {
+      const fogFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const baseFogState: GameState = {
+        scenarioId: 'fog-of-war',
+        playerFactionId: 'blue',
+        factions: fogFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [
+          {
+            id: 'alpha',
+            name: 'Alpha',
+            position: { x: 0, y: 0, z: 0 },
+            color: fogFactions[0].color,
+            size: 1,
+            ownerFactionId: 'blue',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          },
+          {
+            id: 'beta',
+            name: 'Beta',
+            position: { x: 100, y: 0, z: 0 },
+            color: fogFactions[1].color,
+            size: 1,
+            ownerFactionId: 'red',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          }
+        ],
+        fleets: [
+          {
+            id: 'blue-1',
+            factionId: 'blue',
+            ships: [],
+            position: { x: 0, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          },
+          {
+            id: 'red-1',
+            factionId: 'red',
+            ships: [],
+            position: { x: 100, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          }
+        ],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        objectives: { conditions: [] },
+        rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
+      };
+
+      const view = applyFogOfWar(baseFogState, 'blue');
+      const beta = view.systems.find(system => system.id === 'beta');
+      assert.ok(beta, 'Beta system should exist in the view state');
+      assert.strictEqual(beta?.ownerFactionId, 'red', 'Enemy ownership should remain visible even when the system is unobserved');
+      assert.strictEqual(beta?.color, fogFactions[1].color, 'Enemy territorial color should remain visible for border rendering');
+
+      const fleetIds = new Set(view.fleets.map(fleet => fleet.id));
+      assert.ok(fleetIds.has('blue-1'), 'Player fleets stay visible');
+      assert.ok(!fleetIds.has('red-1'), 'Unobserved enemy fleets stay hidden');
+    }
+  },
+  {
+    name: 'Fog of war: custom sensor can reveal fleets independently of defaults',
+    run: () => {
+      const fogFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const baseFogState: GameState = {
+        scenarioId: 'fog-of-war',
+        playerFactionId: 'blue',
+        factions: fogFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [
+          {
+            id: 'alpha',
+            name: 'Alpha',
+            position: { x: 0, y: 0, z: 0 },
+            color: fogFactions[0].color,
+            size: 1,
+            ownerFactionId: 'blue',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          },
+          {
+            id: 'beta',
+            name: 'Beta',
+            position: { x: 100, y: 0, z: 0 },
+            color: fogFactions[1].color,
+            size: 1,
+            ownerFactionId: 'red',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          }
+        ],
+        fleets: [
+          {
+            id: 'blue-1',
+            factionId: 'blue',
+            ships: [],
+            position: { x: 0, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          },
+          {
+            id: 'red-1',
+            factionId: 'red',
+            ships: [],
+            position: { x: 100, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          }
+        ],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        objectives: { conditions: [] },
+        rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
+      };
+
+      const stealthFleet = {
+        ...baseFogState.fleets[1],
+        id: 'red-stealth',
+        position: { x: 500, y: 0, z: 0 }
+      };
+      const state: GameState = { ...baseFogState, fleets: [...baseFogState.fleets, stealthFleet] };
+      const alwaysOnSensor = {
+        id: 'omniscient',
+        isVisible: () => true
+      };
+      const visible = isFleetVisibleToViewer(
+        stealthFleet,
+        state,
+        'blue',
+        new Set(state.systems.map(system => system.id)),
+        [...defaultFleetSensors, alwaysOnSensor]
+      );
+      assert.ok(visible, 'Custom sensor should reveal stealth fleet regardless of range');
+    }
+  },
+  {
+    name: 'Fog of war: observed systems are cached inside visibility context for efficiency',
+    run: () => {
+      const fogFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const baseFogState: GameState = {
+        scenarioId: 'fog-of-war',
+        playerFactionId: 'blue',
+        factions: fogFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [
+          {
+            id: 'alpha',
+            name: 'Alpha',
+            position: { x: 0, y: 0, z: 0 },
+            color: fogFactions[0].color,
+            size: 1,
+            ownerFactionId: 'blue',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          },
+          {
+            id: 'beta',
+            name: 'Beta',
+            position: { x: 100, y: 0, z: 0 },
+            color: fogFactions[1].color,
+            size: 1,
+            ownerFactionId: 'red',
+            resourceType: 'none',
+            isHomeworld: false,
+            planets: []
+          }
+        ],
+        fleets: [
+          {
+            id: 'blue-1',
+            factionId: 'blue',
+            ships: [],
+            position: { x: 0, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          },
+          {
+            id: 'red-1',
+            factionId: 'red',
+            ships: [],
+            position: { x: 100, y: 0, z: 0 },
+            state: FleetState.ORBIT,
+            targetSystemId: null,
+            targetPosition: null,
+            radius: 1,
+            stateStartTurn: 0
+          }
+        ],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        objectives: { conditions: [] },
+        rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
+      };
+
+      const observedIds = new Set<string>(['alpha']);
+      const visible = isFleetVisibleToViewer(baseFogState.fleets[0], baseFogState, 'blue', observedIds);
+      assert.ok(visible, 'Viewer fleet remains visible when observed systems are precomputed');
+      assert.ok(observedIds.has('alpha'), 'Precomputed observed IDs are reused unchanged');
+    }
+  }
+);
+
+// --- immutability.spec.ts ---
+
+const engine_withNodeEnv = (value: string | undefined, run: () => void) => {
+  const previous = process.env.NODE_ENV;
+
+  if (typeof value === 'undefined') {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = value;
+  }
+
+  try {
+    run();
+  } finally {
+    if (typeof previous === 'undefined') {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previous;
+    }
+  }
+};
+
+tests.push(
+  {
+    name: 'deepFreezeDev freezes objects and blocks mutations in test environment',
+    run: () =>
+      engine_withNodeEnv('test', () => {
+        const state = { nested: { value: 1 }, list: [1, 2, 3] } as const;
+        deepFreezeDev(state);
+        assert(Object.isFrozen(state), 'root object should be frozen in test env');
+        assert(Object.isFrozen(state.nested), 'nested object should be frozen in test env');
+        assert(Object.isFrozen(state.list), 'arrays should also be frozen in test env');
+        assert.throws(() => {
+          (state as any).nested.value = 2;
+        }, TypeError);
+      })
+  },
+  {
+    name: 'deepFreezeDev is inert outside dev/test environments',
+    run: () =>
+      engine_withNodeEnv('production', () => {
+        const state = { counter: 0, nested: { value: 1 } };
+        deepFreezeDev(state);
+        assert(!Object.isFrozen(state), 'root object should remain unfrozen in production');
+        state.counter += 1;
+        state.nested.value = 5;
+        assert.strictEqual(state.counter, 1);
+        assert.strictEqual(state.nested.value, 5);
+      })
+  }
+);
+
+// --- fuelTransfer.spec.ts ---
+
+tests.push({
+  name: 'Tanker fuel is pooled and distributed across multiple targets',
+  run: () => {
+    const position = { x: 0, y: 0, z: 0 };
+
+    const createShip = (id: string, type: ShipType, fuel: number): ShipEntity => {
+      const stats = SHIP_STATS[type];
+      return {
+        id,
+        type,
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        fuel,
+        carriedArmyId: null
+      };
+    };
+
+    const createFleetLocal = (id: string, ships: ShipEntity[]): Fleet => ({
+      id,
+      factionId: 'blue',
+      ships,
+      position,
+      state: FleetState.ORBIT,
+      targetSystemId: null,
+      targetPosition: null,
+      radius: 1,
+      stateStartTurn: 0
+    });
+
+    const createStateLocal = (fleets: Fleet[]): GameState => {
+      const localFactions: FactionState[] = [{ id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }];
+      return {
+        scenarioId: 'test',
+        playerFactionId: 'blue',
+        factions: localFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [],
+        fleets,
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        objectives: { conditions: [] },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
+      };
+    };
+
+    const tankerA = createShip('tanker-a', ShipType.TANKER, 1500);
+    const tankerB = createShip('tanker-b', ShipType.TANKER, 2000);
+    const cruiser = createShip('cruiser-1', ShipType.CRUISER, 2600);
+    const destroyer = createShip('destroyer-1', ShipType.DESTROYER, 1700);
+    const fighter = createShip('fighter-1', ShipType.FIGHTER, 70);
+
+    const fleet = createFleetLocal('fleet-1', [tankerA, cruiser, destroyer, tankerB, fighter]);
+    const state = createStateLocal([fleet]);
+    const ctx: TurnContext = { turn: 0, rng: new RNG(1) };
+
+    const result = phaseCleanup(state, ctx);
+    const [updatedFleet] = result.fleets;
+    const tankerReserve = SHIP_STATS[ShipType.TANKER].fuelCapacity * 0.1;
+
+    const tankerAFuel = updatedFleet.ships.find(ship => ship.id === 'tanker-a')?.fuel;
+    const tankerBFuel = updatedFleet.ships.find(ship => ship.id === 'tanker-b')?.fuel;
+    const cruiserFuel = updatedFleet.ships.find(ship => ship.id === 'cruiser-1')?.fuel;
+    const destroyerFuel = updatedFleet.ships.find(ship => ship.id === 'destroyer-1')?.fuel;
+    const fighterFuel = updatedFleet.ships.find(ship => ship.id === 'fighter-1')?.fuel;
+
+    assert.strictEqual(cruiserFuel, 3000, 'Cruiser should be fully refueled');
+    assert.strictEqual(destroyerFuel, 2000, 'Destroyer should be fully refueled');
+    assert.strictEqual(fighterFuel, 120, 'Fighter should be fully refueled');
+
+    assert.strictEqual(tankerAFuel, 1200, 'First tanker should not dip below its reserve');
+    assert.strictEqual(tankerBFuel, 1550, 'Second tanker should supply the remaining demand');
+    assert.ok(
+      tankerAFuel !== undefined && tankerBFuel !== undefined && tankerAFuel >= tankerReserve && tankerBFuel >= tankerReserve,
+      'Tankers must retain their reserve fuel'
+    );
+  }
+});
+
+// --- aiSpatialIndex.spec.ts ---
+
+tests.push(
+  {
+    name: 'SpatialIndex queryRadius includes only points inside radius',
+    run: () => {
+      type Point = { id: string; position: { x: number; y: number; z: number } };
+      const points: Point[] = [
+        { id: 'a', position: { x: 0, y: 0, z: 0 } },
+        { id: 'b', position: { x: 10, y: 0, z: 0 } },
+        { id: 'c', position: { x: 25, y: 0, z: 0 } }
+      ];
+
+      const index = new SpatialIndex(points, 8);
+      const nearby = index.queryRadius({ x: 0, y: 0, z: 0 }, 12).map(p => p.id);
+      assert.deepStrictEqual(new Set(nearby), new Set(['a', 'b']));
+    }
+  },
+  {
+    name: 'SpatialIndex findNearest returns closest point',
+    run: () => {
+      type Point = { id: string; position: { x: number; y: number; z: number } };
+      const points: Point[] = [
+        { id: 'a', position: { x: 0, y: 0, z: 0 } },
+        { id: 'b', position: { x: 10, y: 0, z: 0 } },
+        { id: 'c', position: { x: 25, y: 0, z: 0 } }
+      ];
+      const index = new SpatialIndex(points, 8);
+      const nearest = index.findNearest({ x: 13, y: 0, z: 0 });
+      assert.strictEqual(nearest?.item.id, 'b');
+    }
+  },
+  {
+    name: 'SpatialIndex findNearest respects predicate filters',
+    run: () => {
+      type Point = { id: string; position: { x: number; y: number; z: number } };
+      const points: Point[] = [
+        { id: 'a', position: { x: 0, y: 0, z: 0 } },
+        { id: 'b', position: { x: 10, y: 0, z: 0 } },
+        { id: 'c', position: { x: 25, y: 0, z: 0 } }
+      ];
+      const index = new SpatialIndex(points, 8);
+      const nearestMatching = index.findNearest({ x: 13, y: 0, z: 0 }, item => item.id === 'c');
+      assert.strictEqual(nearestMatching?.item.id, 'c');
+    }
+  },
+  {
+    name: 'SpatialIndex behaves on empty index',
+    run: () => {
+      type Point = { id: string; position: { x: number; y: number; z: number } };
+      const emptyIndex = new SpatialIndex<Point>([], 5);
+      assert.deepStrictEqual(emptyIndex.queryRadius({ x: 0, y: 0, z: 0 }, 10), []);
+      assert.strictEqual(emptyIndex.findNearest({ x: 0, y: 0, z: 0 }), null);
+    }
+  }
+);
+
+// --- serializationRobustness.spec.ts ---
+
+const engine_sr_factions: FactionState[] = [{ id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }];
+
+const engine_sr_createPlanet = (systemId: string): PlanetBody => ({
+  id: `planet-${systemId}-1`,
+  systemId,
+  name: `${systemId} I`,
+  bodyType: 'planet',
+  class: 'solid',
+  ownerFactionId: 'blue',
+  size: 1,
+  isSolid: true
+});
+
+const engine_sr_createSystem = (id: string): StarSystem => ({
+  id,
+  name: id,
+  position: { x: 0, y: 0, z: 0 },
+  color: '#ffffff',
+  size: 1,
+  ownerFactionId: 'blue',
+  resourceType: 'none',
+  isHomeworld: false,
+  planets: [engine_sr_createPlanet(id)]
+});
+
+const engine_sr_createFleet = (id: string, system: StarSystem): Fleet => {
+  const ship: ShipEntity = {
+    id: `${id}-ship`,
+    type: ShipType.FRIGATE,
+    hp: 50,
+    maxHp: 50,
+    fuel: 50,
+    carriedArmyId: null
+  };
+
+  return {
+    id,
+    factionId: 'blue',
+    ships: [ship],
+    position: { ...system.position },
+    state: FleetState.ORBIT,
+    targetSystemId: null,
+    targetPosition: null,
+    radius: 1,
+    stateStartTurn: 0
+  };
+};
+
+const engine_sr_createBaseState = (): GameState => {
+  const system = engine_sr_createSystem('sys-1');
+  const fleet = engine_sr_createFleet('fleet-1', system);
+  return {
+    scenarioId: 'test',
+    scenarioTitle: 'Test',
+    playerFactionId: 'blue',
+    factions: engine_sr_factions,
+    seed: 42,
+    rngState: 42,
+    startYear: 0,
+    day: 0,
+    systems: [system],
+    fleets: [fleet],
+    armies: [],
+    lasers: [],
+    battles: [],
+    logs: [],
+    messages: [],
+    selectedFleetId: null,
+    winnerFactionId: null,
+    objectives: { conditions: [] },
+    rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
+  };
+};
+
+tests.push(
+  {
+    name: 'Deserialization rejects future save versions',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const save = JSON.parse(serializeGameState(base));
+      save.version = 999;
+      assert.throws(() => deserializeGameState(JSON.stringify(save)), /newer than supported/);
+    }
+  },
+  {
+    name: 'Deserialization drops invalid armies',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const save = JSON.parse(serializeGameState(base));
+      const planetId = base.systems[0].planets[0].id;
+
+      save.state.armies = [
+        {
+          id: 'army-bad',
+          factionId: 'blue',
+          unitType: 'mechanized_infantry',
+          maxMembers: -5,
+          members: 10,
+          attack: 1,
+          defense: 1,
+          condition: 1,
+          state: ArmyState.DEPLOYED,
+          containerId: planetId
+        }
+      ];
+
+      const restored = deserializeGameState(JSON.stringify(save));
+      assert.strictEqual(restored.armies.length, 0);
+    }
+  },
+  {
+    name: 'Deserialization drops invalid battles',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const save = JSON.parse(serializeGameState(base));
+      const systemId = base.systems[0].id;
+      const fleetId = base.fleets[0].id;
+
+      save.state.battles = [
+        {
+          id: 'battle-bad',
+          systemId,
+          turnCreated: 0,
+          status: 'unknown',
+          involvedFleetIds: [fleetId],
+          logs: []
+        }
+      ];
+
+      const restored = deserializeGameState(JSON.stringify(save));
+      assert.strictEqual(restored.battles.length, 0);
+    }
+  },
+  {
+    name: 'Deserialization truncates logs and messages to bounded sizes',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const save = JSON.parse(serializeGameState(base));
+
+      save.state.logs = Array.from({ length: 6000 }, (_, i) => ({
+        id: `log-${i}`,
+        day: i,
+        text: 'test',
+        type: 'info'
+      }));
+
+      save.state.messages = Array.from({ length: 1500 }, (_, i) => ({
+        id: `message-${i}`,
+        day: i,
+        type: 'generic',
+        priority: 0,
+        title: 'Test',
+        subtitle: '',
+        lines: ['line'],
+        payload: {},
+        read: false,
+        dismissed: false,
+        createdAtTurn: i
+      }));
+
+      const restored = deserializeGameState(JSON.stringify(save));
+      assert.ok(restored.logs.length < 6000);
+      assert.ok(restored.messages.length < 1500);
+    }
+  },
+  {
+    name: 'Deserialization sanitizes ship hp/fuel/consumables and round-trips cleanly',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const save = JSON.parse(serializeGameState(base));
+      const ship = save.state.fleets[0].ships[0];
+
+      ship.maxHp = 200;
+      ship.hp = -10;
+      ship.fuel = 1499.99994;
+      ship.consumables = { offensiveMissiles: -1, torpedoes: 3.7, interceptors: 'bad' };
+
+      const restored = deserializeGameState(JSON.stringify(save));
+      const restoredShip = restored.fleets[0].ships[0];
+      assert.ok(restoredShip.consumables);
+      const restoredConsumables = restoredShip.consumables!;
+
+      assert.strictEqual(restoredShip.hp, 0);
+      assert.strictEqual(restoredShip.maxHp, 200);
+      assert.strictEqual(restoredShip.fuel, quantizeFuel(1500));
+      assert.strictEqual(restoredConsumables.offensiveMissiles, 4);
+
+      const roundTripped = JSON.parse(serializeGameState(restored));
+      const persistedShip = roundTripped.state.fleets[0].ships[0];
+      assert.strictEqual(persistedShip.fuel, restoredShip.fuel);
+    }
+  }
+);
+
+// --- groundTerrain.spec.ts ---
+
+tests.push({
+  name: 'deriveTerrainType returns Urban for building tiles',
+  run: () => {
+    const seed = 101;
+    const systemId = 'sys-terrain';
+    const astro = generateStellarSystem({ worldSeed: seed, systemId });
+    const system = {
+      id: systemId,
+      name: systemId,
+      position: { x: 0, y: 0, z: 0 },
+      color: '#ffffff',
+      size: 1,
+      ownerFactionId: 'blue',
+      resourceType: 'none' as const,
+      isHomeworld: false,
+      astro,
+      planets: [] as PlanetBody[]
+    };
+    system.planets = buildPlanetBodies({ id: system.id, name: system.name, ownerFactionId: system.ownerFactionId }, astro, []);
+    const body = system.planets.find(p => p.isSolid && p.bodyType === 'planet')!;
+    const descriptor = createPlanetSurfaceDescriptor({ gameSeed: seed, systemId, body });
+
+    const localFactions: FactionState[] = [{ id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }];
+    const base: GameState = {
+      scenarioId: 'test',
+      playerFactionId: 'blue',
+      factions: localFactions,
+      seed,
+      rngState: seed,
+      startYear: 0,
+      day: 1,
+      systems: [system],
+      fleets: [],
+      stations: [],
+      armies: [],
+      lasers: [],
+      battles: [],
+      logs: [],
+      messages: [],
+      selectedFleetId: null,
+      winnerFactionId: null,
+      planetSurfaceDescriptorsByBodyId: { [body.id]: descriptor },
+      groundBuildings: [],
+      objectives: { conditions: [] },
+      rules: { fogOfWar: false, aiEnabled: false, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
+    };
+
+    const map = generateSurfaceMapForState(base, body.id)!;
+    const { w } = map.descriptor.config;
+    const idx = map.tiles.findIndex(t => t.biome !== 'ocean');
+    assert.ok(idx >= 0);
+    const q = idx % w;
+    const r = Math.floor(idx / w);
+    const state: GameState = {
+      ...base,
+      groundBuildings: [{ id: 'b', factionId: 'blue', type: 'outpost', surfacePos: { bodyId: body.id, q, r } }]
+    };
+    const terrain = deriveTerrainType(state, body.id, { q, r });
+    assert.strictEqual(terrain, 'Urban');
+  }
+});
+
+// --- groundCombat.spec.ts ---
+
+tests.push(
+  {
+    name: 'triangular RNG is bounded by epsilon',
+    run: () => {
+      const eps = 0.08;
+      const rng = new RNG(123);
+      for (let i = 0; i < 10000; i += 1) {
+        const v = rollTriangularCentered(rng, eps);
+        assert.ok(v >= 1 - eps && v <= 1 + eps, `Expected ${v} in [${1 - eps}, ${1 + eps}]`);
+      }
+    }
+  },
+  {
+    name: 'engagement RNG is deterministic per (turn, attackerId, defenderId)',
+    run: () => {
+      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
+        const base: Army = {
+          id: overrides.id,
+          factionId: overrides.factionId,
+          state: ArmyState.DEPLOYED,
+          containerId: 'body-1',
+          surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
+          unitType: 'mechanized_infantry',
+          posture: 'normal',
+          maxMembers: 10000,
+          members: 10000,
+          attack: 1,
+          defense: 1,
+          condition: 1
+        };
+        return { ...base, ...overrides };
+      };
+
+      const attacker = mkArmy({ id: 'a', factionId: 'blue', attack: 1.1 });
+      const defender = mkArmy({ id: 'd', factionId: 'red', defense: 1.1 });
+
+      const a = resolveEngagement(attacker, defender, { turn: 7, terrainType: 'Open' });
+      const b = resolveEngagement(attacker, defender, { turn: 7, terrainType: 'Open' });
+      assert.deepStrictEqual(a, b);
+    }
+  },
+  {
+    name: 'non-inversion guard math: if R0 <= 0.8519 then RNG cannot push above 1.0 (epsilon=0.08)',
+    run: () => {
+      const eps = 0.08;
+      const maxRatio = (1 + eps) / (1 - eps);
+      const threshold = 1 / maxRatio;
+      assert.ok(Math.abs(threshold - 0.8518518518518519) < 1e-12);
+      const r0 = threshold;
+      const rMax = r0 * maxRatio;
+      assert.ok(rMax <= 1.0 + 1e-12, `Expected rMax<=1, got ${rMax}`);
+    }
+  }
+);
+
+// --- rng.spec.ts ---
+
+const ENGINE_UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+tests.push(
+  {
+    name: 'Mulberry32 sequence remains bit-for-bit stable for seed 1',
+    run: () => {
+      const rng = new RNG(1);
+      const outputs = Array.from({ length: RNG_SEED_1_SEQUENCE.length }, () => rng.nextUint32());
+      assert.deepStrictEqual(outputs, RNG_SEED_1_SEQUENCE);
+    }
+  },
+  {
+    name: 'Gaussian approximation remains stable for seed 1',
+    run: () => {
+      const rng = new RNG(1);
+      const outputs = Array.from({ length: RNG_GAUSSIAN_SEED_1_SEQUENCE.length }, () => rng.gaussian());
+      const epsilon = 1e-12;
+      outputs.forEach((value, index) => {
+        const expected = RNG_GAUSSIAN_SEED_1_SEQUENCE[index];
+        assert.ok(Math.abs(value - expected) < epsilon, `Gaussian output at index ${index} diverged: expected ${expected}, got ${value}`);
+      });
+    }
+  },
+  {
+    name: 'State normalization keeps increments within uint32 range',
+    run: () => {
+      const rng = new RNG(0xffffffff);
+      rng.nextUint32();
+      assert.strictEqual(rng.getState(), 0x6d2b79f4);
+      rng.nextUint32();
+      assert.strictEqual(rng.getState(), 0xda56f3e9);
+    }
+  },
+  {
+    name: 'State round-trip preserves zero',
+    run: () => {
+      const rng = new RNG(123);
+      rng.setState(0);
+      assert.strictEqual(rng.getState(), 0);
+      rng.setState(rng.getState());
+      assert.strictEqual(rng.getState(), 0);
+    }
+  },
+  {
+    name: 'id() returns RFC4122 UUID v4 with deterministic prefix',
+    run: () => {
+      const rng = new RNG(1);
+      const ids = Array.from({ length: 3 }, () => rng.id('fleet'));
+      const expected = [
+        'fleet_f3ea87a0-c949-4300-abc4-0687fd2726fb',
+        'fleet_2b9de7f7-3066-4647-b001-e39c5c9f82b8',
+        'fleet_7007016d-71b7-4cfe-8aa6-8c742e3b217d'
+      ];
+      assert.deepStrictEqual(ids, expected);
+      ids.forEach(id => {
+        const [, uuid] = id.split('_');
+        assert.ok(ENGINE_UUID_V4_REGEX.test(uuid), `ID ${id} must include a valid UUID v4`);
+      });
+    }
+  },
+  {
+    name: 'id() remains deterministic for identical seeds',
+    run: () => {
+      const rngA = new RNG(12345);
+      const rngB = new RNG(12345);
+      const sequenceA = Array.from({ length: 5 }, () => rngA.id('ship'));
+      const sequenceB = Array.from({ length: 5 }, () => rngB.id('ship'));
+      assert.deepStrictEqual(sequenceA, sequenceB);
+    }
+  },
+  {
+    name: 'id() generates unique UUIDs over a reasonable sequence',
+    run: () => {
+      const rng = new RNG(99);
+      const count = 10_000;
+      const seen = new Set<string>();
+
+      for (let i = 0; i < count; i++) {
+        const id = rng.id('x');
+        const [, uuid] = id.split('_');
+        if (seen.has(id)) {
+          throw new Error(`Duplicate ID generated at iteration ${i}: ${id}`);
+        }
+        assert.ok(ENGINE_UUID_V4_REGEX.test(uuid), `Generated ID does not match UUID v4 format: ${id}`);
+        seen.add(id);
+      }
+
+      assert.strictEqual(seen.size, count);
+    }
+  },
+  {
+    name: 'shortId() returns a stable truncated segment for UUID-based IDs',
+    run: () => {
+      const id = 'fleet_550e8400-e29b-41d4-a716-446655440000';
+      assert.strictEqual(shortId(id), '550E8400');
+    }
+  }
+);
 
 const results: { name: string; success: boolean; error?: Error }[] = [];
 

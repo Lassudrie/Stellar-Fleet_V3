@@ -1,11 +1,11 @@
 
-import { ArmyState, Fleet, FleetState, GameMessage, GameState, StarSystem } from '../shared/types';
+import { ArmyState, Fleet, FleetState, GameMessage, GameState, StarSystem } from '../shared/shared';
 import { RNG } from './rng';
 import { applyCommand, GameCommand, CommandResult } from './commands';
 import { runTurn } from './runTurn';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
-import { canonicalizeMessages, canonicalizeState } from './state/canonicalize';
+import { canonicalizeMessages, canonicalizeState } from './state';
 import { FuelShortageError } from './logistics/fuel';
 
 type PlayerCommand =

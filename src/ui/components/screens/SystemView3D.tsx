@@ -27,9 +27,9 @@ import {
   Station,
   StarSystem,
   StarSystemAstro
-} from '../../../shared/types';
+} from '../../../shared/shared';
 import { calculateFleetPower } from '../../../engine/world';
-import { shortId } from '../../../engine/idUtils';
+import { shortId } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import { useFleetName } from '../../context/FleetNames';
 import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';

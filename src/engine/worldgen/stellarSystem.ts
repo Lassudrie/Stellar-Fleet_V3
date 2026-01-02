@@ -1,5 +1,5 @@
 import { RNG } from '../rng';
-import { sorted } from '../../shared/sorting';
+import { sorted } from '../../shared/shared';
 import type {
   AtmosphereType,
   MoonData,
@@ -17,7 +17,7 @@ import type {
   StellarSystemGenParams,
   StellarSystemPlan,
   WeightedSpectralType
-} from '../../shared/types';
+} from '../../shared/shared';
 
 // ============================================================
 // Constants (was: worldgen/stellar/constants.ts)

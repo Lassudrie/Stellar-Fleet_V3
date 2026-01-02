@@ -8,7 +8,7 @@ import type {
   GroundUnitType,
   HexCoord,
   PlanetSurfaceMap
-} from '../shared/types';
+} from '../shared/shared';
 import { RNG } from './rng';
 import { generateSurfaceMapForState, getTileAt, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
 

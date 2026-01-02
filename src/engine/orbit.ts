@@ -1,5 +1,5 @@
 import { CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../content/data/static';
-import { Fleet, FleetState, GameState, StarSystem, FactionId } from '../shared/types';
+import { Fleet, FleetState, GameState, StarSystem, FactionId } from '../shared/shared';
 import { Vec3, distSq } from './math/vec3';
 
 /**

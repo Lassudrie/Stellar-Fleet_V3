@@ -1,5 +1,8 @@
-
 import type { Vec3 } from '../engine/math/vec3';
+
+// ============================================================
+// Shared game types (was: shared/shared.ts)
+// ============================================================
 
 // Replaces enum Faction
 export type FactionId = string;
@@ -15,28 +18,22 @@ export interface FactionState {
 export enum FleetState {
   ORBIT = 'ORBIT',
   MOVING = 'MOVING',
-  COMBAT = 'COMBAT',
+  COMBAT = 'COMBAT'
 }
 
 export enum ArmyState {
   EMBARKED = 'EMBARKED',
   DEPLOYED = 'DEPLOYED',
-  IN_TRANSIT = 'IN_TRANSIT',
+  IN_TRANSIT = 'IN_TRANSIT'
 }
 
 // --- Ground Units (Surface Map) ---
 
-export type GroundUnitType =
-  | 'light_infantry'
-  | 'mechanized_infantry'
-  | 'heavy_armor'
-  | 'artillery';
+export type GroundUnitType = 'light_infantry' | 'mechanized_infantry' | 'heavy_armor' | 'artillery';
 
 export type GroundPosture = 'normal' | 'prepared_defense';
 
-export type GroundOrder =
-  | { type: 'move'; to: SurfacePos }
-  | { type: 'attack'; targetArmyId: string };
+export type GroundOrder = { type: 'move'; to: SurfacePos } | { type: 'attack'; targetArmyId: string };
 
 export enum ShipType {
   CARRIER = 'carrier',
@@ -49,7 +46,7 @@ export enum ShipType {
   BUILDER = 'builder',
   SUPPORT = 'support',
   TANKER = 'tanker',
-  EXTRACTOR = 'extractor',
+  EXTRACTOR = 'extractor'
 }
 
 export type StationType = 'shipyard' | 'mining' | 'defense' | 'relay' | 'outpost';
@@ -147,19 +144,31 @@ export interface PlanetBody {
 // NOTE: This is intentionally JSON-serializable to support save files.
 
 export type Biome =
-  | 'ocean' | 'coast' | 'lake'
-  | 'ice' | 'tundra' | 'taiga'
-  | 'grassland' | 'forest' | 'rainforest'
-  | 'desert' | 'rocky' | 'mountain'
-  | 'volcanic' | 'cratered';
+  | 'ocean'
+  | 'coast'
+  | 'lake'
+  | 'ice'
+  | 'tundra'
+  | 'taiga'
+  | 'grassland'
+  | 'forest'
+  | 'rainforest'
+  | 'desert'
+  | 'rocky'
+  | 'mountain'
+  | 'volcanic'
+  | 'cratered';
 
-export interface HexCoord { q: number; r: number; }
+export interface HexCoord {
+  q: number;
+  r: number;
+}
 
 export interface PlanetSurfaceConfig {
-  w: number;                 // ex: 96
-  h: number;                 // ex: 48
-  wrapX: boolean;            // true (cylindrical)
-  generatorVersion: number;  // ex: 1 (bump on breaking changes)
+  w: number; // ex: 96
+  h: number; // ex: 48
+  wrapX: boolean; // true (cylindrical)
+  generatorVersion: number; // ex: 1 (bump on breaking changes)
 }
 
 export interface PlanetSurfaceDescriptor {
@@ -177,20 +186,14 @@ export const enum FeatureBits {
 }
 
 export interface PlanetSurfaceTile {
-  elev: number;        // int16-ish (implementation chooses encoding)
-  tempC2: number;      // int16: local temperature in °C*2 (stable encoding)
-  moist: number;       // uint8 0..255
+  elev: number; // int16-ish (implementation chooses encoding)
+  tempC2: number; // int16: local temperature in °C*2 (stable encoding)
+  moist: number; // uint8 0..255
   biome: Biome;
   featureBits: number; // bitset
 }
 
-export type SettlementType =
-  | 'outpost'
-  | 'colony'
-  | 'frontierTown'
-  | 'city'
-  | 'metropolis'
-  | 'megalopolis';
+export type SettlementType = 'outpost' | 'colony' | 'frontierTown' | 'city' | 'metropolis' | 'megalopolis';
 
 export interface Settlement {
   id: string;
@@ -325,11 +328,11 @@ export interface Army {
   groundOrder?: GroundOrder;
 
   // --- Strict combat profile (used by ground resolver) ---
-  maxMembers: number;  // MM
-  members: number;     // M
-  attack: number;      // A
-  defense: number;     // D
-  condition: number;   // C in [0..1]
+  maxMembers: number; // MM
+  members: number; // M
+  attack: number; // A
+  defense: number; // D
+  condition: number; // C in [0..1]
 }
 
 export interface StarSystem {
@@ -486,10 +489,10 @@ export interface GameplayRules {
 export interface GameState {
   scenarioId: string;
   scenarioTitle?: string;
-  
+
   // Faction System
   playerFactionId: FactionId; // The ID of the local player
-  factions: FactionState[];   // Registry of all factions in this game
+  factions: FactionState[]; // Registry of all factions in this game
 
   seed: number;
   rngState: number;
@@ -519,3 +522,97 @@ export interface GameState {
   objectives: GameObjectives;
   rules: GameplayRules;
 }
+
+// ============================================================
+// Shared utilities (was: shared/shared.ts, shared/shared.ts, shared/shared.ts)
+// ============================================================
+
+const envMeta =
+  typeof import.meta !== 'undefined'
+    ? (import.meta as ImportMeta & { env?: { DEV?: boolean; VITE_LOG_LEVEL?: string } })
+    : undefined;
+
+type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
+
+const LEVEL_ORDER: Record<LogLevel, number> = {
+  silent: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4
+};
+
+const parseLogLevel = (value?: string): LogLevel | null => {
+  if (!value) return null;
+  const normalized = value.toLowerCase() as LogLevel;
+  return normalized in LEVEL_ORDER ? normalized : null;
+};
+
+const defaultLevel: LogLevel = envMeta?.env?.DEV ? 'debug' : 'warn';
+let currentLevel: LogLevel = parseLogLevel(envMeta?.env?.VITE_LOG_LEVEL) ?? defaultLevel;
+
+const shouldLog = (level: LogLevel) => LEVEL_ORDER[level] <= LEVEL_ORDER[currentLevel];
+
+type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug';
+
+const logWithLevel =
+  (level: LogLevel, method: ConsoleMethod) =>
+  (...args: unknown[]) => {
+    if (shouldLog(level)) {
+      // Some environments may not implement console.debug explicitly.
+      const fallbackMethod = console[method] ?? console.log;
+      fallbackMethod(...args);
+    }
+  };
+
+export const setLogLevel = (level: LogLevel): void => {
+  currentLevel = level;
+};
+
+export const getLogLevel = (): LogLevel => currentLevel;
+
+export const logger = {
+  error: logWithLevel('error', 'error'),
+  warn: logWithLevel('warn', 'warn'),
+  info: logWithLevel('info', 'info'),
+  debug: logWithLevel('debug', 'debug')
+};
+
+// Backward-compatible helpers
+export const devLog = (...args: Parameters<typeof console.log>) => logger.debug(...args);
+export const devWarn = (...args: Parameters<typeof console.warn>) => logger.warn(...args);
+export const devError = (...args: Parameters<typeof console.error>) => logger.error(...args);
+export const devInfo = (...args: Parameters<typeof console.info>) => logger.info(...args);
+
+export const sorted = <T>(items: readonly T[], compareFn?: (a: T, b: T) => number): T[] => {
+  // eslint-disable-next-line no-restricted-syntax -- the copy ensures callers keep immutability
+  return [...items].sort(compareFn);
+};
+
+/**
+ * Parses the unique ID format (prefix_hash) to return a displayable short code.
+ * Handles cases where the ID might not follow the expected format.
+ */
+export const shortId = (id: string): string => {
+  if (!id) return '???';
+  const parts = id.split('_');
+  const suffix = parts[parts.length - 1];
+  if (!suffix) return '???';
+
+  const uuidSegment = suffix.includes('-') ? suffix.split('-')[0] : suffix;
+  if (!uuidSegment) return '???';
+
+  const normalized = uuidSegment.replace(/[^a-zA-Z0-9]/g, '');
+  if (!normalized) return '???';
+
+  return normalized.slice(0, 8).toUpperCase();
+};
+
+/**
+ * Returns a standardized label for fleets.
+ * Example: "FLEET A1B2C3"
+ */
+export const fleetLabel = (id: string): string => {
+  return `FLEET ${shortId(id)}`;
+};
+

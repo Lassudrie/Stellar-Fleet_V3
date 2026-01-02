@@ -14,10 +14,10 @@ import {
   LogEntry,
   ShipType,
   StarSystem
-} from '../shared/types';
+} from '../shared/shared';
 import { RNG } from './rng';
-import { deepFreezeDev } from './state/immutability';
-import { canonicalizeMessages, canonicalizeState, isCanonical } from './state/canonicalize';
+import { deepFreezeDev } from './state';
+import { canonicalizeMessages, canonicalizeState, isCanonical } from './state';
 import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } from './ai';
 import { applyCommand } from './commands';
 import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
@@ -41,7 +41,7 @@ import {
 } from './ground';
 import { sanitizeArmies } from './army';
 import { quantizeFuel } from './logistics/fuel';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 
 export interface TurnContext {
   turn: number;

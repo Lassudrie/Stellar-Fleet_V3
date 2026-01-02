@@ -1,6 +1,6 @@
 import { CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
-import { devWarn } from '../shared/devLogger';
-import { sorted } from '../shared/sorting';
+import { devWarn } from '../shared/shared';
+import { sorted } from '../shared/shared';
 import {
   type Battle,
   type BattleAmmunitionBreakdown,
@@ -13,9 +13,9 @@ import {
   type ShipKillRecord,
   type GameState,
   type Fleet
-} from '../shared/types';
-import { FleetState, ShipType } from '../shared/types';
-import { shortId } from './idUtils';
+} from '../shared/shared';
+import { FleetState, ShipType } from '../shared/shared';
+import { shortId } from '../shared/shared';
 import { distSq } from './math/vec3';
 import { RNG } from './rng';
 import { withUpdatedFleetDerived } from './fleetDerived';

@@ -1,5 +1,5 @@
 import { MAX_HYPERJUMP_DISTANCE_LY, SHIP_STATS } from '../../content/data/static';
-import { Fleet } from '../../shared/types';
+import { Fleet } from '../../shared/shared';
 
 export interface FleetFuelSummary {
   totalFuel: number;

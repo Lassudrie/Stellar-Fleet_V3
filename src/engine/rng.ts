@@ -1,4 +1,4 @@
-import { logger } from '../shared/devLogger';
+import { logger } from '../shared/shared';
 
 // Deterministic Random Number Generator
 // Algorithm: Mulberry32

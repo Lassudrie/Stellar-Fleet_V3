@@ -12,7 +12,7 @@ import {
   SettlementType,
   StarSystem,
   SurfacePos
-} from '../../../shared/types';
+} from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import type { GameCommand } from '../../../engine/commands';
 import {

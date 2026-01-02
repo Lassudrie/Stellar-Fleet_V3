@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GameMessage } from '../../../shared/types';
+import { GameMessage } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 interface MessageToastsProps {
   messages: GameMessage[];

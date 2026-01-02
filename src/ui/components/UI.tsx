@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState, GameMessage } from '../../shared/types';
+import { Fleet, StarSystem, LogEntry, Battle, GameState, FleetState, ArmyState, FactionId, FactionState, GameMessage } from '../../shared/shared';
 import VictoryScreen from './ui/VictoryScreen';
 import TopBar from './ui/TopBar';
 import SideMenu from './ui/SideMenu';
@@ -19,7 +19,7 @@ import { distSq, dist } from '../../engine/math/vec3';
 import { findOrbitingSystem } from './ui/orbiting';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
 import MessageToasts from './ui/MessageToasts';
-import { sorted } from '../../shared/sorting';
+import { sorted } from '../../shared/shared';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 

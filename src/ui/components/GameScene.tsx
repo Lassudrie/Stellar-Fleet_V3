@@ -4,15 +4,14 @@ import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { BufferGeometry, BufferAttribute } from 'three';
-import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../../shared/types';
+import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../../shared/shared';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
 import TerritoryBorders from './TerritoryBorders';
 import GameCamera from './GameCamera';
 import IntelGhosts from './IntelGhosts';
 import { Vec3 } from '../../engine/math/vec3';
-import { useMapMetrics } from './hooks/useMapMetrics';
-import { sorted } from '../../shared/sorting';
+import { sorted } from '../../shared/shared';
 
 interface GameSceneProps {
   gameState: GameState;
@@ -28,6 +27,84 @@ interface GameSceneProps {
 
 const resolveFactionColor = (factions: GameState['factions'], id: string) =>
   factions.find(faction => faction.id === id)?.color || '#999';
+
+// ------------------------------------------------------------
+// Map metrics (was: ui/components/hooks/useMapMetrics.ts)
+// ------------------------------------------------------------
+
+const DEFAULT_RADIUS = 120;
+const DEFAULT_MARGIN = 40;
+
+interface MapBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+interface MapMetrics {
+  center: Vec3;
+  radius: number;
+  bounds: MapBounds;
+}
+
+function useMapMetrics(systems: StarSystem[]): MapMetrics {
+  return useMemo(() => {
+    if (systems.length === 0) {
+      return {
+        center: { x: 0, y: 0, z: 0 },
+        radius: DEFAULT_RADIUS,
+        bounds: {
+          minX: -DEFAULT_RADIUS - DEFAULT_MARGIN,
+          maxX: DEFAULT_RADIUS + DEFAULT_MARGIN,
+          minZ: -DEFAULT_RADIUS - DEFAULT_MARGIN,
+          maxZ: DEFAULT_RADIUS + DEFAULT_MARGIN
+        }
+      };
+    }
+
+    let minX = systems[0].position.x;
+    let maxX = systems[0].position.x;
+    let minY = systems[0].position.y;
+    let maxY = systems[0].position.y;
+    let minZ = systems[0].position.z;
+    let maxZ = systems[0].position.z;
+
+    systems.forEach(({ position }) => {
+      minX = Math.min(minX, position.x);
+      maxX = Math.max(maxX, position.x);
+      minY = Math.min(minY, position.y);
+      maxY = Math.max(maxY, position.y);
+      minZ = Math.min(minZ, position.z);
+      maxZ = Math.max(maxZ, position.z);
+    });
+
+    const center: Vec3 = {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      z: (minZ + maxZ) / 2
+    };
+
+    const extentX = maxX - minX;
+    const extentY = maxY - minY;
+    const extentZ = maxZ - minZ;
+    const boundingDiagonal = Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
+    const radius = Math.max(boundingDiagonal / 2, DEFAULT_RADIUS);
+
+    const margin = Math.max(DEFAULT_MARGIN, Math.max(extentX, extentZ) * 0.1);
+
+    return {
+      center,
+      radius,
+      bounds: {
+        minX: minX - margin,
+        maxX: maxX + margin,
+        minZ: minZ - margin,
+        maxZ: maxZ + margin
+      }
+    };
+  }, [systems]);
+}
 
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
   const lineRef = useRef<any>(null);

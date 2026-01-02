@@ -1,6 +1,6 @@
 
-import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/types';
-import { sorted } from '../shared/sorting';
+import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/shared';
+import { sorted } from '../shared/shared';
 
 export interface GroundBattleResult {
     systemId: string;

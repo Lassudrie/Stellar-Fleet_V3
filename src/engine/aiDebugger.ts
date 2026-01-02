@@ -1,5 +1,5 @@
 
-import { FactionId } from '../shared/types';
+import { FactionId } from '../shared/shared';
 
 // --- TYPES ---
 

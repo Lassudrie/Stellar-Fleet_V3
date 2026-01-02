@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { EnemySighting } from '../../shared/types';
+import { EnemySighting } from '../../shared/shared';
 
 interface IntelGhostsProps {
   sightings: Record<string, EnemySighting>;

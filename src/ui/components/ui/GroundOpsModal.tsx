@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
-import { Army, ArmyState, FactionId, FactionState, Fleet, FleetState, ShipType, StarSystem } from '../../../shared/types';
+import { Army, ArmyState, FactionId, FactionState, Fleet, FleetState, ShipType, StarSystem } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
 import { distSq } from '../../../engine/math/vec3';
-import { shortId } from '../../../engine/idUtils';
+import { shortId } from '../../../shared/shared';
 import { getBombardedPlanetIdsForSystem } from '../../../engine/orbitalBombardment';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 

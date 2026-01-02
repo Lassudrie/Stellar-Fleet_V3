@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
+import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/shared';
 import { useFleetName } from '../../context/FleetNames';
 import { getFleetSpeed } from '../../../engine/movement';
 import { dist } from '../../../engine/math/vec3';
@@ -8,7 +8,7 @@ import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 import { SHIP_STATS } from '../../../content/data/static';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 interface SideMenuProps {
   isOpen: boolean;

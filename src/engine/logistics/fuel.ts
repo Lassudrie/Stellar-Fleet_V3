@@ -1,4 +1,4 @@
-import { Fleet, ShipType, StarSystem, FleetState, GameplayRules } from '../../shared/types';
+import { Fleet, ShipType, StarSystem, FleetState, GameplayRules } from '../../shared/shared';
 import { MAX_HYPERJUMP_DISTANCE_LY, SHIP_STATS } from '../../content/data/static';
 import { dist } from '../math/vec3';
 import { getOrbitingSystem } from '../orbit';

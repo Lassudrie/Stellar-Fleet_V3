@@ -3,7 +3,7 @@ import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
 import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
-import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem } from '../../shared/types';
+import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem } from '../../shared/shared';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
 import { findOrbitingSystem } from './ui/orbiting';
 import { GAS_GIANT_ICON } from '../constants/icons';

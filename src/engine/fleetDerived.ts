@@ -1,4 +1,4 @@
-import { Fleet } from '../shared/types';
+import { Fleet } from '../shared/shared';
 
 /**
  * Calculates the visual radius of a fleet based on its ship count.

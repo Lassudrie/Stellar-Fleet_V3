@@ -1,9 +1,9 @@
 import { BASE_FLEET_SPEED, SHIP_STATS } from '../content/data/static';
-import { sorted } from '../shared/sorting';
-import type { Army, Fleet, LogEntry, ShipEntity, StarSystem } from '../shared/types';
-import { ArmyState, FleetState } from '../shared/types';
+import { sorted } from '../shared/shared';
+import type { Army, Fleet, LogEntry, ShipEntity, StarSystem } from '../shared/shared';
+import { ArmyState, FleetState } from '../shared/shared';
 import { applyContestedLandingRisk, computeLoadOps, computeUnloadOps } from './armyOps';
-import { shortId } from './idUtils';
+import { shortId } from '../shared/shared';
 import { add, clone, len, normalize, scale, sub } from './math/vec3';
 import { isOrbitContested } from './orbit';
 import { RNG } from './rng';

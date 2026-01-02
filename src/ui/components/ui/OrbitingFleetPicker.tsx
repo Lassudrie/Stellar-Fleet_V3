@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
-import { Fleet, StarSystem } from '../../../shared/types';
+import { Fleet, StarSystem } from '../../../shared/shared';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { calculateFleetPower } from '../../../engine/world';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 

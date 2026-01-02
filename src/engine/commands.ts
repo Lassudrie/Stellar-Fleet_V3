@@ -1,16 +1,16 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType, GroundBuildingType } from '../shared/types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType, GroundBuildingType } from '../shared/shared';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
-import { deepFreezeDev } from './state/immutability';
+import { deepFreezeDev } from './state';
 import { applyContestedLandingRisk, computeLoadOps, computeUnloadOps } from './armyOps';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
-import { shortId } from './idUtils';
+import { shortId } from '../shared/shared';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 import { getTileAt, isBuildable, isPassable, normalizeSurfacePositions } from './planetSurface';
 
 export type GameCommand =

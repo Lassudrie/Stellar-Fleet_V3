@@ -1,9 +1,9 @@
 
-import { StarSystem, FactionId } from '../shared/types';
+import { StarSystem, FactionId } from '../shared/shared';
 import { TERRITORY_RADIUS } from '../content/data/static';
 import { Vec3, distSq } from './math/vec3';
 import { SpatialIndex } from './spatialIndex';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 
 // Pre-calculate squared radius to avoid Sqrt operations in hot loops
 const TERRITORY_RADIUS_SQ = TERRITORY_RADIUS * TERRITORY_RADIUS;

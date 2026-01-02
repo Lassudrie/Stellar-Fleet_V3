@@ -1,5 +1,5 @@
-import { Fleet, StarSystem } from '../../../shared/types';
-import { sorted } from '../../../shared/sorting';
+import { Fleet, StarSystem } from '../../../shared/shared';
+import { sorted } from '../../../shared/shared';
 import { isFleetWithinOrbitProximity } from '../../../engine/orbit';
 
 export type SystemObjectKind = 'body' | 'fleet' | 'station' | 'ship';

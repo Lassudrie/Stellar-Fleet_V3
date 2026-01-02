@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Battle } from '../../../shared/types';
+import { Battle } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 
 interface TopBarProps {

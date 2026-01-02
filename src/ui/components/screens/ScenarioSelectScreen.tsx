@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { SCENARIO_TEMPLATES, buildScenario, ScenarioTemplate } from '../../../content/scenarios';
-import { GameScenario } from '../../../content/scenarios/types';
+import { GameScenario } from '../../../content/scenarios';
 import { useI18n } from '../../i18n';
 
 interface ScenarioSelectScreenProps {

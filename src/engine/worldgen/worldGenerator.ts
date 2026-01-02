@@ -1,15 +1,15 @@
-import { GameState, StarSystem, Fleet, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/types';
+import { GameState, StarSystem, Fleet, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/shared';
 import { RNG } from '../rng';
-import { GameScenario } from '../../content/scenarios/types';
+import { GameScenario } from '../../content/scenarios';
 import { createArmy, MIN_ARMY_CREATION_MEMBERS } from '../army';
 import { createShip } from '../world';
 import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
 import { SHIP_STATS } from '../../content/data/static';
-import { devLog, devWarn } from '../../shared/devLogger';
+import { devLog, devWarn } from '../../shared/shared';
 import { generateStellarSystem } from './stellarSystem';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
-import { sorted } from '../../shared/sorting';
+import { sorted } from '../../shared/shared';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from '../planetSurface';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
@@ -481,7 +481,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   });
 
   // --- 2.6. INITIALIZE PLANET SURFACE DESCRIPTORS (lightweight, persisted) ---
-  const planetSurfaceDescriptorsByBodyId: Record<string, import('../../shared/types').PlanetSurfaceDescriptor> = {};
+  const planetSurfaceDescriptorsByBodyId: Record<string, import('../../shared/shared').PlanetSurfaceDescriptor> = {};
   systems.forEach(system => {
     system.planets.forEach(body => {
       if (!body.isSolid) return;

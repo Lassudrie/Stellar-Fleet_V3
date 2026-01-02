@@ -1,5 +1,5 @@
 import React from 'react';
-import { Fleet, FleetState } from '../../../shared/types';
+import { Fleet, FleetState } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 
 interface SystemFleetInfoPanelProps {

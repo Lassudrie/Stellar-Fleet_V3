@@ -1,4 +1,4 @@
-import type { GroundUnitType } from '../../shared/types';
+import type { GroundUnitType } from '../../shared/shared';
 import type { TerrainType } from '../../engine/ground';
 
 export interface GroundUnitStats {

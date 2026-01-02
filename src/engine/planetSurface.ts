@@ -14,8 +14,8 @@ import type {
   Settlement,
   SettlementType,
   SurfacePos
-} from '../shared/types';
-import { ArmyState, FeatureBits } from '../shared/types';
+} from '../shared/shared';
+import { ArmyState, FeatureBits } from '../shared/shared';
 import { RNG } from './rng';
 import { getPlanetById } from './planets';
 

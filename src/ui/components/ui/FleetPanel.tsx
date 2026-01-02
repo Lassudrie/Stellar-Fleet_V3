@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Fleet, ShipEntity, ShipType, Army, StarSystem } from '../../../shared/types';
-import { shortId } from '../../../engine/idUtils';
+import { Fleet, ShipEntity, ShipType, Army, StarSystem } from '../../../shared/shared';
+import { shortId } from '../../../shared/shared';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { computeFleetFuelSummary } from '../../utils/fleetFuel';
 import { GAS_GIANT_ICON } from '../../constants/icons';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
