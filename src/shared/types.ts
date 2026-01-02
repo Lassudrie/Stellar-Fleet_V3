@@ -129,6 +129,65 @@ export interface PlanetBody {
   isSolid: boolean;
 }
 
+// --- Planet Surface Map (2D Hex, deterministic) ---
+// NOTE: This is intentionally JSON-serializable to support save files.
+
+export type Biome =
+  | 'ocean' | 'coast' | 'lake'
+  | 'ice' | 'tundra' | 'taiga'
+  | 'grassland' | 'forest' | 'rainforest'
+  | 'desert' | 'rocky' | 'mountain'
+  | 'volcanic' | 'cratered';
+
+export interface HexCoord { q: number; r: number; }
+
+export interface PlanetSurfaceConfig {
+  w: number;                 // ex: 96
+  h: number;                 // ex: 48
+  wrapX: boolean;            // true (cylindrical)
+  generatorVersion: number;  // ex: 1 (bump on breaking changes)
+}
+
+export interface PlanetSurfaceDescriptor {
+  seed: number; // uint32
+  config: PlanetSurfaceConfig;
+  astroRef?: { planetIndex: number; moonIndex?: number };
+}
+
+export const enum FeatureBits {
+  River = 1 << 0,
+  Road = 1 << 1,
+  City = 1 << 2,
+  Capital = 1 << 3,
+  Resource1 = 1 << 8
+}
+
+export interface PlanetSurfaceTile {
+  elev: number;        // int16-ish (implementation chooses encoding)
+  temp: number;        // int16-ish (implementation chooses encoding)
+  moist: number;       // uint8 0..255
+  biome: Biome;
+  featureBits: number; // bitset
+}
+
+export interface Settlement {
+  id: string;
+  name: string;
+  coord: HexCoord;
+  factionId?: string; // undefined if neutral
+  kind: 'outpost' | 'city' | 'capital';
+  size: number; // 1..N
+}
+
+export interface PlanetSurfaceMap {
+  systemId: string;
+  bodyId: string; // planetId or moonId
+  descriptor: PlanetSurfaceDescriptor;
+  seaLevelElev: number;
+  tiles: PlanetSurfaceTile[]; // length w*h (or derived from typed buffers internally)
+  settlements: Settlement[];
+}
+
 // Helper to pass a few derived orbit/HZ values into planet logic
 export interface StellarDerived {
   semiMajorAxisAu: number;
@@ -391,6 +450,11 @@ export interface GameState {
   winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;
   aiState?: AIState; // Legacy single-AI state kept for transition
+  /**
+   * Deterministic planet surface descriptors keyed by bodyId.
+   * Stored in saves to freeze surface generation results across algorithm evolution.
+   */
+  planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
   objectives: GameObjectives;
   rules: GameplayRules;
 }
