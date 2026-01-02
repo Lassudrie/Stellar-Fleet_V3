@@ -17,7 +17,7 @@ import {
   StationType
 } from '../shared/types';
 
-export const SAVE_VERSION = 3 as const;
+export const SAVE_VERSION = 4 as const;
 export type SaveVersion = typeof SAVE_VERSION;
 
 // --- DTOs (Data Transfer Objects) ---
@@ -87,9 +87,21 @@ export interface StationDTO {
 export interface ArmyDTO {
   id: string;
   factionId: string; // Renamed
-  strength: number;
+  // Legacy V3 fields (read-only migration)
+  strength?: number;
   maxStrength?: number;
   morale?: number;
+
+  // V4 fields
+  unitType?: string;
+  maxMembers?: number;
+  members?: number;
+  attack?: number;
+  defense?: number;
+  condition?: number;
+
+  posture?: 'normal' | 'prepared_defense';
+  groundOrder?: any;
   state: ArmyState;
   containerId: string;
   surfacePos?: SurfacePos;
@@ -231,4 +243,10 @@ export interface SaveFileV3 {
   state: GameStateDTO;
 }
 
-export type SaveFile = SaveFileV2 | SaveFileV3;
+export interface SaveFileV4 {
+  version: 4;
+  createdAt: string;
+  state: GameStateDTO;
+}
+
+export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4;

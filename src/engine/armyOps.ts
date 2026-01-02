@@ -5,6 +5,7 @@ import { getDefaultSolidPlanet } from './planets';
 
 const CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35;
 const CONTESTED_UNLOAD_LOSS_FRACTION = 0.35;
+const CONTESTED_UNLOAD_CONDITION_LOSS = 0.06;
 type ContestedLandingMode = 'abort' | 'always_land';
 
 export interface ArmyOpsOptions {
@@ -230,16 +231,18 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
         const roll = rng.next();
         const tookFire = roll < CONTESTED_UNLOAD_FAILURE_THRESHOLD;
         const success = mode === 'always_land' || !tookFire;
-        const strengthLoss = tookFire ? Math.max(1, Math.floor(army.strength * CONTESTED_UNLOAD_LOSS_FRACTION)) : 0;
+        const membersLoss = tookFire ? Math.max(1, Math.floor(army.members * CONTESTED_UNLOAD_LOSS_FRACTION)) : 0;
+        const conditionLoss = tookFire ? CONTESTED_UNLOAD_CONDITION_LOSS : 0;
 
-        outcomes.set(army.id, { tookFire, strengthLoss, success });
+        outcomes.set(army.id, { tookFire, strengthLoss: membersLoss, success });
 
         if (mode === 'abort') {
             if (success) {
                 succeeded.push(army.id);
                 return {
                     ...army,
-                    strength: Math.max(0, army.strength - strengthLoss),
+                    members: Math.max(0, army.members - membersLoss),
+                    condition: Math.max(0, Math.min(1, army.condition - conditionLoss)),
                     state: ArmyState.DEPLOYED,
                     containerId: targetPlanetId ?? army.containerId
                 };
@@ -247,14 +250,16 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
             failed.push(army.id);
             return {
                 ...army,
-                strength: Math.max(0, army.strength - strengthLoss)
+                members: Math.max(0, army.members - membersLoss),
+                condition: Math.max(0, Math.min(1, army.condition - conditionLoss))
             };
         }
 
         succeeded.push(army.id);
         return {
             ...army,
-            strength: Math.max(0, army.strength - strengthLoss)
+            members: Math.max(0, army.members - membersLoss),
+            condition: Math.max(0, Math.min(1, army.condition - conditionLoss))
         };
     });
 

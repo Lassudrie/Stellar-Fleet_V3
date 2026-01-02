@@ -365,7 +365,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                                     <option value="" disabled>{t('fleet.load')}</option>
                                                     {availableArmies.map(({ army, planetName }) => (
                                                         <option key={army.id} value={army.id}>
-                                                            {shortId(army.id)} ({planetName}) ({army.strength})
+                                                            {shortId(army.id)} ({planetName}) ({army.members})
                                                         </option>
                                                     ))}
                                                 </select>

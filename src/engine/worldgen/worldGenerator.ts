@@ -1,7 +1,7 @@
 import { GameState, StarSystem, Fleet, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/types';
 import { RNG } from '../rng';
 import { GameScenario } from '../../content/scenarios/types';
-import { createArmy, MIN_ARMY_CREATION_STRENGTH } from '../army';
+import { createArmy, MIN_ARMY_CREATION_MEMBERS } from '../army';
 import { createShip } from '../world';
 import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
@@ -598,7 +598,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               if (ship.type === ShipType.TRANSPORTER) {
                   const army = createArmy(
                       factionId,
-                      MIN_ARMY_CREATION_STRENGTH,
+                      'mechanized_infantry',
+                      MIN_ARMY_CREATION_MEMBERS,
                       fleet.id,
                       ArmyState.EMBARKED,
                       rng
@@ -630,7 +631,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               const targetPlanet = occupiablePlanets[i % occupiablePlanets.length];
               const army = createArmy(
                   sys.ownerFactionId,
-                  MIN_ARMY_CREATION_STRENGTH,
+                  'mechanized_infantry',
+                  MIN_ARMY_CREATION_MEMBERS,
                   targetPlanet.id,
                   ArmyState.DEPLOYED,
                   rng

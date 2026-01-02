@@ -14,6 +14,7 @@ import {
 } from '../../../shared/types';
 import { useI18n } from '../../i18n';
 import { fnv1a32 } from '../../../engine/planetSurface/hash32';
+import type { GameCommand } from '../../../engine/commands';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
@@ -29,6 +30,7 @@ interface SurfaceViewProps {
   onSelectBody: (bodyId: string) => void;
   onBackToGalaxy: () => void;
   onBackToSystem?: () => void;
+  onIssueCommand?: (cmd: GameCommand) => void;
 }
 
 type CameraState = { zoom: number; offset: { x: number; y: number } };
@@ -177,7 +179,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   primaryReturn = 'GAME',
   onSelectBody,
   onBackToGalaxy,
-  onBackToSystem
+  onBackToSystem,
+  onIssueCommand
 }) => {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -197,6 +200,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [hovered, setHovered] = useState<HexCoord | null>(null);
   const [selected, setSelected] = useState<HexCoord | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
+  const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -568,6 +573,26 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       if (isClick && map) {
         const coord = pickCoord(event.clientX, event.clientY);
         setSelected(coord);
+
+        // If the user is issuing an order, treat the click as a target selection.
+        if (coord && onIssueCommand && selectedArmyId && body) {
+          const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
+          if (selectedArmy && selectedArmy.state === ArmyState.DEPLOYED && selectedArmy.containerId === body.id) {
+            if (orderMode === 'move') {
+              onIssueCommand({ type: 'ORDER_GROUND_MOVE', armyId: selectedArmyId, to: { bodyId: body.id, q: coord.q, r: coord.r } });
+              setOrderMode('none');
+            } else if (orderMode === 'attack') {
+              const target = normalizedArmies
+                .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
+                .map(m => m.army)
+                .find(a => a.factionId !== playerFactionId);
+              if (target) {
+                onIssueCommand({ type: 'ORDER_GROUND_ATTACK', attackerId: selectedArmyId, targetArmyId: target.id });
+                setOrderMode('none');
+              }
+            }
+          }
+        }
       }
       return;
     }
@@ -581,6 +606,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!map || !activeCoord) return [];
     return normalizedArmies.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, normalizedArmies]);
+
+  const selectedArmy = useMemo(() => {
+    if (!selectedArmyId) return null;
+    const army = armies.find(a => a.id === selectedArmyId) ?? null;
+    if (!army) return null;
+    if (army.state !== ArmyState.DEPLOYED) return null;
+    if (!body || army.containerId !== body.id) return null;
+    return army;
+  }, [armies, body, selectedArmyId]);
+
+  useEffect(() => {
+    // Auto-select a friendly army when clicking an occupied tile.
+    if (!activeCoord) return;
+    const friendly = tileArmies.map(x => x.army).find(a => a.factionId === playerFactionId) ?? null;
+    setSelectedArmyId(friendly?.id ?? null);
+  }, [activeCoord, playerFactionId, tileArmies]);
 
   const tileBuildings = useMemo(() => {
     if (!map || !activeCoord) return [];
@@ -796,12 +837,70 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                         <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: marker.faction?.color ?? '#e2e8f0' }} />
                         <span className="font-semibold text-slate-100">{marker.faction?.name ?? marker.army.factionId}</span>
                       </div>
-                      <div className="text-xs text-slate-300 font-mono">{marker.army.strength.toFixed(0)}</div>
+                      <button
+                        className={`text-xs font-mono px-2 py-0.5 rounded border ${
+                          marker.army.id === selectedArmyId
+                            ? 'border-sky-400 text-sky-200'
+                            : 'border-slate-700 text-slate-300 hover:border-slate-500'
+                        }`}
+                        onClick={() => setSelectedArmyId(marker.army.id)}
+                        title="Select unit"
+                      >
+                        {marker.army.members.toFixed(0)}
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+
+            {selectedArmy && (
+              <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Orders</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    disabled={!onIssueCommand}
+                    onClick={() => setOrderMode(prev => (prev === 'move' ? 'none' : 'move'))}
+                    className={`rounded border px-3 py-2 text-xs font-semibold ${
+                      orderMode === 'move' ? 'border-sky-400 bg-sky-900/40 text-sky-100' : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
+                    }`}
+                  >
+                    Move
+                  </button>
+                  <button
+                    disabled={!onIssueCommand}
+                    onClick={() => setOrderMode(prev => (prev === 'attack' ? 'none' : 'attack'))}
+                    className={`rounded border px-3 py-2 text-xs font-semibold ${
+                      orderMode === 'attack' ? 'border-rose-400 bg-rose-900/30 text-rose-100' : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
+                    }`}
+                  >
+                    Attack
+                  </button>
+                  <button
+                    disabled={!onIssueCommand}
+                    onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: selectedArmy.id })}
+                    className="rounded border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={!onIssueCommand}
+                    onClick={() => onIssueCommand?.({
+                      type: 'SET_GROUND_POSTURE',
+                      armyId: selectedArmy.id,
+                      posture: selectedArmy.posture === 'prepared_defense' ? 'normal' : 'prepared_defense'
+                    })}
+                    className="rounded border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
+                  >
+                    {selectedArmy.posture === 'prepared_defense' ? 'Unprepare' : 'Prepare'}
+                  </button>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {orderMode === 'move' && 'Click a hex to set a move order.'}
+                  {orderMode === 'attack' && 'Click an enemy unit hex to set an attack order.'}
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">

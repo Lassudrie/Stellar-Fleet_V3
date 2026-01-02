@@ -85,10 +85,10 @@ const ShipCard: React.FC<{ ship: ShipEntity; armies: Army[] }> = ({ ship, armies
           <div className="font-semibold mb-1">{t('ship.detail.embarkedTroops')}</div>
           <div className="text-slate-200">{t('ship.detail.armyLabel', { id: carriedArmy.id })}</div>
           <div className="text-slate-300">
-            {t('ship.detail.strengthLabel', { current: carriedArmy.strength, max: carriedArmy.maxStrength })}
+            {t('ship.detail.strengthLabel', { current: carriedArmy.members, max: carriedArmy.maxMembers })}
           </div>
           <div className="text-slate-300">
-            {t('ship.detail.moraleLabel', { percent: (carriedArmy.morale * 100).toFixed(0) })}
+            {t('ship.detail.moraleLabel', { percent: (carriedArmy.condition * 100).toFixed(0) })}
           </div>
         </div>
       )}

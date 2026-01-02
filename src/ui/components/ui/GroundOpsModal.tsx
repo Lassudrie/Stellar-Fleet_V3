@@ -137,7 +137,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
               const factionSummaries = sorted(
                 Array.from(byFaction.entries()).map(([factionId, list]) => {
                   const faction = factionLookup[factionId];
-                  const strength = list.reduce((sum, army) => sum + army.strength, 0);
+                  const strength = list.reduce((sum, army) => sum + army.members, 0);
                   return {
                     factionId,
                     name: faction?.name ?? factionId,
@@ -208,7 +208,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
                         {playerArmies.map(army => (
                           <div key={army.id} className="flex items-center justify-between gap-2">
                             <div className="text-xs text-slate-200 font-mono">
-                              {shortId(army.id)} <span className="text-slate-400">({army.strength})</span>
+                              {shortId(army.id)} <span className="text-slate-400">({army.members})</span>
                             </div>
                             <select
                               className="bg-slate-900 border border-slate-600 text-slate-200 text-[10px] py-1 px-2 rounded focus:outline-none focus:border-indigo-400"

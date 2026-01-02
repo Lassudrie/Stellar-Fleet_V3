@@ -1,6 +1,5 @@
 
 import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/types';
-import { ARMY_DESTROY_THRESHOLD } from './army';
 import { sorted } from '../shared/sorting';
 
 export interface GroundBattleResult {
@@ -8,32 +7,28 @@ export interface GroundBattleResult {
     planetId: string;
     winnerFactionId: FactionId | 'draw' | null;
     armiesDestroyed: string[]; // IDs of destroyed armies
-    armyUpdates: { armyId: string; strength: number; morale: number }[];
-    casualties: { factionId: FactionId; strengthLost: number; moraleLost: number; destroyed: string[] }[];
+    armyUpdates: { armyId: string; members: number; condition: number }[];
+    casualties: { factionId: FactionId; membersLost: number; conditionLost: number; destroyed: string[] }[];
     logs: string[];
 }
 
 const MAX_CASUALTY_FRACTION_PER_TURN = 0.35;
-const MORALE_LOSS_MULTIPLIER = 0.6;
-const MIN_MORALE_FACTOR = 0.25;
-const MAX_MORALE_FACTOR = 2;
-
-const buildDestructionThresholdMap = (entries: { armyId: string; threshold: number }[]): Map<string, number> => {
-    return new Map(entries.map(entry => [entry.armyId, entry.threshold]));
-};
+const CONDITION_LOSS_MULTIPLIER = 0.6;
+const MIN_CONDITION_FACTOR = 0.25;
+const MAX_CONDITION_FACTOR = 2;
 
 /**
  * Helper to calculate total ground power
  */
-const clampMoraleFactor = (morale: number): number => {
-    return Math.min(MAX_MORALE_FACTOR, Math.max(MIN_MORALE_FACTOR, morale));
+const clampConditionFactor = (condition: number): number => {
+    return Math.min(MAX_CONDITION_FACTOR, Math.max(MIN_CONDITION_FACTOR, condition));
 };
 
 const calculatePower = (armies: Army[]): number => {
-    return armies.reduce((sum, army) => sum + army.strength * clampMoraleFactor(army.morale), 0);
+    return armies.reduce((sum, army) => sum + army.members * clampConditionFactor(army.condition), 0);
 };
 
-const calculateTotalStrength = (armies: Army[]): number => armies.reduce((sum, army) => sum + army.strength, 0);
+const calculateTotalMembers = (armies: Army[]): number => armies.reduce((sum, army) => sum + army.members, 0);
 
 const casualtyFraction = (ownPower: number, enemyPower: number): number => {
     if (ownPower <= 0) return 0;
@@ -42,54 +37,50 @@ const casualtyFraction = (ownPower: number, enemyPower: number): number => {
 };
 
 interface LossOutcome {
-    updates: { armyId: string; strength: number; morale: number }[];
+    updates: { armyId: string; members: number; condition: number }[];
     destroyedIds: string[];
-    strengthLost: number;
-    moraleLost: number;
-    thresholds: { armyId: string; threshold: number }[];
+    membersLost: number;
+    conditionLost: number;
 }
 
 const applyLosses = (
     armies: Army[],
-    totalStrengthLoss: number,
+    totalMembersLoss: number,
     lossFraction: number
 ): LossOutcome => {
     if (armies.length === 0) {
-        return { updates: [], destroyedIds: [], strengthLost: 0, moraleLost: 0, thresholds: [] };
+        return { updates: [], destroyedIds: [], membersLost: 0, conditionLost: 0 };
     }
 
     const sortedArmies = sorted(armies, (a, b) => a.id.localeCompare(b.id));
-    const totalStrength = calculateTotalStrength(sortedArmies);
-    const clampedStrengthLoss = Math.max(0, Math.min(totalStrengthLoss, totalStrength));
-    let remainingLoss = clampedStrengthLoss;
+    const totalMembers = calculateTotalMembers(sortedArmies);
+    const clampedMembersLoss = Math.max(0, Math.min(totalMembersLoss, totalMembers));
+    let remainingLoss = clampedMembersLoss;
     let appliedLoss = 0;
-    let moraleLost = 0;
-    const updates: { armyId: string; strength: number; morale: number }[] = [];
+    let conditionLost = 0;
+    const updates: { armyId: string; members: number; condition: number }[] = [];
     const destroyedIds: string[] = [];
-    const thresholds: { armyId: string; threshold: number }[] = [];
 
     sortedArmies.forEach((army, index) => {
         const isLast = index === sortedArmies.length - 1;
-        const proportionalLoss = totalStrength > 0 ? Math.floor((clampedStrengthLoss * army.strength) / totalStrength) : 0;
+        const proportionalLoss = totalMembers > 0 ? Math.floor((clampedMembersLoss * army.members) / totalMembers) : 0;
         const plannedLoss = isLast ? remainingLoss : proportionalLoss;
-        const loss = Math.max(0, Math.min(army.strength, plannedLoss, remainingLoss));
-        const newStrength = Math.max(0, army.strength - loss);
-        const moralePenalty = loss > 0 ? lossFraction * MORALE_LOSS_MULTIPLIER : 0;
-        const newMorale = clampMoraleFactor(army.morale * (1 - moralePenalty));
-        const destructionThreshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+        const loss = Math.max(0, Math.min(army.members, plannedLoss, remainingLoss));
+        const newMembers = Math.max(0, army.members - loss);
+        const conditionPenalty = loss > 0 ? lossFraction * CONDITION_LOSS_MULTIPLIER : 0;
+        const newCondition = clampConditionFactor(army.condition * (1 - conditionPenalty));
 
-        appliedLoss += army.strength - newStrength;
+        appliedLoss += army.members - newMembers;
         remainingLoss -= loss;
-        moraleLost += Math.max(0, army.morale - newMorale);
+        conditionLost += Math.max(0, army.condition - newCondition);
 
-        updates.push({ armyId: army.id, strength: newStrength, morale: newMorale });
-        thresholds.push({ armyId: army.id, threshold: destructionThreshold });
-        if (newStrength <= destructionThreshold) {
+        updates.push({ armyId: army.id, members: newMembers, condition: newCondition });
+        if (newMembers === 0 || newCondition < 0.20) {
             destroyedIds.push(army.id);
         }
     });
 
-    return { updates, destroyedIds, strengthLost: appliedLoss, moraleLost, thresholds };
+    return { updates, destroyedIds, membersLost: appliedLoss, conditionLost };
 };
 
 /**
@@ -140,8 +131,8 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
     let winnerFactionId: FactionId | 'draw' | null = null;
     const armiesToDestroy: string[] = [];
     let logText = '';
-    let armyUpdates: { armyId: string; strength: number; morale: number }[] = [];
-    let casualties: { factionId: FactionId; strengthLost: number; moraleLost: number; destroyed: string[] }[] = [];
+    let armyUpdates: { armyId: string; members: number; condition: number }[] = [];
+    let casualties: { factionId: FactionId; membersLost: number; conditionLost: number; destroyed: string[] }[] = [];
 
     const getFactionLabel = (factionId: FactionId): string => {
         const faction = state.factions.find(f => f.id === factionId);
@@ -158,17 +149,16 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
         const soleFaction = soleFactionResult.value as FactionId;
         winnerFactionId = soleFaction;
         logText = `Planet ${planet.name} secured by ${getFactionLabel(soleFaction)} ground forces (unopposed).`;
-        casualties = [{ factionId: soleFaction, strengthLost: 0, moraleLost: 0, destroyed: [] }];
+        casualties = [{ factionId: soleFaction, membersLost: 0, conditionLost: 0, destroyed: [] }];
     } else {
         // Case B: Active Combat (rule depends on defender presence)
         const factionOutcomes = new Map<FactionId, LossOutcome>();
-        const factionThresholds = new Map<FactionId, Map<string, number>>();
         const factionPowers = new Map<FactionId, number>();
-        const factionStrengths = new Map<FactionId, number>();
+        const factionMembers = new Map<FactionId, number>();
 
         armiesByFaction.forEach((factionArmies, factionId) => {
             factionPowers.set(factionId, calculatePower(factionArmies));
-            factionStrengths.set(factionId, calculateTotalStrength(factionArmies));
+            factionMembers.set(factionId, calculateTotalMembers(factionArmies));
         });
 
         const getEnemyFactions = (factionId: FactionId): FactionId[] => {
@@ -182,36 +172,30 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
 
         armiesByFaction.forEach((factionArmies, factionId) => {
             const power = factionPowers.get(factionId) ?? 0;
-            const strength = factionStrengths.get(factionId) ?? 0;
+            const members = factionMembers.get(factionId) ?? 0;
             const enemyPower = getEnemyFactions(factionId).reduce((sum, enemyId) => {
                 return sum + (factionPowers.get(enemyId) ?? 0);
             }, 0);
             const lossFraction = casualtyFraction(power, enemyPower);
-            const strengthLoss = Math.floor(strength * lossFraction);
+            const membersLoss = Math.floor(members * lossFraction);
 
-            const outcome = applyLosses(factionArmies, strengthLoss, lossFraction);
+            const outcome = applyLosses(factionArmies, membersLoss, lossFraction);
             factionOutcomes.set(factionId, outcome);
-            factionThresholds.set(factionId, buildDestructionThresholdMap(outcome.thresholds));
         });
 
-        const survivorsByFaction = new Map<FactionId, { updates: { armyId: string; strength: number; morale: number }[] }>();
+        const survivorsByFaction = new Map<FactionId, { updates: { armyId: string; members: number; condition: number }[] }>();
         const originalArmiesById = new Map(armiesOnGround.map(army => [army.id, army]));
 
         factionOutcomes.forEach((outcome, factionId) => {
-            const thresholdMap = factionThresholds.get(factionId) ?? new Map<string, number>();
-        const survivors = outcome.updates.filter(update => {
-            const baseArmy = originalArmiesById.get(update.armyId);
-            const threshold = thresholdMap.get(update.armyId) ?? (baseArmy ? ARMY_DESTROY_THRESHOLD(baseArmy.maxStrength) : 0);
-            return update.strength > threshold;
-        });
+        const survivors = outcome.updates.filter(update => update.members > 0 && update.condition >= 0.20);
         survivorsByFaction.set(factionId, { updates: survivors });
 
             armiesToDestroy.push(...outcome.destroyedIds);
             armyUpdates.push(...outcome.updates);
             casualties.push({
                 factionId,
-                strengthLost: outcome.strengthLost,
-                moraleLost: outcome.moraleLost,
+                membersLost: outcome.membersLost,
+                conditionLost: outcome.conditionLost,
                 destroyed: outcome.destroyedIds
             });
         });
@@ -224,8 +208,19 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
             const reconstructedArmies: Army[] = survivors.updates.map(update => {
                 const baseArmy = originalArmiesById.get(update.armyId);
                 return baseArmy
-                    ? { ...baseArmy, strength: update.strength, morale: update.morale }
-                    : { id: update.armyId, factionId, strength: update.strength, morale: update.morale, maxStrength: update.strength, state: ArmyState.DEPLOYED, containerId: planet.id };
+                    ? { ...baseArmy, members: update.members, condition: update.condition }
+                    : {
+                        id: update.armyId,
+                        factionId,
+                        unitType: 'mechanized_infantry',
+                        maxMembers: update.members,
+                        members: update.members,
+                        attack: 1,
+                        defense: 1,
+                        condition: update.condition,
+                        state: ArmyState.DEPLOYED,
+                        containerId: planet.id
+                      };
             });
 
             survivingPowers.push({ factionId, remainingPower: calculatePower(reconstructedArmies) });
@@ -296,7 +291,7 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
 
         if (casualties.length > 0) {
             const lossSummary = casualties
-                .map(entry => `${getFactionLabel(entry.factionId)} lost ${entry.strengthLost} strength (${entry.destroyed.length} units destroyed)`)
+                .map(entry => `${getFactionLabel(entry.factionId)} lost ${entry.membersLost} members (${entry.destroyed.length} units destroyed)`)
                 .join(', ');
             logText += ` Losses - ${lossSummary}.`;
         }

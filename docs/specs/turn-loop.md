@@ -73,12 +73,21 @@
 
 - **Entrée** : état après bombardement, incluant positions orbitale/sol.
 - **Traitement** :
-  - Résout `resolveGroundConflict` planète par planète solide, accumule pertes, destructions et changement de propriétaire.
-  - Met à jour/élimine les armées, recalcul les propriétaires de planètes puis de systèmes : dès qu'une seule faction conserve des armées déployées dans un système, elle en devient propriétaire, y compris si d'autres planètes solides restent neutres ou détenues sans garnison.
-  - Génère logs combat et messages `PLANET_CONQUERED` (lignes pertes/restes) ordonnés via `canonicalizeMessages`.
-  - Met à jour `aiStates` pour pousser les factions IA victorieuses à tenir les systèmes capturés (`holdUntilTurnBySystemId`).
+  - Exécute les ordres terrestres persistés sur les unités (`Army.groundOrder`) pour les unités `DEPLOYED` sur surface map hex.
+  - Pipeline normatif (cf. `ground-surface-combat-v1.md`) :
+    1) calcul supply (par body et faction) ; 2) snapshot ZOC pré-mouvement ;
+    3) exécution des mouvements (MP, collisions no-stacking, fatigue) ;
+    4) exécution des attaques (engagement 1v1 localisé, break/retraite/avance) ;
+    5) suppression des unités hors de combat ;
+    6) nettoyage des ordres.
+  - Conquête minimale : si, sur un body, il ne reste qu’une seule faction au sol, `ownerFactionId` du body passe à cette faction.
+  - Génère logs combat et messages synthétiques (conquête et pertes) via `canonicalizeMessages`.
+  - Met à jour `aiStates` (hold) pour les factions IA gagnant le contrôle d’un body/système.
 - **Sortie** : systèmes recolorés et réassignés, armées filtrées/ajustées, logs/messages enrichis, IA mise à jour.
-- **Invariants** : une planète n’est capturée que si un seul camp reste au sol ET que l’orbite n’est pas contestée; les mises à jour de force/morale sont appliquées avant suppression des armées sous seuil.
+- **Invariants** :
+  - Les engagements sont déterministes et utilisent une RNG isolée par engagement.
+  - No-stacking : aucun hex ne peut contenir plus d’une unité après la phase.
+  - Les unités hors de combat sont retirées selon le seuil de `condition`/`members` (et non via un seuil legacy de “strength”).
 
 ### 2.7. Phase Objectifs (`phaseObjectives`)
 

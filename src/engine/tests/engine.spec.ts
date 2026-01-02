@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { resolveGroundConflict } from '../conquest';
-import { ARMY_DESTROY_THRESHOLD, sanitizeArmies } from '../army';
+import { sanitizeArmies } from '../army';
 import { CAPTURE_RANGE, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
 import { resolveBattle } from '../battle/resolution';
 import { SHIP_STATS } from '../../content/data/static';
@@ -104,15 +104,19 @@ const createFleet = (id: string, factionId: string, position: Vec3, ships: TestS
 const createArmy = (
   id: string,
   factionId: string,
-  strength: number,
+  members: number,
   state: ArmyState,
   containerId: string
 ): Army => ({
   id,
   factionId,
-  strength,
-  maxStrength: strength,
-  morale: 1,
+  unitType: 'mechanized_infantry',
+  posture: 'normal',
+  maxMembers: members,
+  members,
+  attack: 1,
+  defense: 1,
+  condition: 1,
   state,
   containerId
 });
@@ -764,10 +768,10 @@ const tests: TestCase[] = [
       const updatedA = nextState.armies.find(army => army.id === redArmyA.id);
       const updatedB = nextState.armies.find(army => army.id === redArmyB.id);
 
-      assert.ok(updatedA && updatedA.strength < redArmyA.strength, 'Bombardment should reduce strength on planet 1');
-      assert.ok(updatedB && updatedB.strength < redArmyB.strength, 'Bombardment should reduce strength on planet 2');
-      assert.ok(updatedA && updatedA.morale < redArmyA.morale, 'Bombardment should reduce morale on planet 1');
-      assert.ok(updatedB && updatedB.morale < redArmyB.morale, 'Bombardment should reduce morale on planet 2');
+      assert.ok(updatedA && updatedA.members < redArmyA.members, 'Bombardment should reduce members on planet 1');
+      assert.ok(updatedB && updatedB.members < redArmyB.members, 'Bombardment should reduce members on planet 2');
+      assert.ok(updatedA && updatedA.condition < redArmyA.condition, 'Bombardment should reduce condition on planet 1');
+      assert.ok(updatedB && updatedB.condition < redArmyB.condition, 'Bombardment should reduce condition on planet 2');
       assert.ok(
         nextState.logs.some(log => log.text.includes('Orbital bombardment')),
         'Bombardment should log results'
@@ -798,8 +802,8 @@ const tests: TestCase[] = [
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
-      assert.strictEqual(updated?.strength, redArmy.strength, 'Contested orbit should prevent bombardment losses');
-      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should prevent morale loss');
+      assert.strictEqual(updated?.members, redArmy.members, 'Contested orbit should prevent bombardment losses');
+      assert.strictEqual(updated?.condition, redArmy.condition, 'Contested orbit should prevent condition loss');
     }
   },
   {
@@ -826,8 +830,8 @@ const tests: TestCase[] = [
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
-      assert.strictEqual(updated?.strength, redArmy.strength, 'Contested orbit should skip bombardment resolution');
-      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should leave morale unchanged');
+      assert.strictEqual(updated?.members, redArmy.members, 'Contested orbit should skip bombardment resolution');
+      assert.strictEqual(updated?.condition, redArmy.condition, 'Contested orbit should leave condition unchanged');
       assert.strictEqual(
         nextState.logs.length,
         state.logs.length,
@@ -855,8 +859,8 @@ const tests: TestCase[] = [
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
-      assert.strictEqual(updated?.strength, redArmy.strength, 'Transport-only fleets should not bombard');
-      assert.strictEqual(updated?.morale, redArmy.morale, 'Transport-only fleets should not affect morale');
+      assert.strictEqual(updated?.members, redArmy.members, 'Transport-only fleets should not bombard');
+      assert.strictEqual(updated?.condition, redArmy.condition, 'Transport-only fleets should not affect condition');
     }
   },
   {
@@ -867,13 +871,17 @@ const tests: TestCase[] = [
         { id: 'blue-floor-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
       ]);
 
-      const minStrength = ARMY_DESTROY_THRESHOLD(10000) + ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER;
+      const minMembers = ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER;
       const redArmy: Army = {
         id: 'army-red-floor',
         factionId: 'red',
-        strength: minStrength,
-        maxStrength: 10000,
-        morale: 1,
+        unitType: 'mechanized_infantry',
+        posture: 'normal',
+        maxMembers: 10000,
+        members: minMembers,
+        attack: 1,
+        defense: 1,
+        condition: 1,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
       };
@@ -889,8 +897,8 @@ const tests: TestCase[] = [
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
       assert.ok(
-        updated && updated.strength >= minStrength,
-        'Bombardment should not drop strength below the destruction threshold buffer'
+        updated && updated.members >= minMembers,
+        'Bombardment should not drop members below the minimum buffer'
       );
     }
   },
@@ -906,12 +914,12 @@ const tests: TestCase[] = [
       const result = resolveGroundConflict(system.planets[0], system, state);
       assert.ok(result, 'Ground conflict should resolve');
       assert.strictEqual(result?.winnerFactionId, 'draw', 'Balanced forces should stalemate');
-      assert.deepStrictEqual(result?.armiesDestroyed, [], 'Threshold should prevent immediate destruction');
+      assert.deepStrictEqual(result?.armiesDestroyed, [], 'Units should not be auto-removed in the legacy resolver unless out of combat');
 
       const blueUpdate = result?.armyUpdates.find(update => update.armyId === blueArmy.id);
       const redUpdate = result?.armyUpdates.find(update => update.armyId === redArmy.id);
-      assert.ok(blueUpdate && blueUpdate.strength > 2000, 'Blue army should survive above destruction threshold');
-      assert.ok(redUpdate && redUpdate.strength > 2000, 'Red army should survive above destruction threshold');
+      assert.ok(blueUpdate && blueUpdate.members > 0, 'Blue army should survive with members remaining');
+      assert.ok(redUpdate && redUpdate.members > 0, 'Red army should survive with members remaining');
     }
   },
   {
@@ -922,9 +930,13 @@ const tests: TestCase[] = [
       const redArmy: Army = {
         id: 'army-red-broken',
         factionId: 'red',
-        strength: 1500,
-        maxStrength: 20000,
-        morale: 0.5,
+        unitType: 'mechanized_infantry',
+        posture: 'normal',
+        maxMembers: 20000,
+        members: 1500,
+        attack: 1,
+        defense: 1,
+        condition: 0.5,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
       };
@@ -938,7 +950,7 @@ const tests: TestCase[] = [
 
       const redUpdate = result?.armyUpdates.find(update => update.armyId === redArmy.id);
       assert.ok(redUpdate, 'Red army should receive an update before removal');
-      assert.ok(redUpdate!.strength < redArmy.strength, 'Red army should lose strength from the fight');
+      assert.ok(redUpdate!.members < redArmy.members, 'Red army should lose members from the fight');
     }
   },
   {
@@ -1088,7 +1100,7 @@ const tests: TestCase[] = [
       assert.ok(unloadedArmy, 'Army should still exist after unloading');
       assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must be deployed on the surface');
       assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
-      assert.strictEqual(unloadedArmy?.strength, blueArmy.strength, 'No risk should apply in a clear orbit');
+      assert.strictEqual(unloadedArmy?.members, blueArmy.members, 'No risk should apply in a clear orbit');
 
       const combatLogs = updated.logs.filter(log => log.type === 'combat');
       assert.strictEqual(combatLogs.length, 0, 'No combat logs should be generated when orbit is clear');
@@ -1136,8 +1148,8 @@ const tests: TestCase[] = [
       assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must still disembark');
       assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
       assert.ok(
-        (unloadedArmy?.strength ?? 0) < blueArmy.strength,
-        'Contested unload should apply deterministic strength loss'
+        (unloadedArmy?.members ?? 0) < blueArmy.members,
+        'Contested unload should apply deterministic members loss'
       );
 
       const combatLog = updated.logs.find(log => log.type === 'combat');
@@ -1650,9 +1662,13 @@ const tests: TestCase[] = [
       const redArmy: Army = {
         id: 'army-red-loop',
         factionId: 'red',
-        strength: 0,
-        maxStrength: 20000,
-        morale: 0.8,
+        unitType: 'mechanized_infantry',
+        posture: 'normal',
+        maxMembers: 20000,
+        members: 0,
+        attack: 1,
+        defense: 1,
+        condition: 0.8,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
       };
@@ -1669,7 +1685,7 @@ const tests: TestCase[] = [
         armies: state.armies
           .map(army => {
             const update = firstResult?.armyUpdates.find(entry => entry.armyId === army.id);
-            return update ? { ...army, strength: update.strength, morale: update.morale } : army;
+            return update ? { ...army, members: update.members, condition: update.condition } : army;
           })
           .filter(army => !(firstResult?.armiesDestroyed || []).includes(army.id))
       };
@@ -2483,7 +2499,8 @@ const tests: TestCase[] = [
       const system = createSystem('sys-6', 'blue');
       const weakArmy: Army = {
         ...createArmy('army-weak', 'blue', 15000, ArmyState.EMBARKED, 'fleet-weak'),
-        strength: 50
+        members: 0,
+        condition: 0.1
       };
 
       const fleet = createFleet('fleet-weak', 'blue', baseVec, [
@@ -2497,7 +2514,7 @@ const tests: TestCase[] = [
 
       assert.strictEqual(cleanedCarrier.carriedArmyId, null, 'Carrier should free missing or destroyed armies');
       assert.strictEqual(sanitized.armies.length, 0, 'Weak embarked armies should be removed');
-      assert.ok(logs.some(entry => entry.includes('critical strength')), 'Cleanup should log attrition-based removals');
+      assert.ok(logs.some(entry => entry.includes('out of combat')), 'Cleanup should log out-of-combat removals');
     }
   },
   {

@@ -8,7 +8,6 @@ import {
   ORBITAL_BOMBARDMENT_MIN_MORALE,
   ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER
 } from '../content/data/static';
-import { ARMY_DESTROY_THRESHOLD } from './army';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { sorted } from '../shared/sorting';
 
@@ -23,7 +22,7 @@ export interface OrbitalBombardmentTarget {
 }
 
 export interface OrbitalBombardmentResult {
-  updates: Map<string, { strength: number; morale: number }>;
+  updates: Map<string, { members: number; condition: number }>;
   logs: string[];
   bombardedPlanetIds: Set<string>;
 }
@@ -115,7 +114,7 @@ export const getBombardedPlanetIdsForSystem = (
 
 const applyBombardment = (
   target: OrbitalBombardmentTarget
-): { updates: { armyId: string; strength: number; morale: number }[]; strengthLost: number; moraleLossFraction: number } => {
+): { updates: { armyId: string; members: number; condition: number }[]; membersLost: number; conditionLossFraction: number } => {
   const strengthLossFraction = clampFraction(
     target.bombardmentPower * ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
     ORBITAL_BOMBARDMENT_MAX_STRENGTH_LOSS_FRACTION
@@ -126,36 +125,38 @@ const applyBombardment = (
   );
 
   const sortedArmies = target.targetArmies;
-  const totalStrength = sortedArmies.reduce((sum, army) => sum + army.strength, 0);
-  const totalStrengthLoss = Math.floor(totalStrength * strengthLossFraction);
+  const totalMembers = sortedArmies.reduce((sum, army) => sum + army.members, 0);
+  const totalMembersLoss = Math.floor(totalMembers * strengthLossFraction);
 
-  let remainingLoss = totalStrengthLoss;
+  let remainingLoss = totalMembersLoss;
   let appliedLoss = 0;
-  const updates: { armyId: string; strength: number; morale: number }[] = [];
+  const updates: { armyId: string; members: number; condition: number }[] = [];
 
   sortedArmies.forEach((army, index) => {
-    const minStrength = ARMY_DESTROY_THRESHOLD(army.maxStrength) + ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER;
-    const maxLoss = Math.max(0, army.strength - minStrength);
+    // Legacy buffer retained as a safety margin to avoid erasing tiny remnants too easily.
+    // With the new out-of-combat rules, units can still be removed later by cleanup.
+    const minMembers = Math.max(0, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER);
+    const maxLoss = Math.max(0, army.members - minMembers);
     const isLast = index === sortedArmies.length - 1;
     const proportionalLoss = isLast
       ? remainingLoss
-      : totalStrength > 0
-        ? Math.floor((totalStrengthLoss * army.strength) / totalStrength)
+      : totalMembers > 0
+        ? Math.floor((totalMembersLoss * army.members) / totalMembers)
         : 0;
     const loss = Math.min(maxLoss, Math.max(0, proportionalLoss));
-    const newStrength = army.strength - loss;
+    const newMembers = army.members - loss;
     remainingLoss -= loss;
     appliedLoss += loss;
 
-    const newMorale = Math.max(ORBITAL_BOMBARDMENT_MIN_MORALE, army.morale * (1 - moraleLossFraction));
-    updates.push({ armyId: army.id, strength: newStrength, morale: newMorale });
+    const newCondition = Math.max(ORBITAL_BOMBARDMENT_MIN_MORALE, army.condition * (1 - moraleLossFraction));
+    updates.push({ armyId: army.id, members: newMembers, condition: newCondition });
   });
 
-  return { updates, strengthLost: appliedLoss, moraleLossFraction };
+  return { updates, membersLost: appliedLoss, conditionLossFraction: moraleLossFraction };
 };
 
 export const resolveOrbitalBombardment = (state: GameState): OrbitalBombardmentResult => {
-  const updates = new Map<string, { strength: number; morale: number }>();
+  const updates = new Map<string, { members: number; condition: number }>();
   const logs: string[] = [];
   const bombardedPlanetIds = new Set<string>();
 
@@ -164,17 +165,17 @@ export const resolveOrbitalBombardment = (state: GameState): OrbitalBombardmentR
     if (targets.length === 0) return;
 
     targets.forEach(target => {
-      const { updates: localUpdates, strengthLost, moraleLossFraction } = applyBombardment(target);
+      const { updates: localUpdates, membersLost, conditionLossFraction } = applyBombardment(target);
       localUpdates.forEach(update => {
-        updates.set(update.armyId, { strength: update.strength, morale: update.morale });
+        updates.set(update.armyId, { members: update.members, condition: update.condition });
       });
 
       bombardedPlanetIds.add(target.planetId);
 
       const attackerLabel = getFactionLabel(state, target.attackerFactionId);
-      const moraleLossPercent = (moraleLossFraction * 100).toFixed(1);
+      const conditionLossPercent = (conditionLossFraction * 100).toFixed(1);
       logs.push(
-        `Orbital bombardment at ${target.planetName} (${target.systemName}) by ${attackerLabel}: -${strengthLost} strength, -${moraleLossPercent}% morale.`
+        `Orbital bombardment at ${target.planetName} (${target.systemName}) by ${attackerLabel}: -${membersLost} members, -${conditionLossPercent}% condition.`
       );
     });
   });

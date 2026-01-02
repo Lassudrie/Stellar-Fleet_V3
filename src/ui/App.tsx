@@ -25,6 +25,7 @@ import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/sorting';
 import { generateSurfaceMapForState } from '../engine/planetSurface/access';
 import { resolveSurfaceContext } from './navigation/surfaceNavigation';
+import type { GameCommand } from '../engine/commands';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
 
@@ -622,6 +623,12 @@ const App: React.FC = () => {
       handleCloseMenu();
   };
 
+  const handleSurfaceIssueCommand = useCallback((cmd: GameCommand) => {
+      if (!engine) return;
+      const result = engine.dispatchCommand(cmd);
+      processCommandResult(result, notifyCommandError);
+  }, [engine]);
+
   const handleSplitFleet = (shipIds: string[]) => {
       if (engine && selectedFleetId) {
           const result = engine.dispatchPlayerCommand({
@@ -956,6 +963,7 @@ const App: React.FC = () => {
               onSelectBody={handleSelectSurfaceBody}
               onBackToGalaxy={() => handleLeaveSurfaceView('GAME')}
               onBackToSystem={surfaceSystem ? () => handleLeaveSurfaceView('SYSTEM_VIEW') : undefined}
+              onIssueCommand={handleSurfaceIssueCommand}
             />
             {transitionOverlayElement}
         </div>
