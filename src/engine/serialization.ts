@@ -829,7 +829,7 @@ export const deserializeGameState = (json: string): GameState => {
             ? surfacePos
             : undefined;
 
-        return {
+        const baseArmy: Army = {
           id: a.id,
           factionId,
           strength: clampedStrength,
@@ -837,8 +837,10 @@ export const deserializeGameState = (json: string): GameState => {
           morale,
           state: a.state,
           containerId: a.containerId,
-          surfacePos: normalizedSurfacePos
+          ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {})
         };
+
+        return baseArmy;
       })
       .filter((army): army is Army => Boolean(army));
 
