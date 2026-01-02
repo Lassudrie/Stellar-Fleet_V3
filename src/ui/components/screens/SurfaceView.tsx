@@ -96,10 +96,38 @@ const roundAxial = ({ q, r }: { q: number; r: number }): HexCoord => {
   return { q: rx, r: rz };
 };
 
-const computeMapSizePx = (config: PlanetSurfaceMap['descriptor']['config'], size: number) => {
-  const width = Math.sqrt(3) * size * (config.w + 0.5);
-  const height = size * 1.5 * (config.h - 1) + size * 2;
-  return { width, height };
+type MapBoundsPx = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
+const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['config'], size: number): MapBoundsPx => {
+  // For pointy-top axial coords:
+  // - center x = size * (sqrt(3)*q + sqrt(3)/2*r)
+  // - center y = size * (3/2*r)
+  // Hex polygon bounds from center:
+  // - half width = sqrt(3)/2 * size
+  // - half height = size
+  const halfW = (Math.sqrt(3) / 2) * size;
+  const minX = -halfW;
+  const minY = -size;
+
+  const bottomRight = axialToPixel(config.w - 1, config.h - 1, size);
+  const maxX = bottomRight.x + halfW;
+  const maxY = bottomRight.y + size;
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
 };
 
 const normalizePos = (pos: SurfacePos | undefined, config: PlanetSurfaceMap['descriptor']['config']): HexCoord | null => {
@@ -179,12 +207,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
-    const { width, height } = computeMapSizePx(activeMapConfig, HEX_SIZE);
+    const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
     setCamera({
       zoom: 1,
       offset: {
-        x: (viewport.width - width) / 2,
-        y: (viewport.height - height) / 2
+        x: (viewport.width - bounds.width) / 2 - bounds.minX,
+        y: (viewport.height - bounds.height) / 2 - bounds.minY
       }
     });
     setHovered(null);
@@ -484,7 +512,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     );
   }
 
-  const mapSizePx = computeMapSizePx(map.descriptor.config, HEX_SIZE);
+  const mapBoundsPx = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
   const primaryButtonClasses = (target: 'GAME' | 'SYSTEM_VIEW') =>
     `rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
       primaryReturn === target
@@ -560,12 +588,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             </button>
             <button
               onClick={() => {
-                const { width, height } = mapSizePx;
+                const { width, height, minX, minY } = mapBoundsPx;
                 setCamera({
                   zoom: 1,
                   offset: {
-                    x: (viewport.width - width) / 2,
-                    y: (viewport.height - height) / 2
+                    x: (viewport.width - width) / 2 - minX,
+                    y: (viewport.height - height) / 2 - minY
                   }
                 });
               }}
