@@ -105,13 +105,14 @@ const computeSlope = (idx: number, elev: Float32Array, w: number, h: number, wra
 const placeSettlements = (params: {
   descriptor: PlanetSurfaceDescriptor;
   tiles: PlanetSurfaceTile[];
+  elev: Float32Array;
   w: number;
   h: number;
   wrapX: boolean;
   seaLevelElev: number;
   ownerFactionId?: string | null;
 }): Settlement[] => {
-  const { descriptor, tiles, w, h, wrapX, ownerFactionId } = params;
+  const { descriptor, tiles, elev, w, h, wrapX, ownerFactionId } = params;
   const n = w * h;
   const rng = new RNG(descriptor.seed ^ 0x9e3779b9);
 
@@ -119,11 +120,14 @@ const placeSettlements = (params: {
 
   const pickCandidates = (k: number): number[] => {
     const out: number[] = [];
+    const seen = new Set<number>();
     let safety = 0;
     while (out.length < k && safety < k * 30) {
       safety += 1;
       const idx = rng.int(0, n - 1);
       if (!isLandIndex(idx)) continue;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
       out.push(idx);
     }
     return out;
@@ -133,7 +137,7 @@ const placeSettlements = (params: {
 
   const scoreSite = (idx: number, existing: number[]): number => {
     const tile = tiles[idx];
-    const slope = computeSlope(idx, Float32Array.from(tiles.map(t => t.elev)), w, h, wrapX);
+    const slope = computeSlope(idx, elev, w, h, wrapX);
     const c = indexToAxial(idx, w);
     const ns = neighborsAxial(c, w, h, wrapX);
     const nearWater = ns.some(nc => isWaterBiome(tiles[axialToIndex(nc, w)].biome)) ? 1 : 0;
@@ -463,6 +467,7 @@ export const generateSurfaceMap = (params: {
   const settlements = placeSettlements({
     descriptor,
     tiles,
+    elev,
     w,
     h,
     wrapX,
@@ -479,4 +484,3 @@ export const generateSurfaceMap = (params: {
     settlements
   };
 };
-
