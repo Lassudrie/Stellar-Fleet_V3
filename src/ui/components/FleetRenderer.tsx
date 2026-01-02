@@ -36,6 +36,9 @@ const EXTRUDE_SETTINGS = {
 
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
+const DEFAULT_DIRECTION = new Vector3(0, 0, 1);
+const _orientationTarget = new Vector3();
+const _movementDirection = new Vector3();
 
 const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
   try {
@@ -65,6 +68,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const groupRef = useRef<Group>(null);
   // We use a Mesh ref to handle the Rotation/Orientation of the ship model itself
   const meshRef = useRef<Mesh>(null);
+  const lastLookQuaternionRef = useRef<Quaternion>(new Quaternion());
+  const previousPositionRef = useRef<Vector3 | null>(null);
 
   // Double interaction detection (touch)
   const lastTouchRef = useRef<number>(0);
@@ -105,6 +110,12 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   useLayoutEffect(() => {
     if (groupRef.current) {
         groupRef.current.position.set(fleet.position.x, fleet.position.y, fleet.position.z);
+    }
+    if (groupRef.current && meshRef.current) {
+        _orientationTarget.copy(groupRef.current.position).add(DEFAULT_DIRECTION);
+        meshRef.current.lookAt(_orientationTarget);
+        lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
+        meshRef.current.quaternion.multiply(tiltQuaternion);
     }
     
     // Check if we should trigger a flash on mount (e.g. Enemy arriving from Fog of War)
@@ -173,6 +184,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         const lookAtZ = fleet.position.z + Math.sin(futureTime) * ORBIT_RADIUS;
         
         meshRef.current.lookAt(lookAtX, fleet.position.y, lookAtZ);
+        lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
         meshRef.current.quaternion.multiply(tiltQuaternion);
 
     } else {
@@ -181,8 +193,37 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         groupRef.current.position.lerp(_vec3, 0.5);
         if (fleet.targetPosition) {
             meshRef.current.lookAt(fleet.targetPosition.x, fleet.targetPosition.y, fleet.targetPosition.z);
+            lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
             meshRef.current.quaternion.multiply(tiltQuaternion);
         }
+    }
+
+    const currentPosition = groupRef.current.position;
+    if (!previousPositionRef.current) {
+        previousPositionRef.current = currentPosition.clone();
+    }
+
+    if (!fleet.targetPosition && meshRef.current) {
+        let appliedFallbackOrientation = false;
+
+        if (previousPositionRef.current) {
+            _movementDirection.copy(currentPosition).sub(previousPositionRef.current);
+            if (_movementDirection.lengthSq() > 1e-6) {
+                _orientationTarget.copy(currentPosition).add(_movementDirection);
+                meshRef.current.lookAt(_orientationTarget);
+                lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
+                meshRef.current.quaternion.multiply(tiltQuaternion);
+                appliedFallbackOrientation = true;
+            }
+        }
+
+        if (!appliedFallbackOrientation) {
+            meshRef.current.quaternion.copy(lastLookQuaternionRef.current).multiply(tiltQuaternion);
+        }
+    }
+
+    if (previousPositionRef.current) {
+        previousPositionRef.current.copy(currentPosition);
     }
   });
 
