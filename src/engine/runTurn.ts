@@ -34,8 +34,10 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // --- CANONICALIZE INPUT STATE ---
   // Ensures consistent iteration order for deterministic RNG consumption
   let nextState = { ...state, day: turn };
-  if ((import.meta as any).env?.DEV && !isCanonical(nextState)) {
-    console.warn('[RunTurn] Input state not canonical; normalizing for determinism.');
+  if (!isCanonical(nextState)) {
+    if ((import.meta as any).env?.DEV) {
+      console.warn('[RunTurn] Input state not canonical; normalizing for determinism.');
+    }
     nextState = canonicalizeState(nextState);
   }
 
