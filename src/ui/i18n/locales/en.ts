@@ -159,6 +159,8 @@ export const en = {
   // Surface View
   'surfaceView.header': 'Surface view',
   'surfaceView.noData': 'No surface data is available for this body.',
+  'surfaceView.loadingTitle': 'Generating surface map',
+  'surfaceView.loadingSubtitle': 'This may take a moment on large worlds.',
   'surfaceView.backToGalaxy': 'Back to galaxy',
   'surfaceView.backToSystem': 'Back to system view',
   'surfaceView.mapSize': 'Grid {{width}} × {{height}}',

@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState } from '../shared/types';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap } from '../shared/types';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -796,10 +796,44 @@ const App: React.FC = () => {
       return surfaceSystem.planets.find(planet => planet.id === surfaceViewBodyId) ?? null;
   }, [surfaceSystem, surfaceViewBodyId]);
 
-  const surfaceMap = useMemo(() => {
-      if (screen !== 'SURFACE_VIEW') return null;
-      if (!viewGameState || !surfaceViewBodyId) return null;
-      return generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
+  const [surfaceMap, setSurfaceMap] = useState<PlanetSurfaceMap | null>(null);
+  const [surfaceMapStatus, setSurfaceMapStatus] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>('idle');
+
+  useEffect(() => {
+      if (screen !== 'SURFACE_VIEW') {
+          setSurfaceMap(null);
+          setSurfaceMapStatus('idle');
+          return;
+      }
+      if (!viewGameState || !surfaceViewBodyId) {
+          setSurfaceMap(null);
+          setSurfaceMapStatus('missing');
+          return;
+      }
+
+      let cancelled = false;
+      setSurfaceMap(null);
+      setSurfaceMapStatus('loading');
+
+      const handle = window.setTimeout(() => {
+          if (cancelled) return;
+          try {
+              const map = generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
+              if (cancelled) return;
+              setSurfaceMap(map);
+              setSurfaceMapStatus(map ? 'ready' : 'missing');
+          } catch (error) {
+              console.error('[Surface] map generation failed', error);
+              if (cancelled) return;
+              setSurfaceMap(null);
+              setSurfaceMapStatus('error');
+          }
+      }, 0);
+
+      return () => {
+          cancelled = true;
+          window.clearTimeout(handle);
+      };
   }, [screen, surfaceViewBodyId, viewGameState]);
 
   const surfaceArmies = useMemo(() => {
@@ -910,6 +944,7 @@ const App: React.FC = () => {
         <div className="relative w-full h-screen">
             <SurfaceView
               map={surfaceMap}
+              mapStatus={surfaceMapStatus}
               system={surfaceSystem}
               body={surfaceBody}
               armies={surfaceArmies}
