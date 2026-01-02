@@ -11,6 +11,7 @@ import {
   FactionState,
   StarSystemAstro,
   PlanetBody,
+  PlanetSurfaceDescriptor,
   StationType
 } from '../shared/types';
 
@@ -209,6 +210,7 @@ export interface GameStateDTO {
   rules?: GameplayRules;
   aiState?: AIStateDTO;
   aiStates?: Record<string, AIStateDTO>;
+  planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
 }
 
 export interface SaveFileV2 {

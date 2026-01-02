@@ -22,7 +22,8 @@ import {
   StarSystemAstro,
   GameMessage,
   Station,
-  StationType
+  StationType,
+  PlanetSurfaceDescriptor
 } from '../shared/types';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -235,6 +236,73 @@ const sanitizeOwnerRecord = (
   }, {});
 };
 
+const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescriptor | null => {
+  if (!value || typeof value !== 'object') return null;
+  const d: any = value;
+
+  if (!isFiniteNumber(d.seed)) return null;
+  const config = d.config;
+  if (!config || typeof config !== 'object') return null;
+
+  const w = (config as any).w;
+  const h = (config as any).h;
+  const wrapX = (config as any).wrapX;
+  const generatorVersion = (config as any).generatorVersion;
+  if (!isFiniteNumber(w) || w <= 0) return null;
+  if (!isFiniteNumber(h) || h <= 0) return null;
+  if (typeof wrapX !== 'boolean') return null;
+  if (!isFiniteNumber(generatorVersion) || generatorVersion <= 0) return null;
+
+  const astroRef = d.astroRef;
+  if (astroRef !== undefined) {
+    if (!astroRef || typeof astroRef !== 'object') return null;
+    const planetIndex = (astroRef as any).planetIndex;
+    const moonIndex = (astroRef as any).moonIndex;
+    if (!isFiniteNumber(planetIndex) || planetIndex < 0) return null;
+    if (moonIndex !== undefined && (!isFiniteNumber(moonIndex) || moonIndex < 0)) return null;
+  }
+
+  return {
+    seed: (d.seed >>> 0),
+    config: {
+      w: Math.floor(w),
+      h: Math.floor(h),
+      wrapX,
+      generatorVersion: Math.floor(generatorVersion)
+    },
+    astroRef: astroRef
+      ? {
+          planetIndex: Math.floor((astroRef as any).planetIndex),
+          moonIndex: (astroRef as any).moonIndex !== undefined ? Math.floor((astroRef as any).moonIndex) : undefined
+        }
+      : undefined
+  };
+};
+
+const sanitizePlanetSurfaceDescriptorRecord = (
+  value: unknown,
+  validBodyIds: Set<string>
+): Record<string, PlanetSurfaceDescriptor> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const out: Record<string, PlanetSurfaceDescriptor> = {};
+
+  Object.entries(record).forEach(([bodyId, entry]) => {
+    if (!validBodyIds.has(bodyId)) {
+      console.warn(`[Serialization] Surface descriptor references unknown body '${bodyId}'; skipping.`);
+      return;
+    }
+    const desc = sanitizePlanetSurfaceDescriptor(entry);
+    if (!desc) {
+      console.warn(`[Serialization] Surface descriptor for body '${bodyId}' was invalid; skipping.`);
+      return;
+    }
+    out[bodyId] = desc;
+  });
+
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   if (!aiState) return undefined;
 
@@ -424,6 +492,7 @@ export const serializeGameState = (state: GameState): string => {
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
     aiStates: aiStatesDto,
+    planetSurfaceDescriptorsByBodyId: state.planetSurfaceDescriptorsByBodyId,
     objectives: state.objectives,
     rules: state.rules
   };
@@ -637,6 +706,10 @@ export const deserializeGameState = (json: string): GameState => {
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
     const planetIds = new Set(systems.flatMap(system => system.planets.map(planet => planet.id)));
+    const planetSurfaceDescriptorsByBodyId = sanitizePlanetSurfaceDescriptorRecord(
+      dto.planetSurfaceDescriptorsByBodyId,
+      planetIds
+    );
 
     const stationsDto = Array.isArray(dto.stations) ? dto.stations : [];
     if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
@@ -928,6 +1001,7 @@ export const deserializeGameState = (json: string): GameState => {
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
       aiStates: migratedAiStates,
       aiState: primaryAiState,
+      planetSurfaceDescriptorsByBodyId,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
