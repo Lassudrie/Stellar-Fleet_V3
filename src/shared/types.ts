@@ -31,10 +31,14 @@ export enum ShipType {
   FRIGATE = 'frigate',
   FIGHTER = 'fighter',
   BOMBER = 'bomber',
-  TROOP_TRANSPORT = 'troop_transport',
+  TRANSPORTER = 'transporter',
+  BUILDER = 'builder',
+  SUPPORT = 'support',
   TANKER = 'tanker',
   EXTRACTOR = 'extractor',
 }
+
+export type StationType = 'shipyard' | 'mining' | 'defense' | 'relay' | 'outpost';
 
 export type ResourceType = 'none' | 'gas';
 
@@ -165,7 +169,7 @@ export interface ShipStats {
   torpedoStock: number;
   torpedoDamage: number;
   interceptorStock: number;
-  role: 'capital' | 'screen' | 'striker' | 'transport';
+  role: 'capital' | 'screen' | 'striker' | 'transport' | 'builder' | 'support';
   fuelCapacity: number;
   fuelConsumptionPerLy: number;
   fuelExtractionRate?: number;
@@ -237,8 +241,19 @@ export interface Fleet {
   stateStartTurn: number; // Turn when the current state began (Used for VFX)
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
+  invasionTargetPlanetId?: string | null; // Preferred planet target for invasion orders
   loadTargetSystemId?: string | null; // If set, fleet will embark allied armies at this system upon arrival
   unloadTargetSystemId?: string | null; // If set, fleet will unload embarked armies at this allied system upon arrival
+}
+
+export interface Station {
+  id: string;
+  systemId: string;
+  factionId: FactionId;
+  type: StationType;
+  name?: string;
+  anchorBodyId?: string | null;
+  slotIndex?: number;
 }
 
 export interface LaserShot {
@@ -366,6 +381,7 @@ export interface GameState {
   day: number;
   systems: StarSystem[];
   fleets: Fleet[];
+  stations?: Station[];
   armies: Army[];
   lasers: LaserShot[];
   battles: Battle[];

@@ -43,7 +43,7 @@ export const getFleetEligibility = (
       return { eligible: true, reason: null, distanceLy, distanceSq };
   }
 
-  const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TROOP_TRANSPORT);
+  const hasTransport = fleet.ships.some(ship => ship.type === ShipType.TRANSPORTER);
   if (!hasTransport) return { eligible: false, reason: 'missingTransport', distanceLy, distanceSq };
   if (distanceLy > MAX_HYPERJUMP_DISTANCE_LY) return { eligible: false, reason: 'outOfRange', distanceLy, distanceSq };
   if (!canFleetPayJump(fleet, distanceLy, { unlimitedFuel })) return { eligible: false, reason: 'insufficientFuel', distanceLy, distanceSq };

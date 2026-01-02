@@ -73,7 +73,7 @@ const GroundOpsModal: React.FC<GroundOpsModalProps> = ({
       )
       .reduce((count, fleet) => {
         const eligible = fleet.ships.filter(ship => {
-          if (ship.type !== ShipType.TROOP_TRANSPORT) return false;
+          if (ship.type !== ShipType.TRANSPORTER) return false;
           if (ship.carriedArmyId) return false;
           return (ship.transferBusyUntilDay ?? -Infinity) < day;
         });

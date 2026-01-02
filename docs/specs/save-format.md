@@ -42,6 +42,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
+- `stations`: structures orbitales (id, systemId, factionId, type, anchorBodyId?, slotIndex?).
 - `armies` : armées embarquées ou déployées (`ArmyState`, force, morale, conteneur).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
 - `lasers` : tirs (`start`, `end`, couleur, durée de vie) conservés pour l’animation.

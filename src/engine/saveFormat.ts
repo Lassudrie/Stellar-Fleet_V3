@@ -10,7 +10,8 @@ import {
   GameplayRules,
   FactionState,
   StarSystemAstro,
-  PlanetBody
+  PlanetBody,
+  StationType
 } from '../shared/types';
 
 export const SAVE_VERSION = 3 as const;
@@ -65,8 +66,19 @@ export interface FleetDTO {
   stateStartTurn: number;
   retreating?: boolean;
   invasionTargetSystemId?: string | null;
+  invasionTargetPlanetId?: string | null;
   loadTargetSystemId?: string | null;
   unloadTargetSystemId?: string | null;
+}
+
+export interface StationDTO {
+  id: string;
+  systemId: string;
+  factionId: string;
+  type: StationType;
+  name?: string;
+  anchorBodyId?: string | null;
+  slotIndex?: number;
 }
 
 export interface ArmyDTO {
@@ -184,6 +196,7 @@ export interface GameStateDTO {
   day: number;
   systems: StarSystemDTO[];
   fleets: FleetDTO[];
+  stations?: StationDTO[];
   armies?: ArmyDTO[];
   lasers?: LaserShotDTO[];
   battles?: BattleDTO[];

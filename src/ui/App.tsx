@@ -8,13 +8,14 @@ import { FleetNameProvider } from './context/FleetNames';
 import MainMenu from './components/screens/MainMenu';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
+import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower } from '../engine/world';
-import { clone, equals } from '../engine/math/vec3';
+import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState, deserializeGameState } from '../engine/serialization';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
@@ -22,19 +23,26 @@ import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/sorting';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL';
+type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
+const SCREEN_TRANSITION_MS = 400;
+const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
 
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
+  const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
+  const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
+  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -43,6 +51,7 @@ const App: React.FC = () => {
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [systemDetailSystem, setSystemDetailSystem] = useState<StarSystem | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number, y: number } | null>(null);
+  const [focusTarget, setFocusTarget] = useState<Vec3 | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
   
@@ -139,6 +148,35 @@ const App: React.FC = () => {
   useEffect(() => {
       inspectedFleetIdRef.current = inspectedFleetId;
   }, [inspectedFleetId]);
+
+  const clearTransitionTimer = useCallback(() => {
+      if (transitionTimerRef.current !== null) {
+          window.clearTimeout(transitionTimerRef.current);
+          transitionTimerRef.current = null;
+      }
+  }, []);
+
+  useEffect(() => {
+      return () => clearTransitionTimer();
+  }, [clearTransitionTimer]);
+
+  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW', prepare?: () => void) => {
+      clearTransitionTimer();
+      prepare?.();
+      setPendingScreen(nextScreen);
+      setTransitionPhase('fadeOut');
+
+      transitionTimerRef.current = window.setTimeout(() => {
+          setScreen(nextScreen);
+          setTransitionPhase('fadeIn');
+
+          transitionTimerRef.current = window.setTimeout(() => {
+              setTransitionPhase('idle');
+              setPendingScreen(null);
+              transitionTimerRef.current = null;
+          }, SCREEN_TRANSITION_MS);
+      }, SCREEN_TRANSITION_MS);
+  }, [clearTransitionTimer]);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -343,6 +381,7 @@ const App: React.FC = () => {
 
   const handleSystemClick = (sys: StarSystem, event: any) => {
       setTargetSystem(sys);
+      setFocusTarget(sys.position);
       setMenuPosition({ x: event.clientX, y: event.clientY });
       setFleetPickerMode(null);
       setInspectedFleetId(null);
@@ -442,6 +481,34 @@ const App: React.FC = () => {
       setUiMode('GROUND_OPS_MODAL');
   };
 
+  const handleOpenSystemView = () => {
+      if (!targetSystem || !viewGameState) {
+          console.warn('[App] handleOpenSystemView: Missing targetSystem or viewGameState');
+          return;
+      }
+      const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
+      setTargetSystem(latestSystem);
+      setSystemViewSystem(latestSystem);
+      beginScreenTransition('SYSTEM_VIEW', () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+      });
+  };
+
+  const handleSystemCameraStateChange = useCallback((systemId: string, state: SystemCameraState) => {
+      setSystemViewCameraBySystem(prev => ({
+          ...prev,
+          [systemId]: state
+      }));
+  }, []);
+
+  const handleReturnToGalaxy = () => {
+      beginScreenTransition('GAME', () => {
+          setUiMode('NONE');
+          setMenuPosition(null);
+      });
+  };
+
   const handleOpenSystemDetails = () => {
       if (!targetSystem || !viewGameState) {
           console.warn('[App] handleOpenSystemDetails: Missing targetSystem or viewGameState');
@@ -473,7 +540,7 @@ const App: React.FC = () => {
       setUiMode('INVASION_MODAL');
   };
 
-  const handleCommitInvasion = (fleetId: string) => {
+  const handleCommitInvasion = (fleetId: string, planetId: string | null) => {
       const fId = fleetId;
       if (!targetSystem || !engine) {
           console.warn('[App] handleCommitInvasion: Missing targetSystem or engine');
@@ -483,13 +550,14 @@ const App: React.FC = () => {
       const result = engine.dispatchPlayerCommand({
           type: 'ORDER_INVASION',
           fleetId: fId,
-          targetSystemId: targetSystem.id
+          targetSystemId: targetSystem.id,
+          targetPlanetId: planetId ?? undefined
       });
 
-      if (processCommandResult(result, notifyCommandError) && typeof result.deployedArmies === 'number') {
+      if (processCommandResult(result, notifyCommandError)) {
           engine.dispatchCommand({
               type: 'ADD_LOG',
-              text: t('msg.invasionLog', { system: targetSystem.name, count: result.deployedArmies }),
+              text: t('msg.invasionLog', { system: targetSystem.name }),
               logType: 'move'
           });
       }
@@ -662,10 +730,76 @@ const App: React.FC = () => {
 
   if (loading) return <LoadingScreen />;
 
+  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW';
+
+  const transitionOverlayElement = (
+    <div
+      className={`${transitionPhase === 'idle' ? 'pointer-events-none' : 'pointer-events-auto'} absolute inset-0 z-50 bg-black`}
+      style={{
+          opacity: transitionPhase === 'fadeOut' ? 1 : 0,
+          transition: `opacity ${SCREEN_TRANSITION_MS}ms ease`
+      }}
+    />
+  );
+
   if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'LOAD_GAME' ? 'LOAD_GAME' : 'SCENARIO')} />;
   if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
   
+  if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
+      return (
+        <div className="relative w-full h-screen bg-black text-white">
+            <FleetNameProvider fleets={viewGameState?.fleets ?? []}>
+                <SystemView3D
+                  starSystem={systemViewSystem}
+                  astro={systemViewSystem.astro}
+                  fleets={viewGameState?.fleets ?? []}
+                  stations={viewGameState?.stations ?? []}
+                  factions={viewGameState?.factions ?? []}
+                  playerFactionId={viewGameState?.playerFactionId}
+                  day={viewGameState?.day ?? 0}
+                  selectedFleetId={selectedFleetId}
+                  onSelectFleet={handleFleetSelect}
+                  onInspectFleet={handleFleetInspect}
+                  initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
+                  onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
+                  scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
+                />
+            </FleetNameProvider>
+            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
+                <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                        {t('systemView.currentSystem')}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between gap-4">
+                        <div>
+                            <div className="text-2xl font-bold">{systemViewSystem.name}</div>
+                            <div className="text-sm text-slate-300">
+                                {systemViewSystem.astro ? t('systemView.astroLoaded') : t('systemView.noAstro')}
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleReturnToGalaxy}
+                            className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
+                        >
+                            {t('systemView.backToGalaxy')}
+                        </button>
+                    </div>
+                </div>
+                <div className="pointer-events-auto m-4 self-start">
+                    <button
+                        onClick={handleReturnToGalaxy}
+                        className="rounded-full bg-slate-800/80 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg ring-1 ring-slate-600 transition hover:bg-slate-700"
+                    >
+                        {t('systemView.backToGalaxy')}
+                    </button>
+                </div>
+            </div>
+            {transitionOverlayElement}
+        </div>
+      );
+  }
+
   if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
@@ -679,6 +813,8 @@ const App: React.FC = () => {
                     gameState={viewGameState}
                     enemySightings={enemySightings}
                     selectedFleetId={selectedFleetId}
+                    focusTarget={focusTarget}
+                    isInteractive={!isGameInteractionLocked}
                     onFleetSelect={handleFleetSelect}
                     onFleetInspect={handleFleetInspect}
                     onSystemClick={handleSystemClick}
@@ -720,6 +856,7 @@ const App: React.FC = () => {
                     onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
                     onOpenGroundOps={handleOpenGroundOps}
                     onCloseMenu={handleCloseMenu}
+                    onOpenSystemView={handleOpenSystemView}
                     fleetPickerMode={fleetPickerMode}
                     onOpenSystemDetails={handleOpenSystemDetails}
                     systemDetailSystem={systemDetailSystem}
@@ -752,6 +889,7 @@ const App: React.FC = () => {
                     onMarkMessageRead={handleMarkMessageRead}
                     onMarkAllMessagesRead={handleMarkAllMessagesRead}
                 />
+                {transitionOverlayElement}
             </FleetNameProvider>
         </div>
       );

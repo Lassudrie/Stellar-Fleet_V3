@@ -740,7 +740,7 @@ const planArmyEmbarkation = (
       ship => ship.carriedArmyId && embarkedFriendlyArmies.has(ship.carriedArmyId)
     );
     const freeTransports = fleet.ships.filter(
-      ship => ship.type === ShipType.TROOP_TRANSPORT && !ship.carriedArmyId
+      ship => ship.type === ShipType.TRANSPORTER && !ship.carriedArmyId
     ).length;
 
     if (hasEmbarkedArmies && task.type === 'ATTACK') {
@@ -931,7 +931,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
       .filter(fleet => fleet.factionId === factionId && isFleetOrbitingSystem(fleet, system) && isCommandableFleet(fleet))
       .reduce((count, fleet) => {
         const freeTransports = fleet.ships.filter(ship =>
-          ship.type === ShipType.TROOP_TRANSPORT &&
+          ship.type === ShipType.TRANSPORTER &&
           !ship.carriedArmyId &&
           (ship.transferBusyUntilDay ?? -Infinity) < state.day
         ).length;

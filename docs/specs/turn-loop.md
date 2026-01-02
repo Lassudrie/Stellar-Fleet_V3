@@ -74,7 +74,7 @@
 - **Entrée** : état après bombardement, incluant positions orbitale/sol.
 - **Traitement** :
   - Résout `resolveGroundConflict` planète par planète solide, accumule pertes, destructions et changement de propriétaire.
-  - Met à jour/élimine les armées, recalcul les propriétaires de planètes puis de systèmes (bloqués si orbite contestée via `isOrbitContested`).
+  - Met à jour/élimine les armées, recalcul les propriétaires de planètes puis de systèmes : dès qu'une seule faction conserve des armées déployées dans un système, elle en devient propriétaire, y compris si d'autres planètes solides restent neutres ou détenues sans garnison.
   - Génère logs combat et messages `PLANET_CONQUERED` (lignes pertes/restes) ordonnés via `canonicalizeMessages`.
   - Met à jour `aiStates` pour pousser les factions IA victorieuses à tenir les systèmes capturés (`holdUntilTurnBySystemId`).
 - **Sortie** : systèmes recolorés et réassignés, armées filtrées/ajustées, logs/messages enrichis, IA mise à jour.

@@ -226,11 +226,11 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
 
 /**
  * Checks if a ship is a valid candidate to carry an army.
- * Rule 1: Must be TROOP_TRANSPORT.
+ * Rule 1: Must be TRANSPORTER.
  * Rule 2: Must be empty.
  */
 export const canLoadArmy = (ship: ShipEntity): boolean => {
-    if (ship.type !== ShipType.TROOP_TRANSPORT) return false;
+    if (ship.type !== ShipType.TRANSPORTER) return false;
     if (ship.carriedArmyId) return false; // Already full
     return true;
 };
@@ -304,7 +304,7 @@ export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
  */
 export const hasInvadingForce = (fleet: Fleet): boolean => {
     return fleet.ships.some(s => 
-        s.type === ShipType.TROOP_TRANSPORT && 
+        s.type === ShipType.TRANSPORTER && 
         !!s.carriedArmyId
     );
 };

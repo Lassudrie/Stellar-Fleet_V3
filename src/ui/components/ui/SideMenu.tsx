@@ -134,7 +134,9 @@ const SHIP_TRIGRAM: Record<ShipType, string> = {
   [ShipType.FRIGATE]: 'FRI',
   [ShipType.FIGHTER]: 'FTR',
   [ShipType.BOMBER]: 'BMB',
-  [ShipType.TROOP_TRANSPORT]: 'TRN',
+  [ShipType.TRANSPORTER]: 'TRN',
+  [ShipType.BUILDER]: 'BLD',
+  [ShipType.SUPPORT]: 'SUP',
   [ShipType.TANKER]: 'TNK',
   [ShipType.EXTRACTOR]: 'EXT',
 };
@@ -152,7 +154,9 @@ const getFleetComposition = (fleet: Fleet): Record<ShipType, number> => {
       [ShipType.FRIGATE]: 0,
       [ShipType.FIGHTER]: 0,
       [ShipType.BOMBER]: 0,
-      [ShipType.TROOP_TRANSPORT]: 0,
+      [ShipType.TRANSPORTER]: 0,
+      [ShipType.BUILDER]: 0,
+      [ShipType.SUPPORT]: 0,
       [ShipType.TANKER]: 0,
       [ShipType.EXTRACTOR]: 0,
   });

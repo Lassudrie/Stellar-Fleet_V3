@@ -5,7 +5,7 @@ Cette spécification décrit les règles de chargement, de débarquement et de t
 ## Conditions de chargement
 - Une flotte doit être en orbite d'un système solide : `FleetState.ORBIT` et distance orbitale valide (`ORBIT_PROXIMITY_RANGE_SQ`).
 - Les armées éligibles sont déployées sur une planète solide du système, appartiennent à la même faction et sont en état `DEPLOYED`.
-- Seuls les `TROOP_TRANSPORT` vides peuvent charger. Le calcul limite le nombre d'armées à la capacité de transports disponibles.
+- Seuls les `TRANSPORTER` vides peuvent charger. Le calcul limite le nombre d'armées à la capacité de transports disponibles.
 - Les armées passent à l'état `EMBARKED` et sont référencées par l'identifiant du fleet transporteur. Un journal de mouvement est émis à chaque lot chargé.
 
 ## Conditions de débarquement
@@ -33,6 +33,6 @@ Cette spécification décrit les règles de chargement, de débarquement et de t
 
 ## Références aux constantes clés
 - Portée orbitale : `ORBIT_PROXIMITY_RANGE_SQ` (contrôles de chargement/débarquement et disponibilité des transports).
-- Types éligibles : `ShipType.TROOP_TRANSPORT`.
+- Types éligibles : `ShipType.TRANSPORTER`.
 - Risque d'orbite contestée : `CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35`, `CONTESTED_UNLOAD_LOSS_FRACTION = 0.35`.
 - Gel d'utilisation des transports : `transferBusyUntilDay` fixé au jour courant après un transfert planétaire.

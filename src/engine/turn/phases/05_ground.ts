@@ -4,7 +4,6 @@ import { TurnContext } from '../types';
 import { resolveGroundConflict } from '../../conquest';
 import { COLORS } from '../../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
-import { isOrbitContested } from '../../orbit';
 import { canonicalizeMessages } from '../../state/canonicalize';
 import { sorted } from '../../../shared/sorting';
 
@@ -98,21 +97,43 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
         armiesByPlanetId.set(match.planetId, list);
     });
 
+    const armiesBySystemId = new Map<string, Army[]>();
+
+    nextArmies.forEach(army => {
+        if (army.state !== ArmyState.DEPLOYED) return;
+        const match = planetIndex.get(army.containerId);
+        if (!match) return;
+        const list = armiesBySystemId.get(match.systemId) ?? [];
+        list.push(army);
+        armiesBySystemId.set(match.systemId, list);
+    });
+
     const updatedSystems = nextSystems.map(system => {
-        const contestedOrbit = isOrbitContested(system, state);
+        const armiesInSystem = armiesBySystemId.get(system.id) ?? [];
+        const groundFactionIds = sorted(
+            Array.from(new Set(armiesInSystem.map(army => army.factionId))),
+            (a, b) => a.localeCompare(b)
+        );
+        const soleGroundFaction = groundFactionIds.length === 1 ? groundFactionIds[0] : null;
 
         const updatedPlanets = system.planets.map(planet => {
             const armies = armiesByPlanetId.get(planet.id) ?? [];
             const factionIds = new Set(armies.map(a => a.factionId));
-            const ownerFactionId =
-                factionIds.size === 1 && !contestedOrbit
+            const ownerFromLocalPresence =
+                factionIds.size === 1
                     ? Array.from(factionIds)[0]
                     : planet.ownerFactionId;
+            const ownerFactionId =
+                planet.isSolid && soleGroundFaction
+                    ? soleGroundFaction
+                    : ownerFromLocalPresence;
 
             const initialOwner = initialPlanetOwners.get(planet.id) ?? null;
             const ownerChanged = planet.isSolid && ownerFactionId !== initialOwner;
 
-            if (ownerChanged) {
+            const shouldNotifyPlanetConquest = ownerChanged && armies.length > 0;
+
+            if (shouldNotifyPlanetConquest) {
                 const battleResult = groundResults.get(planet.id);
                 const casualtiesByFaction = new Map<FactionId, { strengthLost: number; destroyed: number }>();
 
@@ -182,24 +203,78 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             return { ...planet, ownerFactionId };
         });
 
-        const systemFactionIds = new Set<FactionId>();
-        updatedPlanets.forEach(planet => {
-            if (!planet.isSolid) return;
-            const armies = armiesByPlanetId.get(planet.id) ?? [];
-            armies.forEach(army => systemFactionIds.add(army.factionId));
-        });
+        const solidBodies = updatedPlanets.filter(planet => planet.isSolid);
+        const uniformSolidOwner = (() => {
+            if (solidBodies.length === 0) return null;
+            const [firstBody] = solidBodies;
+            if (!firstBody.ownerFactionId) return null;
 
-        const newOwnerFactionId =
-            systemFactionIds.size === 1 && !contestedOrbit
-                ? Array.from(systemFactionIds)[0]
-                : system.ownerFactionId;
+            const sharedOwner = firstBody.ownerFactionId;
+            const hasMismatch = solidBodies.some(body => body.ownerFactionId !== sharedOwner);
+
+            return hasMismatch ? null : sharedOwner;
+        })();
+
+        const newOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
+        const solidBodiesHeldByNewOwner = solidBodies.filter(planet => planet.ownerFactionId === newOwnerFactionId);
 
         if (ownerChanged && newOwnerFactionId && aiFactionIds.has(newOwnerFactionId)) {
             if (!holdUpdates[newOwnerFactionId]) {
                 holdUpdates[newOwnerFactionId] = [];
             }
             holdUpdates[newOwnerFactionId].push(system.id);
+        }
+
+        if (ownerChanged && newOwnerFactionId) {
+            const sortedBodies = sorted(solidBodies, (a, b) => a.name.localeCompare(b.name));
+            const involvedFactionIds = new Set<FactionId>([
+                system.ownerFactionId,
+                newOwnerFactionId
+            ].filter((factionId): factionId is FactionId => Boolean(factionId)));
+
+            nextLogs = [
+                ...nextLogs,
+                {
+                    id: ctx.rng.id('log'),
+                    day: ctx.turn,
+                    text: `System ${system.name} control set to ${newOwnerFactionId} after enemy ground presence was cleared. Solid worlds now held: ${sortedBodies.filter(body => body.ownerFactionId === newOwnerFactionId).map(body => body.name).join(', ') || 'none'}.`,
+                    type: 'combat'
+                }
+            ];
+
+            const isPlayerInvolved =
+                newOwnerFactionId === state.playerFactionId || system.ownerFactionId === state.playerFactionId;
+
+            if (isPlayerInvolved) {
+                const systemMessage: GameMessage = {
+                    id: ctx.rng.id('msg'),
+                    day: ctx.turn,
+                    type: 'SYSTEM_SECURED',
+                    priority: newOwnerFactionId === state.playerFactionId ? 2 : 1,
+                    title: `${system.name} secured`,
+                    subtitle: `Turn ${ctx.turn}`,
+                    lines: [
+                        groundFactionIds.length > 0
+                            ? `No opposing ground armies remain; ${newOwnerFactionId} holds surface control.`
+                            : `${newOwnerFactionId} controls the system following ground resolution.`,
+                        `Solid bodies held: ${solidBodiesHeldByNewOwner.map(body => body.name).join(', ') || 'None'}.`
+                    ],
+                    payload: {
+                        systemId: system.id,
+                        newOwnerFactionId,
+                        involvedFactionIds: sorted(
+                            Array.from(new Set<FactionId>([...involvedFactionIds, ...groundFactionIds])),
+                            (a, b) => a.localeCompare(b)
+                        )
+                    },
+                    read: false,
+                    dismissed: false,
+                    createdAtTurn: ctx.turn
+                };
+
+                nextMessages = canonicalizeMessages([...nextMessages, systemMessage]);
+            }
         }
 
         const newColor =

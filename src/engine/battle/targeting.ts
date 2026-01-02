@@ -10,15 +10,105 @@ import {
 
 // Priority Tables (Lower index = Higher priority)
 const PRIORITIES: Record<ShipType, ShipType[]> = {
-  [ShipType.CARRIER]: [ShipType.CARRIER, ShipType.CRUISER, ShipType.DESTROYER, ShipType.FRIGATE, ShipType.TROOP_TRANSPORT],
-  [ShipType.CRUISER]: [ShipType.CARRIER, ShipType.CRUISER, ShipType.DESTROYER, ShipType.FRIGATE, ShipType.TROOP_TRANSPORT],
-  [ShipType.DESTROYER]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER, ShipType.TROOP_TRANSPORT],
-  [ShipType.FRIGATE]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.DESTROYER, ShipType.FRIGATE, ShipType.TROOP_TRANSPORT],
-  [ShipType.FIGHTER]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER, ShipType.TROOP_TRANSPORT],
-  [ShipType.BOMBER]: [ShipType.CARRIER, ShipType.CRUISER, ShipType.DESTROYER, ShipType.FRIGATE, ShipType.TROOP_TRANSPORT],
-  [ShipType.TROOP_TRANSPORT]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER, ShipType.CRUISER],
-  [ShipType.TANKER]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER, ShipType.CRUISER],
-  [ShipType.EXTRACTOR]: [ShipType.BOMBER, ShipType.FIGHTER, ShipType.FRIGATE, ShipType.DESTROYER, ShipType.CRUISER],
+  [ShipType.CARRIER]: [
+    ShipType.CARRIER,
+    ShipType.CRUISER,
+    ShipType.DESTROYER,
+    ShipType.FRIGATE,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.CRUISER]: [
+    ShipType.CARRIER,
+    ShipType.CRUISER,
+    ShipType.DESTROYER,
+    ShipType.FRIGATE,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.DESTROYER]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.FRIGATE]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.DESTROYER,
+    ShipType.FRIGATE,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.FIGHTER]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.BOMBER]: [
+    ShipType.CARRIER,
+    ShipType.CRUISER,
+    ShipType.DESTROYER,
+    ShipType.FRIGATE,
+    ShipType.SUPPORT,
+    ShipType.BUILDER,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.TRANSPORTER]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.CRUISER,
+    ShipType.SUPPORT,
+    ShipType.BUILDER
+  ],
+  [ShipType.BUILDER]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.CRUISER,
+    ShipType.SUPPORT,
+    ShipType.TRANSPORTER
+  ],
+  [ShipType.SUPPORT]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.CRUISER,
+    ShipType.TRANSPORTER,
+    ShipType.BUILDER
+  ],
+  [ShipType.TANKER]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.CRUISER,
+    ShipType.SUPPORT,
+    ShipType.BUILDER
+  ],
+  [ShipType.EXTRACTOR]: [
+    ShipType.BOMBER,
+    ShipType.FIGHTER,
+    ShipType.FRIGATE,
+    ShipType.DESTROYER,
+    ShipType.CRUISER,
+    ShipType.SUPPORT,
+    ShipType.BUILDER
+  ],
 };
 
 export const selectTarget = (
@@ -57,7 +147,7 @@ export const selectTarget = (
     TARGET_TRANSPORT_FOCUS_BASE + TARGET_TRANSPORT_FOCUS_PER_ROUND * (round - 1)
   );
 
-  const transports = getCandidatesForType(ShipType.TROOP_TRANSPORT);
+  const transports = getCandidatesForType(ShipType.TRANSPORTER);
   if (transports.length > 0 && rand() < transportFocusChance) {
     const idx = Math.floor(rand() * transports.length) % transports.length;
     return transports[idx].shipId;

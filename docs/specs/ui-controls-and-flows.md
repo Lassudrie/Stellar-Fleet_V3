@@ -82,7 +82,7 @@
 - **Split** : dans le panneau flotte, sélectionner un sous-ensemble de vaisseaux (hors sélection complète) puis « Split » crée une nouvelle flotte avec ces vaisseaux (`SPLIT_FLEET`). Action réservée aux flottes du joueur.
 - **Merge** : si plusieurs flottes du joueur sont en orbite rapprochée du même système, la section « Merge » propose de fusionner dans l’une d’elles (`MERGE_FLEETS`).
 - **Déploiement / Embarquement ciblé** :
-  - Les `TROOP_TRANSPORT` sélectionnés peuvent **déployer** une armée embarquée vers une planète solide du système (menu déroulant si plusieurs planètes) via `UNLOAD_ARMY`.
+  - Les `TRANSPORTER` sélectionnés peuvent **déployer** une armée embarquée vers une planète solide du système (menu déroulant si plusieurs planètes) via `UNLOAD_ARMY`.
   - Un transport vide peut **embarquer** une armée déployée du joueur présente sur ces planètes via `LOAD_ARMY`.
 - Les listes sont filtrées par faction : aucune action de split/merge ou d’embarquement n’est proposée sur des flottes ennemies.
 

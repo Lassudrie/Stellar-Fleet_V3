@@ -139,7 +139,7 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     fuelCapacity: 180,
     fuelConsumptionPerLy: 3
   },
-  [ShipType.TROOP_TRANSPORT]: {
+  [ShipType.TRANSPORTER]: {
     maxHp: 2000, // Very durable (Capital class hull)
     damage: 0,   // No offensive weaponry
     speed: 0.8,  // Slow
@@ -155,6 +155,40 @@ export const SHIP_STATS: Record<ShipType, ShipStats> = {
     role: 'transport',
     fuelCapacity: 3000,
     fuelConsumptionPerLy: 10
+  },
+  [ShipType.BUILDER]: {
+    maxHp: 500,
+    damage: 5,
+    speed: 0.9,
+    cost: 50,
+    pdStrength: 12,
+    evasion: 0.12,
+    maneuverability: 0.25,
+    offensiveMissileStock: 0,
+    missileDamage: 0,
+    torpedoStock: 0,
+    torpedoDamage: 0,
+    interceptorStock: 0,
+    role: 'builder',
+    fuelCapacity: 2500,
+    fuelConsumptionPerLy: 7
+  },
+  [ShipType.SUPPORT]: {
+    maxHp: 800,
+    damage: 15,
+    speed: 1.0,
+    cost: 55,
+    pdStrength: 25,
+    evasion: 0.2,
+    maneuverability: 0.4,
+    offensiveMissileStock: 6,
+    missileDamage: 20,
+    torpedoStock: 0,
+    torpedoDamage: 0,
+    interceptorStock: 10,
+    role: 'support',
+    fuelCapacity: 2200,
+    fuelConsumptionPerLy: 7
   },
   [ShipType.TANKER]: {
     maxHp: 1400,

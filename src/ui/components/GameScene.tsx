@@ -1,5 +1,5 @@
 
-import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef, useState } from 'react';
 import { Canvas, ThreeEvent } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -18,6 +18,8 @@ interface GameSceneProps {
   gameState: GameState;
   enemySightings: Record<string, EnemySighting>;
   selectedFleetId: string | null;
+  isInteractive?: boolean;
+  focusTarget?: Vec3 | null;
   onFleetSelect: (id: string | null) => void;
   onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
@@ -111,7 +113,9 @@ const GameScene: React.FC<GameSceneProps> = ({
   onFleetSelect,
   onFleetInspect,
   onSystemClick,
-  onBackgroundClick
+  onBackgroundClick,
+  focusTarget,
+  isInteractive = true
 }) => {
 
   const playerHomeworld = useMemo(() => {
@@ -135,12 +139,19 @@ const GameScene: React.FC<GameSceneProps> = ({
   const isScenarioReady = gameState.systems.length > 0;
 
   const initialHomeworldRef = useRef<Vec3 | null>(null);
+  const [lastFocusedTarget, setLastFocusedTarget] = useState<Vec3 | null>(null);
 
   useEffect(() => {
     if (isScenarioReady && !initialHomeworldRef.current) {
       initialHomeworldRef.current = playerHomeworld;
     }
   }, [isScenarioReady, playerHomeworld]);
+
+  useEffect(() => {
+    if (focusTarget) {
+      setLastFocusedTarget(focusTarget);
+    }
+  }, [focusTarget]);
 
   const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
 
@@ -153,6 +164,8 @@ const GameScene: React.FC<GameSceneProps> = ({
     () => [homeworldForCamera.x, homeworldForCamera.y + 80, homeworldForCamera.z + 50] as [number, number, number],
     [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
   );
+
+  const cameraFocusTarget = lastFocusedTarget;
 
   const mapMetrics = useMapMetrics(gameState.systems);
 
@@ -184,6 +197,7 @@ const GameScene: React.FC<GameSceneProps> = ({
     fleetId: string,
     options?: { isDouble?: boolean; pointerType?: string }
   ) => {
+    if (!isInteractive) return;
     const isDouble = options?.isDouble ?? false;
     const pointerType = options?.pointerType;
     const isTouchPointer = pointerType === 'touch' || hasCoarsePointer();
@@ -215,16 +229,20 @@ const GameScene: React.FC<GameSceneProps> = ({
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   return (
-    <div className="absolute inset-0 z-0 bg-black">
+    <div className={`absolute inset-0 z-0 bg-black ${isInteractive ? '' : 'pointer-events-none'}`}>
       <Canvas
         gl={{ antialias: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
-        onPointerMissed={() => onBackgroundClick()}
+        onPointerMissed={() => {
+            if (!isInteractive) return;
+            onBackgroundClick();
+        }}
       >
         <Suspense fallback={null}>
             <GameCamera
               initialPosition={cameraPosition}
               initialTarget={cameraTarget}
+              focusTarget={cameraFocusTarget}
               ready={isScenarioReady}
               mapRadius={mapMetrics.radius}
               mapBounds={mapMetrics.bounds}

@@ -1,22 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, MapControls } from '@react-three/drei';
 import { MapControls as ThreeMapControls } from 'three-stdlib';
+import { Vector3 } from 'three';
 import { Vec3 } from '../../engine/math/vec3';
 import { clampCameraToBounds, createClampScratch, ClampBounds, ClampScratch } from './GameCameraClamp';
 
 interface GameCameraProps {
   initialPosition?: Vec3 | [number, number, number];
   initialTarget?: Vec3 | [number, number, number];
+  focusTarget?: Vec3 | [number, number, number] | null;
   ready?: boolean;
   mapRadius?: number;
   mapBounds?: ClampBounds;
 }
 
-const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, ready, mapRadius, mapBounds }) => {
+const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, focusTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
   const hasInitialized = useRef(false);
   const isClampingRef = useRef(false);
   const clampScratchRef = useRef<ClampScratch>(createClampScratch());
+  const focusVectorRef = useRef<Vector3>(new Vector3());
+  const desiredPositionRef = useRef<Vector3>(new Vector3());
+  const offsetRef = useRef<Vector3>(new Vector3());
 
   const targetArray = useMemo<[number, number, number]>(() => {
     if (!initialTarget) return [0, 0, 0];
@@ -39,6 +44,11 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
 
     return { minDistance, maxDistance };
   }, [mapRadius]);
+
+  const polarLimits = useMemo(() => ({
+    min: Math.PI / 8,
+    max: Math.PI / 2,
+  }), []);
 
   const clampControls = useCallback((options?: { skipUpdate?: boolean }) => {
     if (!controlsRef.current || !mapBounds) return;
@@ -91,6 +101,54 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     clampControls();
   }, [clampControls, mapBounds]);
 
+  useEffect(() => {
+    if (!focusTarget || !controlsRef.current || !ready) return;
+
+    const controls = controlsRef.current;
+    const targetX = Array.isArray(focusTarget) ? focusTarget[0] : focusTarget.x;
+    const targetY = Array.isArray(focusTarget) ? focusTarget[1] : focusTarget.y;
+    const targetZ = Array.isArray(focusTarget) ? focusTarget[2] : focusTarget.z;
+
+    const clampedX = mapBounds ? Math.min(mapBounds.maxX, Math.max(mapBounds.minX, targetX)) : targetX;
+    const clampedZ = mapBounds ? Math.min(mapBounds.maxZ, Math.max(mapBounds.minZ, targetZ)) : targetZ;
+
+    focusVectorRef.current.set(clampedX, targetY, clampedZ);
+
+    let frameId: number | null = null;
+
+    const animate = () => {
+      if (!controlsRef.current) return;
+
+      const camera = controlsRef.current.object;
+      const target = controlsRef.current.target;
+      const focusVec = focusVectorRef.current;
+
+      offsetRef.current.copy(camera.position).sub(target);
+      desiredPositionRef.current.copy(focusVec).add(offsetRef.current);
+
+      target.lerp(focusVec, 0.12);
+      camera.position.lerp(desiredPositionRef.current, 0.12);
+
+      controlsRef.current.update();
+      clampControls();
+
+      const targetDelta = target.distanceTo(focusVec);
+      const positionDelta = camera.position.distanceTo(desiredPositionRef.current);
+
+      if (targetDelta > 0.01 || positionDelta > 0.01) {
+        frameId = requestAnimationFrame(animate);
+      }
+    };
+
+    frameId = requestAnimationFrame(animate);
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [focusTarget, clampControls, mapBounds, ready]);
+
   return (
     <>
       {/*
@@ -103,19 +161,20 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       {/*
         MapControls:
         - Idéal pour les RTS/Cartes.
-        - enableRotate={false} : Verrouille la rotation (pas de pivot).
         - screenSpacePanning={false} : Le pan suit le sol (plan XZ), pas l'écran.
         - dampingFactor : Ajoute de l'inertie fluide.
       */}
       <MapControls
         ref={controlsRef}
         target={targetArray}
-        enableRotate={false}
+        enableRotate
         enablePan={true}
         enableZoom={true}
         minDistance={distanceConfig.minDistance}
         maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}
+        minPolarAngle={polarLimits.min}
+        maxPolarAngle={polarLimits.max}
         screenSpacePanning={false}
         onChange={() => clampControls({ skipUpdate: true })}
       />

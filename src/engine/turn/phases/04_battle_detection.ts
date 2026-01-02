@@ -28,6 +28,7 @@ export const phaseBattleDetection = (state: GameState, ctx: TurnContext): GameSt
                 targetSystemId: null,
                 targetPosition: null,
                 invasionTargetSystemId: null,
+                invasionTargetPlanetId: null,
                 loadTargetSystemId: null,
                 unloadTargetSystemId: null
             };

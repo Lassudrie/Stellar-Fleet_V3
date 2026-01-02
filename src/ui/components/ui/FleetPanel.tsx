@@ -71,10 +71,23 @@ const ShipIcon: React.FC<{ type: string; className?: string }> = ({ type, classN
            <circle cx="12" cy="12" r="8" />
         </svg>
       );
-    case ShipType.TROOP_TRANSPORT:
+    case ShipType.TRANSPORTER:
       return (
         <svg {...props}>
            <path d="M12 2l8.5 5v10L12 22l-8.5-5V7L12 2z" />
+        </svg>
+      );
+    case ShipType.BUILDER:
+      return (
+        <svg {...props}>
+          <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" />
+        </svg>
+      );
+    case ShipType.SUPPORT:
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 6v12M6 12h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
         </svg>
       );
     case ShipType.TANKER:
@@ -150,7 +163,9 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
 
   // Sort order: Capital first, but put transports high if they have actions
   const sortOrder = [
-    ShipType.TROOP_TRANSPORT,
+    ShipType.TRANSPORTER,
+    ShipType.BUILDER,
+    ShipType.SUPPORT,
     ShipType.TANKER,
     ShipType.EXTRACTOR,
     ShipType.CARRIER, 
@@ -262,7 +277,7 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                             
                             // Army Logic for Transports
                             const hasArmy = !!ship.carriedArmyId;
-                            const isTransport = ship.type === ShipType.TROOP_TRANSPORT;
+                            const isTransport = ship.type === ShipType.TRANSPORTER;
                             const canDeploy = isPlayer && isTransport && hasArmy && solidPlanets.length > 0;
                             const canEmbark = isPlayer && isTransport && !hasArmy && currentSystem && availableArmies.length > 0;
                             const carriedArmyLabel = ship.carriedArmyId ? shortId(ship.carriedArmyId) : '?';

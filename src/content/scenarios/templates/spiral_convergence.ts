@@ -53,7 +53,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "aurora",
         spawnLocation: "home_system",
-        ships: ["troop_transport", "troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       },
       {
@@ -65,7 +65,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "aurora",
         spawnLocation: "random",
-        ships: ["troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       },
       {
@@ -77,7 +77,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "ember",
         spawnLocation: "home_system",
-        ships: ["troop_transport", "troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       },
       {
@@ -89,7 +89,7 @@ const spiralConvergence: ScenarioDefinitionV1 = {
       {
         ownerFactionId: "ember",
         spawnLocation: "random",
-        ships: ["troop_transport", "troop_transport", "destroyer", "frigate"],
+        ships: ["transporter", "transporter", "destroyer", "frigate"],
         withArmies: true
       }
     ]

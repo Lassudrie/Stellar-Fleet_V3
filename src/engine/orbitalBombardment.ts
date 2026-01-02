@@ -37,7 +37,7 @@ const isFleetInSystem = (fleet: Fleet, system: StarSystem): boolean =>
   isFleetWithinOrbitProximity(fleet, system);
 
 const countBombardmentShips = (fleet: Fleet): number =>
-  fleet.ships.filter(ship => ship.type !== ShipType.TROOP_TRANSPORT).length;
+  fleet.ships.filter(ship => ship.type !== ShipType.TRANSPORTER).length;
 
 const getBombardmentPower = (fleets: Fleet[]): number => {
   const shipCount = fleets.reduce((sum, fleet) => sum + countBombardmentShips(fleet), 0);

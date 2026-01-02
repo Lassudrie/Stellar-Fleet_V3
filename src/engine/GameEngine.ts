@@ -12,7 +12,7 @@ type PlayerCommand =
     | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string }
     | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
     | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string }
+    | { type: 'ORDER_INVASION'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null }
     | { type: 'ORDER_LOAD'; fleetId: string; targetSystemId: string }
     | { type: 'ORDER_UNLOAD'; fleetId: string; targetSystemId: string }
     | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string }
@@ -165,7 +165,8 @@ export class GameEngine {
             const result = this.dispatchCommand({
                 type: 'ORDER_INVASION_MOVE',
                 fleetId: command.fleetId,
-                targetSystemId: command.targetSystemId
+                targetSystemId: command.targetSystemId,
+                targetPlanetId: command.targetPlanetId ?? null
             });
 
             return result.ok ? { ...result, deployedArmies: embarkedArmies } : result;
