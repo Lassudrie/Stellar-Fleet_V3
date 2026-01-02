@@ -118,6 +118,9 @@ export const executeMoveOrder = (params: {
 
   for (let i = 1; i < pathResult.path.length; i += 1) {
     const next = pathResult.path[i];
+    // Collision/no-stacking guard: if the next hex is occupied at execution time, stop immediately
+    // on the previous hex (do not spend MP for the blocked step).
+    if (isOccupied(next)) break;
     const cost = stepCostCenti(pos, next);
     if (mpUsedCenti + cost > mpCenti) break;
     mpUsedCenti += cost;

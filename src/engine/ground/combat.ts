@@ -97,12 +97,17 @@ export const previewEngagement = (attacker: Army, defender: Army, ctx: Engagemen
   const lossesDef = computeLosses(defender.members, pDef);
   const lossesAtt = computeLosses(attacker.members, pAtt);
 
+  const defenderMembersAfter = Math.max(0, defender.members - lossesDef);
+
   const dCDef = clamp(0.10 * r, 0.03, 0.25);
   const dCAtt = clamp(0.08 / r, 0.02, 0.20);
 
-  const breakScore = (1 - srDef) * 0.6 + (1 - defender.condition) * 0.4;
+  const defenderConditionAfter = clamp(defender.condition - dCDef, 0, 1);
+  // Preview break evaluation uses updated defender SR/condition (mirrors resolver sans RNG).
+  const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
+  const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
   const advantage = clamp((r >= 2.5 ? 1.0 : (r - 1.1)), 0.0, 1.0);
-  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
+  const breakChance = clamp(breakScore * (0.15 + 0.55 * advantage), 0.0, 0.85);
 
   return {
     attackerId: attacker.id,
@@ -178,7 +183,7 @@ export const resolveEngagement = (attacker: Army, defender: Army, ctx: Engagemen
   const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
   const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
   const advantage = clamp((r >= 2.5 ? 1.0 : (r - 1.1)), 0.0, 1.0);
-  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
+  const breakChance = clamp(breakScore * (0.15 + 0.55 * advantage), 0.0, 0.85);
 
   const forcedBreak = defenderConditionAfter <= 0.20 || srDefAfter <= 0.15;
   const breakRoll = rng.next();
