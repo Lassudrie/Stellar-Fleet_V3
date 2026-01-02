@@ -572,19 +572,22 @@ const SystemFleetMesh: React.FC<SystemFleetMeshProps> = ({
         <sphereGeometry args={[1.6, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <mesh
-        geometry={geometry}
-        rotation={chevronRotation}
-        scale={baseScale}
-      >
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={emissiveIntensity}
-          roughness={0.4}
-          metalness={0.6}
-        />
-      </mesh>
+      {/* Fleet icon: keep it for unselected/hovered fleets, but hide it when selected to avoid the large cone/triangle overlay. */}
+      {!isSelected && (
+        <mesh
+          geometry={geometry}
+          rotation={chevronRotation}
+          scale={baseScale}
+        >
+          <meshStandardMaterial
+            color={color}
+            emissive={color}
+            emissiveIntensity={emissiveIntensity}
+            roughness={0.4}
+            metalness={0.6}
+          />
+        </mesh>
+      )}
       {isSelected && (
         <mesh
           geometry={ringGeometry}
