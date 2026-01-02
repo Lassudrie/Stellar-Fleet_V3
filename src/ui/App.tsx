@@ -766,33 +766,35 @@ const App: React.FC = () => {
                   scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
                 />
             </FleetNameProvider>
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
-                <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                        {t('systemView.currentSystem')}
-                    </p>
-                    <div className="mt-1 flex items-center justify-between gap-4">
-                        <div>
-                            <div className="text-2xl font-bold">{systemViewSystem.name}</div>
-                            <div className="text-sm text-slate-300">
-                                {systemViewSystem.astro ? t('systemView.astroLoaded') : t('systemView.noAstro')}
-                            </div>
-                        </div>
+            <div className="pointer-events-none absolute inset-0">
+                <div className="pointer-events-auto absolute left-4 right-4 top-4 max-w-xl">
+                    <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 backdrop-blur shadow">
                         <button
                             onClick={handleReturnToGalaxy}
-                            className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
+                            aria-label={t('systemView.backToGalaxy')}
+                            title={t('systemView.backToGalaxy')}
+                            className="group flex h-10 w-10 items-center justify-center rounded-md border border-slate-600 bg-slate-800/80 text-slate-200 shadow transition hover:border-slate-400 hover:bg-slate-700 active:scale-95"
                         >
-                            {t('systemView.backToGalaxy')}
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                strokeWidth={2}
+                                stroke="currentColor"
+                                className="h-5 w-5 transition-colors group-hover:text-white"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
+                                />
+                            </svg>
                         </button>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="truncate text-xl font-bold leading-none">{systemViewSystem.name}</div>
+                        </div>
                     </div>
-                </div>
-                <div className="pointer-events-auto m-4 self-start">
-                    <button
-                        onClick={handleReturnToGalaxy}
-                        className="rounded-full bg-slate-800/80 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg ring-1 ring-slate-600 transition hover:bg-slate-700"
-                    >
-                        {t('systemView.backToGalaxy')}
-                    </button>
                 </div>
             </div>
             {transitionOverlayElement}
