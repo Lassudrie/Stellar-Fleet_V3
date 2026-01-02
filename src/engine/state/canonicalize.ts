@@ -10,7 +10,7 @@
 import { GameState, Fleet, Army, Battle, StarSystem, LogEntry, GameMessage, Station } from '../../shared/types';
 import { sorted } from '../../shared/sorting';
 
-const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+const compareIds = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const isSortedByDayThenId = (entries: Array<{ day: number; id: string }>): boolean => {
     for (let i = 1; i < entries.length; i++) {
