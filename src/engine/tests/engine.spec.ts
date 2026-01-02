@@ -35,7 +35,7 @@ import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../battle';
 import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
-import { resolveFleetMovement } from '../movement/movementPhase';
+import { resolveFleetMovement } from '../movement';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
 import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { findNearestSystem } from '../world';

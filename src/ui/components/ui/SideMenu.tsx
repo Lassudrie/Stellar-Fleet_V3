@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/types';
 import { useFleetName } from '../../context/FleetNames';
-import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
+import { getFleetSpeed } from '../../../engine/movement';
 import { dist } from '../../../engine/math/vec3';
 import { findOrbitingSystem } from './orbiting';
 import { useI18n } from '../../i18n';

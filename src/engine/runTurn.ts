@@ -21,7 +21,7 @@ import { canonicalizeMessages, canonicalizeState, isCanonical } from './state/ca
 import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } from './ai';
 import { applyCommand } from './commands';
 import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
-import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement/movementPhase';
+import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement';
 import { generateSurfaceMapForState, isPassable, neighborsAxial, normalizeSurfacePositions, relocateSurfacePosDeterministic } from './planetSurface';
 import { checkVictoryConditions } from './objectives';
 import { ORBIT_PROXIMITY_RANGE_SQ, COLORS, CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
