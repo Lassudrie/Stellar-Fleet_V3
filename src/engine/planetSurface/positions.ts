@@ -12,7 +12,14 @@ const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): S
   if (!map) return null;
 
   const { w, h, wrapX } = descriptor.config;
-  const capital = map.settlements.find(s => s.kind === 'capital')?.coord;
+
+  const explicitCapital = map.settlements.find(s => s.isCapital)?.coord;
+  // Fallback: pick the largest settlement by population if no explicit capital is flagged.
+  let largest = null as (typeof map.settlements)[number] | null;
+  for (const s of map.settlements) {
+    if (!largest || s.population > largest.population) largest = s;
+  }
+  const capital = explicitCapital ?? largest?.coord;
   const origin = capital ? { q: capital.q, r: capital.r } : { q: Math.floor(w / 2), r: Math.floor(h / 2) };
 
   // Prefer passable tiles near capital/center. Deterministic tie-break by hash.

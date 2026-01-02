@@ -19,7 +19,7 @@ const hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number => {
     h = fnv1a32(`${h}|${t.elev}|${t.tempC2}|${t.moist}|${t.biome}|${t.featureBits}`);
   }
   for (const s of map.settlements) {
-    h = fnv1a32(`${h}|${s.id}|${s.kind}|${s.factionId ?? ''}|${s.coord.q},${s.coord.r}|${s.size}`);
+    h = fnv1a32(`${h}|${s.id}|${s.type}|${s.factionId ?? ''}|${s.coord.q},${s.coord.r}|${s.population}|${s.isCapital ? 1 : 0}`);
   }
   return h >>> 0;
 };

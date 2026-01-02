@@ -1,7 +1,7 @@
 import type { PlanetBody, PlanetSurfaceConfig, PlanetSurfaceDescriptor } from '../../shared/types';
 import { hashJoin32 } from './hash32';
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 1;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 2;
 
 const clampInt = (x: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, Math.round(x)));

@@ -184,13 +184,26 @@ export interface PlanetSurfaceTile {
   featureBits: number; // bitset
 }
 
+export type SettlementType =
+  | 'outpost'
+  | 'colony'
+  | 'frontierTown'
+  | 'city'
+  | 'metropolis'
+  | 'megalopolis';
+
 export interface Settlement {
   id: string;
   name: string;
   coord: HexCoord;
   factionId?: string; // undefined if neutral
-  kind: 'outpost' | 'city' | 'capital';
-  size: number; // 1..N
+  type: SettlementType;
+  population: number;
+  /**
+   * Marks the primary settlement for the owning faction on this body.
+   * Used as a deterministic anchor point for initial ground deployments.
+   */
+  isCapital?: boolean;
 }
 
 export interface PlanetSurfaceMap {
