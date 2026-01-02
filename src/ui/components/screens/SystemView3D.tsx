@@ -55,6 +55,7 @@ interface SystemView3DProps {
   selectedFleetId?: string | null;
   onSelectFleet?: (fleetId: string | null) => void;
   onInspectFleet?: (fleetId: string) => void;
+  onOpenSurfaceView?: (bodyId: string) => void;
   initialCameraState?: SystemCameraState;
   onCameraStateChange?: (state: SystemCameraState) => void;
   scaleFactor?: number;
@@ -1130,6 +1131,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   selectedFleetId = null,
   onSelectFleet,
   onInspectFleet,
+  onOpenSurfaceView,
   initialCameraState,
   onCameraStateChange,
   scaleFactor = 1
@@ -1653,6 +1655,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               isSelected={isSelectionActive}
               onClearSelection={isSelectionActive ? clearSelection : undefined}
               onCenter={() => handleCenterBody(displayedBody.id)}
+              onOpenSurfaceView={isSelectionActive ? onOpenSurfaceView : undefined}
             />
           ) : displayedFleet ? (
             <SystemFleetInfoPanel

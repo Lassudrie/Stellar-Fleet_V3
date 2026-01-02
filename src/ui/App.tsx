@@ -9,6 +9,7 @@ import MainMenu from './components/screens/MainMenu';
 import LoadGameScreen from './components/screens/LoadGameScreen';
 import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
+import PlanetView2D from './components/screens/PlanetView2D';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
@@ -34,14 +35,15 @@ const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW' | 'PLANET_VIEW'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
   const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
   const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
-  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | null>(null);
+  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | 'PLANET_VIEW' | null>(null);
+  const [planetViewContext, setPlanetViewContext] = useState<{ systemId: string; bodyId: string } | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
 
   // UI State
@@ -160,7 +162,7 @@ const App: React.FC = () => {
       return () => clearTransitionTimer();
   }, [clearTransitionTimer]);
 
-  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW', prepare?: () => void) => {
+  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW' | 'PLANET_VIEW', prepare?: () => void) => {
       clearTransitionTimer();
       prepare?.();
       setPendingScreen(nextScreen);
@@ -730,7 +732,7 @@ const App: React.FC = () => {
 
   if (loading) return <LoadingScreen />;
 
-  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW';
+  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW' || pendingScreen === 'PLANET_VIEW';
 
   const transitionOverlayElement = (
     <div
@@ -761,6 +763,16 @@ const App: React.FC = () => {
                   selectedFleetId={selectedFleetId}
                   onSelectFleet={handleFleetSelect}
                   onInspectFleet={handleFleetInspect}
+                  onOpenSurfaceView={(bodyId) => {
+                    if (!viewGameState) return;
+                    const sys = viewGameState.systems.find(s => s.id === systemViewSystem.id);
+                    if (!sys) return;
+                    const body = sys.planets.find(p => p.id === bodyId);
+                    if (!body || !body.isSolid) return;
+                    beginScreenTransition('PLANET_VIEW', () => {
+                      setPlanetViewContext({ systemId: systemViewSystem.id, bodyId });
+                    });
+                  }}
                   initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
                   onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
                   scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
@@ -798,6 +810,22 @@ const App: React.FC = () => {
             {transitionOverlayElement}
         </div>
       );
+  }
+
+  if (screen === 'PLANET_VIEW' && viewGameState && planetViewContext) {
+    return (
+      <div className="relative w-full h-screen bg-black text-white">
+        <PlanetView2D
+          gameState={viewGameState}
+          systemId={planetViewContext.systemId}
+          bodyId={planetViewContext.bodyId}
+          onBack={() => beginScreenTransition('SYSTEM_VIEW', () => {
+            setPlanetViewContext(null);
+          })}
+        />
+        {transitionOverlayElement}
+      </div>
+    );
   }
 
   if (screen === 'GAME' && viewGameState && engine) {

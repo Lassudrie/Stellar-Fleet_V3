@@ -17,6 +17,7 @@ interface SystemBodyInfoPanelProps {
   isSelected: boolean;
   onClearSelection?: () => void;
   onCenter?: (bodyId: string) => void;
+  onOpenSurfaceView?: (bodyId: string) => void;
 }
 
 const formatRadius = (radiusKm: number | undefined, unknown: string): string => {
@@ -30,7 +31,7 @@ const formatHabitability = (score: number | undefined, unknown: string): string 
   return score.toFixed(2);
 };
 
-const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelected, onClearSelection, onCenter }) => {
+const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelected, onClearSelection, onCenter, onOpenSurfaceView }) => {
   const { t } = useI18n();
   const unknown = t('systemView.bodyInfo.unknown');
 
@@ -64,6 +65,15 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelec
               className="rounded border border-slate-700 bg-slate-800 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-100 transition hover:border-slate-500 hover:bg-slate-700"
             >
               {t('systemView.bodyInfo.center')}
+            </button>
+          )}
+          {!isHover && onOpenSurfaceView && body.bodyType !== 'star' && (
+            <button
+              type="button"
+              onClick={() => onOpenSurfaceView(body.id)}
+              className="rounded border border-emerald-700 bg-emerald-900/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-100 transition hover:border-emerald-500 hover:bg-emerald-900/60"
+            >
+              {t('systemView.bodyInfo.surface')}
             </button>
           )}
           <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-200">
