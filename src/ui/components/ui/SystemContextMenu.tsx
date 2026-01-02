@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FactionId, StarSystem } from '../../../shared/types';
 import { useI18n } from '../../i18n';
 import { computeConstrainedMenuPosition, SafeAreaInsets, ViewportRect } from './positioning/computeConstrainedMenuPosition';
@@ -32,6 +32,7 @@ interface SystemContextMenuProps {
   showGroundOpsOption: boolean;
   canSelectFleet: boolean;
   onOpenSystemView: () => void;
+  onOpenSurfaceView: (bodyId: string) => void;
   onOpenSystemDetails: () => void;
   onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
@@ -89,13 +90,17 @@ const readViewportRect = (): ViewportRect => {
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption, showGroundOpsOption,
-    canSelectFleet, onOpenSystemView, onOpenSystemDetails, onSelectFleetAtSystem,
+    canSelectFleet, onOpenSystemView, onOpenSurfaceView, onOpenSystemDetails, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onOpenGroundOps, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [resolvedPosition, setResolvedPosition] = useState(position);
   const [menuConstraints, setMenuConstraints] = useState<{ maxHeight?: number; maxWidth?: number }>({});
+  const defaultSurfaceBodyId = useMemo(
+      () => system.planets.find(planet => planet.isSolid)?.id ?? null,
+      [system.planets]
+  );
 
   const recalcPosition = useCallback(() => {
       const menu = menuRef.current;
@@ -216,6 +221,19 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
           </svg>
           {t('ctx.viewSystem')}
       </button>
+
+      {defaultSurfaceBodyId && (
+          <button
+              onClick={() => { onOpenSurfaceView(defaultSurfaceBodyId); onClose(); }}
+              className="text-left px-3 py-2 hover:bg-indigo-700/30 text-indigo-200 hover:text-white rounded transition-colors text-sm font-bold flex items-center gap-2 uppercase"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                  <path d="M12 2a9.99 9.99 0 00-8.944 5.5A1 1 0 003 9h2.126a5 5 0 011.841-2.024l1.35 2.341A2 2 0 009 10.618V13a3 3 0 103 0v-2.382a2 2 0 00-.317-1.043l1.35-2.34A5 5 0 0118.874 9H21a1 1 0 00-.056-1.5A9.99 9.99 0 0012 2z" />
+                  <path d="M12 22a10 10 0 009.056-6.5 1 1 0 00-.944-1.5h-2.126a5 5 0 01-1.84 2.024l-1.35-2.341A2 2 0 0015 13.382V11a3 3 0 10-6 0v2.382a2 2 0 00.317 1.043l-1.35 2.34A5 5 0 015.126 14H3a1 1 0 00-.944 1.5A10 10 0 0012 22z" opacity="0.55" />
+              </svg>
+              {t('ctx.viewSurface')}
+          </button>
+      )}
 
       <button
           onClick={onOpenSystemDetails}

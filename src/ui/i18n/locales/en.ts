@@ -102,10 +102,12 @@ export const en = {
   'ctx.cancel': 'Cancel',
   'ctx.systemDetails': 'System Details',
   'ctx.viewSystem': 'View system',
+  'ctx.viewSurface': 'Surface view',
 
   // System View
   'systemView.currentSystem': 'System view',
   'systemView.backToGalaxy': 'Back to galaxy',
+  'systemView.openSurface': 'Open surface view',
   'systemView.astroLoaded': 'Procedural astro data loaded',
   'systemView.noAstro': 'No astro data loaded',
   'systemView.bodyInfo.title': 'Body info',
@@ -153,6 +155,28 @@ export const en = {
   'systemView.stationInfo.clearSelection': 'Clear selection',
   'systemView.stationInfo.unnamedStation': 'Station {{code}}',
   'systemView.actions.resetCamera': 'Reset camera',
+
+  // Surface View
+  'surfaceView.header': 'Surface view',
+  'surfaceView.noData': 'No surface data is available for this body.',
+  'surfaceView.backToGalaxy': 'Back to galaxy',
+  'surfaceView.backToSystem': 'Back to system view',
+  'surfaceView.mapSize': 'Grid {{width}} × {{height}}',
+  'surfaceView.zoomIn': 'Zoom in',
+  'surfaceView.zoomOut': 'Zoom out',
+  'surfaceView.resetView': 'Reset view',
+  'surfaceView.tilePanel': 'Tile intel',
+  'surfaceView.tileCoordinate': 'Hex Q{{q}} / R{{r}}',
+  'surfaceView.hoverHint': 'Hover a tile to inspect terrain.',
+  'surfaceView.zoomLevel': 'Zoom ×{{value}}',
+  'surfaceView.tileBiome': 'Biome',
+  'surfaceView.tileElevation': 'Elevation',
+  'surfaceView.tileTemperature': 'Temperature',
+  'surfaceView.tileMoisture': 'Moisture',
+  'surfaceView.armies': 'Armies on tile',
+  'surfaceView.noArmies': 'No armies stationed here.',
+  'surfaceView.buildings': 'Installations',
+  'surfaceView.noBuildings': 'No buildings present.',
 
   // System Detail Modal
   'system.value.unknown': 'Unknown',
@@ -268,6 +292,7 @@ export const en = {
   'groundOps.system': 'System: {{system}}',
   'groundOps.transports': 'Transports available: {{count}}',
   'groundOps.transportsNone': 'No transports in orbit.',
+  'groundOps.viewSurface': 'Open surface view',
   'groundOps.noLandingZones': 'No solid bodies available for ground ops.',
   'groundOps.owner': 'Owner',
   'groundOps.neutral': 'Neutral',
@@ -290,6 +315,7 @@ export const en = {
   'invasion.cancel': 'Cancel',
   'invasion.selectPlanet': 'Target planet',
   'invasion.noSolidPlanets': 'No solid planets available',
+  'invasion.viewSurface': 'Inspect surface',
 
   // Battle Screen
   'battle.reportTitle': 'Battle Report',

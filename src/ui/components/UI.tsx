@@ -59,6 +59,7 @@ interface UIProps {
   onSelectFleet: (fleetId: string) => void;
   onInspectFleet: (fleetId: string) => void;
   onOpenSystemView: () => void;
+  onOpenSurfaceView: (bodyId: string) => void;
   onOpenSystemDetails: () => void;
   systemDetailSystem: StarSystem | null;
   onCloseSystemDetails: () => void;
@@ -89,7 +90,7 @@ const UI: React.FC<UIProps> = ({
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
     onInspectFleet,
-    onOpenSystemView, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
+    onOpenSystemView, onOpenSurfaceView, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
   devMode, godEyes, onSetUiSettings,
@@ -357,6 +358,7 @@ const UI: React.FC<UIProps> = ({
             showGroundOpsOption={showGroundOpsOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
             onOpenSystemView={onOpenSystemView}
+            onOpenSurfaceView={onOpenSurfaceView}
             onOpenSystemDetails={onOpenSystemDetails}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
@@ -402,6 +404,7 @@ const UI: React.FC<UIProps> = ({
             onConfirm={onCommitInvasion}
             onClose={onCloseMenu}
             playerFactionId={playerFactionId}
+            onOpenSurfaceView={onOpenSurfaceView}
         />
       )}
 
@@ -416,6 +419,7 @@ const UI: React.FC<UIProps> = ({
             onTransfer={(armyId, fromPlanetId, toPlanetId) =>
                 onTransferArmy(targetSystem.id, armyId, fromPlanetId, toPlanetId)
             }
+            onOpenSurfaceView={onOpenSurfaceView}
             onClose={onCloseMenu}
         />
       )}
