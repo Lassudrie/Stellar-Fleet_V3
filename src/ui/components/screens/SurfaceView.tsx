@@ -17,6 +17,7 @@ import { fnv1a32 } from '../../../engine/planetSurface/hash32';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
+  mapStatus?: 'idle' | 'loading' | 'ready' | 'missing' | 'error';
   system: StarSystem | null;
   body: PlanetBody | null;
   armies: Army[];
@@ -128,6 +129,7 @@ const getTileAt = (map: PlanetSurfaceMap, coord: HexCoord) => {
 
 const SurfaceView: React.FC<SurfaceViewProps> = ({
   map,
+  mapStatus = 'ready',
   system,
   body,
   armies,
@@ -441,29 +443,44 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return normalizedBuildings.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, normalizedBuildings]);
 
-  if (!map || !system || !body) {
-    return (
-      <div className="relative w-full h-screen bg-slate-950 text-white flex items-center justify-center">
-        <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 text-center space-y-4">
-          <div className="text-lg font-semibold">{t('surfaceView.noData')}</div>
-          <div className="flex justify-center gap-3">
+  const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
+
+  const renderPlaceholder = (title: string, subtitle?: string) => (
+    <div className="relative w-full h-screen bg-slate-950 text-white flex items-center justify-center">
+      <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 text-center space-y-4 max-w-lg">
+        <div className="text-lg font-semibold">{title}</div>
+        {subtitle && <div className="text-sm text-slate-300">{subtitle}</div>}
+        <div className="flex justify-center gap-3">
+          <button
+            onClick={onBackToGalaxy}
+            className="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold"
+          >
+            {t('surfaceView.backToGalaxy')}
+          </button>
+          {onBackToSystem && (
             <button
-              onClick={onBackToGalaxy}
+              onClick={onBackToSystem}
               className="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold"
             >
-              {t('surfaceView.backToGalaxy')}
+              {t('surfaceView.backToSystem')}
             </button>
-            {onBackToSystem && (
-              <button
-                onClick={onBackToSystem}
-                className="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold"
-              >
-                {t('surfaceView.backToSystem')}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+
+  if (!system || !body) {
+    return renderPlaceholder(t('surfaceView.noData'));
+  }
+
+  if (resolvedMapStatus === 'loading') {
+    return renderPlaceholder(t('surfaceView.loadingTitle'), t('surfaceView.loadingSubtitle'));
+  }
+
+  if (!map || resolvedMapStatus === 'missing' || resolvedMapStatus === 'error') {
+    return (
+      renderPlaceholder(t('surfaceView.noData'))
     );
   }
 
