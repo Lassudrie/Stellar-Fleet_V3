@@ -513,13 +513,16 @@ const SystemFleetMesh: React.FC<SystemFleetMeshProps> = ({
   const getFleetName = useFleetName();
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
-
+  const chevronRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
   const resolvePointerType = (event: any) => event?.pointerType || event?.nativeEvent?.pointerType || '';
   const emissiveIntensity = isSelected ? 0.75 : isHovered ? 0.55 : 0.35;
+  const emphasisScale = isSelected ? 1.1 : isHovered ? 1.04 : 1;
+  const verticalEmphasis = isSelected ? scale * 0.2 : isHovered ? scale * 0.08 : 0;
+  const baseScale: [number, number, number] = useMemo(() => [scale, scale, scale], [scale]);
   const labelText = showLabel ? `${getFleetName(fleet.id)} [${fleet.ships.length}]` : '';
 
   return (
-    <group>
+    <group position={[0, verticalEmphasis, 0]} scale={[emphasisScale, emphasisScale, emphasisScale]}>
       <mesh
         onClick={(event) => {
           event.stopPropagation();
@@ -558,8 +561,8 @@ const SystemFleetMesh: React.FC<SystemFleetMeshProps> = ({
       </mesh>
       <mesh
         geometry={geometry}
-        rotation={[-Math.PI / 2, 0, 0]}
-        scale={[scale, scale, scale]}
+        rotation={chevronRotation}
+        scale={baseScale}
       >
         <meshStandardMaterial
           color={color}
@@ -572,7 +575,7 @@ const SystemFleetMesh: React.FC<SystemFleetMeshProps> = ({
       {isSelected && (
         <mesh
           geometry={ringGeometry}
-          rotation={[-Math.PI / 2, 0, 0]}
+          rotation={chevronRotation}
           scale={[scale * 1.1, scale * 1.1, scale * 1.1]}
         >
           <meshBasicMaterial color={color} transparent opacity={0.6} />
