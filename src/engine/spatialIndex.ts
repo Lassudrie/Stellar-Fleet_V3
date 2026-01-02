@@ -45,14 +45,41 @@ export class SpatialIndex<T extends PositionedEntity> {
     return `${x}:${z}`;
   }
 
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
+  // OPTIMIZATION: Use callback to avoid array allocation
+  private forEachCellInSquare(
+    center: { x: number; z: number },
+    cellRadius: number,
+    callback: (x: number, z: number) => void
+  ) {
     for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
       for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
+        callback(x, z);
       }
     }
-    return cells;
+  }
+
+  // OPTIMIZATION: Only iterate the perimeter/ring to avoid re-checking inner cells in expanding searches
+  private forEachCellInRing(
+    center: { x: number; z: number },
+    cellRadius: number,
+    callback: (x: number, z: number) => void
+  ) {
+    if (cellRadius === 0) {
+      callback(center.x, center.z);
+      return;
+    }
+
+    // Top and Bottom rows
+    for (let x = center.x - cellRadius; x <= center.x + cellRadius; x++) {
+      callback(x, center.z - cellRadius); // Top
+      callback(x, center.z + cellRadius); // Bottom
+    }
+
+    // Left and Right columns (excluding corners which were handled above)
+    for (let z = center.z - cellRadius + 1; z <= center.z + cellRadius - 1; z++) {
+      callback(center.x - cellRadius, z); // Left
+      callback(center.x + cellRadius, z); // Right
+    }
   }
 
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
@@ -96,8 +123,8 @@ export class SpatialIndex<T extends PositionedEntity> {
     const maxDistanceSq = maxDistance * maxDistance;
     const candidates: T[] = [];
 
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+    this.forEachCellInSquare(center, cellRadius, (cx, cz) => {
+      const bucket = this.buckets.get(this.getKey(cx, cz));
       if (!bucket) return;
 
       bucket.forEach(item => {
@@ -128,10 +155,9 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+      // OPTIMIZATION: Use forEachCellInRing to avoid checking inner cells again
+      this.forEachCellInRing(center, cellRadius, (cx, cz) => {
+        const bucket = this.buckets.get(this.getKey(cx, cz));
         if (!bucket) return;
 
         bucket.forEach(item => {
@@ -152,6 +178,8 @@ export class SpatialIndex<T extends PositionedEntity> {
           position.z - bounds.minZ,
           bounds.maxZ - position.z
         );
+        // If the closest point found so far is closer than the nearest possible point
+        // in the next ring (minBoundary), we can stop.
         if (minBoundary > 0 && bestDistanceSq <= minBoundary * minBoundary) {
           break;
         }
