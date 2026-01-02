@@ -6,6 +6,8 @@ import { COLORS } from '../../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, getLegacyAiFactionId } from '../../ai';
 import { canonicalizeMessages } from '../../state/canonicalize';
 import { sorted } from '../../../shared/sorting';
+import { ARMY_DESTROY_THRESHOLD } from '../../army';
+import { isOrbitContested } from '../../orbit';
 
 export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     let nextLogs = [...state.logs];
@@ -90,6 +92,8 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
     const armiesByPlanetId = new Map<string, Army[]>();
     nextArmies.forEach(army => {
         if (army.state !== ArmyState.DEPLOYED) return;
+        const threshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+        if (army.strength <= threshold) return;
         const match = planetIndex.get(army.containerId);
         if (!match) return;
         const list = armiesByPlanetId.get(match.planetId) ?? [];
@@ -101,6 +105,8 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
 
     nextArmies.forEach(army => {
         if (army.state !== ArmyState.DEPLOYED) return;
+        const threshold = ARMY_DESTROY_THRESHOLD(army.maxStrength);
+        if (army.strength <= threshold) return;
         const match = planetIndex.get(army.containerId);
         if (!match) return;
         const list = armiesBySystemId.get(match.systemId) ?? [];
@@ -115,6 +121,7 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             (a, b) => a.localeCompare(b)
         );
         const soleGroundFaction = groundFactionIds.length === 1 ? groundFactionIds[0] : null;
+        const orbitContested = isOrbitContested(system, state);
 
         const updatedPlanets = system.planets.map(planet => {
             const armies = armiesByPlanetId.get(planet.id) ?? [];
@@ -123,10 +130,12 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
                 factionIds.size === 1
                     ? Array.from(factionIds)[0]
                     : planet.ownerFactionId;
-            const ownerFactionId =
+            const desiredOwnerFactionId =
                 planet.isSolid && soleGroundFaction
                     ? soleGroundFaction
                     : ownerFromLocalPresence;
+
+            const ownerFactionId = orbitContested ? planet.ownerFactionId : desiredOwnerFactionId;
 
             const initialOwner = initialPlanetOwners.get(planet.id) ?? null;
             const ownerChanged = planet.isSolid && ownerFactionId !== initialOwner;
@@ -215,7 +224,8 @@ export const phaseGround = (state: GameState, ctx: TurnContext): GameState => {
             return hasMismatch ? null : sharedOwner;
         })();
 
-        const newOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
+        const desiredSystemOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
+        const newOwnerFactionId = orbitContested ? system.ownerFactionId : desiredSystemOwnerFactionId;
         const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
         const solidBodiesHeldByNewOwner = solidBodies.filter(planet => planet.ownerFactionId === newOwnerFactionId);
 
