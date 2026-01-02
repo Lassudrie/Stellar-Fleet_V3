@@ -203,3 +203,50 @@ Dans la description/summary, mentionner explicitement :
 - l’impact (ou non) sur le déterminisme,
 - toute modification de format de sauvegarde (`SAVE_VERSION`),
 - les tests exécutés.
+
+## Garde-fou architectural TypeScript (non-prolifération et organisation)
+
+- Interdit : créer un nouveau fichier `.ts` par défaut.
+- Autorisé uniquement si l’un des cas suivants est démontré et documenté dans la PR :
+  - **Dépassement d’un seuil raisonnable** : le fichier existant dépasse une taille exploitable (ex. ~500 lignes) malgré un regroupement logique cohérent.
+  - **Implémentation interchangeable obligatoire** : plusieurs implémentations d’une même API doivent coexister et être sélectionnables sans couplage (ex. stratégie de génération de monde hot-swappable).
+  - **Mutualisation multi-domaines** : une logique transversale doit être partagée entre plusieurs domaines fonctionnels sans dépendance circulaire.
+- Si aucune de ces conditions n’est remplie, la modification doit être réalisée dans un fichier existant cohérent, quitte à refactorer ce fichier pour en améliorer la lisibilité.
+
+### Organisation par domaines stables, jamais par micro-concepts
+- Interdit : un fichier par classe, un fichier par fonction, un fichier par système ECS ou tout découpage micro-conceptuel.
+- Obligatoire : des fichiers agrégateurs par domaine fonctionnel stable (ex. `combatTerrestre`, `surfacePlanetaire`, `generationMonde`).
+- Plusieurs types, fonctions et systèmes homogènes doivent cohabiter dans un même fichier dès lors qu’ils relèvent du même domaine et de la même responsabilité.
+
+### Règles strictes pour les barrels (`index.ts`)
+- Un seul `index.ts` par dossier est autorisé et obligatoire pour exposer l’API publique du dossier.
+- Interdit : tout import direct vers un fichier interne d’un dossier ; les consommateurs doivent passer exclusivement par le `index.ts` du dossier.
+- Ajouter un export dans le barrel est toujours préférable à la création d’un nouveau fichier lorsque la logique correspond au domaine déjà couvert.
+
+### Granularité minimale par fichier
+- Un fichier doit contenir une unité fonctionnelle complète (plusieurs fonctions/objets/types cohérents) et non une primitive isolée.
+- Interdit : fichiers ne contenant qu’une fonction triviale ou un type isolé.
+- Mauvais exemples : `resolveX.ts`, `computeY.ts`, `applyEffect.ts`.
+- Bons exemples : `groundCombat.ts` (regroupe résolution de combat terrestre, calculs de dégâts, effets de terrain), `planetSurface.ts` (gestion de la surface planétaire, interactions de terrain et ressources).
+
+### Types, interfaces et implémentations
+- Interdit : séparer systématiquement en `*.types.ts`, `*.interfaces.ts`, `*.impl.ts` lorsqu’il n’existe qu’une seule implémentation.
+- Autorisé : la séparation uniquement en cas de besoin structurel avéré (plusieurs implémentations concurrentes, découplage fort nécessaire, contrat public partagé entre paquets).
+- Par défaut, types, interfaces et logique associée cohabitent dans le même fichier tant qu’une seule implémentation existe.
+
+### Convention de nommage des fichiers
+- Les noms doivent être nominaux et décrire le domaine fonctionnel (ex. `fleetOperations.ts`, `worldGeneration.ts`).
+- Interdit : noms verbaux ou orientés action unique (ex. `compute`, `resolve`, `handleX`), car ils favorisent la fragmentation et la prolifération de micro-fichiers.
+
+### Exemples pédagogiques
+- **Bon dossier (organisation compacte)**
+  - `combat/`
+    - `groundCombat.ts` : types, systèmes et utilitaires pour le combat terrestre regroupés.
+    - `spaceCombat.ts` : logique spatiale complète, partage des types communs avec `groundCombat.ts` si nécessaire.
+    - `index.ts` : exports publics uniques du domaine combat.
+- **Mauvais dossier (explosion de micro-fichiers)**
+  - `combat/`
+    - `resolveMelee.ts`, `resolveRanged.ts`, `computeDamage.ts`, `applyBuff.ts`, `unitTypes.ts`, `damageTypes.ts`, `index.ts` : chaque action dans son fichier, imports croisés internes, logique éclatée et difficile à maintenir.
+
+### Règle de conformité des agents
+- Tout agent qui crée des fichiers `.ts` inutiles, contourne les barrels (`index.ts`), ou fragmente excessivement la logique est non conforme. Sa contribution doit être rejetée ou retravaillée avant fusion.
