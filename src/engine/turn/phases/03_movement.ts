@@ -3,6 +3,7 @@ import { GameState, Fleet, LogEntry } from '../../../shared/types';
 import { TurnContext } from '../types';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from '../../movement/movementPhase';
 import { sorted } from '../../../shared/sorting';
+import { normalizeSurfacePositions } from '../../planetSurface/positions';
 
 export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => {
     const nextDay = ctx.turn; // Movement projects to current turn positions
@@ -69,10 +70,10 @@ export const phaseMovement = (state: GameState, ctx: TurnContext): GameState => 
         newLogs.push(...arrivalOutcome.logs);
     });
 
-    return {
+    return normalizeSurfacePositions({
         ...state,
         fleets: workingFleets,
         armies: workingArmies,
         logs: [...state.logs, ...newLogs]
-    };
+    });
 };

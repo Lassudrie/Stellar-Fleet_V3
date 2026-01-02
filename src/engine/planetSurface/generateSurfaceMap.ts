@@ -112,9 +112,13 @@ const placeSettlements = (params: {
   seaLevelElev: number;
   ownerFactionId?: string | null;
 }): Settlement[] => {
-  const { descriptor, tiles, elev, w, h, wrapX, ownerFactionId } = params;
+  const { descriptor, tiles, w, h, wrapX, ownerFactionId } = params;
   const n = w * h;
   const rng = new RNG(descriptor.seed ^ 0x9e3779b9);
+
+  // Precompute elevations once (used by slope scoring).
+  const elev = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev;
 
   const isLandIndex = (i: number): boolean => !isWaterBiome(tiles[i].biome);
 
