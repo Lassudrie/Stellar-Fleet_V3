@@ -1,9 +1,6 @@
 
-export interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
-}
+import type { Vec3 } from '../../shared/types';
+export type { Vec3 } from '../../shared/types';
 
 const isValidVec3 = (v: Vec3 | null | undefined): v is Vec3 =>
   Boolean(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z));
