@@ -10,6 +10,8 @@ import { devLog, devWarn } from '../../shared/devLogger';
 import { generateStellarSystem } from './stellar';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { sorted } from '../../shared/sorting';
+import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
+import { normalizeSurfacePositions } from '../planetSurface/positions';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -479,6 +481,19 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
     );
   });
 
+  // --- 2.6. INITIALIZE PLANET SURFACE DESCRIPTORS (lightweight, persisted) ---
+  const planetSurfaceDescriptorsByBodyId: Record<string, import('../../shared/types').PlanetSurfaceDescriptor> = {};
+  systems.forEach(system => {
+    system.planets.forEach(body => {
+      if (!body.isSolid) return;
+      planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
+        gameSeed: scenario.seed,
+        systemId: system.id,
+        body
+      });
+    });
+  });
+
   // --- 3. GENERATE FLEETS & ARMIES ---
   const fleets: Fleet[] = [];
   const armies: Army[] = [];
@@ -658,6 +673,8 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       messages: [],
       selectedFleetId: null,
       winnerFactionId: null,
+      planetSurfaceDescriptorsByBodyId,
+      groundBuildings: [],
       objectives: {
           conditions: scenario.objectives.win,
           maxTurns: scenario.objectives.maxTurns
@@ -666,5 +683,6 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       aiState: undefined 
   };
 
-  return { state, rng };
+  const normalizedState = normalizeSurfacePositions(state);
+  return { state: normalizedState, rng };
 };

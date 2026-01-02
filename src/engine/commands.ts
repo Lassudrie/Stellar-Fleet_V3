@@ -1,5 +1,5 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType } from '../shared/types';
+import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType, GroundBuildingType } from '../shared/types';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
@@ -11,6 +11,9 @@ import { shortId } from './idUtils';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/sorting';
+import { getTileAt } from './planetSurface/access';
+import { isBuildable, isPassable } from './planetSurface/validation';
+import { normalizeSurfacePositions } from './planetSurface/positions';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -21,6 +24,8 @@ export type GameCommand =
   | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
+  | { type: 'MOVE_ARMY_ON_SURFACE'; armyId: string; to: { bodyId: string; q: number; r: number } }
+  | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: { bodyId: string; q: number; r: number }; name?: string }
   | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
   | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null; reason?: string; turn?: number }
@@ -74,6 +79,66 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
     const ok = (nextState: GameState, events?: string[]): CommandResult => ({ ok: true, state: nextState, events });
 
     switch (command.type) {
+        case 'MOVE_ARMY_ON_SURFACE': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army) return fail('Army not found');
+            if (army.state !== ArmyState.DEPLOYED) return fail('Army is not deployed on a planet surface.');
+
+            const bodyId = command.to.bodyId;
+            if (army.containerId !== bodyId) return fail('Army is not on the target body.');
+
+            const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
+            if (!descriptor) return fail('Missing surface descriptor for body.');
+
+            const q = Math.floor(command.to.q);
+            const r = Math.floor(command.to.r);
+            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+
+            const tileResult = getTileAt(state, bodyId, q, r);
+            if (!tileResult) return fail('Unable to resolve target tile.');
+            if (!isPassable(tileResult.tile.biome)) return fail('Target tile is not passable.');
+
+            const nextState: GameState = {
+                ...state,
+                armies: state.armies.map(a => a.id === army.id ? ({ ...a, surfacePos: { bodyId, q, r } }) : a)
+            };
+
+            return ok(nextState);
+        }
+
+        case 'BUILD_AT': {
+            const { bodyId } = command.at;
+            const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
+            if (!descriptor) return fail('Missing surface descriptor for body.');
+
+            if (!state.factions.some(f => f.id === command.factionId)) return fail('Unknown faction.');
+
+            const q = Math.floor(command.at.q);
+            const r = Math.floor(command.at.r);
+            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+
+            const tileResult = getTileAt(state, bodyId, q, r);
+            if (!tileResult) return fail('Unable to resolve target tile.');
+            if (!isBuildable(tileResult.tile.biome)) return fail('Target tile is not buildable.');
+
+            const buildings = state.groundBuildings ?? [];
+            const occupied = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.q === q && b.surfacePos.r === r);
+            if (occupied) return fail('Tile already contains a building.');
+
+            const building = {
+                id: rng.id('building'),
+                factionId: command.factionId,
+                type: command.buildingType,
+                name: command.name,
+                surfacePos: { bodyId, q, r }
+            };
+
+            return ok({
+                ...state,
+                groundBuildings: [...buildings, building]
+            });
+        }
+
         case 'MOVE_FLEET': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
@@ -419,12 +484,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 })
                 : { armies: unloadResult.armies, logs: [], succeeded: [], failed: [] };
 
-            return ok({
+            const nextState = {
                 ...state,
                 fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
                 armies: riskOutcome.armies,
                 logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
-            });
+            };
+
+            return ok(normalizeSurfacePositions(nextState));
         }
 
         case 'TRANSFER_ARMY_PLANET': {
@@ -467,12 +534,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
                 type: 'move'
             };
 
-            return ok({
+            const nextState = {
                 ...state,
                 fleets: updatedFleets,
                 armies: updatedArmies,
                 logs: [...state.logs, transferLog]
-            });
+            };
+
+            return ok(normalizeSurfacePositions(nextState));
         }
 
         case 'SPLIT_FLEET': {

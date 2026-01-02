@@ -11,6 +11,9 @@ import {
   FactionState,
   StarSystemAstro,
   PlanetBody,
+  PlanetSurfaceDescriptor,
+  GroundBuilding,
+  SurfacePos,
   StationType
 } from '../shared/types';
 
@@ -89,7 +92,10 @@ export interface ArmyDTO {
   morale?: number;
   state: ArmyState;
   containerId: string;
+  surfacePos?: SurfacePos;
 }
+
+export type GroundBuildingDTO = GroundBuilding;
 
 export interface StarSystemDTO {
   id: string;
@@ -209,6 +215,8 @@ export interface GameStateDTO {
   rules?: GameplayRules;
   aiState?: AIStateDTO;
   aiStates?: Record<string, AIStateDTO>;
+  planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
+  groundBuildings?: GroundBuildingDTO[];
 }
 
 export interface SaveFileV2 {
