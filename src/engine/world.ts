@@ -1,9 +1,9 @@
 
-import { StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/types';
+import { StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/shared';
 import { SENSOR_RANGE, SHIP_STATS } from '../content/data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
-import { devWarn } from '../shared/devLogger';
+import { devWarn } from '../shared/shared';
 
 const DISTANCE_TOLERANCE = 1e-6;
 

@@ -3,9 +3,9 @@ import { createEmptyAIState, getLegacyAiFactionId, planAiTurn } from './ai';
 import { RNG } from './rng';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from './worldgen/worldGenerator';
-import { Fleet, GameState, StarSystem } from '../shared/types';
-import { devLog } from '../shared/devLogger';
-import { sorted } from '../shared/sorting';
+import { Fleet, GameState, StarSystem } from '../shared/shared';
+import { devLog } from '../shared/shared';
+import { sorted } from '../shared/shared';
 
 const parseTurnCount = (): number => {
   const raw = process.env.SMOKE_TURNS ?? '100';

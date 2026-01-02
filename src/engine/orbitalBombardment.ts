@@ -1,4 +1,4 @@
-import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, ShipType, StarSystem } from '../shared/types';
+import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, ShipType, StarSystem } from '../shared/shared';
 import {
   ORBITAL_BOMBARDMENT_POWER_PER_SHIP,
   ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
@@ -9,7 +9,7 @@ import {
   ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER
 } from '../content/data/static';
 import { isFleetWithinOrbitProximity } from './orbit';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 
 export interface OrbitalBombardmentTarget {
   systemId: string;

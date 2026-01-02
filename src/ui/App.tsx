@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap } from '../shared/types';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -22,9 +22,9 @@ import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
-import { sorted } from '../shared/sorting';
-import { generateSurfaceMapForState } from '../engine/planetSurface/access';
-import { resolveSurfaceContext } from './navigation/surfaceNavigation';
+import { sorted } from '../shared/shared';
+import { generateSurfaceMapForState } from '../engine/planetSurface';
+import { getDefaultSolidPlanet, getPlanetById } from '../engine/planets';
 import type { GameCommand } from '../engine/commands';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
@@ -34,6 +34,47 @@ const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const SCREEN_TRANSITION_MS = 400;
 const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
+
+// ------------------------------------------------------------
+// Surface navigation helper (was: ui/navigation/surfaceNavigation.ts)
+// ------------------------------------------------------------
+
+interface SurfaceNavContext {
+  system: StarSystem;
+  body: PlanetBody;
+}
+
+const resolveSurfaceContext = ({
+  systems,
+  preferredSystemId,
+  bodyId
+}: {
+  systems: StarSystem[];
+  preferredSystemId?: string | null;
+  bodyId?: string | null;
+}): SurfaceNavContext | null => {
+  if (bodyId) {
+    const match = getPlanetById(systems, bodyId);
+    if (match && match.planet.isSolid) {
+      return { system: match.system, body: match.planet };
+    }
+  }
+
+  if (preferredSystemId) {
+    const system = systems.find(entry => entry.id === preferredSystemId);
+    if (system) {
+      const fallback = getDefaultSolidPlanet(system);
+      if (fallback) return { system, body: fallback };
+    }
+  }
+
+  for (const system of systems) {
+    const fallback = getDefaultSolidPlanet(system);
+    if (fallback) return { system, body: fallback };
+  }
+
+  return null;
+};
 
 const App: React.FC = () => {
   const { t } = useI18n();

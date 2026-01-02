@@ -1,5 +1,5 @@
 import React from 'react';
-import { Fleet, StarSystem } from '../../../shared/types';
+import { Fleet, StarSystem } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import { FleetRegistryList } from './SideMenu';
 

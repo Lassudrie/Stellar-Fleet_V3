@@ -1,10 +1,10 @@
 
 import React, { useMemo, useEffect, useRef } from 'react';
-import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../../shared/types';
+import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
-import { FactionRegistry, resolveBattleOutcome } from '../../../engine/battle/outcome';
-import { shortId } from '../../../engine/idUtils';
-import { sorted } from '../../../shared/sorting';
+import { FactionRegistry, resolveBattleOutcome } from '../../../engine/battle';
+import { shortId } from '../../../shared/shared';
+import { sorted } from '../../../shared/shared';
 
 interface BattleScreenProps {
   battleId?: string;

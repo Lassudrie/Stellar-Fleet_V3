@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlanetBodyType } from '../../../shared/types';
+import { PlanetBodyType } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 
 export type SystemBodyInfo = {

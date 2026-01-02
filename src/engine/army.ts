@@ -1,9 +1,9 @@
 
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody, GroundUnitType } from '../shared/types';
+import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody, GroundUnitType } from '../shared/shared';
 import { RNG } from './rng';
-import { logger } from '../shared/devLogger';
+import { logger } from '../shared/shared';
 import { getPlanetById } from './planets';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 
 export const MIN_ARMY_CREATION_MEMBERS = 10000;

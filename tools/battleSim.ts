@@ -14,11 +14,11 @@ import {
   ShipEntity,
   ShipType,
   StarSystem
-} from '../src/shared/types';
-import { resolveBattle } from '../src/engine/battle/resolution';
+} from '../src/shared/shared';
+import { resolveBattle } from '../src/engine/battle';
 import { SHIP_STATS, COLORS } from '../src/content/data/static';
 import { Vec3 } from '../src/engine/math/vec3';
-import { sorted } from '../src/shared/sorting';
+import { sorted } from '../src/shared/shared';
 import { computeFleetRadius } from '../src/engine/fleetDerived';
 
 type FleetComposition = Partial<Record<ShipType, number>>;

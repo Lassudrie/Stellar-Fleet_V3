@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem } from '../shared/types';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem } from '../shared/shared';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
@@ -10,7 +10,7 @@ import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../content/data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
-import { sorted } from '../shared/sorting';
+import { sorted } from '../shared/shared';
 
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';

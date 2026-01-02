@@ -1,10 +1,34 @@
 import React from 'react';
-import { Army, FactionState, Fleet, ShipEntity, ShipConsumables, ShipKillRecord, ShipType } from '../../../shared/types';
+import { Army, FactionState, Fleet, ShipEntity, ShipConsumables, ShipKillRecord, ShipType } from '../../../shared/shared';
 import { SHIP_STATS } from '../../../content/data/static';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
-import { sorted } from '../../../shared/sorting';
-import { SHIP_ICONS } from '../../assets/ships/registry';
+import { sorted } from '../../../shared/shared';
+import carrier from '../../assets/ships/carrier.png';
+import cruiser from '../../assets/ships/cruiser.png';
+import destroyer from '../../assets/ships/destroyer.png';
+import frigate from '../../assets/ships/frigate.png';
+import fighter from '../../assets/ships/fighter.png';
+import bomber from '../../assets/ships/bomber.png';
+import transporter from '../../assets/ships/transporter.png';
+import builder from '../../assets/ships/builder.png';
+import support from '../../assets/ships/support.png';
+import tanker from '../../assets/ships/tanker.png';
+import extractor from '../../assets/ships/extractor.png';
+
+const SHIP_ICONS: Record<ShipType, string> = {
+  [ShipType.CARRIER]: carrier,
+  [ShipType.CRUISER]: cruiser,
+  [ShipType.DESTROYER]: destroyer,
+  [ShipType.FRIGATE]: frigate,
+  [ShipType.FIGHTER]: fighter,
+  [ShipType.BOMBER]: bomber,
+  [ShipType.TRANSPORTER]: transporter,
+  [ShipType.BUILDER]: builder,
+  [ShipType.SUPPORT]: support,
+  [ShipType.TANKER]: tanker,
+  [ShipType.EXTRACTOR]: extractor
+};
 
 interface ShipDetailModalProps {
   fleet: Fleet;

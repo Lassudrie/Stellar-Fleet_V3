@@ -1,9 +1,9 @@
 
 import React, { useMemo } from 'react';
 import { Color, DoubleSide, BufferGeometry, BufferAttribute } from 'three';
-import { StarSystem, FactionId, FactionState } from '../../shared/types';
+import { StarSystem, FactionId, FactionState } from '../../shared/shared';
 import { TERRITORY_RADIUS } from '../../content/data/static';
-import { sorted } from '../../shared/sorting';
+import { sorted } from '../../shared/shared';
 
 // --- CONFIGURATION ---
 const CIRCLE_SEGMENTS = 64;  

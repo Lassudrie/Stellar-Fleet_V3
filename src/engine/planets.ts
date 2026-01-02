@@ -6,8 +6,8 @@ import {
   PlanetData,
   StarSystem,
   StarSystemAstro
-} from '../shared/types';
-import { sorted } from '../shared/sorting';
+} from '../shared/shared';
+import { sorted } from '../shared/shared';
 
 export interface PlanetBodySeed {
   id?: string;

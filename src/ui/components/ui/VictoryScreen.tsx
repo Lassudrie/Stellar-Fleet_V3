@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { FactionId } from '../../../shared/types';
+import { FactionId } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 
 interface VictoryScreenProps {

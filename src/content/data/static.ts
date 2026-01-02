@@ -1,5 +1,5 @@
 
-import { ShipType, ShipStats } from '../../shared/types';
+import { ShipType, ShipStats } from '../../shared/shared';
 
 export const GALAXY_RADIUS = 100;
 export const SYSTEM_COUNT = 100;

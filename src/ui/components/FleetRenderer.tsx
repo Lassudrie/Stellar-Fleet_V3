@@ -2,7 +2,7 @@
 import React, { useRef, useMemo, useLayoutEffect, useEffect } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
-import { Fleet, FleetState } from '../../shared/types';
+import { Fleet, FleetState } from '../../shared/shared';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../../content/data/static';
 import { Text, Billboard } from '@react-three/drei';
 import { useFleetName } from '../context/FleetNames';

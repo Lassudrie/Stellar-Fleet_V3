@@ -1,5 +1,5 @@
-import type { GroundUnitType } from '../../shared/types';
-import type { TerrainType } from '../../engine/ground/terrain';
+import type { GroundUnitType } from '../../shared/shared';
+import type { TerrainType } from '../../engine/ground';
 
 export interface GroundUnitStats {
   baseMP: number;

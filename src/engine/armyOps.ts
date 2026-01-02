@@ -1,5 +1,5 @@
-import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../shared/types';
-import { shortId } from './idUtils';
+import { Army, ArmyState, Fleet, LogEntry, ShipType, StarSystem } from '../shared/shared';
+import { shortId } from '../shared/shared';
 import { RNG } from './rng';
 import { getDefaultSolidPlanet } from './planets';
 

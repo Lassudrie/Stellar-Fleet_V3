@@ -1,12 +1,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Fleet, StarSystem, ShipType } from '../../../shared/types';
+import { Fleet, StarSystem, ShipType } from '../../../shared/shared';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
-import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
+import { getFleetSpeed } from '../../../engine/movement';
 import { dist, distSq } from '../../../engine/math/vec3';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 interface InvasionModalProps {
   targetSystem: StarSystem;

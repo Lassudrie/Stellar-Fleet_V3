@@ -1,14 +1,14 @@
 
 import React, { useMemo } from 'react';
-import { Fleet, StarSystem, FleetState, ShipType } from '../../../shared/types';
-import { getFleetSpeed } from '../../../engine/movement/fleetSpeed';
+import { Fleet, StarSystem, FleetState, ShipType } from '../../../shared/shared';
+import { getFleetSpeed } from '../../../engine/movement';
 import { useFleetName } from '../../context/FleetNames';
 import { useI18n } from '../../i18n';
 import { distSq } from '../../../engine/math/vec3';
 import { CAPTURE_RANGE_SQ, MAX_HYPERJUMP_DISTANCE_LY } from '../../../content/data/static';
 import { canFleetPayJump } from '../../../engine/logistics/fuel';
 import { getOrbitingSystem } from '../../../engine/orbit';
-import { sorted } from '../../../shared/sorting';
+import { sorted } from '../../../shared/shared';
 
 interface FleetPickerProps {
   mode: 'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useI18n } from '../../i18n';
-import { MoonData, PlanetData, StarSystem } from '../../../shared/types';
+import { MoonData, PlanetData, StarSystem } from '../../../shared/shared';
 import { formatAu, formatCelsius, formatGravity } from '../../format/units';
 import { GAS_GIANT_ICON } from '../../constants/icons';
 
