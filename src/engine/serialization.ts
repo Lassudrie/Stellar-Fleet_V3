@@ -45,7 +45,7 @@ import {
 } from './saveFormat';
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
-import { generateStellarSystem } from './worldgen/stellar';
+import { generateStellarSystem } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
 import { normalizeSurfacePositions } from './planetSurface';

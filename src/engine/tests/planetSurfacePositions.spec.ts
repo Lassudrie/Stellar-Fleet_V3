@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { applyCommand } from '../commands';
 import { RNG } from '../rng';
-import { generateStellarSystem } from '../worldgen/stellar';
+import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor, generateSurfaceMapForState } from '../planetSurface';
 import { deserializeGameState, serializeGameState } from '../serialization';

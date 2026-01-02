@@ -7,7 +7,7 @@ import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
 import { SHIP_STATS } from '../../content/data/static';
 import { devLog, devWarn } from '../../shared/devLogger';
-import { generateStellarSystem } from './stellar';
+import { generateStellarSystem } from './stellarSystem';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { sorted } from '../../shared/sorting';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from '../planetSurface';

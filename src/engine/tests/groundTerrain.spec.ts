@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { generateStellarSystem } from '../worldgen/stellar';
+import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor, generateSurfaceMapForState } from '../planetSurface';
 import { deriveTerrainType } from '../ground';

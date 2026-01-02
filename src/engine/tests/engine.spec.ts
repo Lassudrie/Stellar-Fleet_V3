@@ -37,7 +37,7 @@ import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../movement/movementPhase';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
-import { generateStellarSystem } from '../worldgen/stellar';
+import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { findNearestSystem } from '../world';
 import { FuelShortageError } from '../logistics/fuel';
 

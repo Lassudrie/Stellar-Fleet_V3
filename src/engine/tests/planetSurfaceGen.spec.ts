@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import type { PlanetBody, PlanetData } from '../../shared/types';
-import { generateStellarSystem } from '../worldgen/stellar';
+import { generateStellarSystem } from '../worldgen/stellarSystem';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap } from '../planetSurface';
 
