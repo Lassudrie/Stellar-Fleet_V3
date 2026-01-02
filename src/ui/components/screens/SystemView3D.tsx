@@ -624,7 +624,7 @@ interface SystemFleetShipsProps {
 const SystemFleetShips: React.FC<SystemFleetShipsProps> = ({ fleet, scale, color, visible }) => {
   const meshRef = useRef<InstancedMesh>(null);
   const temp = useMemo(() => new Object3D(), []);
-  const shipGeometry = useDisposableMemo(() => new ConeGeometry(0.35, 0.8, 6), []);
+  const shipGeometry = useDisposableMemo(() => new SphereGeometry(0.45, 8, 8), []);
   const shipMaterial = useDisposableMemo(
     () => new MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3, roughness: 0.5, metalness: 0.4 }),
     [color]
