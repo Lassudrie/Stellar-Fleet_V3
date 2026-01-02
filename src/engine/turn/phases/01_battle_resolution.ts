@@ -124,7 +124,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         
         // Global Notification
         if (result.updatedBattle.winnerFactionId) {
-            const sysName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+            const sysName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name ?? battle.systemId;
              nextLogs.push({
                  id: ctx.rng.id('log'),
                  day: ctx.turn,
@@ -142,17 +142,16 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
         Object.keys(result.updatedBattle.shipsLost ?? {}).forEach(factionId => involvedFactionIdsSet.add(factionId as FactionId));
         const involvedFactionIds = sorted(Array.from(involvedFactionIdsSet), (a, b) => a.localeCompare(b));
 
-        const systemName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+        const systemDisplayName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name ?? battle.systemId;
         const isPlayerInvolved = involvedFactionIds.includes(currentTurnState.playerFactionId);
         const ammunitionTotals = aggregateAmmunitionTotals(result.updatedBattle.ammunitionByFaction);
-        const battleSystemName = systemName || battle.systemId;
 
         if (lostArmyIds.length > 0) {
             sorted(lostArmyIds).forEach(armyId => {
                 nextLogs.push({
                     id: ctx.rng.id('log'),
                     day: ctx.turn,
-                    text: `Army ${armyId} was lost with its transport during the battle at ${battleSystemName}.`,
+                    text: `Army ${armyId} was lost with its transport during the battle at ${systemDisplayName}.`,
                     type: 'combat'
                 });
             });
@@ -163,7 +162,7 @@ export const phaseBattleResolution = (state: GameState, ctx: TurnContext): GameS
             day: ctx.turn,
             type: 'battle_resolution',
             priority: isPlayerInvolved ? 2 : 1,
-            title: `Battle resolved at ${systemName}`,
+            title: `Battle resolved at ${systemDisplayName}`,
             subtitle: result.updatedBattle.winnerFactionId
                 ? `Winner: ${result.updatedBattle.winnerFactionId.toUpperCase()}`
                 : 'Outcome undetermined',
