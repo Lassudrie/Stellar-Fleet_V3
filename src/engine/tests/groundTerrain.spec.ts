@@ -3,7 +3,7 @@ import { generateStellarSystem } from '../worldgen/stellar';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor } from '../planetSurface/descriptor';
 import { generateSurfaceMapForState } from '../planetSurface/access';
-import { deriveTerrainType } from '../ground/terrain';
+import { deriveTerrainType } from '../ground';
 import type { FactionState, GameState, PlanetBody } from '../../shared/types';
 
 interface TestCase { name: string; run: () => void; }

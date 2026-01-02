@@ -20,8 +20,7 @@ import { deepFreezeDev } from './state/immutability';
 import { canonicalizeMessages, canonicalizeState, isCanonical } from './state/canonicalize';
 import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } from './ai';
 import { applyCommand } from './commands';
-import { detectNewBattles, pruneBattles } from './battle/detection';
-import { resolveBattle } from './battle/resolution';
+import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement/movementPhase';
 import { normalizeSurfacePositions } from './planetSurface/positions';
 import { checkVictoryConditions } from './objectives';
@@ -32,13 +31,17 @@ import { resolveOrbitalBombardment } from './orbitalBombardment';
 import { generateSurfaceMapForState } from './planetSurface/access';
 import { neighborsAxial } from './planetSurface/hex';
 import { isPassable, relocateSurfacePosDeterministic } from './planetSurface/validation';
-import { deriveTerrainType } from './ground/terrain';
-import { computeSupplyDistanceMapForBody, SUPPLY_RADIUS } from './ground/supply';
-import { computeZocSnapshotForBody } from './ground/zoc';
-import { executeMoveOrder } from './ground/movement';
-import { resolveEngagement } from './ground/combat';
-import { applyOverrunPenalty, chooseDefenderRetreat } from './ground/breakOutcome';
-import { hexKey } from './ground/utils';
+import {
+  applyOverrunPenalty,
+  chooseDefenderRetreat,
+  computeSupplyDistanceMapForBody,
+  computeZocSnapshotForBody,
+  deriveTerrainType,
+  executeMoveOrder,
+  hexKey,
+  resolveEngagement,
+  SUPPLY_RADIUS
+} from './ground';
 import { sanitizeArmies } from './army';
 import { quantizeFuel } from './logistics/fuel';
 import { sorted } from '../shared/sorting';

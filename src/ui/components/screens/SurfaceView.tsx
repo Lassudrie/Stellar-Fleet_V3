@@ -16,16 +16,23 @@ import {
 import { useI18n } from '../../i18n';
 import { fnv1a32 } from '../../../engine/planetSurface/hash32';
 import type { GameCommand } from '../../../engine/commands';
-import { computeEffectiveMP } from '../../../engine/ground/movement';
-import { computeSupplyDistanceMapFromSurfaceMap, isSupplied, SUPPLY_RADIUS } from '../../../engine/ground/supply';
-import { computeZocSnapshotFromArmies, isInEnemyZoc } from '../../../engine/ground/zoc';
-import { computeReachable, findPathWithCost } from '../../../engine/ground/pathfinding';
-import { deriveTerrainTypeFromSurfaceMap, MOVE_COST } from '../../../engine/ground/terrain';
+import {
+  computeEffectiveMP,
+  computeReachable,
+  computeSupplyDistanceMapFromSurfaceMap,
+  computeZocSnapshotFromArmies,
+  deriveTerrainTypeFromSurfaceMap,
+  findPathWithCost,
+  hexKey as engineHexKey,
+  isInEnemyZoc,
+  isSupplied,
+  MOVE_COST,
+  previewEngagement,
+  SUPPLY_RADIUS
+} from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
-import { previewEngagement } from '../../../engine/ground/combat';
 import { neighborsAxial } from '../../../engine/planetSurface/hex';
 import { isPassable } from '../../../engine/planetSurface/validation';
-import { hexKey as engineHexKey } from '../../../engine/ground/utils';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;

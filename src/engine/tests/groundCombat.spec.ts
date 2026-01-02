@@ -1,6 +1,5 @@
 import assert from 'node:assert';
-import { resolveEngagement } from '../ground/combat';
-import { rollTriangularCentered } from '../ground/random';
+import { resolveEngagement, rollTriangularCentered } from '../ground';
 import { RNG } from '../rng';
 
 import { ArmyState, type Army } from '../../shared/types';

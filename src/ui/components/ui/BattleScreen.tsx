@@ -2,7 +2,7 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 import { GameState, Fleet, FactionId, Battle, BattleShipSnapshot } from '../../../shared/types';
 import { useI18n } from '../../i18n';
-import { FactionRegistry, resolveBattleOutcome } from '../../../engine/battle/outcome';
+import { FactionRegistry, resolveBattleOutcome } from '../../../engine/battle';
 import { shortId } from '../../../engine/idUtils';
 import { sorted } from '../../../shared/sorting';
 

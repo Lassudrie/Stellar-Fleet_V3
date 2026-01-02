@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { detectNewBattles } from '../battle/detection';
+import { detectNewBattles } from '../battle';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
 import { isOrbitContested } from '../orbit';
 import {
