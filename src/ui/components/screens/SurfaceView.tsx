@@ -278,7 +278,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return normalized;
   }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
 
-  const drawHex = (ctx: CanvasRenderingContext2D, center: { x: number; y: number }, size: number, options: { fill?: string; stroke?: string }) => {
+  const drawHex = (
+    ctx: CanvasRenderingContext2D,
+    center: { x: number; y: number },
+    size: number,
+    options: { fill?: string; stroke?: string; lineWidth?: number }
+  ) => {
     ctx.beginPath();
     for (let i = 0; i < 6; i += 1) {
       const angle = Math.PI / 180 * (60 * i - 30);
@@ -294,7 +299,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }
     if (options.stroke) {
       ctx.strokeStyle = options.stroke;
-      ctx.lineWidth = 0.75;
+      if (typeof options.lineWidth === 'number') ctx.lineWidth = options.lineWidth;
       ctx.stroke();
     }
   };
@@ -328,7 +333,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           y: y * camera.zoom + camera.offset.y
         };
         const color = biomeColors[tile.biome] ?? '#334155';
-        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke });
+        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 });
       }
     }
 
@@ -385,9 +390,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
       };
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      drawHex(ctx, center, hexSize * 1.02, { stroke: color });
+      drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
     };
 
     if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');
