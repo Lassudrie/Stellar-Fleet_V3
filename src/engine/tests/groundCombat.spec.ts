@@ -3,7 +3,7 @@ import { resolveEngagement } from '../ground/combat';
 import { rollTriangularCentered } from '../ground/random';
 import { RNG } from '../rng';
 
-import type { Army } from '../../shared/types';
+import { ArmyState, type Army } from '../../shared/types';
 
 interface TestCase {
   name: string;
@@ -14,7 +14,7 @@ const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army
   const base: Army = {
     id: overrides.id,
     factionId: overrides.factionId,
-    state: 'DEPLOYED',
+    state: ArmyState.DEPLOYED,
     containerId: 'body-1',
     surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
     unitType: 'mechanized_infantry',
