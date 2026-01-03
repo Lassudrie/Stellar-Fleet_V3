@@ -52,6 +52,7 @@ type CameraState = { zoom: number; offset: { x: number; y: number } };
 const HEX_SIZE = 12;
 const MIN_ZOOM = 0.20;
 const MAX_ZOOM = 4.00;
+const TERRAIN_ZOOM_STEP = 0.05;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 const PAN_MARGIN_PX = 40;
@@ -219,6 +220,12 @@ const computeFitZoom = (viewport: { width: number; height: number }, bounds: Map
   return clamp(fit, MIN_ZOOM, 1);
 };
 
+const quantizeZoom = (zoom: number): number => {
+  const step = TERRAIN_ZOOM_STEP;
+  const snapped = Math.round(zoom / step) * step;
+  return clamp(snapped, MIN_ZOOM, MAX_ZOOM);
+};
+
 const normalizePos = (pos: SurfacePos | undefined, config: PlanetSurfaceMap['descriptor']['config']): HexCoord | null => {
   if (!pos) return null;
   const q = wrapQ(Math.round(pos.q), config.w, config.wrapX);
@@ -257,6 +264,16 @@ const surfaceMapKey = (surfaceMap: PlanetSurfaceMap): string => {
   ].join('|');
 };
 
+type TerrainBufferContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+type TerrainBuffer = {
+  key: string;
+  zoom: number;
+  dpr: number;
+  bounds: MapBoundsPx;
+  canvas: OffscreenCanvas | HTMLCanvasElement;
+};
+
 const SurfaceView: React.FC<SurfaceViewProps> = ({
   map: mapProp,
   mapStatus = 'ready',
@@ -284,6 +301,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
   const [readyMapCache, setReadyMapCache] = useState<{ key: string; map: PlanetSurfaceMap } | null>(null);
+  const terrainBufferRef = useRef<TerrainBuffer | null>(null);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -316,6 +334,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (readyMapCache && body?.id === readyMapCache.map.bodyId) return readyMapCache.key;
     return null;
   }, [body?.id, mapKeyFromProp, mapProp, readyMapCache]);
+
+  useEffect(() => {
+    terrainBufferRef.current = null;
+  }, [currentMapKey]);
 
   const map = useMemo(() => {
     if (mapProp && mapKeyFromProp) return mapProp;
@@ -508,7 +530,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
 
   const drawHex = (
-    ctx: CanvasRenderingContext2D,
+    ctx: TerrainBufferContext,
     center: { x: number; y: number },
     size: number,
     options: { fill?: string; stroke?: string; lineWidth?: number }
@@ -532,6 +554,69 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       ctx.stroke();
     }
   };
+
+  const renderTerrainLayer = useCallback((
+    mapToRender: PlanetSurfaceMap,
+    config: PlanetSurfaceMap['descriptor']['config'],
+    zoom: number,
+    dpr: number
+  ): TerrainBuffer | null => {
+    const bounds = computeMapBoundsPx(config, HEX_SIZE);
+    const width = Math.max(1, Math.ceil(bounds.width * zoom * dpr));
+    const height = Math.max(1, Math.ceil(bounds.height * zoom * dpr));
+
+    const canvas: OffscreenCanvas | HTMLCanvasElement = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : (() => {
+        const el = document.createElement('canvas');
+        el.width = width;
+        el.height = height;
+        return el;
+      })();
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const gridStroke = 'rgba(148, 163, 184, 0.22)';
+    const hexSize = HEX_SIZE * zoom * dpr;
+
+    ctx.clearRect(0, 0, width, height);
+
+    for (let r = 0; r < config.h; r += 1) {
+      for (let q = 0; q < config.w; q += 1) {
+        const tile = mapToRender.tiles[r * config.w + q];
+        if (!tile) continue;
+        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
+        const center = {
+          x: (x - bounds.minX) * zoom * dpr,
+          y: (y - bounds.minY) * zoom * dpr
+        };
+        const color = biomeColors[tile.biome] ?? '#334155';
+        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 * dpr });
+      }
+    }
+
+    return {
+      key: surfaceMapKey(mapToRender),
+      zoom,
+      dpr,
+      bounds,
+      canvas
+    };
+  }, []);
+
+  const requestTerrainBuffer = useCallback((dpr: number): TerrainBuffer | null => {
+    if (!map || !activeMapConfig || !currentMapKey) return null;
+    const targetZoom = quantizeZoom(camera.zoom);
+    const cached = terrainBufferRef.current;
+    if (cached && cached.key === currentMapKey && cached.zoom === targetZoom && cached.dpr === dpr) {
+      return cached;
+    }
+
+    const buffer = renderTerrainLayer(map, activeMapConfig, targetZoom, dpr);
+    terrainBufferRef.current = buffer;
+    return buffer;
+  }, [activeMapConfig, camera.zoom, currentMapKey, map, renderTerrainLayer]);
 
   // draw() is defined later, after overlay computations.
 
@@ -633,19 +718,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const armiesOnBody = normalizedArmies.map(m => m.army);
     return computeZocSnapshotFromArmies({ bodyId: map.bodyId, w, h, wrapX, armies: armiesOnBody });
   }, [map, normalizedArmies]);
-
-  const enemyZocMask = useMemo(() => {
-    if (!map || !zocSnapshot) return null;
-    const { w, h } = map.descriptor.config;
-    const mask = new Uint8Array(w * h);
-    for (const [factionId, arr] of zocSnapshot.zocByFactionId.entries()) {
-      if (factionId === playerFactionId) continue;
-      for (let i = 0; i < mask.length; i += 1) {
-        if (arr[i]) mask[i] = 1;
-      }
-    }
-    return mask;
-  }, [map, playerFactionId, zocSnapshot]);
 
   const movementStepCostCenti = useCallback((from: HexCoord, to: HexCoord, army: Army): number => {
     if (!map || !zocSnapshot) return 0;
@@ -750,27 +822,37 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
+    const terrainBuffer = requestTerrainBuffer(dpr);
 
     ctx.save();
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-    const hexSize = HEX_SIZE * camera.zoom;
-    const gridStroke = 'rgba(148, 163, 184, 0.22)';
-
-    for (let r = 0; r < activeMapConfig.h; r += 1) {
-      for (let q = 0; q < activeMapConfig.w; q += 1) {
-        const tile = map.tiles[r * activeMapConfig.w + q];
-        if (!tile) continue;
-        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-        const center = {
-          x: x * camera.zoom + camera.offset.x,
-          y: y * camera.zoom + camera.offset.y
-        };
-        const color = biomeColors[tile.biome] ?? '#334155';
-        drawHex(ctx, center, hexSize, { fill: color, stroke: gridStroke, lineWidth: 0.75 });
+    if (terrainBuffer) {
+      const destX = camera.offset.x + terrainBuffer.bounds.minX * camera.zoom;
+      const destY = camera.offset.y + terrainBuffer.bounds.minY * camera.zoom;
+      const destW = terrainBuffer.bounds.width * camera.zoom;
+      const destH = terrainBuffer.bounds.height * camera.zoom;
+      ctx.drawImage(terrainBuffer.canvas, destX, destY, destW, destH);
+    } else {
+      const fallbackGridStroke = 'rgba(148, 163, 184, 0.22)';
+      const fallbackHexSize = HEX_SIZE * camera.zoom;
+      for (let r = 0; r < activeMapConfig.h; r += 1) {
+        for (let q = 0; q < activeMapConfig.w; q += 1) {
+          const tile = map.tiles[r * activeMapConfig.w + q];
+          if (!tile) continue;
+          const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
+          const center = {
+            x: x * camera.zoom + camera.offset.x,
+            y: y * camera.zoom + camera.offset.y
+          };
+          const color = biomeColors[tile.biome] ?? '#334155';
+          drawHex(ctx, center, fallbackHexSize, { fill: color, stroke: fallbackGridStroke, lineWidth: 0.75 });
+        }
       }
     }
+
+    const hexSize = HEX_SIZE * camera.zoom;
 
     // --- Overlays ---
     if (reachableCosts) {
@@ -941,13 +1023,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     camera.offset.x,
     camera.offset.y,
     camera.zoom,
-    enemyZocMask,
-    factionIndex,
     hovered,
     map,
     movePreview,
     normalizedArmies,
     normalizedBuildings,
+    requestTerrainBuffer,
     playerFactionId,
     reachableCosts,
     selected,
