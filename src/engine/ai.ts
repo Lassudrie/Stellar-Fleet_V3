@@ -1,16 +1,15 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem } from '../shared/shared';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem, sorted } from '../shared/shared';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
 import { SpatialIndex } from './spatialIndex';
 import { aiDebugger, SystemEvalLog } from './aiDebugger';
-import { distSq, dist } from './math/vec3';
+import { distSq } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../content/data/static';
 import { getDefaultSolidPlanet } from './planets';
 import { isFleetOrbitingSystem } from './orbit';
-import { sorted } from '../shared/shared';
 
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
@@ -69,11 +68,11 @@ const sortRecordKeys = (record: Record<string, unknown>): string[] =>
   sorted(Object.keys(record), compareStrings);
 
 const createSortedRecord = <T>(record: Record<string, T>): Record<string, T> => {
-  const sorted: Record<string, T> = {};
+  const result: Record<string, T> = {};
   sortRecordKeys(record).forEach(key => {
-    sorted[key] = record[key];
+    result[key] = record[key];
   });
-  return sorted;
+  return result;
 };
 
 const isCommandableFleet = (fleet: Fleet): boolean => fleet.state !== FleetState.COMBAT && !fleet.retreating;
@@ -115,8 +114,11 @@ const AI_PROFILE_CONFIGS: Record<AiProfile, AiConfig> = {
   balanced: BASE_AI_CONFIG,
 };
 
+const isAiProfile = (profile: unknown): profile is AiProfile =>
+  profile === 'aggressive' || profile === 'defensive' || profile === 'balanced';
+
 const getAiConfig = (profile?: string): AiConfig => {
-  const key = (profile as AiProfile) || 'balanced';
+  const key: AiProfile = isAiProfile(profile) ? profile : 'balanced';
   return AI_PROFILE_CONFIGS[key] ?? BASE_AI_CONFIG;
 };
 
@@ -171,6 +173,10 @@ const updateMemory = (
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
   const fleetIndex = new SpatialIndex(myFleets, CAPTURE_RANGE, state.day);
   const systemIndex = new SpatialIndex(state.systems, CAPTURE_RANGE, state.day);
+  const systemById = new Map<string, StarSystem>();
+  state.systems.forEach(sys => systemById.set(sys.id, sys));
+  const perceivedSystemById = new Map<string, StarSystem>();
+  perceivedState.systems.forEach(sys => perceivedSystemById.set(sys.id, sys));
 
   const minDistanceBySystemId: Record<string, number> = {};
   state.systems.forEach(system => {
@@ -188,7 +194,7 @@ const updateMemory = (
   // while the current day is less than or equal to the recorded turn.
   sortRecordKeys(memory.holdUntilTurnBySystemId).forEach(systemId => {
     const holdUntil = memory.holdUntilTurnBySystemId[systemId];
-    const system = state.systems.find(s => s.id === systemId);
+    const system = systemById.get(systemId);
 
     if (!system || system.ownerFactionId !== factionId || holdUntil < state.day) {
       delete memory.holdUntilTurnBySystemId[systemId];
@@ -258,7 +264,7 @@ const updateMemory = (
 
   observedSystemIds.forEach(id => {
     memory.systemLastSeen[id] = state.day;
-    const observedSystem = perceivedState.systems.find(sys => sys.id === id);
+    const observedSystem = perceivedSystemById.get(id);
     if (observedSystem) {
       memory.lastOwnerBySystemId[id] = observedSystem.ownerFactionId;
     }
@@ -289,9 +295,24 @@ const evaluateSystems = (
   const visibleEnemyFleets = perceivedState.fleets
     .filter(f => f.factionId !== factionId && isCommandableFleet(f));
   const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE, state.day);
+  // Cache fleet power to avoid recomputing it repeatedly within a single evaluation pass.
+  const fleetPowerCache = new Map<string, number>();
+  const getFleetPowerCached = (fleet: Fleet): number => {
+    const existing = fleetPowerCache.get(fleet.id);
+    if (existing !== undefined) return existing;
+    const power = calculateFleetPower(fleet);
+    fleetPowerCache.set(fleet.id, power);
+    return power;
+  };
+  // Index sightings by system id once (avoid N_systems * N_sightings filters).
+  const sightingsBySystemId: Record<string, EnemySighting[]> = {};
+  Object.values(memory.sightings).forEach(sighting => {
+    if (!sighting.systemId) return;
+    (sightingsBySystemId[sighting.systemId] ??= []).push(sighting);
+  });
   const totalMyPower = perceivedState.fleets
     .filter(f => f.factionId === factionId && isCommandableFleet(f))
-    .reduce((sum, f) => sum + calculateFleetPower(f), 0);
+    .reduce((sum, f) => sum + getFleetPowerCached(f), 0);
 
   state.systems.forEach(sys => {
       let value = 10;
@@ -304,10 +325,10 @@ const evaluateSystems = (
 
       const visibleFleetsHere = enemyIndex.queryRadius(sys.position, CAPTURE_RANGE, { currentTurn: state.day });
 
-      const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + calculateFleetPower(fleet), 0);
+      const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + getFleetPowerCached(fleet), 0);
 
       // Estimate threat using stored sightings
-      const sightingsHere = Object.values(memory.sightings).filter(s => s.systemId === sys.id);
+      const sightingsHere = sightingsBySystemId[sys.id] ?? [];
       const threatMemory = sightingsHere.reduce((sum, sighting) => sum + (sighting.estimatedPower * sighting.confidence), 0);
 
       const fogThreatFactor = fogAge === 0 ? 1 : 1 / (1 + fogAge * 0.2);
@@ -370,6 +391,14 @@ const generateTasks = (
       .filter(a => a.factionId === factionId && a.state === ArmyState.EMBARKED)
       .map(a => a.id)
   );
+  const hasEmbarkedArmies = myFleets.some(fleet =>
+    fleet.ships.some(ship => ship.carriedArmyId && embarkedFriendlyArmies.has(ship.carriedArmyId))
+  );
+  const hasDeployableArmies = state.armies.some(
+    army => army.factionId === factionId && army.state === ArmyState.DEPLOYED
+  );
+  const hasTransportCapacity = myFleets.some(fleet => fleet.ships.some(ship => ship.type === ShipType.TRANSPORTER));
+  const canAttemptInvasion = hasTransportCapacity && (hasEmbarkedArmies || hasDeployableArmies);
 
   const tasks: Task[] = [];
 
@@ -452,16 +481,13 @@ const generateTasks = (
               return a.factionId !== factionId;
           }).length;
 
-          const hasEmbarkedArmies = myFleets.some(f =>
-              f.ships.some(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
-          );
-
           let type: TaskType = 'ATTACK';
           const distanceWeightedPriority = applyDistanceWeight(sysData.id, 500 + sysData.value);
           const groundDefensePower = defenders * 50;
           let basePriority = applyFog(distanceWeightedPriority) + inertia;
 
-          if (hasEmbarkedArmies) {
+          const shouldAttemptInvasion = canAttemptInvasion && (hasEmbarkedArmies || defenders > 0);
+          if (shouldAttemptInvasion) {
                type = 'INVADE';
                basePriority += 200;
           }
@@ -590,7 +616,7 @@ const assignFleets = (
       .filter(fObj => !fObj.assigned)
       .map(fObj => {
         const f = fObj.fleet;
-        const moveAge = state.day - (f.stateStartTurn ?? state.day);
+        const moveAge = Math.max(0, state.day - (f.stateStartTurn ?? (state.day - cfg.minMoveCommitTurns)));
         const isLocked = f.state === FleetState.MOVING &&
                          f.targetSystemId !== task.systemId &&
                          moveAge < cfg.minMoveCommitTurns &&
@@ -618,7 +644,19 @@ const assignFleets = (
         }
 
         if (task.type === 'INVADE') {
-            const embarkedCount = f.ships.filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId)).length;
+            const { transporterCount, embarkedCount } = f.ships.reduce(
+              (acc, ship) => {
+                if (ship.type === ShipType.TRANSPORTER) acc.transporterCount += 1;
+                if (ship.carriedArmyId && embarkedFriendlyArmies.has(ship.carriedArmyId)) acc.embarkedCount += 1;
+                return acc;
+              },
+              { transporterCount: 0, embarkedCount: 0 }
+            );
+
+            // Prefer fleets that can actually transport armies even if they are not yet loaded.
+            if (transporterCount > 0) {
+                suitability += 2000 + (transporterCount * 500);
+            }
             if (embarkedCount > 0) {
                 suitability += 5000 + (embarkedCount * 1000);
             }
@@ -740,7 +778,10 @@ const planArmyEmbarkation = (
       ship => ship.carriedArmyId && embarkedFriendlyArmies.has(ship.carriedArmyId)
     );
     const freeTransports = fleet.ships.filter(
-      ship => ship.type === ShipType.TRANSPORTER && !ship.carriedArmyId
+      ship =>
+        ship.type === ShipType.TRANSPORTER &&
+        !ship.carriedArmyId &&
+        (ship.transferBusyUntilDay ?? -Infinity) < state.day
     ).length;
 
     if (hasEmbarkedArmies && task.type === 'ATTACK') {
@@ -751,15 +792,15 @@ const planArmyEmbarkation = (
     if (freeTransports === 0) return assign;
 
     let bestSystemId: string | null = null;
-    let bestDistance = Infinity;
+    let bestDistanceSq = Infinity;
 
     state.systems.forEach(system => {
       const available = availableArmyCounts[system.id] || 0;
       if (available <= 0) return;
 
-      const distance = dist(fleet.position, system.position);
-      if (distance < bestDistance) {
-        bestDistance = distance;
+      const distanceSq = distSq(fleet.position, system.position);
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
         bestSystemId = system.id;
       }
     });
@@ -809,15 +850,25 @@ const generateCommands = (
           return;
       }
 
-      if (fleet.state === FleetState.ORBIT &&
-          state.systems.find(s => dist(s.position, fleet.position) < 5)?.id === task.systemId) {
+      const targetSystem = getSystemById(state.systems, task.systemId);
+      if (!targetSystem) {
+        return;
+      }
+
+      const hasTransportCapacity = fleet.ships.some(ship => ship.type === ShipType.TRANSPORTER);
+      const useInvasionOrder = task.type === 'INVADE' && hasTransportCapacity;
+
+      if (fleet.state === FleetState.ORBIT && isFleetOrbitingSystem(fleet, targetSystem)) {
           if (task.type === 'INVADE') {
-              const targetSystem = getSystemById(state.systems, task.systemId);
-              const targetPlanet = targetSystem ? getDefaultSolidPlanet(targetSystem) : null;
+              const targetPlanet = getDefaultSolidPlanet(targetSystem);
               if (!targetPlanet) return;
 
               fleet.ships
-                  .filter(s => s.carriedArmyId && embarkedFriendlyArmies.has(s.carriedArmyId))
+                  .filter(s =>
+                    s.carriedArmyId &&
+                    embarkedFriendlyArmies.has(s.carriedArmyId) &&
+                    (s.transferBusyUntilDay ?? -Infinity) < state.day
+                  )
                   .forEach(ship => {
                       if (!ship.carriedArmyId) return;
                       commands.push({
@@ -836,7 +887,7 @@ const generateCommands = (
       }
 
       if (fleet.state === FleetState.MOVING && fleet.targetSystemId === task.systemId) {
-          if (task.type === 'INVADE') {
+          if (useInvasionOrder) {
               const reason = fleet.invasionTargetSystemId === task.systemId
                 ? 'Maintain invasion course toward assigned target'
                 : 'Reaffirm invasion move toward assigned target';
@@ -858,7 +909,7 @@ const generateCommands = (
           return;
       }
 
-      if (task.type === 'INVADE') {
+      if (useInvasionOrder) {
           commands.push({
               type: 'ORDER_INVASION_MOVE',
               fleetId: fleet.id,
@@ -870,7 +921,7 @@ const generateCommands = (
               type: 'MOVE_FLEET',
               fleetId: fleet.id,
               targetSystemId: task.systemId,
-              reason: `Move fleet for ${task.type} task`
+              reason: task.type === 'INVADE' ? 'Move fleet to support invasion task' : `Move fleet for ${task.type} task`
           });
       }
   });

@@ -10,7 +10,7 @@ import type {
   PlanetSurfaceMap
 } from '../shared/shared';
 import { RNG } from './rng';
-import { generateSurfaceMapForState, getTileAt, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
+import { generateSurfaceMapForState, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
 
 // ----------------------------
 // Utils (was: ground/utils.ts)
@@ -19,6 +19,25 @@ import { generateSurfaceMapForState, getTileAt, hashJoin32, isPassable, neighbor
 export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 export const hexKey = (coord: HexCoord): string => `${coord.q}|${coord.r}`;
+
+// Wrap-safe modulo for wrapX maps.
+const mod = (n: number, m: number): number => {
+  if (m === 0) return 0;
+  return ((n % m) + m) % m;
+};
+
+/**
+ * Normalizes a coordinate for a map with optional wrapX. Returns null if out-of-bounds on r,
+ * or on q when wrapX is false.
+ */
+const normalizeCoord = (coord: HexCoord, w: number, h: number, wrapX: boolean): HexCoord | null => {
+  if (w <= 0 || h <= 0) return null;
+  const r = coord.r;
+  if (r < 0 || r >= h) return null;
+  const q = wrapX ? mod(coord.q, w) : coord.q;
+  if (q < 0 || q >= w) return null;
+  return { q, r };
+};
 
 // -----------------------------
 // Random (was: ground/random.ts)
@@ -94,10 +113,9 @@ export const biomeToTerrainType = (biome: Biome): TerrainType => {
 
 export const deriveTerrainTypeFromSurfaceMap = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): TerrainType => {
   const { w, h, wrapX } = map.descriptor.config;
-  const q = wrapX ? ((coord.q % w) + w) % w : coord.q;
-  const r = coord.r;
-  if (r < 0 || r >= h) return 'Open';
-  if (!wrapX && (q < 0 || q >= w)) return 'Open';
+  const norm = normalizeCoord(coord, w, h, wrapX);
+  if (!norm) return 'Open';
+  const { q, r } = norm;
 
   const hasBuilding = buildings.some(b => b.surfacePos.bodyId === map.bodyId && b.surfacePos.q === q && b.surfacePos.r === r);
   if (hasBuilding) return 'Urban';
@@ -111,18 +129,13 @@ export const deriveTerrainTypeFromSurfaceMap = (map: PlanetSurfaceMap, buildings
 };
 
 export const deriveTerrainType = (state: GameState, bodyId: string, coord: HexCoord): TerrainType => {
-  // Urban if settlement or building exists on the tile.
   const buildings = state.groundBuildings ?? [];
-  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.q === coord.q && b.surfacePos.r === coord.r);
-  if (hasBuilding) return 'Urban';
-
   const surfaceMap = generateSurfaceMapForState(state, bodyId);
-  const hasSettlement = surfaceMap?.settlements?.some(s => s.coord.q === coord.q && s.coord.r === coord.r);
-  if (hasSettlement) return 'Urban';
+  if (surfaceMap) return deriveTerrainTypeFromSurfaceMap(surfaceMap, buildings, coord);
 
-  const tileResult = getTileAt(state, bodyId, coord.q, coord.r);
-  if (!tileResult) return 'Open';
-  return biomeToTerrainType(tileResult.tile.biome);
+  // Fallback when surface map is unavailable: urban buildings only.
+  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.q === coord.q && b.surfacePos.r === coord.r);
+  return hasBuilding ? 'Urban' : 'Open';
 };
 
 // -----------------------
@@ -156,21 +169,21 @@ export const computeZocSnapshotFromArmies = (params: {
     return arr;
   };
 
-  armies.forEach(army => {
-    if (army.state !== 'DEPLOYED') return;
-    if (army.containerId !== bodyId) return;
-    if (!army.surfacePos) return;
-    if (army.members <= 0) return;
-    if (army.condition < 0.3) return;
-    const q = army.surfacePos.q;
-    const r = army.surfacePos.r;
-    if (q < 0 || q >= w || r < 0 || r >= h) return;
+  for (const army of armies) {
+    if (army.state !== 'DEPLOYED') continue;
+    if (army.containerId !== bodyId) continue;
+    if (!army.surfacePos) continue;
+    if (army.members <= 0) continue;
+    if (army.condition < 0.3) continue;
+    const norm = normalizeCoord({ q: army.surfacePos.q, r: army.surfacePos.r }, w, h, wrapX);
+    if (!norm) continue;
+    const { q, r } = norm;
     const arr = getArr(army.factionId);
     const ns = neighborsAxial({ q, r }, w, h, wrapX);
     for (const n of ns) {
       arr[n.r * w + n.q] = 1;
     }
-  });
+  }
 
   return { bodyId, w, h, wrapX, zocByFactionId };
 };
@@ -183,7 +196,9 @@ export const computeZocSnapshotForBody = (state: GameState, bodyId: string, armi
 };
 
 export const isInEnemyZoc = (snapshot: ZocSnapshot, coord: HexCoord, ownFactionId: FactionId): boolean => {
-  const idx = coord.r * snapshot.w + coord.q;
+  const norm = normalizeCoord(coord, snapshot.w, snapshot.h, snapshot.wrapX);
+  if (!norm) return false;
+  const idx = norm.r * snapshot.w + norm.q;
   for (const [factionId, arr] of snapshot.zocByFactionId.entries()) {
     if (factionId === ownFactionId) continue;
     if (arr[idx]) return true;
@@ -279,8 +294,8 @@ export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, bu
   const dist = new Uint16Array(size);
   dist.fill(INF);
 
-  const queueQ = new Int16Array(size);
-  const queueR = new Int16Array(size);
+  const queueQ = new Int32Array(size);
+  const queueR = new Int32Array(size);
   let head = 0;
   let tail = 0;
 
@@ -295,21 +310,20 @@ export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, bu
   };
 
   // Supply sources: settlements controlled by faction + ground buildings controlled by faction
-  map.settlements.forEach(s => {
-    if (s.factionId !== factionId) return;
-    const coord = s.coord;
-    if (coord.q < 0 || coord.q >= w || coord.r < 0 || coord.r >= h) return;
-    enqueue(coord, 0);
-  });
+  for (const s of map.settlements) {
+    if (s.factionId !== factionId) continue;
+    const norm = normalizeCoord(s.coord, w, h, wrapX);
+    if (!norm) continue;
+    enqueue(norm, 0);
+  }
 
-  buildings.forEach(b => {
-    if (b.factionId !== factionId) return;
-    if (b.surfacePos.bodyId !== map.bodyId) return;
-    const q = b.surfacePos.q;
-    const r = b.surfacePos.r;
-    if (q < 0 || q >= w || r < 0 || r >= h) return;
-    enqueue({ q, r }, 0);
-  });
+  for (const b of buildings) {
+    if (b.factionId !== factionId) continue;
+    if (b.surfacePos.bodyId !== map.bodyId) continue;
+    const norm = normalizeCoord({ q: b.surfacePos.q, r: b.surfacePos.r }, w, h, wrapX);
+    if (!norm) continue;
+    enqueue(norm, 0);
+  }
 
   // If no sources, leave INF everywhere.
   while (head < tail) {
@@ -335,9 +349,11 @@ export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, bu
 
 export const isSupplied = (distanceMap: Uint16Array | null, coord: HexCoord, bodyMap: PlanetSurfaceMap, radius = SUPPLY_RADIUS): boolean => {
   if (!distanceMap) return false;
-  const { w } = bodyMap.descriptor.config;
-  const idx = coord.r * w + coord.q;
-  const d = distanceMap[idx] ?? INF;
+  const { w, h, wrapX } = bodyMap.descriptor.config;
+  const norm = normalizeCoord(coord, w, h, wrapX);
+  if (!norm) return false;
+  const idx = norm.r * w + norm.q;
+  const d = distanceMap[idx];
   return d <= radius;
 };
 
@@ -644,11 +660,15 @@ export const executeMoveOrder = (params: {
 }): MoveExecutionResult => {
   const { state, army, to, supplied, zocSnapshot, isOccupied } = params;
   const map = generateSurfaceMapForState(state, army.containerId);
+  const mpEff = computeEffectiveMP(army, supplied);
+
+  const fromRaw: HexCoord = army.surfacePos ? { q: army.surfacePos.q, r: army.surfacePos.r } : to;
+
   if (!map || !army.surfacePos) {
     return {
       moved: false,
-      from: to,
-      to,
+      from: fromRaw,
+      to: fromRaw,
       steps: 0,
       mpEff: 0,
       mpUsedCenti: 0,
@@ -660,16 +680,12 @@ export const executeMoveOrder = (params: {
   }
   const { w, h, wrapX } = map.descriptor.config;
 
-  const from: HexCoord = { q: army.surfacePos.q, r: army.surfacePos.r };
-  const mpEff = computeEffectiveMP(army, supplied);
-  const mpCenti = mpEff * 100;
-
-  const inBounds = (c: HexCoord) => c.q >= 0 && c.q < w && c.r >= 0 && c.r < h;
-  if (!inBounds(to)) {
+  const fromNorm = normalizeCoord(fromRaw, w, h, wrapX);
+  if (!fromNorm) {
     return {
       moved: false,
-      from,
-      to: from,
+      from: fromRaw,
+      to: fromRaw,
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
@@ -679,7 +695,28 @@ export const executeMoveOrder = (params: {
       updatedArmy: army
     };
   }
-  const tile = map.tiles[to.r * w + to.q];
+
+  const toNorm = normalizeCoord(to, w, h, wrapX);
+  if (!toNorm) {
+    return {
+      moved: false,
+      from: fromNorm,
+      to: fromNorm,
+      steps: 0,
+      mpEff,
+      mpUsedCenti: 0,
+      used75pct: false,
+      fatigueDelta: 0,
+      touchedCost3: false,
+      updatedArmy: army
+    };
+  }
+
+  const from: HexCoord = fromNorm;
+  const target: HexCoord = toNorm;
+  const mpCenti = mpEff * 100;
+
+  const tile = map.tiles[target.r * w + target.q];
   if (!tile || !isPassable(tile.biome)) {
     return {
       moved: false,
@@ -695,30 +732,75 @@ export const executeMoveOrder = (params: {
     };
   }
 
-  const stepCostCenti = (a: HexCoord, b: HexCoord): number => {
-    const terrain = deriveTerrainType(state, army.containerId, b);
+  const isPassableAt = (c: HexCoord): boolean => {
+    const tileAt = map.tiles[c.r * w + c.q];
+    return !!tileAt && isPassable(tileAt.biome);
+  };
+
+  const size = w * h;
+  const urbanMask = new Uint8Array(size);
+  const buildings = state.groundBuildings ?? [];
+
+  for (const s of map.settlements) {
+    const norm = normalizeCoord(s.coord, w, h, wrapX);
+    if (!norm) continue;
+    urbanMask[norm.r * w + norm.q] = 1;
+  }
+  for (const b of buildings) {
+    if (b.surfacePos.bodyId !== map.bodyId) continue;
+    const norm = normalizeCoord({ q: b.surfacePos.q, r: b.surfacePos.r }, w, h, wrapX);
+    if (!norm) continue;
+    urbanMask[norm.r * w + norm.q] = 1;
+  }
+
+  const terrainCache: Array<TerrainType | null> = new Array(size).fill(null);
+  const baseCostCacheCenti = new Int32Array(size);
+
+  const getTerrainTypeAt = (c: HexCoord): TerrainType => {
+    const idx = c.r * w + c.q;
+    const cached = terrainCache[idx];
+    if (cached) return cached;
+    let terrain: TerrainType;
+    if (urbanMask[idx]) {
+      terrain = 'Urban';
+    } else {
+      const tileAt = map.tiles[idx];
+      terrain = tileAt ? biomeToTerrainType(tileAt.biome) : 'Open';
+    }
+    terrainCache[idx] = terrain;
+    return terrain;
+  };
+
+  const getBaseMoveCostCenti = (c: HexCoord): number => {
+    const idx = c.r * w + c.q;
+    const cached = baseCostCacheCenti[idx];
+    if (cached !== 0) return cached;
+    const terrain = getTerrainTypeAt(c);
     const baseCost = MOVE_COST[terrain];
     const affinityRaw = GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain];
     const affinity = clampAffinity(affinityRaw);
-    let cost = Math.round(baseCost * affinity * 100);
+    const cost = Math.max(1, Math.round(baseCost * affinity * 100));
+    baseCostCacheCenti[idx] = cost;
+    return cost;
+  };
 
+  const stepCostCenti = (a: HexCoord, b: HexCoord): number => {
+    let cost = getBaseMoveCostCenti(b);
     if (zocSnapshot) {
       const curEnemy = isInEnemyZoc(zocSnapshot, a, army.factionId);
       const nextEnemy = isInEnemyZoc(zocSnapshot, b, army.factionId);
-      if (!curEnemy && nextEnemy) cost += 100;
-      if (curEnemy && !nextEnemy) cost += 100;
+      if (curEnemy !== nextEnemy) cost += 100;
     }
-
     return cost;
   };
 
   const pathResult = findPathWithCost({
     from,
-    to,
+    to: target,
     w,
     h,
     wrapX,
-    isBlocked: c => isOccupied(c),
+    isBlocked: c => !isPassableAt(c) || isOccupied(c),
     stepCostCenti
   });
 
@@ -747,12 +829,13 @@ export const executeMoveOrder = (params: {
     const next = pathResult.path[i];
     // Collision/no-stacking guard: if the next hex is occupied at execution time, stop immediately
     // on the previous hex (do not spend MP for the blocked step).
+    if (!isPassableAt(next)) break;
     if (isOccupied(next)) break;
     const cost = stepCostCenti(pos, next);
     if (mpUsedCenti + cost > mpCenti) break;
     mpUsedCenti += cost;
     steps += 1;
-    const terrain = deriveTerrainType(state, army.containerId, next);
+    const terrain = getTerrainTypeAt(next);
     if (MOVE_COST[terrain] >= 3) touchedCost3 = true;
     pos = next;
   }
