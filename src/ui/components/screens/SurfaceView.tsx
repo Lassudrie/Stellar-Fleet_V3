@@ -31,7 +31,7 @@ import {
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
 import { fnv1a32, isPassable, neighborsAxial } from '../../../engine/planetSurface';
-import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
+import { useMapControlsCamera } from '../../hooks';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
@@ -42,9 +42,6 @@ interface SurfaceViewProps {
   buildings: GroundBuilding[];
   factions: FactionState[];
   playerFactionId: FactionId;
-  availableBodies: PlanetBody[];
-  primaryReturn?: 'GAME' | 'SYSTEM_VIEW';
-  onSelectBody: (bodyId: string) => void;
   onBackToGalaxy: () => void;
   onBackToSystem?: () => void;
   onIssueCommand?: (cmd: GameCommand) => void;
@@ -256,9 +253,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   buildings,
   factions,
   playerFactionId,
-  availableBodies,
-  primaryReturn = 'GAME',
-  onSelectBody,
   onBackToGalaxy,
   onBackToSystem,
   onIssueCommand
@@ -276,9 +270,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [selected, setSelected] = useState<HexCoord | null>(null);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
-  const [showReachable, setShowReachable] = useState(true);
-  const [showZoc, setShowZoc] = useState(false);
-  const [showPreview, setShowPreview] = useState(true);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -653,7 +644,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   }, [hovered, isArmySupplied, map, movementStepCostCenti, occupancy, orderMode, selectedArmy, selectedArmyCoord, zocSnapshot]);
 
   const reachableCosts = useMemo(() => {
-    if (!map || !selectedArmy || !selectedArmyCoord || !showReachable) return null;
+    if (!map || !selectedArmy || !selectedArmyCoord) return null;
     if (!zocSnapshot) return null;
     const supplied = isArmySupplied(selectedArmy, selectedArmyCoord);
     const mpEff = computeEffectiveMP(selectedArmy, supplied);
@@ -671,10 +662,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       stepCostCenti: (a, b) => movementStepCostCenti(a, b, selectedArmy),
       maxCostCenti: mpCenti
     });
-  }, [isArmySupplied, map, movementStepCostCenti, occupancy, selectedArmy, selectedArmyCoord, showReachable, zocSnapshot]);
+  }, [isArmySupplied, map, movementStepCostCenti, occupancy, selectedArmy, selectedArmyCoord, zocSnapshot]);
 
   const combatPreview = useMemo(() => {
-    if (!map || !selectedArmy || !selectedArmyCoord || !hovered || !showPreview) return null;
+    if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
 
     const enemy = normalizedArmies
       .filter(m => m.coord.q === hovered.q && m.coord.r === hovered.r)
@@ -700,7 +691,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
     const rRange = approxRngRange(preview.r, 0.08);
     return { enemy, terrainType, preview, rRange };
-  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, showPreview]);
+  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord]);
 
   const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
 
@@ -735,18 +726,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }
 
     // --- Overlays ---
-    if (showZoc && enemyZocMask) {
-      for (let r = 0; r < activeMapConfig.h; r += 1) {
-        for (let q = 0; q < activeMapConfig.w; q += 1) {
-          const idx = r * activeMapConfig.w + q;
-          if (!enemyZocMask[idx]) continue;
-          const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-          const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
-          drawHex(ctx, center, hexSize, { fill: 'rgba(244, 63, 94, 0.10)' });
-        }
-      }
-    }
-
     if (reachableCosts) {
       reachableCosts.forEach((_cost, key) => {
         const [qStr, rStr] = key.split('|');
@@ -927,7 +906,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     selected,
     selectedArmyCoord,
     settlements,
-    showZoc,
     viewport.height,
     viewport.width
   ]);
@@ -1011,14 +989,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return renderPlaceholder(t('surfaceView.noData'));
   }
 
-  const mapBoundsPx = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
-  const primaryButtonClasses = (target: 'GAME' | 'SYSTEM_VIEW') =>
-    `rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
-      primaryReturn === target
-        ? 'bg-sky-700 text-white border-sky-400'
-        : 'bg-slate-800 text-slate-100 border-slate-600 hover:border-slate-400'
-    }`;
-
   return (
     <div className="relative w-full h-screen bg-slate-950 text-white overflow-hidden">
       <div ref={containerRef} className="absolute inset-0">
@@ -1046,103 +1016,18 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         </div>
       )}
 
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
-        <div className="pointer-events-auto m-4 p-4 bg-slate-900/80 border border-slate-700 rounded-xl backdrop-blur max-w-4xl w-[calc(100%-2rem)] max-h-[34vh] overflow-auto md:max-h-none">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">{t('surfaceView.header')}</p>
-              <div className="text-2xl font-bold flex items-center gap-2">
-                <span>{body.name}</span>
-                <span className="text-slate-400 text-base">/ {system.name}</span>
-              </div>
-              <p className="text-xs text-slate-400">
-                {t('surfaceView.mapSize', { width: map.descriptor.config.w, height: map.descriptor.config.h })}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={body.id}
-                onChange={(event) => onSelectBody(event.target.value)}
-                className="rounded bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-100"
-              >
-                {availableBodies.map(entry => (
-                  <option key={entry.id} value={entry.id}>{entry.name}</option>
-                ))}
-              </select>
-
-              {onBackToSystem && (
-                <button onClick={onBackToSystem} className={primaryButtonClasses('SYSTEM_VIEW')}>
-                  {t('surfaceView.backToSystem')}
-                </button>
-              )}
-              <button onClick={onBackToGalaxy} className={primaryButtonClasses('GAME')}>
-                {t('surfaceView.backToGalaxy')}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => {
-                userCameraRef.current = true;
-                const focus = { x: viewport.width / 2, y: viewport.height / 2 };
-                setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom * 1.15, clampOffset, MIN_ZOOM, MAX_ZOOM));
-              }}
-              className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
-            >
-              {t('surfaceView.zoomIn')}
-            </button>
-            <button
-              onClick={() => {
-                userCameraRef.current = true;
-                const focus = { x: viewport.width / 2, y: viewport.height / 2 };
-                setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom / 1.15, clampOffset, MIN_ZOOM, MAX_ZOOM));
-              }}
-              className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
-            >
-              {t('surfaceView.zoomOut')}
-            </button>
-            <button
-              onClick={() => {
-                const fitZoom = computeFitZoom(viewport, mapBoundsPx);
-                const nextOffset = {
-                  x: (viewport.width - mapBoundsPx.width * fitZoom) / 2 - mapBoundsPx.minX * fitZoom,
-                  y: (viewport.height - mapBoundsPx.height * fitZoom) / 2 - mapBoundsPx.minY * fitZoom
-                };
-                userCameraRef.current = false; // reset is a deliberate baseline
-                setCamera({ zoom: fitZoom, offset: clampOffset(nextOffset, fitZoom) });
-              }}
-              className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
-            >
-              {t('surfaceView.resetView')}
-            </button>
-            <button
-              onClick={() => setShowReachable(v => !v)}
-              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                showReachable ? 'bg-sky-800/60 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
-              }`}
-            >
-              Reachable
-            </button>
-            <button
-              onClick={() => setShowZoc(v => !v)}
-              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                showZoc ? 'bg-rose-900/40 border-rose-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
-              }`}
-            >
-              ZOC
-            </button>
-            <button
-              onClick={() => setShowPreview(v => !v)}
-              className={`rounded border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                showPreview ? 'bg-emerald-900/30 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-100 hover:border-slate-400'
-              }`}
-            >
-              Preview
-            </button>
-          </div>
+      {onBackToSystem && (
+        <div className="absolute top-4 left-4 right-4 z-10 pointer-events-none flex justify-start">
+          <button
+            onClick={onBackToSystem}
+            className="pointer-events-auto rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
+          >
+            {t('surfaceView.backToSystem')}
+          </button>
         </div>
+      )}
 
+      <div className="pointer-events-none absolute inset-0 flex flex-col justify-end">
         <div className="pointer-events-auto m-4 self-end w-full max-w-md">
           <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur max-h-[45vh] overflow-auto md:max-h-none">
             <div className="flex items-center justify-between">
