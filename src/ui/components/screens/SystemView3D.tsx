@@ -298,6 +298,26 @@ const applyPlanetOrbitSpacing = (
   });
 };
 
+const applyMoonOrbitSpacing = (
+  moons: OrbitingMoon[],
+  planetRadius: number,
+  moonOrbitClearance: number
+): OrbitingMoon[] => {
+  let lastOrbitRadius = planetRadius;
+  let lastMoonRadius = 0;
+
+  return moons.map((moon, index) => {
+    const minimumDistanceFromPlanet = planetRadius + moon.radius + moonOrbitClearance;
+    const minimumDistanceFromPrevious = index === 0
+      ? minimumDistanceFromPlanet
+      : lastOrbitRadius + lastMoonRadius + moon.radius + moonOrbitClearance;
+    const adjustedOrbitRadius = Math.max(moon.orbitRadius, minimumDistanceFromPrevious);
+    lastOrbitRadius = adjustedOrbitRadius;
+    lastMoonRadius = moon.radius;
+    return { ...moon, orbitRadius: adjustedOrbitRadius };
+  });
+};
+
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
     {children}
@@ -1164,6 +1184,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
   // Visual padding to keep planets and the star clearly separated; tune to adjust orbit spacing.
   const planetOrbitClearance = Math.max(minPlanetRadius * 2, clampedScale * 0.75);
+  const moonOrbitClearance = Math.max(minMoonRadius * 2, clampedScale * 0.35);
   const focusDistanceFloor = 2.5 * clampedScale;
   const baseCameraDistance = 12 * clampedScale;
   const defaultCameraPosition = useMemo<[number, number, number]>(
@@ -1219,8 +1240,20 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       minPlanetRadius,
       minMoonRadius
     ));
-    return applyPlanetOrbitSpacing(rawPlanets, starRadius, planetOrbitClearance);
-  }, [minMoonRadius, minPlanetRadius, planetOrbitClearance, sceneScale, sourcePlanets, starRadius]);
+    const planetsWithSpacedMoons = rawPlanets.map(planet => ({
+      ...planet,
+      moons: applyMoonOrbitSpacing(planet.moons, planet.radius, moonOrbitClearance)
+    }));
+    return applyPlanetOrbitSpacing(planetsWithSpacedMoons, starRadius, planetOrbitClearance);
+  }, [
+    minMoonRadius,
+    minPlanetRadius,
+    moonOrbitClearance,
+    planetOrbitClearance,
+    sceneScale,
+    sourcePlanets,
+    starRadius
+  ]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
