@@ -290,28 +290,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // When viewport changes on mobile (address bar / chrome), preserve the world center to avoid jumps,
-  // but only once the user has interacted with the camera.
-  useEffect(() => {
-    const prevVp = lastViewportRef.current;
-    const nextVp = viewport;
-    if (prevVp.width === nextVp.width && prevVp.height === nextVp.height) return;
-
-    if (map && activeMapConfig && userCameraRef.current) {
-      setCamera(prev => {
-        const prevCenterWorldX = (prevVp.width / 2 - prev.offset.x) / prev.zoom;
-        const prevCenterWorldY = (prevVp.height / 2 - prev.offset.y) / prev.zoom;
-        const nextOffset = {
-          x: nextVp.width / 2 - prevCenterWorldX * prev.zoom,
-          y: nextVp.height / 2 - prevCenterWorldY * prev.zoom
-        };
-        return { ...prev, offset: clampOffset(nextOffset, prev.zoom) };
-      });
-    }
-
-    lastViewportRef.current = nextVp;
-  }, [viewport.width, viewport.height, map, activeMapConfig, clampOffset]);
-
   useEffect(() => {
     if (!map || !activeMapConfig) return;
     const bodyId = map.bodyId;
@@ -385,6 +363,28 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     },
     [activeMapConfig, viewport.height, viewport.width]
   );
+
+  // When viewport changes on mobile (address bar / chrome), preserve the world center to avoid jumps,
+  // but only once the user has interacted with the camera.
+  useEffect(() => {
+    const prevVp = lastViewportRef.current;
+    const nextVp = viewport;
+    if (prevVp.width === nextVp.width && prevVp.height === nextVp.height) return;
+
+    if (map && activeMapConfig && userCameraRef.current) {
+      setCamera(prev => {
+        const prevCenterWorldX = (prevVp.width / 2 - prev.offset.x) / prev.zoom;
+        const prevCenterWorldY = (prevVp.height / 2 - prev.offset.y) / prev.zoom;
+        const nextOffset = {
+          x: nextVp.width / 2 - prevCenterWorldX * prev.zoom,
+          y: nextVp.height / 2 - prevCenterWorldY * prev.zoom
+        };
+        return { ...prev, offset: clampOffset(nextOffset, prev.zoom) };
+      });
+    }
+
+    lastViewportRef.current = nextVp;
+  }, [viewport.width, viewport.height, map, activeMapConfig, clampOffset]);
 
   const normalizedArmies = useMemo(() => {
     if (!map || !activeMapConfig) return [];
