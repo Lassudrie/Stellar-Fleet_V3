@@ -165,6 +165,7 @@ export const en = {
   'surfaceView.loadingOverlay': 'Loading…',
   'surfaceView.backToGalaxy': 'Back to galaxy',
   'surfaceView.backToSystem': 'Back to system view',
+  'surfaceView.bodyHeader': 'Surface — {{name}}',
   'surfaceView.mapSize': 'Grid {{width}} × {{height}}',
   'surfaceView.zoomIn': 'Zoom in',
   'surfaceView.zoomOut': 'Zoom out',

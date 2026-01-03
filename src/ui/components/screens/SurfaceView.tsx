@@ -1249,16 +1249,28 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         </div>
       )}
 
-      {onBackToSystem && (
-        <div className="absolute top-4 left-4 right-4 z-10 pointer-events-none flex justify-start">
-          <button
-            onClick={onBackToSystem}
-            className="pointer-events-auto rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
-          >
-            {t('surfaceView.backToSystem')}
-          </button>
+      <div className="absolute top-4 left-4 right-4 z-10 pointer-events-none flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="pointer-events-auto rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm font-semibold text-slate-100 backdrop-blur">
+          {t('surfaceView.bodyHeader', { name: body.name })}
         </div>
-      )}
+        <div className="pointer-events-auto flex justify-start sm:justify-end">
+          {onBackToSystem ? (
+            <button
+              onClick={onBackToSystem}
+              className="rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
+            >
+              {t('surfaceView.backToSystem')}
+            </button>
+          ) : (
+            <button
+              onClick={onBackToGalaxy}
+              className="rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
+            >
+              {t('surfaceView.backToGalaxy')}
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-end">
         <div className="pointer-events-auto m-4 self-end w-full max-w-md">
