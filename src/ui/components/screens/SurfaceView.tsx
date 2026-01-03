@@ -183,23 +183,38 @@ type MapBoundsPx = {
 };
 
 const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['config'], size: number): MapBoundsPx => {
-  const halfW = (Math.sqrt(3) / 2) * size;
+  // Analytical O(1) calculation for odd-r offset hex grid bounds
+  // For odd-r offset: q ranges [0, w-1], r ranges [0, h-1]
+  // offset-to-axial: q_axial = q - floor(r/2)
+  // axial-to-pixel: x = sqrt(3) * size * q_axial + sqrt(3)/2 * size * r, y = 1.5 * size * r
+  // Combined: x = sqrt(3) * size * (q - floor(r/2)) + sqrt(3)/2 * size * r
+  //          y = 1.5 * size * r
+  
+  const sqrt3 = Math.sqrt(3);
+  const halfW = (sqrt3 / 2) * size;
   const halfH = size;
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (let r = 0; r < config.h; r += 1) {
-    for (let q = 0; q < config.w; q += 1) {
-      const { x, y } = gridToPixel({ q, r }, size);
-      minX = Math.min(minX, x - halfW);
-      maxX = Math.max(maxX, x + halfW);
-      minY = Math.min(minY, y - halfH);
-      maxY = Math.max(maxY, y + halfH);
-    }
-  }
+  
+  const w = config.w;
+  const h = config.h;
+  
+  // Top: r=0, y = 0
+  // Bottom: r=h-1, y = 1.5 * size * (h-1)
+  const minY = -halfH;
+  const maxY = 1.5 * size * (h - 1) + halfH;
+  
+  // Rightmost: q=w-1, r=h-1
+  // x = sqrt(3) * size * ((w-1) - floor((h-1)/2)) + sqrt(3)/2 * size * (h-1)
+  const rightmostX = sqrt3 * size * ((w - 1) - Math.floor((h - 1) / 2)) + sqrt3 / 2 * size * (h - 1);
+  const maxX = rightmostX + halfW;
+  
+  // Leftmost: q=0, find minimum x over all r
+  // For q=0: x = sqrt(3) * size * (-floor(r/2)) + sqrt(3)/2 * size * r
+  // For r even: x = sqrt(3) * size * (-r/2) + sqrt(3)/2 * size * r = 0
+  // For r odd: x = sqrt(3) * size * (-(r-1)/2) + sqrt(3)/2 * size * r = sqrt(3)/2 * size
+  // So leftmost is at x=0 (r=0 or any even r), but we need to account for hex radius
+  // Actually, for r=1: x = sqrt(3)/2 * size, which is positive
+  // The true leftmost (including hex radius) is at x=0 - halfW = -halfW
+  const minX = -halfW;
 
   return {
     minX,
@@ -305,7 +320,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const wheelFrameRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
   const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
-  const pendingPointerEvent = useRef<React.PointerEvent<HTMLCanvasElement> | null>(null);
+  const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -353,7 +368,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       pointerMoveFrameRef.current = null;
     }
     pendingWheelEvent.current = null;
-    pendingPointerEvent.current = null;
+    pendingPointerEvents.current.clear();
   }, []);
 
   const map = useMemo(() => {
@@ -717,29 +732,41 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.persist();
-    pendingPointerEvent.current = event;
+    pendingPointerEvents.current.set(event.pointerId, event);
     if (pointerMoveFrameRef.current === null) {
       pointerMoveFrameRef.current = requestAnimationFrame(() => {
         pointerMoveFrameRef.current = null;
-        const pending = pendingPointerEvent.current;
-        pendingPointerEvent.current = null;
-        if (!pending) return;
-
-        const interacting = cameraControls.handlePointerMove(pending);
-        if (interacting) {
+        const pendingMap = pendingPointerEvents.current;
+        pendingPointerEvents.current = new Map();
+        
+        // Process all pending pointer moves
+        let anyInteracting = false;
+        for (const pending of pendingMap.values()) {
+          const interacting = cameraControls.handlePointerMove(pending);
+          if (interacting) {
+            anyInteracting = true;
+          }
+        }
+        
+        if (anyInteracting) {
           setHovered(null);
           return;
         }
 
-        if (!map) return;
+        if (!map || pendingMap.size === 0) return;
 
-        const coord = pickCoord(pending.clientX, pending.clientY);
+        // Use the last pointer event for hover (or primary pointer if available)
+        const lastEvent = Array.from(pendingMap.values())[pendingMap.size - 1];
+        const coord = pickCoord(lastEvent.clientX, lastEvent.clientY);
         setHovered(prev => (sameHex(prev, coord) ? prev : coord));
       });
     }
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    // Clean up pending moves for this pointer
+    pendingPointerEvents.current.delete(event.pointerId);
+    
     const wasTap = cameraControls.handlePointerUp(event);
     if (!wasTap || !map) return;
 
@@ -767,30 +794,37 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    // Clean up pending moves for this pointer
+    pendingPointerEvents.current.delete(event.pointerId);
+    
     cameraControls.handlePointerCancel(event);
     setHovered(null);
   };
 
-  const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
+  // Only attach touch handlers if Pointer Events are not available
+  // This prevents double event streams (Pointer Events + Touch Events) on modern browsers
+  const supportsPointerEvents = typeof window !== 'undefined' && 'PointerEvent' in window;
+  
+  const handleTouchStart = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
     event.preventDefault();
     forwardTouchEvent(event, handlePointerDown, event.changedTouches);
-  };
+  });
 
-  const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchMove = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
     forwardTouchEvent(event, handlePointerMove, event.touches);
-  };
+  });
 
-  const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchEnd = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
     forwardTouchEvent(event, handlePointerUp, event.changedTouches);
-  };
+  });
 
-  const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchCancel = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
     forwardTouchEvent(event, handlePointerCancel, event.changedTouches);
-  };
+  });
 
   const activeCoord = selected ?? hovered;
   const activeTile = map && activeCoord ? getTileAt(map, activeCoord) : null;
@@ -1246,10 +1280,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchCancel}
+          {...(handleTouchStart ? { onTouchStart: handleTouchStart } : {})}
+          {...(handleTouchMove ? { onTouchMove: handleTouchMove } : {})}
+          {...(handleTouchEnd ? { onTouchEnd: handleTouchEnd } : {})}
+          {...(handleTouchCancel ? { onTouchCancel: handleTouchCancel } : {})}
           onPointerLeave={(event) => {
             handlePointerCancel(event);
             setHovered(null);

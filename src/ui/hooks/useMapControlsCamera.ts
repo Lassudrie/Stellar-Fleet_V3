@@ -244,14 +244,20 @@ export const useMapControlsCamera = ({
       }
 
       const scale = distance / gesture.startDistance;
-      const nextCamera = zoomAroundPoint(
-        gesture.startCamera,
-        center,
-        gesture.startCamera.zoom * scale,
-        clampOffset,
-        minZoom,
-        maxZoom
+      const targetZoom = gesture.startCamera.zoom * scale;
+      
+      // Use startWorld as the anchor point to prevent drift when the pinch center moves
+      // Calculate the offset so that startWorld remains at the same screen position
+      const clampedZoom = clampValue(targetZoom, minZoom, maxZoom);
+      const nextOffset = clampOffset(
+        {
+          x: center.x - gesture.startWorld.x * clampedZoom,
+          y: center.y - gesture.startWorld.y * clampedZoom
+        },
+        clampedZoom
       );
+      
+      const nextCamera = { zoom: clampedZoom, offset: nextOffset };
       gesture.movedSq = Math.max(
         gesture.movedSq,
         (center.x - gesture.startCenter.x) ** 2 + (center.y - gesture.startCenter.y) ** 2
