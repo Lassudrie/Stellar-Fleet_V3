@@ -1001,6 +1001,7 @@ useEffect(() => {
                   initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
                   onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
                   scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
+                  onOpenSurfaceView={(bodyId) => handleOpenSurfaceView(bodyId, { systemHint: systemViewSystem, returnTo: 'SYSTEM_VIEW' })}
                 />
             </FleetNameProvider>
             <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">

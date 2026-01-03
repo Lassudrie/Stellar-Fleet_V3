@@ -28,6 +28,7 @@ import {
   PlanetData,
   PlanetType,
   PlanetBodyType,
+  PlanetBody,
   Station,
   StarSystem,
   StarSystemAstro
@@ -64,6 +65,7 @@ interface SystemView3DProps {
   onCameraStateChange?: (state: SystemCameraState) => void;
   scaleFactor?: number;
   showBodyLabels?: boolean;
+  onOpenSurfaceView?: (bodyId: string) => void;
 }
 
 const KM_PER_AU = 149_597_870.7;
@@ -99,6 +101,7 @@ type OrbitingMoon = {
   orbitRadius: number;
   orbitAngle: number;
   type: MoonType;
+  isSolid?: boolean;
 };
 
 type OrbitingPlanet = {
@@ -117,6 +120,7 @@ type PlanetSource = (PlanetData & {
   planetType?: PlanetType;
   name?: string;
   habitabilityScore?: number;
+  isSolid?: boolean;
 }) | {
   id?: string;
   class?: string;
@@ -127,6 +131,7 @@ type PlanetSource = (PlanetData & {
   planetType?: PlanetType;
   name?: string;
   habitabilityScore?: number;
+  isSolid?: boolean;
 };
 
 type MoonSource = MoonData & {
@@ -134,6 +139,8 @@ type MoonSource = MoonData & {
   moonType?: MoonType;
   orbitDistanceKm?: number;
   habitabilityScore?: number;
+  id?: string;
+  isSolid?: boolean;
 };
 
 type UseMemoDisposableDeps = React.DependencyList;
@@ -284,12 +291,14 @@ const buildPlanetModel = (
     const moonOrbitKm = getMoonOrbitKm(moon as MoonSource, radiusKm);
     const moonOrbitRadius = moonOrbitKm * sceneScale;
     const moonAngle = (moonIndex / Math.max(planet.moons?.length ?? 1, 1)) * Math.PI * 2 + Math.PI / 4;
+    const moonId = (moon as MoonSource).id ?? `${planetId}-moon-${moonIndex + 1}`;
     return {
-      id: `${planetId}-moon-${moonIndex + 1}`,
+      id: moonId,
       radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
       orbitRadius: moonOrbitRadius,
       orbitAngle: moonAngle,
-      type: getMoonType(moon as MoonSource)
+      type: getMoonType(moon as MoonSource),
+      isSolid: (moon as MoonSource).isSolid
     };
   });
 
@@ -774,7 +783,6 @@ const applyMaterialOpacity = (material: Material | Material[], opacity: number) 
     mat.transparent = opacity < 1;
     mat.depthTest = false;
     mat.depthWrite = false;
-    // @ts-expect-error toneMapped exists on materials used by Text
     mat.toneMapped = false;
   });
 };
@@ -830,8 +838,6 @@ const BodyLabel: React.FC<BodyLabelProps> = ({ target, baseScale, color = '#e2e8
           maxWidth={14}
           anchorX="center"
           anchorY="bottom"
-          depthTest={false}
-          depthWrite={false}
         >
           {target.name}
         </Text>
@@ -1496,7 +1502,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   initialCameraState,
   onCameraStateChange,
   scaleFactor = 1,
-  showBodyLabels = true
+  showBodyLabels = true,
+  onOpenSurfaceView
 }) => {
   const { t } = useI18n();
   const getFleetName = useFleetName();
@@ -1521,17 +1528,40 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
   );
+  const moonBodiesByPlanetIndex = useMemo(() => {
+    const buckets: PlanetBody[][] = [];
+    let planetIndex = -1;
+    starSystem.planets.forEach((body) => {
+      if (body.bodyType === 'planet') {
+        planetIndex += 1;
+        return;
+      }
+      if (body.bodyType === 'moon' && planetIndex >= 0) {
+        buckets[planetIndex] = buckets[planetIndex] ?? [];
+        buckets[planetIndex].push(body);
+      }
+    });
+    return buckets.map(bucket => bucket.sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' })));
+  }, [starSystem.planets]);
   const sourcePlanets = useMemo<PlanetSource[]>(() => {
     if (astro?.planets?.length) {
       return astro.planets.map((planet, index) => {
         const linkedBody = planetBodies[index];
         const planetId = linkedBody?.id ?? (planet as { id?: string }).id ?? `planet-${index + 1}`;
+        const moonBodies = moonBodiesByPlanetIndex[index] ?? [];
+        const moons: MoonSource[] = (planet.moons ?? []).map((moon, moonIndex) => ({
+          ...moon,
+          id: moonBodies[moonIndex]?.id,
+          isSolid: moonBodies[moonIndex]?.isSolid ?? true
+        }));
         return {
           ...planet,
           id: planetId,
           name: linkedBody?.name,
           planetType: planet.type,
-          habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore
+          habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore,
+          isSolid: linkedBody?.isSolid ?? true,
+          moons
         };
       });
     }
@@ -1544,6 +1574,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         name: planetBody.name,
         planetType: getPlanetType(planetBody as PlanetSource),
         habitabilityScore: (planetBody as { habitabilityScore?: number }).habitabilityScore,
+        isSolid: planetBody.isSolid,
         moons: []
       }));
     }
@@ -1553,7 +1584,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       planetType: 'Terrestrial' as PlanetType,
       moons: []
     }));
-  }, [astro?.planets, planetBodies]);
+  }, [astro?.planets, moonBodiesByPlanetIndex, planetBodies]);
 
   const planets = useMemo<OrbitingPlanet[]>(() => {
     const rawPlanets = sourcePlanets.map((planet, index) => buildPlanetModel(
@@ -1670,13 +1701,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       name: t('systemView.bodyInfo.starName', { system: starSystem.name }),
       bodyType: 'star' as CelestialBodyType,
       bodySubType: astro?.primarySpectralType,
-      radiusKm: starRadiusKm
+      radiusKm: starRadiusKm,
+      isSolid: false
     };
 
     sourcePlanets.forEach((planet, index) => {
       const planetId = planet.id ?? `planet-${index + 1}`;
       const planetName = planet.name ?? t('systemView.bodyInfo.unnamedPlanet', { index: index + 1 });
       const planetType = getPlanetType(planet);
+      const surfaceBodyId = planet.id ?? planetId;
       map[planetId] = {
         id: planetId,
         name: planetName,
@@ -1684,12 +1717,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         bodySubType: planetType,
         radiusKm: getPlanetRadiusKm(planet),
         atmosphere: (planet as PlanetData).atmosphere,
-        habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore
+        habitabilityScore: (planet as { habitabilityScore?: number }).habitabilityScore,
+        isSolid: (planet as { isSolid?: boolean }).isSolid ?? true,
+        surfaceBodyId
       };
 
       const moons = (planet.moons ?? []) as MoonSource[];
       moons.forEach((moon, moonIndex) => {
-        const moonId = `${planetId}-moon-${moonIndex + 1}`;
+        const moonId = moon.id ?? `${planetId}-moon-${moonIndex + 1}`;
         const moonName = t('systemView.bodyInfo.moonName', {
           parent: planetName,
           index: moonIndex + 1
@@ -1701,7 +1736,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           bodySubType: getMoonType(moon),
           radiusKm: getMoonRadiusKm(moon),
           atmosphere: moon.atmosphere,
-          habitabilityScore: (moon as { habitabilityScore?: number }).habitabilityScore
+          habitabilityScore: (moon as { habitabilityScore?: number }).habitabilityScore,
+          isSolid: moon.isSolid ?? true,
+          surfaceBodyId: moon.id ?? moonId
         };
       });
     });
@@ -2077,6 +2114,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               isSelected={isSelectionActive}
               onClearSelection={isSelectionActive ? clearSelection : undefined}
               onCenter={() => handleCenterBody(displayedBody.id)}
+              onOpenSurfaceView={onOpenSurfaceView}
             />
           ) : displayedFleet ? (
             <SystemFleetInfoPanel
