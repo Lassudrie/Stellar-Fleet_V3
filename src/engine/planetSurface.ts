@@ -1368,7 +1368,22 @@ export const generateSurfaceMap = (params: {
 // Access/cache (was: planetSurface/access.ts)
 // ==========================================
 
-const surfaceCache = new WeakMap<GameState, Map<string, PlanetSurfaceMap>>();
+const surfaceCache = new WeakMap<PlanetSurfaceDescriptor, Map<string, PlanetSurfaceMap>>();
+
+const getOwnerKey = (ownerFactionId?: string | null): string => ownerFactionId ?? '__neutral__';
+
+const freezeSurfaceMap = (map: PlanetSurfaceMap): PlanetSurfaceMap => {
+  map.tiles.forEach(tile => Object.freeze(tile));
+  Object.freeze(map.tiles);
+
+  map.settlements.forEach(settlement => {
+    Object.freeze(settlement.coord);
+    Object.freeze(settlement);
+  });
+  Object.freeze(map.settlements);
+
+  return Object.freeze(map);
+};
 
 export const getSurfaceDescriptor = (state: GameState, bodyId: string): PlanetSurfaceDescriptor | null => {
   return state.planetSurfaceDescriptorsByBodyId?.[bodyId] ?? null;
@@ -1404,24 +1419,27 @@ export const generateSurfaceMapForState = (state: GameState, bodyId: string): Pl
   const astro = getAstroForBody(state, bodyId, descriptor);
   if (!astro) return null;
 
-  const cachedByBody = surfaceCache.get(state);
-  const cachedMap = cachedByBody?.get(bodyId);
+  const ownerKey = getOwnerKey(astro.ownerFactionId);
+  const cachedByOwner = surfaceCache.get(descriptor);
+  const cachedMap = cachedByOwner?.get(ownerKey);
   if (cachedMap) return cachedMap;
 
-  const surfaceMap = generateSurfaceMap({
-    systemId: astro.systemId,
-    bodyId,
-    descriptor,
-    planetData: astro.planetData,
-    moonData: astro.moonData,
-    ownerFactionId: astro.ownerFactionId
-  });
+  const surfaceMap = freezeSurfaceMap(
+    generateSurfaceMap({
+      systemId: astro.systemId,
+      bodyId,
+      descriptor,
+      planetData: astro.planetData,
+      moonData: astro.moonData,
+      ownerFactionId: astro.ownerFactionId
+    })
+  );
 
-  const cache = cachedByBody ?? new Map<string, PlanetSurfaceMap>();
-  if (!cachedByBody) {
-    surfaceCache.set(state, cache);
+  const cache = cachedByOwner ?? new Map<string, PlanetSurfaceMap>();
+  if (!cachedByOwner) {
+    surfaceCache.set(descriptor, cache);
   }
-  cache.set(bodyId, surfaceMap);
+  cache.set(ownerKey, surfaceMap);
 
   return surfaceMap;
 };
@@ -1737,4 +1755,3 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
     groundBuildings: nextBuildings.length > 0 ? nextBuildings : undefined
   };
 };
-

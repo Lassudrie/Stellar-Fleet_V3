@@ -41,6 +41,7 @@ import {
   layoutTacticalRing,
   makeObjectId,
   parseObjectId,
+  type TacticalRingConfig,
   type SystemObjectId
 } from './systemViewLayout';
 
@@ -298,11 +299,66 @@ const applyPlanetOrbitSpacing = (
   });
 };
 
+const applyMoonOrbitSpacing = (
+  moons: OrbitingMoon[],
+  planetRadius: number,
+  moonOrbitClearance: number
+): OrbitingMoon[] => {
+  let lastOrbitRadius = planetRadius;
+  let lastMoonRadius = 0;
+
+  return moons.map((moon, index) => {
+    const minimumDistanceFromPlanet = planetRadius + moon.radius + moonOrbitClearance;
+    const minimumDistanceFromPrevious = index === 0
+      ? minimumDistanceFromPlanet
+      : lastOrbitRadius + lastMoonRadius + moon.radius + moonOrbitClearance;
+    const adjustedOrbitRadius = Math.max(moon.orbitRadius, minimumDistanceFromPrevious);
+    lastOrbitRadius = adjustedOrbitRadius;
+    lastMoonRadius = moon.radius;
+    return { ...moon, orbitRadius: adjustedOrbitRadius };
+  });
+};
+
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
     {children}
   </group>
 );
+
+type FleetRingBaseOptions = {
+  starRadius: number;
+  focusDistanceFloor: number;
+  planets: OrbitingPlanet[];
+  safetyMargin: number;
+  minimumOrbitClearance: number;
+};
+
+const computeFleetRingBaseRadius = ({
+  starRadius,
+  focusDistanceFloor,
+  planets,
+  safetyMargin,
+  minimumOrbitClearance
+}: FleetRingBaseOptions): number => {
+  const minimumRadius = Math.max(starRadius + safetyMargin, focusDistanceFloor * 1.5);
+
+  if (!planets.length) {
+    return minimumRadius;
+  }
+
+  const closestPlanet = planets.reduce(
+    (currentClosest, planet) => (planet.orbitRadius < currentClosest.orbitRadius ? planet : currentClosest),
+    planets[0]
+  );
+  const innerOrbitLimit = closestPlanet.orbitRadius - closestPlanet.radius - minimumOrbitClearance;
+
+  if (innerOrbitLimit >= minimumRadius) {
+    return innerOrbitLimit;
+  }
+
+  const outerOrbitLimit = closestPlanet.orbitRadius + closestPlanet.radius + minimumOrbitClearance;
+  return Math.max(outerOrbitLimit, minimumRadius);
+};
 
 interface StarMeshProps {
   radius: number;
@@ -807,6 +863,8 @@ interface SystemEntitiesLayerProps {
   selectedFleetId: string | null;
   selectedObjectId: SystemObjectId | null;
   hoveredObjectId: SystemObjectId | null;
+  fleetIconScale: number;
+  fleetLayoutConfig: TacticalRingConfig;
   getFactionColor: (id: string) => string;
   onHoverObject: (objectId: SystemObjectId) => void;
   onBlurObject: (objectId: SystemObjectId) => void;
@@ -829,6 +887,8 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
   selectedFleetId,
   selectedObjectId,
   hoveredObjectId,
+  fleetIconScale,
+  fleetLayoutConfig,
   getFactionColor,
   onHoverObject,
   onBlurObject,
@@ -840,26 +900,9 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
   const stationCoreGeometry = useDisposableMemo(() => new CylinderGeometry(0.35, 0.35, 0.8, 10), []);
   const selectionRingGeometry = useDisposableMemo(() => new RingGeometry(0.9, 1.15, 32), []);
 
-  const fleetIconScale = 0.45 * clampedScale;
-  const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
-  const fleetRingSpacing = Math.max(fleetIconScale * 4, clampedScale * 1.1);
-  const fleetRingCapacity = 12;
-  const fleetRingBase = useMemo(() => {
-    if (!planets.length) {
-      return Math.max(starRadius * 4.5, focusDistanceFloor * 1.5);
-    }
-    const firstOrbitRadius = Math.min(...planets.map((planet) => planet.orbitRadius));
-    const unclamped = Math.max(starRadius * 3.2, focusDistanceFloor * 1.5);
-    return Math.min(unclamped, firstOrbitRadius * 0.7);
-  }, [focusDistanceFloor, planets, starRadius]);
-
   const fleetLayouts = useMemo(() => layoutTacticalRing(fleets, {
-    baseRadius: fleetRingBase,
-    ringSpacing: fleetRingSpacing,
-    maxPerRing: fleetRingCapacity,
-    yOffset: eclipticEpsilon,
-    rotationSpeed: 0.12
-  }, day), [day, eclipticEpsilon, fleetRingBase, fleetRingSpacing, fleets]);
+    ...fleetLayoutConfig
+  }, day), [day, fleetLayoutConfig, fleets]);
 
   const stationLayouts = useMemo(() => {
     const orderedStations = [...stations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
@@ -1164,6 +1207,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
   // Visual padding to keep planets and the star clearly separated; tune to adjust orbit spacing.
   const planetOrbitClearance = Math.max(minPlanetRadius * 2, clampedScale * 0.75);
+  const moonOrbitClearance = Math.max(minMoonRadius * 2, clampedScale * 0.35);
   const focusDistanceFloor = 2.5 * clampedScale;
   const baseCameraDistance = 12 * clampedScale;
   const defaultCameraPosition = useMemo<[number, number, number]>(
@@ -1219,8 +1263,20 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       minPlanetRadius,
       minMoonRadius
     ));
-    return applyPlanetOrbitSpacing(rawPlanets, starRadius, planetOrbitClearance);
-  }, [minMoonRadius, minPlanetRadius, planetOrbitClearance, sceneScale, sourcePlanets, starRadius]);
+    const planetsWithSpacedMoons = rawPlanets.map(planet => ({
+      ...planet,
+      moons: applyMoonOrbitSpacing(planet.moons, planet.radius, moonOrbitClearance)
+    }));
+    return applyPlanetOrbitSpacing(planetsWithSpacedMoons, starRadius, planetOrbitClearance);
+  }, [
+    minMoonRadius,
+    minPlanetRadius,
+    moonOrbitClearance,
+    planetOrbitClearance,
+    sceneScale,
+    sourcePlanets,
+    starRadius
+  ]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
@@ -1433,27 +1489,27 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [starSystem.id]);
   const fleetIconScale = 0.45 * clampedScale;
   const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
+  const fleetRingSpacing = Math.max(fleetIconScale * 4, clampedScale * 1.1);
+  const fleetSafetyMargin = Math.max(fleetIconScale * 2.6, clampedScale * 1.1);
+  const fleetOrbitClearance = Math.max(fleetRingSpacing * 0.45, fleetIconScale * 2.2, clampedScale * 0.9);
+  const fleetRingBase = useMemo(
+    () => computeFleetRingBaseRadius({
+      starRadius,
+      focusDistanceFloor,
+      planets,
+      safetyMargin: fleetSafetyMargin,
+      minimumOrbitClearance: fleetOrbitClearance
+    }),
+    [focusDistanceFloor, fleetOrbitClearance, fleetSafetyMargin, planets, starRadius]
+  );
+  const fleetLayoutConfig = useMemo<TacticalRingConfig>(() => ({
+    baseRadius: fleetRingBase,
+    ringSpacing: fleetRingSpacing,
+    maxPerRing: 12,
+    yOffset: eclipticEpsilon,
+    rotationSpeed: 0.12
+  }), [eclipticEpsilon, fleetRingBase, fleetRingSpacing]);
   const stationIconScale = 0.55 * clampedScale;
-  const fleetLayoutConfig = useMemo(() => {
-    if (!planets.length) {
-      return {
-        baseRadius: Math.max(starRadius * 4.5, focusDistanceFloor * 1.5),
-        ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
-        maxPerRing: 12,
-        yOffset: eclipticEpsilon,
-        rotationSpeed: 0.12
-      };
-    }
-    const firstOrbitRadius = Math.min(...planets.map((planet) => planet.orbitRadius));
-    const unclamped = Math.max(starRadius * 3.2, focusDistanceFloor * 1.5);
-    return {
-      baseRadius: Math.min(unclamped, firstOrbitRadius * 0.7),
-      ringSpacing: Math.max(fleetIconScale * 4, clampedScale * 1.1),
-      maxPerRing: 12,
-      yOffset: eclipticEpsilon,
-      rotationSpeed: 0.12
-    };
-  }, [clampedScale, eclipticEpsilon, fleetIconScale, focusDistanceFloor, planets, starRadius]);
   const fleetLayoutsForFocus = useMemo(
     () => layoutTacticalRing(systemFleets, fleetLayoutConfig, day),
     [day, fleetLayoutConfig, systemFleets]
@@ -1649,6 +1705,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             selectedFleetId={selectedFleetId}
             selectedObjectId={selectedObjectId}
             hoveredObjectId={hoveredObjectId}
+            fleetIconScale={fleetIconScale}
+            fleetLayoutConfig={fleetLayoutConfig}
             getFactionColor={getFactionColor}
             onHoverObject={handleHoverObject}
             onBlurObject={handleBlurObject}
