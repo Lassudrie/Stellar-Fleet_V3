@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody } from '../shared/shared';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody, PlanetSurfaceDescriptor } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -34,6 +34,23 @@ const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const SCREEN_TRANSITION_MS = 400;
 const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
+
+const areSurfaceDescriptorsEqual = (
+  a: PlanetSurfaceDescriptor | null,
+  b: PlanetSurfaceDescriptor | null
+) => {
+  if (!a || !b) return a === b;
+
+  return (
+    a.seed === b.seed &&
+    a.config.w === b.config.w &&
+    a.config.h === b.config.h &&
+    a.config.wrapX === b.config.wrapX &&
+    a.config.generatorVersion === b.config.generatorVersion &&
+    a.astroRef.planetIndex === b.astroRef.planetIndex &&
+    a.astroRef.moonIndex === b.astroRef.moonIndex
+  );
+};
 
 // ------------------------------------------------------------
 // Surface navigation helper (was: ui/navigation/surfaceNavigation.ts)
@@ -839,50 +856,90 @@ const App: React.FC = () => {
       return viewGameState.systems.find(sys => sys.id === surfaceViewSystem.id) ?? surfaceViewSystem;
   }, [surfaceViewSystem, viewGameState]);
 
-  const surfaceBody = useMemo(() => {
-      if (!surfaceSystem || !surfaceViewBodyId) return null;
-      return surfaceSystem.planets.find(planet => planet.id === surfaceViewBodyId) ?? null;
-  }, [surfaceSystem, surfaceViewBodyId]);
+const surfaceBody = useMemo(() => {
+    if (!surfaceSystem || !surfaceViewBodyId) return null;
+    return surfaceSystem.planets.find(planet => planet.id === surfaceViewBodyId) ?? null;
+}, [surfaceSystem, surfaceViewBodyId]);
 
-  const [surfaceMap, setSurfaceMap] = useState<PlanetSurfaceMap | null>(null);
-  const [surfaceMapStatus, setSurfaceMapStatus] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>('idle');
+const [surfaceMap, setSurfaceMap] = useState<PlanetSurfaceMap | null>(null);
+const [surfaceMapStatus, setSurfaceMapStatus] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>('idle');
+const surfaceDescriptor = useMemo(() => {
+    if (!viewGameState || !surfaceViewBodyId) return null;
+    return viewGameState.planetSurfaceDescriptorsByBodyId?.[surfaceViewBodyId] ?? null;
+}, [surfaceViewBodyId, viewGameState?.planetSurfaceDescriptorsByBodyId]);
+const surfaceDescriptorRef = useRef<PlanetSurfaceDescriptor | null>(null);
+const surfaceMapRef = useRef<PlanetSurfaceMap | null>(null);
 
-  useEffect(() => {
-      if (screen !== 'SURFACE_VIEW') {
-          setSurfaceMap(null);
-          setSurfaceMapStatus('idle');
-          return;
-      }
-      if (!viewGameState || !surfaceViewBodyId) {
-          setSurfaceMap(null);
-          setSurfaceMapStatus('missing');
-          return;
-      }
+useEffect(() => {
+    if (screen !== 'SURFACE_VIEW') {
+        setSurfaceMap(null);
+        setSurfaceMapStatus('idle');
+        surfaceDescriptorRef.current = null;
+        surfaceMapRef.current = null;
+        return;
+    }
+    if (!viewGameState || !surfaceViewBodyId) {
+        setSurfaceMap(null);
+        setSurfaceMapStatus('missing');
+        surfaceDescriptorRef.current = null;
+        surfaceMapRef.current = null;
+        return;
+    }
+    const descriptor = surfaceDescriptor ?? null;
+    if (!descriptor) {
+        setSurfaceMap(null);
+        setSurfaceMapStatus('missing');
+        surfaceDescriptorRef.current = null;
+        surfaceMapRef.current = null;
+        return;
+    }
 
-      let cancelled = false;
-      setSurfaceMap(null);
-      setSurfaceMapStatus('loading');
+    const descriptorChanged = !areSurfaceDescriptorsEqual(descriptor, surfaceDescriptorRef.current);
 
-      const handle = window.setTimeout(() => {
-          if (cancelled) return;
-          try {
-              const map = generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
-              if (cancelled) return;
-              setSurfaceMap(map);
-              setSurfaceMapStatus(map ? 'ready' : 'missing');
-          } catch (error) {
-              console.error('[Surface] map generation failed', error);
-              if (cancelled) return;
-              setSurfaceMap(null);
-              setSurfaceMapStatus('error');
-          }
-      }, 0);
+    if (!descriptorChanged && surfaceMapRef.current) {
+        setSurfaceMap(surfaceMapRef.current);
+        setSurfaceMapStatus('ready');
+        return;
+    }
 
-      return () => {
-          cancelled = true;
-          window.clearTimeout(handle);
-      };
-  }, [screen, surfaceViewBodyId, viewGameState]);
+    let cancelled = false;
+    setSurfaceMapStatus('loading');
+
+    if (descriptorChanged) {
+        surfaceDescriptorRef.current = descriptor;
+        surfaceMapRef.current = null;
+        setSurfaceMap(null);
+    }
+
+    const handle = window.setTimeout(() => {
+        if (cancelled) return;
+        try {
+            const map = generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
+            if (cancelled) return;
+            surfaceDescriptorRef.current = descriptor;
+            surfaceMapRef.current = map;
+            if (!map) {
+                setSurfaceMap(null);
+                setSurfaceMapStatus('missing');
+                return;
+            }
+            setSurfaceMap(map);
+            setSurfaceMapStatus('ready');
+        } catch (error) {
+            console.error('[Surface] map generation failed', error);
+            if (cancelled) return;
+            surfaceDescriptorRef.current = descriptor;
+            surfaceMapRef.current = null;
+            setSurfaceMap(null);
+            setSurfaceMapStatus('error');
+        }
+    }, 0);
+
+    return () => {
+        cancelled = true;
+        window.clearTimeout(handle);
+    };
+}, [screen, surfaceDescriptor, surfaceViewBodyId, viewGameState]);
 
   const surfaceArmies = useMemo(() => {
       if (!viewGameState || !surfaceViewBodyId) return [];
