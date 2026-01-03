@@ -52,8 +52,8 @@ interface SurfaceViewProps {
 type CameraState = { zoom: number; offset: { x: number; y: number } };
 
 const HEX_SIZE = 12;
-const MIN_ZOOM = 0.6;
-const MAX_ZOOM = 2.6;
+const MIN_ZOOM = 0.20;
+const MAX_ZOOM = 4.00;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 const PAN_MARGIN_PX = 40;
@@ -187,6 +187,15 @@ const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['config'], si
   };
 };
 
+const computeFitZoom = (viewport: { width: number; height: number }, bounds: MapBoundsPx): number => {
+  const pad = 0.94;
+  const zx = viewport.width / Math.max(1, bounds.width);
+  const zy = viewport.height / Math.max(1, bounds.height);
+  const fit = Math.min(zx, zy) * pad;
+  // Avoid auto-zooming in above 1 (keeps the feel consistent on large screens).
+  return clamp(fit, MIN_ZOOM, 1);
+};
+
 const normalizePos = (pos: SurfacePos | undefined, config: PlanetSurfaceMap['descriptor']['config']): HexCoord | null => {
   if (!pos) return null;
   const q = wrapQ(Math.round(pos.q), config.w, config.wrapX);
@@ -280,11 +289,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   useEffect(() => {
     if (!map || !activeMapConfig) return;
     const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
+    const fitZoom = computeFitZoom(viewport, bounds);
     setCamera({
-      zoom: 1,
+      zoom: fitZoom,
       offset: {
-        x: (viewport.width - bounds.width) / 2 - bounds.minX,
-        y: (viewport.height - bounds.height) / 2 - bounds.minY
+        x: (viewport.width - bounds.width * fitZoom) / 2 - bounds.minX * fitZoom,
+        y: (viewport.height - bounds.height * fitZoom) / 2 - bounds.minY * fitZoom
       }
     });
     setHovered(null);
@@ -1024,7 +1034,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       </div>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
-        <div className="pointer-events-auto m-4 p-4 bg-slate-900/80 border border-slate-700 rounded-xl backdrop-blur max-w-4xl">
+        <div className="pointer-events-auto m-4 p-4 bg-slate-900/80 border border-slate-700 rounded-xl backdrop-blur max-w-4xl w-[calc(100%-2rem)] max-h-[34vh] overflow-auto md:max-h-none">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">{t('surfaceView.header')}</p>
@@ -1097,12 +1107,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             </button>
             <button
               onClick={() => {
-                const { width, height, minX, minY } = mapBoundsPx;
+                const fitZoom = computeFitZoom(viewport, mapBoundsPx);
                 const nextOffset = {
-                  x: (viewport.width - width) / 2 - minX,
-                  y: (viewport.height - height) / 2 - minY
+                  x: (viewport.width - mapBoundsPx.width * fitZoom) / 2 - mapBoundsPx.minX * fitZoom,
+                  y: (viewport.height - mapBoundsPx.height * fitZoom) / 2 - mapBoundsPx.minY * fitZoom
                 };
-                setCamera({ zoom: 1, offset: clampOffset(nextOffset, 1) });
+                setCamera({ zoom: fitZoom, offset: clampOffset(nextOffset, fitZoom) });
               }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >
@@ -1136,7 +1146,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         </div>
 
         <div className="pointer-events-auto m-4 self-end w-full max-w-md">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur max-h-[45vh] overflow-auto md:max-h-none">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('surfaceView.tilePanel')}</p>
