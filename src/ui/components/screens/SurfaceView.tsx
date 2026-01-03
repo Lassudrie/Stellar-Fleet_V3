@@ -465,15 +465,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     tapDragThresholdSq: CLICK_DRAG_THRESHOLD_SQ
   });
 
+  const normalizeTouchPoint = useCallback((touch: React.Touch, rect: DOMRect) => ({
+    clientX: clamp(touch.clientX, rect.left, rect.right),
+    clientY: clamp(touch.clientY, rect.top, rect.bottom)
+  }), []);
+
   const touchToPointerEvent = useCallback((
     touchEvent: React.TouchEvent<HTMLCanvasElement>,
-    touch: React.Touch
+    touch: React.Touch,
+    rect: DOMRect
   ): React.PointerEvent<HTMLCanvasElement> => {
     const target = touchEvent.currentTarget;
+    const normalized = normalizeTouchPoint(touch, rect);
     return {
       pointerId: touch.identifier,
-      clientX: touch.clientX,
-      clientY: touch.clientY,
+      clientX: normalized.clientX,
+      clientY: normalized.clientY,
       currentTarget: target,
       target,
       pointerType: 'touch',
@@ -495,16 +502,21 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         }
       }
     } as unknown as React.PointerEvent<HTMLCanvasElement>;
-  }, []);
+  }, [normalizeTouchPoint]);
+
+  type TouchListLike = TouchList | React.TouchList;
 
   const forwardTouchEvent = useCallback((
     touchEvent: React.TouchEvent<HTMLCanvasElement>,
-    handler: (event: React.PointerEvent<HTMLCanvasElement>) => void
+    handler: (event: React.PointerEvent<HTMLCanvasElement>) => void,
+    touchList?: TouchListLike
   ) => {
-    for (let i = 0; i < touchEvent.changedTouches.length; i += 1) {
-      const touch = touchEvent.changedTouches.item(i);
+    const rect = touchEvent.currentTarget.getBoundingClientRect();
+    const list = touchList ?? touchEvent.changedTouches;
+    for (let i = 0; i < list.length; i += 1) {
+      const touch = list.item(i);
       if (!touch) continue;
-      const pointerLike = touchToPointerEvent(touchEvent, touch);
+      const pointerLike = touchToPointerEvent(touchEvent, touch, rect);
       handler(pointerLike);
     }
   }, [touchToPointerEvent]);
@@ -761,19 +773,23 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
-    forwardTouchEvent(event, handlePointerDown);
+    event.preventDefault();
+    forwardTouchEvent(event, handlePointerDown, event.changedTouches);
   };
 
   const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
-    forwardTouchEvent(event, handlePointerMove);
+    event.preventDefault();
+    forwardTouchEvent(event, handlePointerMove, event.touches);
   };
 
   const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
-    forwardTouchEvent(event, handlePointerUp);
+    event.preventDefault();
+    forwardTouchEvent(event, handlePointerUp, event.changedTouches);
   };
 
   const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
-    forwardTouchEvent(event, handlePointerCancel);
+    event.preventDefault();
+    forwardTouchEvent(event, handlePointerCancel, event.changedTouches);
   };
 
   const activeCoord = selected ?? hovered;
