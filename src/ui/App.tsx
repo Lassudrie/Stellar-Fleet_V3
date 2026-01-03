@@ -23,9 +23,9 @@ import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/shared';
-import { generateSurfaceMapForState } from '../engine/planetSurface';
 import { getDefaultSolidPlanet, getPlanetById } from '../engine/planets';
 import type { GameCommand } from '../engine/commands';
+import { buildSurfaceMapWorkerRequest, SurfaceMapWorkerClient } from './workers';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
 
@@ -840,10 +840,18 @@ const surfaceMapRef = useRef<PlanetSurfaceMap | null>(null);
 const surfaceMapCacheRef = useRef<Map<string, PlanetSurfaceMap>>(new Map());
 const surfaceMapKeyRef = useRef<string | null>(null);
 const viewGameStateRef = useRef<GameState | null>(null);
+const surfaceMapWorkerRef = useRef<SurfaceMapWorkerClient | null>(null);
 
 useEffect(() => {
     viewGameStateRef.current = viewGameState;
 }, [viewGameState]);
+
+useEffect(() => {
+    return () => {
+        surfaceMapWorkerRef.current?.dispose();
+        surfaceMapWorkerRef.current = null;
+    };
+}, []);
 
 const surfaceMapKey = useMemo(() => {
     if (!viewGameState || !surfaceDescriptor || !surfaceViewBodyId) return null;
@@ -881,43 +889,44 @@ useEffect(() => {
         return;
     }
 
-    if (surfaceMapKey === surfaceMapKeyRef.current) {
-        const cachedMap = surfaceMapRef.current ?? surfaceMapCacheRef.current.get(surfaceMapKey) ?? null;
-        if (cachedMap) {
-            surfaceMapRef.current = cachedMap;
-            setSurfaceMap(cachedMap);
-            setSurfaceMapStatus('ready');
-            return;
-        }
-    } else {
-        surfaceMapKeyRef.current = surfaceMapKey;
-        surfaceMapRef.current = null;
-        setSurfaceMap(null);
-    }
+    const cachedMap = surfaceMapKey === surfaceMapKeyRef.current
+        ? surfaceMapRef.current ?? surfaceMapCacheRef.current.get(surfaceMapKey) ?? null
+        : surfaceMapCacheRef.current.get(surfaceMapKey) ?? null;
 
-    const cachedMapForKey = surfaceMapCacheRef.current.get(surfaceMapKey);
-    if (cachedMapForKey) {
-        surfaceMapRef.current = cachedMapForKey;
-        setSurfaceMap(cachedMapForKey);
+    surfaceMapKeyRef.current = surfaceMapKey;
+
+    if (cachedMap) {
+        surfaceMapRef.current = cachedMap;
+        setSurfaceMap(cachedMap);
         setSurfaceMapStatus('ready');
         return;
     }
 
+    const state = viewGameStateRef.current;
+    if (!state) {
+        surfaceMapRef.current = null;
+        setSurfaceMap(null);
+        setSurfaceMapStatus('missing');
+        return;
+    }
+
+    const workerRequest = buildSurfaceMapWorkerRequest(state, surfaceViewBodyId);
+    if (!workerRequest) {
+        surfaceMapRef.current = null;
+        setSurfaceMap(null);
+        setSurfaceMapStatus('missing');
+        return;
+    }
+
+    const worker = surfaceMapWorkerRef.current ?? new SurfaceMapWorkerClient();
+    surfaceMapWorkerRef.current = worker;
+
     let cancelled = false;
     setSurfaceMapStatus('loading');
 
-    const handle = window.setTimeout(() => {
-        if (cancelled) return;
-        const state = viewGameStateRef.current;
-        if (!state) {
-            setSurfaceMap(null);
-            setSurfaceMapStatus('missing');
-            return;
-        }
-
-        try {
-            const map = generateSurfaceMapForState(state, surfaceViewBodyId);
-            if (cancelled) return;
+    worker.requestSurfaceMap(workerRequest)
+        .then(map => {
+            if (cancelled || surfaceMapKeyRef.current !== surfaceMapKey) return;
             if (!map) {
                 surfaceMapRef.current = null;
                 surfaceMapCacheRef.current.delete(surfaceMapKey);
@@ -929,19 +938,18 @@ useEffect(() => {
             surfaceMapRef.current = map;
             setSurfaceMap(map);
             setSurfaceMapStatus('ready');
-        } catch (error) {
+        })
+        .catch(error => {
             console.error('[Surface] map generation failed', error);
-            if (cancelled) return;
+            if (cancelled || surfaceMapKeyRef.current !== surfaceMapKey) return;
             surfaceMapRef.current = null;
             surfaceMapCacheRef.current.delete(surfaceMapKey);
             setSurfaceMap(null);
             setSurfaceMapStatus('error');
-        }
-    }, 0);
+        });
 
     return () => {
         cancelled = true;
-        window.clearTimeout(handle);
     };
 }, [screen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
 
