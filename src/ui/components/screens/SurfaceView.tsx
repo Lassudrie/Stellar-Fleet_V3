@@ -272,6 +272,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const activeMapConfig = map?.descriptor.config ?? null;
 
+  const buildingsOnBody = useMemo(() => {
+    if (!map) return [];
+    // Le ?. sécurise si surfacePos est optionnel côté type.
+    return buildings.filter(b => b.surfacePos?.bodyId === map.bodyId);
+  }, [buildings, map]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -310,9 +316,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         y: (viewport.height - bounds.height * fitZoom) / 2 - bounds.minY * fitZoom
       }
     });
+  }, [map?.bodyId, activeMapConfig, viewport.width, viewport.height]);
+
+  useEffect(() => {
+    // Reset UI uniquement quand on change de carte/corps, pas à chaque resize.
     setHovered(null);
     setSelected(null);
-  }, [map?.bodyId, activeMapConfig, viewport.width, viewport.height]);
+    setSelectedArmyId(null);
+    setOrderMode('none');
+  }, [map?.bodyId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -402,14 +414,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const normalizedBuildings = useMemo(() => {
     if (!map || !activeMapConfig) return [];
-    return buildings
-      .filter(building => building.surfacePos.bodyId === map.bodyId)
-      .map(building => ({
-        building,
-        coord: normalizePos(building.surfacePos, activeMapConfig) ?? deriveFallbackPos(building.id, activeMapConfig),
-        faction: factionIndex[building.factionId]
-      }));
-  }, [activeMapConfig, buildings, factionIndex, map]);
+    return buildingsOnBody.map(building => ({
+      building,
+      coord: normalizePos(building.surfacePos, activeMapConfig) ?? deriveFallbackPos(building.id, activeMapConfig),
+      faction: factionIndex[building.factionId]
+    }));
+  }, [activeMapConfig, buildingsOnBody, factionIndex, map]);
 
   const settlements = useMemo(() => {
     if (!map || !activeMapConfig) return [];
@@ -574,6 +584,20 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         const coord = pickCoord(event.clientX, event.clientY);
         setSelected(coord);
 
+        // Auto-sélection d'une armée amie UNIQUEMENT sur clic normal (pas pendant un ordre).
+        if (orderMode === 'none') {
+          if (!coord) {
+            setSelectedArmyId(null);
+          } else {
+            const friendly = normalizedArmies.find(m =>
+              m.coord.q === coord.q &&
+              m.coord.r === coord.r &&
+              m.army.factionId === playerFactionId
+            ) ?? null;
+            setSelectedArmyId(friendly?.army.id ?? null);
+          }
+        }
+
         // If the user is issuing an order, treat the click as a target selection.
         if (coord && onIssueCommand && selectedArmyId && body) {
           const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
@@ -607,29 +631,23 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return normalizedArmies.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, normalizedArmies]);
 
-  const selectedArmy = useMemo(() => {
+  const selectedArmyEntry = useMemo(() => {
     if (!selectedArmyId) return null;
-    const army = armies.find(a => a.id === selectedArmyId) ?? null;
-    if (!army) return null;
-    if (army.state !== ArmyState.DEPLOYED) return null;
-    if (!body || army.containerId !== body.id) return null;
-    return army;
-  }, [armies, body, selectedArmyId]);
+    return normalizedArmies.find(m => m.army.id === selectedArmyId) ?? null;
+  }, [normalizedArmies, selectedArmyId]);
 
-  const selectedArmyCoord = useMemo(() => {
-    if (!selectedArmy || !activeMapConfig) return null;
-    return normalizePos(selectedArmy.surfacePos, activeMapConfig);
-  }, [activeMapConfig, selectedArmy]);
+  const selectedArmy = selectedArmyEntry?.army ?? null;
+  const selectedArmyCoord = selectedArmyEntry?.coord ?? null;
 
   const supplyByFaction = useMemo(() => {
     if (!map) return new Map<FactionId, Uint16Array>();
     const mapByFaction = new Map<FactionId, Uint16Array>();
     const factionIds = Array.from(new Set(normalizedArmies.map(m => m.army.factionId)));
     factionIds.forEach(fid => {
-      mapByFaction.set(fid, computeSupplyDistanceMapFromSurfaceMap(map, buildings, fid));
+      mapByFaction.set(fid, computeSupplyDistanceMapFromSurfaceMap(map, buildingsOnBody, fid));
     });
     return mapByFaction;
-  }, [buildings, map, normalizedArmies]);
+  }, [buildingsOnBody, map, normalizedArmies]);
 
   const isArmySupplied = useCallback((army: Army, coord: HexCoord | null): boolean => {
     if (!map || !coord) return false;
@@ -659,7 +677,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const movementStepCostCenti = useCallback((from: HexCoord, to: HexCoord, army: Army): number => {
     if (!map || !zocSnapshot) return 0;
-    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, to);
+    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildingsOnBody, to);
     const baseCost = MOVE_COST[terrain];
     const affinity = clampAffinity(GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain]);
     let cost = Math.round(baseCost * affinity * 100);
@@ -670,7 +688,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (curEnemy && !nextEnemy) cost += 100;
 
     return cost;
-  }, [buildings, map, zocSnapshot]);
+  }, [buildingsOnBody, map, zocSnapshot]);
 
   const movePreview = useMemo(() => {
     if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
@@ -735,7 +753,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       .some(n => n.q === hovered.q && n.r === hovered.r);
     if (!adjacent) return null;
 
-    const terrainType = deriveTerrainTypeFromSurfaceMap(map, buildings, hovered);
+    const terrainType = deriveTerrainTypeFromSurfaceMap(map, buildingsOnBody, hovered);
     const suppliedAtt = isArmySupplied(selectedArmy, selectedArmyCoord);
     const suppliedDef = isArmySupplied(enemy, hovered);
 
@@ -748,7 +766,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
     const rRange = approxRngRange(preview.r, 0.08);
     return { enemy, terrainType, preview, rRange };
-  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, showPreview]);
+  }, [buildingsOnBody, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, showPreview]);
 
   const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
 
@@ -1006,12 +1024,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     };
   }, [map, resolvedMapStatus, scheduleDraw]);
 
-  useEffect(() => {
-    // Auto-select a friendly army when clicking an occupied tile.
-    if (!activeCoord) return;
-    const friendly = tileArmies.map(x => x.army).find(a => a.factionId === playerFactionId) ?? null;
-    setSelectedArmyId(friendly?.id ?? null);
-  }, [activeCoord, playerFactionId, tileArmies]);
 
   const tileBuildings = useMemo(() => {
     if (!map || !activeCoord) return [];
