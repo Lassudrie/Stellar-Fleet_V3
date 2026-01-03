@@ -42,7 +42,7 @@ import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { generateStellarSystem } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
-import { normalizeSurfacePositions } from './planetSurface';
+import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './planetSurface';
 
 // ============================================================
 // Save format + DTOs (was: engine/saveFormat.ts)
@@ -608,6 +608,48 @@ const sanitizePlanetSurfaceDescriptorRecord = (
   return Object.keys(out).length > 0 ? out : undefined;
 };
 
+/**
+ * Backfill missing planet surface descriptors.
+ *
+ * Why this exists:
+ * - Older save files (or debug fixtures) may predate the introduction of
+ *   `planetSurfaceDescriptorsByBodyId`.
+ * - The surface view (and ground ops validations) require descriptors to exist.
+ *
+ * We can reconstruct missing descriptors deterministically from (seed, systemId, bodyId)
+ * without consuming RNG.
+ */
+const ensurePlanetSurfaceDescriptors = (params: {
+  seed: number;
+  systems: StarSystem[];
+  existing?: Record<string, PlanetSurfaceDescriptor>;
+}): Record<string, PlanetSurfaceDescriptor> | undefined => {
+  const out: Record<string, PlanetSurfaceDescriptor> = { ...(params.existing ?? {}) };
+
+  let created = 0;
+  for (const system of params.systems) {
+    for (const body of system.planets) {
+      if (!body.isSolid) continue;
+      if (out[body.id]) continue;
+      out[body.id] = createPlanetSurfaceDescriptor({
+        gameSeed: params.seed,
+        systemId: system.id,
+        body
+      });
+      created += 1;
+    }
+  }
+
+  if (created > 0) {
+    console.warn(
+      `[Serialization] Backfilled ${created} missing planet surface descriptor(s). ` +
+        'This save was likely created by an older version.'
+    );
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   if (!aiState) return undefined;
 
@@ -1022,7 +1064,7 @@ export const deserializeGameState = (json: string): GameState => {
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
     const planetIds = new Set(systems.flatMap(system => system.planets.map(planet => planet.id)));
-    const planetSurfaceDescriptorsByBodyId = sanitizePlanetSurfaceDescriptorRecord(
+    const planetSurfaceDescriptorsByBodyIdFromSave = sanitizePlanetSurfaceDescriptorRecord(
       dto.planetSurfaceDescriptorsByBodyId,
       planetIds
     );
@@ -1340,6 +1382,12 @@ export const deserializeGameState = (json: string): GameState => {
       totalWar: true,
       unlimitedFuel: false
     };
+
+    const planetSurfaceDescriptorsByBodyId = ensurePlanetSurfaceDescriptors({
+      seed: normalizedSeed,
+      systems,
+      existing: planetSurfaceDescriptorsByBodyIdFromSave
+    });
 
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
