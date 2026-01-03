@@ -683,7 +683,7 @@ const placeSettlementsV1 = (params: {
 
   // Precompute elevations once (used by slope scoring).
   const elev = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev;
+  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev / 1000;
 
   const isLandIndex = (i: number): boolean => !isWaterBiome(tiles[i].biome);
 
@@ -812,7 +812,7 @@ const placeSettlementsV2 = (params: {
 
   // Precompute elevations once (used by slope scoring).
   const elev = new Float32Array(n);
-  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev;
+  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev / 1000;
 
   const isLandIndex = (i: number): boolean => !isWaterBiome(tiles[i].biome);
 
@@ -1124,7 +1124,8 @@ const addRivers = (params: {
   downhill.fill(-1);
 
   for (let i = 0; i < n; i += 1) {
-    if (tiles[i].elev <= seaLevelElev) continue;
+    if (elev[i] <= seaLevelElev) continue;
+    if (isWaterBiome(tiles[i].biome)) continue;
     const c = indexToAxial(i, w);
     const ns = neighborsAxial(c, w, h, wrapX);
     let best = -1;
@@ -1144,7 +1145,7 @@ const addRivers = (params: {
   order.sort((a, b) => elev[b] - elev[a]); // high->low
 
   const acc = new Uint32Array(n);
-  for (let i = 0; i < n; i += 1) acc[i] = tiles[i].elev > seaLevelElev ? 1 : 0;
+  for (let i = 0; i < n; i += 1) acc[i] = elev[i] > seaLevelElev && !isWaterBiome(tiles[i].biome) ? 1 : 0;
 
   for (const i of order) {
     const to = downhill[i];
@@ -1153,7 +1154,8 @@ const addRivers = (params: {
 
   const threshold = Math.max(25, Math.floor(n / 320));
   for (let i = 0; i < n; i += 1) {
-    if (tiles[i].elev <= seaLevelElev) continue;
+    if (elev[i] <= seaLevelElev) continue;
+    if (isWaterBiome(tiles[i].biome)) continue;
     if (tiles[i].tempC2 <= 0) continue; // <= 0°C
     if (acc[i] >= threshold) {
       tiles[i].featureBits |= FeatureBits.River;
