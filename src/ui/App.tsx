@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody, PlanetSurfaceDescriptor } from '../shared/shared';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -34,23 +34,6 @@ const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const SCREEN_TRANSITION_MS = 400;
 const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
-
-const areSurfaceDescriptorsEqual = (
-  a: PlanetSurfaceDescriptor | null,
-  b: PlanetSurfaceDescriptor | null
-) => {
-  if (!a || !b) return a === b;
-
-  return (
-    a.seed === b.seed &&
-    a.config.w === b.config.w &&
-    a.config.h === b.config.h &&
-    a.config.wrapX === b.config.wrapX &&
-    a.config.generatorVersion === b.config.generatorVersion &&
-    a.astroRef.planetIndex === b.astroRef.planetIndex &&
-    a.astroRef.moonIndex === b.astroRef.moonIndex
-  );
-};
 
 // ------------------------------------------------------------
 // Surface navigation helper (was: ui/navigation/surfaceNavigation.ts)
@@ -867,37 +850,69 @@ const surfaceDescriptor = useMemo(() => {
     if (!viewGameState || !surfaceViewBodyId) return null;
     return viewGameState.planetSurfaceDescriptorsByBodyId?.[surfaceViewBodyId] ?? null;
 }, [surfaceViewBodyId, viewGameState?.planetSurfaceDescriptorsByBodyId]);
-const surfaceDescriptorRef = useRef<PlanetSurfaceDescriptor | null>(null);
 const surfaceMapRef = useRef<PlanetSurfaceMap | null>(null);
+const surfaceMapCacheRef = useRef<Map<string, PlanetSurfaceMap>>(new Map());
+const surfaceMapKeyRef = useRef<string | null>(null);
+const viewGameStateRef = useRef<GameState | null>(null);
 
 useEffect(() => {
-    if (screen !== 'SURFACE_VIEW') {
-        setSurfaceMap(null);
-        setSurfaceMapStatus('idle');
-        surfaceDescriptorRef.current = null;
+    viewGameStateRef.current = viewGameState;
+}, [viewGameState]);
+
+const surfaceMapKey = useMemo(() => {
+    if (!viewGameState || !surfaceDescriptor || !surfaceViewBodyId) return null;
+    const match = getPlanetById(viewGameState.systems, surfaceViewBodyId);
+    if (!match) return null;
+    const { system, planet } = match;
+    const config = surfaceDescriptor.config;
+    const astro = system.astro;
+    const astroKey = astro ? `${astro.seed}|${astro.starCount}|${astro.planets.length}` : 'no-astro';
+    const ownerKey = planet.ownerFactionId ?? 'neutral';
+    const { planetIndex, moonIndex } = surfaceDescriptor.astroRef;
+
+    return [
+        surfaceViewBodyId,
+        surfaceDescriptor.seed,
+        config.w,
+        config.h,
+        config.wrapX ? 'wrap' : 'nowrap',
+        config.generatorVersion,
+        planetIndex,
+        moonIndex ?? 'no-moon',
+        astroKey,
+        ownerKey
+    ].join('|');
+}, [surfaceDescriptor, surfaceViewBodyId, viewGameState]);
+
+useEffect(() => {
+    if (screen !== 'SURFACE_VIEW') return;
+
+    if (!surfaceMapKey || !surfaceDescriptor || !surfaceViewBodyId) {
+        surfaceMapKeyRef.current = null;
         surfaceMapRef.current = null;
-        return;
-    }
-    if (!viewGameState || !surfaceViewBodyId) {
         setSurfaceMap(null);
-        setSurfaceMapStatus('missing');
-        surfaceDescriptorRef.current = null;
-        surfaceMapRef.current = null;
-        return;
-    }
-    const descriptor = surfaceDescriptor ?? null;
-    if (!descriptor) {
-        setSurfaceMap(null);
-        setSurfaceMapStatus('missing');
-        surfaceDescriptorRef.current = null;
-        surfaceMapRef.current = null;
+        setSurfaceMapStatus(surfaceDescriptor ? 'missing' : 'idle');
         return;
     }
 
-    const descriptorChanged = !areSurfaceDescriptorsEqual(descriptor, surfaceDescriptorRef.current);
+    if (surfaceMapKey === surfaceMapKeyRef.current) {
+        const cachedMap = surfaceMapRef.current ?? surfaceMapCacheRef.current.get(surfaceMapKey) ?? null;
+        if (cachedMap) {
+            surfaceMapRef.current = cachedMap;
+            setSurfaceMap(cachedMap);
+            setSurfaceMapStatus('ready');
+            return;
+        }
+    } else {
+        surfaceMapKeyRef.current = surfaceMapKey;
+        surfaceMapRef.current = null;
+        setSurfaceMap(null);
+    }
 
-    if (!descriptorChanged && surfaceMapRef.current) {
-        setSurfaceMap(surfaceMapRef.current);
+    const cachedMapForKey = surfaceMapCacheRef.current.get(surfaceMapKey);
+    if (cachedMapForKey) {
+        surfaceMapRef.current = cachedMapForKey;
+        setSurfaceMap(cachedMapForKey);
         setSurfaceMapStatus('ready');
         return;
     }
@@ -905,31 +920,34 @@ useEffect(() => {
     let cancelled = false;
     setSurfaceMapStatus('loading');
 
-    if (descriptorChanged) {
-        surfaceDescriptorRef.current = descriptor;
-        surfaceMapRef.current = null;
-        setSurfaceMap(null);
-    }
-
     const handle = window.setTimeout(() => {
         if (cancelled) return;
+        const state = viewGameStateRef.current;
+        if (!state) {
+            setSurfaceMap(null);
+            setSurfaceMapStatus('missing');
+            return;
+        }
+
         try {
-            const map = generateSurfaceMapForState(viewGameState, surfaceViewBodyId);
+            const map = generateSurfaceMapForState(state, surfaceViewBodyId);
             if (cancelled) return;
-            surfaceDescriptorRef.current = descriptor;
-            surfaceMapRef.current = map;
             if (!map) {
+                surfaceMapRef.current = null;
+                surfaceMapCacheRef.current.delete(surfaceMapKey);
                 setSurfaceMap(null);
                 setSurfaceMapStatus('missing');
                 return;
             }
+            surfaceMapCacheRef.current.set(surfaceMapKey, map);
+            surfaceMapRef.current = map;
             setSurfaceMap(map);
             setSurfaceMapStatus('ready');
         } catch (error) {
             console.error('[Surface] map generation failed', error);
             if (cancelled) return;
-            surfaceDescriptorRef.current = descriptor;
             surfaceMapRef.current = null;
+            surfaceMapCacheRef.current.delete(surfaceMapKey);
             setSurfaceMap(null);
             setSurfaceMapStatus('error');
         }
@@ -939,7 +957,7 @@ useEffect(() => {
         cancelled = true;
         window.clearTimeout(handle);
     };
-}, [screen, surfaceDescriptor, surfaceViewBodyId, viewGameState]);
+}, [screen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
 
   const surfaceArmies = useMemo(() => {
       if (!viewGameState || !surfaceViewBodyId) return [];
