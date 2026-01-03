@@ -750,6 +750,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return { enemy, terrainType, preview, rRange };
   }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, showPreview]);
 
+  const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
+
   const draw = useCallback(() => {
     if (!map || !activeMapConfig) return;
     const canvas = canvasRef.current;
@@ -978,13 +980,23 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     viewport.width
   ]);
 
-  useEffect(() => {
+  const scheduleDraw = useCallback(() => {
+    if (drawRafRef.current !== null) {
+      window.cancelAnimationFrame(drawRafRef.current);
+    }
+
     const rafId = window.requestAnimationFrame(() => {
       drawRafRef.current = null;
       draw();
     });
 
     drawRafRef.current = rafId;
+  }, [draw]);
+
+  useEffect(() => {
+    if (!map || resolvedMapStatus !== 'ready') return;
+
+    scheduleDraw();
 
     return () => {
       if (drawRafRef.current !== null) {
@@ -992,7 +1004,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         drawRafRef.current = null;
       }
     };
-  }, [draw]);
+  }, [map, resolvedMapStatus, scheduleDraw]);
 
   useEffect(() => {
     // Auto-select a friendly army when clicking an occupied tile.
@@ -1005,8 +1017,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!map || !activeCoord) return [];
     return normalizedBuildings.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, normalizedBuildings]);
-
-  const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
 
   const renderPlaceholder = (title: string, subtitle?: string) => (
     <div className="relative w-full h-screen bg-slate-950 text-white flex items-center justify-center">
