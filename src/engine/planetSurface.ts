@@ -415,7 +415,7 @@ const quantile = (values: Float32Array, q: number): number => {
 const isWaterBiome = (b: Biome): boolean => b === 'ocean' || b === 'coast' || b === 'lake';
 
 const computeOceanConnectedMask = (waterMask: Uint8Array, w: number, h: number, wrapX: boolean): Uint8Array => {
-  // Flood-fill from north & south edges to mark "ocean-connected" water.
+  // Flood-fill from north & south edges (and west/east when not wrapping) to mark "ocean-connected" water.
   const ocean = new Uint8Array(w * h);
   const queue = new Int32Array(w * h);
   let head = 0;
@@ -431,6 +431,15 @@ const computeOceanConnectedMask = (waterMask: Uint8Array, w: number, h: number, 
     const bottom = (h - 1) * w + q;
     if (waterMask[top] && !ocean[top]) push(top);
     if (waterMask[bottom] && !ocean[bottom]) push(bottom);
+  }
+
+  if (!wrapX) {
+    for (let r = 0; r < h; r += 1) {
+      const left = r * w;
+      const right = r * w + (w - 1);
+      if (waterMask[left] && !ocean[left]) push(left);
+      if (waterMask[right] && !ocean[right]) push(right);
+    }
   }
 
   while (head < tail) {
