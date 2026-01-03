@@ -3,12 +3,16 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Billboard, OrbitControls, Text } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
+  Camera,
   ConeGeometry,
   CylinderGeometry,
+  Group,
   InstancedMesh,
+  Material,
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Mesh,
   Object3D,
   RingGeometry,
   Spherical,
@@ -59,6 +63,7 @@ interface SystemView3DProps {
   initialCameraState?: SystemCameraState;
   onCameraStateChange?: (state: SystemCameraState) => void;
   scaleFactor?: number;
+  showBodyLabels?: boolean;
 }
 
 const KM_PER_AU = 149_597_870.7;
@@ -134,6 +139,18 @@ type MoonSource = MoonData & {
 type UseMemoDisposableDeps = React.DependencyList;
 
 type CelestialBodyType = PlanetBodyType | 'star';
+
+type BodyLabelTarget = {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  radius: number;
+  kind: 'planet' | 'moon';
+  parent?: {
+    position: [number, number, number];
+    radius: number;
+  };
+};
 
 type CameraSphericalState = {
   theta: number;
@@ -552,6 +569,160 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           />
         ))}
       </group>
+    </group>
+  );
+};
+
+type BodyLabelEvaluation = {
+  visible: boolean;
+  scale: number;
+  opacity: number;
+};
+
+type LabelComputationScratch = {
+  worldPosition: Vector3;
+  projectedPosition: Vector3;
+  parentWorldPosition: Vector3;
+  parentProjectedPosition: Vector3;
+};
+
+const createBodyLabelState = (
+  target: BodyLabelTarget,
+  camera: Camera,
+  baseScale: number,
+  labelOffset: number,
+  scratch: LabelComputationScratch
+): BodyLabelEvaluation => {
+  const { worldPosition, projectedPosition, parentWorldPosition, parentProjectedPosition } = scratch;
+  worldPosition.set(...target.position);
+  worldPosition.y += labelOffset;
+  projectedPosition.copy(worldPosition).project(camera);
+
+  const isOnScreen = projectedPosition.z > -1 && projectedPosition.z < 1
+    && Math.abs(projectedPosition.x) <= 1.02
+    && Math.abs(projectedPosition.y) <= 1.02;
+
+  if (!isOnScreen) {
+    return {
+      visible: false,
+      scale: 1,
+      opacity: 0
+    };
+  }
+
+  const distance = camera.position.distanceTo(worldPosition);
+  const targetMinScale = baseScale * 0.32;
+  const targetMaxScale = baseScale * (target.kind === 'planet' ? 1.6 : 1.25);
+  const angularScale = MathUtils.clamp((target.radius * 8) / Math.max(distance, 0.001), targetMinScale, targetMaxScale);
+  const fadeStart = Math.max(target.radius * (target.kind === 'planet' ? 28 : 22), baseScale * 5);
+  const fadeEnd = fadeStart * 1.9;
+  const distanceFade = MathUtils.clamp(1 - (distance - fadeStart) / (fadeEnd - fadeStart), 0, 1);
+  const minOpacity = target.kind === 'planet' ? 0.35 : 0.18;
+  const maxOpacity = target.kind === 'planet' ? 1 : 0.88;
+  let opacity = MathUtils.lerp(minOpacity, maxOpacity, distanceFade);
+
+  if (target.parent) {
+    parentWorldPosition.set(...target.parent.position);
+    parentWorldPosition.y += Math.max(target.parent.radius * 1.2, baseScale * 0.2);
+    parentProjectedPosition.copy(parentWorldPosition).project(camera);
+    const screenDistance = projectedPosition.distanceTo(parentProjectedPosition);
+    const overlapThreshold = 0.18;
+    const overlapFactor = MathUtils.clamp(screenDistance / overlapThreshold, 0, 1);
+    opacity *= MathUtils.lerp(0.35, 1, overlapFactor);
+  }
+
+  return {
+    visible: true,
+    scale: angularScale,
+    opacity
+  };
+};
+
+const applyMaterialOpacity = (material: Material | Material[], opacity: number) => {
+  const materials = Array.isArray(material) ? material : [material];
+  materials.forEach((mat) => {
+    mat.opacity = opacity;
+    mat.transparent = opacity < 1;
+    mat.depthTest = false;
+    mat.depthWrite = false;
+    // @ts-expect-error toneMapped exists on materials used by Text
+    mat.toneMapped = false;
+  });
+};
+
+interface BodyLabelProps {
+  target: BodyLabelTarget;
+  baseScale: number;
+  color?: string;
+}
+
+const BodyLabel: React.FC<BodyLabelProps> = ({ target, baseScale, color = '#e2e8f0' }) => {
+  const { camera } = useThree();
+  const groupRef = useRef<Group | null>(null);
+  const textRef = useRef<Mesh | null>(null);
+  const scratch = useMemo<LabelComputationScratch>(() => ({
+    worldPosition: new Vector3(),
+    projectedPosition: new Vector3(),
+    parentWorldPosition: new Vector3(),
+    parentProjectedPosition: new Vector3()
+  }), []);
+  const labelOffset = useMemo(
+    () => Math.max(target.radius * 1.25, baseScale * 0.22),
+    [baseScale, target.radius]
+  );
+  const fontSize = useMemo(
+    () => MathUtils.clamp(target.radius * 0.7, baseScale * 0.32, baseScale * 1.25),
+    [baseScale, target.radius]
+  );
+
+  useFrame(() => {
+    const group = groupRef.current;
+    const text = textRef.current;
+    if (!group || !text) return;
+
+    const { visible, scale, opacity } = createBodyLabelState(target, camera, baseScale, labelOffset, scratch);
+    group.visible = visible;
+    if (!visible) return;
+
+    group.scale.setScalar(scale);
+    applyMaterialOpacity(text.material, opacity);
+  });
+
+  return (
+    <group ref={groupRef} position={target.position}>
+      <Billboard position={[0, labelOffset, 0]} frustumCulled={false}>
+        <Text
+          ref={textRef}
+          fontSize={fontSize}
+          color={color}
+          outlineWidth={fontSize * 0.16}
+          outlineColor="#0f172a"
+          outlineOpacity={0.85}
+          maxWidth={14}
+          anchorX="center"
+          anchorY="bottom"
+          depthTest={false}
+          depthWrite={false}
+        >
+          {target.name}
+        </Text>
+      </Billboard>
+    </group>
+  );
+};
+
+interface SystemBodyLabelsProps {
+  labels: BodyLabelTarget[];
+  baseScale: number;
+}
+
+const SystemBodyLabels: React.FC<SystemBodyLabelsProps> = ({ labels, baseScale }) => {
+  if (!labels.length) return null;
+  return (
+    <group name="SystemBodyLabels">
+      {labels.map((label) => (
+        <BodyLabel key={label.id} target={label} baseScale={baseScale} />
+      ))}
     </group>
   );
 };
@@ -1195,7 +1366,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   onInspectFleet,
   initialCameraState,
   onCameraStateChange,
-  scaleFactor = 1
+  scaleFactor = 1,
+  showBodyLabels = true
 }) => {
   const { t } = useI18n();
   const getFleetName = useFleetName();
@@ -1587,6 +1759,42 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   useEffect(() => {
     setAnchoredBodyId(resolvedAnchoredBodyId ?? starBodyId);
   }, [resolvedAnchoredBodyId, starBodyId]);
+  const bodyLabels = useMemo<BodyLabelTarget[]>(() => {
+    const labels: BodyLabelTarget[] = [];
+
+    planets.forEach((planet) => {
+      const planetPosition = bodyWorldPositions[planet.id];
+      const planetRadius = bodyRadii[planet.id];
+      if (planetPosition && planetRadius) {
+        labels.push({
+          id: planet.id,
+          name: bodyInfoMap[planet.id]?.name ?? planet.id,
+          position: planetPosition,
+          radius: planetRadius,
+          kind: 'planet'
+        });
+      }
+      planet.moons.forEach((moon) => {
+        const moonPosition = bodyWorldPositions[moon.id];
+        const moonRadius = bodyRadii[moon.id];
+        if (moonPosition && moonRadius && planetPosition && planetRadius) {
+          labels.push({
+            id: moon.id,
+            name: bodyInfoMap[moon.id]?.name ?? moon.id,
+            position: moonPosition,
+            radius: moonRadius,
+            kind: 'moon',
+            parent: {
+              position: planetPosition,
+              radius: planetRadius
+            }
+          });
+        }
+      });
+    });
+
+    return labels;
+  }, [bodyInfoMap, bodyRadii, bodyWorldPositions, planets]);
   const requestFocusOnPoint = useCallback((
     position: [number, number, number],
     radius: number,
@@ -1662,22 +1870,22 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         />
 
         <SystemRoot>
-            <StarMesh
-              radius={starRadius}
-              color={primaryColor}
-              geometry={starGeometry}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                requestFocusOnBody(starBodyId);
-              }}
-              onHover={() => handleHoverBody(starBodyId)}
-              onBlur={() => handleBlurBody(starBodyId)}
-              onSelect={() => handleSelectBody(starBodyId)}
-            />
-            {planets.map(planet => (
-              <PlanetOrbitGroup
-                key={planet.id}
-                planet={planet}
+          <StarMesh
+            radius={starRadius}
+            color={primaryColor}
+            geometry={starGeometry}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              requestFocusOnBody(starBodyId);
+            }}
+            onHover={() => handleHoverBody(starBodyId)}
+            onBlur={() => handleBlurBody(starBodyId)}
+            onSelect={() => handleSelectBody(starBodyId)}
+          />
+          {planets.map(planet => (
+            <PlanetOrbitGroup
+              key={planet.id}
+              planet={planet}
               orbitMaterial={orbitMaterial}
               planetGeometry={planetGeometry}
               moonGeometry={moonGeometry}
@@ -1713,6 +1921,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             onSelectObject={handleSelectObject}
             onFocusPoint={requestFocusOnPoint}
           />
+          {showBodyLabels && (
+            <SystemBodyLabels
+              labels={bodyLabels}
+              baseScale={clampedScale}
+            />
+          )}
         </SystemRoot>
       </Canvas>
       <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
