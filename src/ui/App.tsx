@@ -86,7 +86,6 @@ const App: React.FC = () => {
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
   const [surfaceViewBodyId, setSurfaceViewBodyId] = useState<string | null>(null);
   const [surfaceViewSystem, setSurfaceViewSystem] = useState<StarSystem | null>(null);
-  const [surfaceReturnTarget, setSurfaceReturnTarget] = useState<'GAME' | 'SYSTEM_VIEW'>('GAME');
   const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
   const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
   const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW' | null>(null);
@@ -563,24 +562,11 @@ const App: React.FC = () => {
       setSurfaceViewSystem(context.system);
       setSystemViewSystem(context.system);
       setSurfaceViewBodyId(context.body.id);
-      setSurfaceReturnTarget(options?.returnTo ?? 'GAME');
 
       beginScreenTransition('SURFACE_VIEW', () => {
           setUiMode('NONE');
           setMenuPosition(null);
       });
-  };
-
-  const handleSelectSurfaceBody = (bodyId: string) => {
-      if (!viewGameState) return;
-      const context = resolveSurfaceContext({
-          systems: viewGameState.systems,
-          bodyId,
-          preferredSystemId: surfaceViewSystem?.id ?? null
-      });
-      if (!context) return;
-      setSurfaceViewSystem(context.system);
-      setSurfaceViewBodyId(context.body.id);
   };
 
   const handleLeaveSurfaceView = (destination: 'GAME' | 'SYSTEM_VIEW') => {
@@ -971,11 +957,6 @@ useEffect(() => {
       return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === surfaceViewBodyId);
   }, [surfaceViewBodyId, viewGameState]);
 
-  const surfaceBodies = useMemo(
-      () => surfaceSystem?.planets.filter(planet => planet.isSolid) ?? [],
-      [surfaceSystem]
-  );
-
   if (loading) return <LoadingScreen />;
 
   const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW' || pendingScreen === 'SURFACE_VIEW';
@@ -1074,9 +1055,6 @@ useEffect(() => {
               buildings={surfaceBuildings}
               factions={viewGameState.factions}
               playerFactionId={viewGameState.playerFactionId}
-              availableBodies={surfaceBodies}
-              primaryReturn={surfaceReturnTarget}
-              onSelectBody={handleSelectSurfaceBody}
               onBackToGalaxy={() => handleLeaveSurfaceView('GAME')}
               onBackToSystem={surfaceSystem ? () => handleLeaveSurfaceView('SYSTEM_VIEW') : undefined}
               onIssueCommand={handleSurfaceIssueCommand}
