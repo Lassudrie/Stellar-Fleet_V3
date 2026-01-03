@@ -278,6 +278,26 @@ const buildPlanetModel = (
   return { id: planetId, radius, orbitRadius, orbitAngle, type: planetType, moons };
 };
 
+const applyPlanetOrbitSpacing = (
+  planets: OrbitingPlanet[],
+  starRadius: number,
+  planetOrbitClearance: number
+): OrbitingPlanet[] => {
+  let lastOrbitRadius = starRadius;
+  let lastPlanetRadius = 0;
+
+  return planets.map((planet, index) => {
+    const minimumDistanceFromStar = starRadius + planet.radius + planetOrbitClearance;
+    const minimumDistanceFromPrevious = index === 0
+      ? minimumDistanceFromStar
+      : lastOrbitRadius + lastPlanetRadius + planet.radius + planetOrbitClearance;
+    const adjustedOrbitRadius = Math.max(planet.orbitRadius, minimumDistanceFromPrevious);
+    lastOrbitRadius = adjustedOrbitRadius;
+    lastPlanetRadius = planet.radius;
+    return { ...planet, orbitRadius: adjustedOrbitRadius };
+  });
+};
+
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
     {children}
@@ -1142,12 +1162,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
   const minMoonRadius = minPlanetRadius / 3;
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
+  // Visual padding to keep planets and the star clearly separated; tune to adjust orbit spacing.
+  const planetOrbitClearance = Math.max(minPlanetRadius * 2, clampedScale * 0.75);
   const focusDistanceFloor = 2.5 * clampedScale;
   const baseCameraDistance = 12 * clampedScale;
   const defaultCameraPosition = useMemo<[number, number, number]>(
     () => [0, 6 * clampedScale, 12 * clampedScale],
     [clampedScale]
   );
+  const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
+  const starRadius = Math.max(starRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
   const planetBodies = useMemo(
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
@@ -1187,7 +1211,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [astro?.planets, planetBodies]);
 
   const planets = useMemo<OrbitingPlanet[]>(() => {
-    return sourcePlanets.map((planet, index) => buildPlanetModel(
+    const rawPlanets = sourcePlanets.map((planet, index) => buildPlanetModel(
       planet,
       index,
       sourcePlanets.length,
@@ -1195,7 +1219,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       minPlanetRadius,
       minMoonRadius
     ));
-  }, [minMoonRadius, minPlanetRadius, sceneScale, sourcePlanets]);
+    return applyPlanetOrbitSpacing(rawPlanets, starRadius, planetOrbitClearance);
+  }, [minMoonRadius, minPlanetRadius, planetOrbitClearance, sceneScale, sourcePlanets, starRadius]);
 
   const orbitMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
@@ -1237,8 +1262,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const planetGeometry = useDisposableMemo(() => new SphereGeometry(1, 48, 48), []);
   const moonGeometry = useDisposableMemo(() => new SphereGeometry(1, 32, 32), []);
 
-  const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
-  const starRadius = Math.max(starRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
   const starBodyId = useMemo(() => `${starSystem.id}-star-primary`, [starSystem.id]);
   const primaryColor = starSystem.color || '#7dd3fc';
   const bodyWorldPositions = useMemo<Record<string, [number, number, number]>>(() => {
