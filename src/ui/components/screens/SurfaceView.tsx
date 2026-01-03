@@ -57,6 +57,7 @@ const MAX_ZOOM = 4.00;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 const PAN_MARGIN_PX = 40;
+const CENTER_SLOP_PX = 24; // tolerance to prevent hard snapping when map is smaller than viewport
 
 const biomeColors: Record<Biome, string> = {
   ocean: '#0ea5e9',
@@ -241,6 +242,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const drawRafRef = useRef<number | null>(null);
+  const userCameraRef = useRef(false);
+  const lastViewportRef = useRef<{ width: number; height: number }>({ width: 1280, height: 720 });
+  const lastFittedBodyIdRef = useRef<string | null>(null);
   const panRef = useRef<{
     pointerId: number;
     startX: number;
@@ -288,6 +292,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
+    const bodyId = map.bodyId;
+    const mapChanged = lastFittedBodyIdRef.current !== bodyId;
+    if (mapChanged) {
+      lastFittedBodyIdRef.current = bodyId;
+      userCameraRef.current = false; // new map => allow auto-fit
+    }
+    // If the user already interacted with the camera, do not re-fit on every viewport change.
+    if (userCameraRef.current && !mapChanged) return;
+
     const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
     const fitZoom = computeFitZoom(viewport, bounds);
     setCamera({
@@ -328,7 +341,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       let y = offset.y;
 
       if (mapW <= viewport.width) {
-        x = (viewport.width - mapW) / 2 - bounds.minX * zoom;
+        // Do NOT hard-snap to center; clamp around center with a small tolerance to avoid jumps.
+        const centerX = (viewport.width - mapW) / 2 - bounds.minX * zoom;
+        x = clamp(x, centerX - CENTER_SLOP_PX, centerX + CENTER_SLOP_PX);
       } else {
         const minX = viewport.width - PAN_MARGIN_PX - bounds.maxX * zoom;
         const maxX = PAN_MARGIN_PX - bounds.minX * zoom;
@@ -336,7 +351,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       }
 
       if (mapH <= viewport.height) {
-        y = (viewport.height - mapH) / 2 - bounds.minY * zoom;
+        const centerY = (viewport.height - mapH) / 2 - bounds.minY * zoom;
+        y = clamp(y, centerY - CENTER_SLOP_PX, centerY + CENTER_SLOP_PX);
       } else {
         const minY = viewport.height - PAN_MARGIN_PX - bounds.maxY * zoom;
         const maxY = PAN_MARGIN_PX - bounds.minY * zoom;
@@ -347,6 +363,28 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     },
     [activeMapConfig, viewport.height, viewport.width]
   );
+
+  // When viewport changes on mobile (address bar / chrome), preserve the world center to avoid jumps,
+  // but only once the user has interacted with the camera.
+  useEffect(() => {
+    const prevVp = lastViewportRef.current;
+    const nextVp = viewport;
+    if (prevVp.width === nextVp.width && prevVp.height === nextVp.height) return;
+
+    if (map && activeMapConfig && userCameraRef.current) {
+      setCamera(prev => {
+        const prevCenterWorldX = (prevVp.width / 2 - prev.offset.x) / prev.zoom;
+        const prevCenterWorldY = (prevVp.height / 2 - prev.offset.y) / prev.zoom;
+        const nextOffset = {
+          x: nextVp.width / 2 - prevCenterWorldX * prev.zoom,
+          y: nextVp.height / 2 - prevCenterWorldY * prev.zoom
+        };
+        return { ...prev, offset: clampOffset(nextOffset, prev.zoom) };
+      });
+    }
+
+    lastViewportRef.current = nextVp;
+  }, [viewport.width, viewport.height, map, activeMapConfig, clampOffset]);
 
   const normalizedArmies = useMemo(() => {
     if (!map || !activeMapConfig) return [];
@@ -439,6 +477,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
     event.preventDefault();
     if (!map) return;
+    userCameraRef.current = true;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -491,6 +530,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       }
 
       if (panRef.current.didPan) {
+        userCameraRef.current = true;
         const nextOffset = {
           x: panRef.current.offsetX + dx,
           y: panRef.current.offsetY + dy
@@ -1071,6 +1111,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               onClick={() => {
+                userCameraRef.current = true;
                 const focusX = viewport.width / 2;
                 const focusY = viewport.height / 2;
                 setCamera(prev => {
@@ -1089,6 +1130,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             </button>
             <button
               onClick={() => {
+                userCameraRef.current = true;
                 const focusX = viewport.width / 2;
                 const focusY = viewport.height / 2;
                 setCamera(prev => {
@@ -1112,6 +1154,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                   x: (viewport.width - mapBoundsPx.width * fitZoom) / 2 - mapBoundsPx.minX * fitZoom,
                   y: (viewport.height - mapBoundsPx.height * fitZoom) / 2 - mapBoundsPx.minY * fitZoom
                 };
+                userCameraRef.current = false; // reset is a deliberate baseline
                 setCamera({ zoom: fitZoom, offset: clampOffset(nextOffset, fitZoom) });
               }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
