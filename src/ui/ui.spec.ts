@@ -8,7 +8,7 @@ import { Fleet, FleetState, GameMessage, ShipType, StarSystem } from '../shared/
 
 import { computeHiddenToastState, selectActiveToastMessages } from './components/ui/MessageToasts';
 
-import { clampCameraToBounds, createClampScratch, ClampBounds } from './components/GameCamera';
+import { clampCameraToBounds, createClampScratch, ClampBounds } from './hooks';
 
 import { vec3 } from '../engine/math/vec3';
 import { getSystemFleets, hashStringToAngle, layoutTacticalRing } from './components/screens/systemViewLayout';
@@ -566,4 +566,3 @@ assert.strictEqual(getInitialLocale(), 'en');
 }
 
 console.log('ui tests passed');
-

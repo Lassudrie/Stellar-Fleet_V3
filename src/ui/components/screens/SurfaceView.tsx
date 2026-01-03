@@ -31,6 +31,7 @@ import {
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
 import { fnv1a32, isPassable, neighborsAxial } from '../../../engine/planetSurface';
+import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
@@ -245,20 +246,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const userCameraRef = useRef(false);
   const lastViewportRef = useRef<{ width: number; height: number }>({ width: 1280, height: 720 });
   const lastFittedBodyIdRef = useRef<string | null>(null);
-  const panRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    offsetX: number;
-    offsetY: number;
-    didPan: boolean;
-    movedSq: number;
-  } | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [camera, setCamera] = useState<CameraState>({ zoom: 1, offset: { x: 0, y: 0 } });
   const [hovered, setHovered] = useState<HexCoord | null>(null);
   const [selected, setSelected] = useState<HexCoord | null>(null);
-  const [isPanning, setIsPanning] = useState(false);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
   const [showReachable, setShowReachable] = useState(true);
@@ -363,6 +354,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     },
     [activeMapConfig, viewport.height, viewport.width]
   );
+
+  const cameraControls = useMapControlsCamera({
+    camera,
+    clampOffset,
+    maxZoom: MAX_ZOOM,
+    minZoom: MIN_ZOOM,
+    setCamera,
+    tapDragThresholdSq: CLICK_DRAG_THRESHOLD_SQ
+  });
 
   // When viewport changes on mobile (address bar / chrome), preserve the world center to avoid jumps,
   // but only once the user has interacted with the camera.
@@ -475,72 +475,19 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   // draw() is defined later, after overlay computations.
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    if (!map) return;
     userCameraRef.current = true;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const focusX = event.clientX - rect.left;
-    const focusY = event.clientY - rect.top;
-    const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
-
-    setCamera(prev => {
-      const nextZoom = clamp(prev.zoom * zoomFactor, MIN_ZOOM, MAX_ZOOM);
-      const scale = nextZoom / prev.zoom;
-      const nextOffset = {
-        x: focusX - (focusX - prev.offset.x) * scale,
-        y: focusY - (focusY - prev.offset.y) * scale
-      };
-      return {
-        zoom: nextZoom,
-        offset: {
-          ...clampOffset(nextOffset, nextZoom)
-        }
-      };
-    });
+    cameraControls.handleWheel(event);
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!canvasRef.current) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    panRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      offsetX: camera.offset.x,
-      offsetY: camera.offset.y,
-      didPan: false,
-      movedSq: 0
-    };
+    userCameraRef.current = true;
+    cameraControls.handlePointerDown(event);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (panRef.current && panRef.current.pointerId === event.pointerId) {
-      const dx = event.clientX - panRef.current.startX;
-      const dy = event.clientY - panRef.current.startY;
-      const movedSq = dx * dx + dy * dy;
-
-      panRef.current.movedSq = movedSq;
-
-      if (!panRef.current.didPan && movedSq >= CLICK_DRAG_THRESHOLD_SQ) {
-        panRef.current.didPan = true;
-        setIsPanning(true);
-      }
-
-      if (panRef.current.didPan) {
-        userCameraRef.current = true;
-        const nextOffset = {
-          x: panRef.current.offsetX + dx,
-          y: panRef.current.offsetY + dy
-        };
-
-        setCamera(prev => ({
-          ...prev,
-          offset: clampOffset(nextOffset, prev.zoom)
-        }));
-      }
+    const interacting = cameraControls.handlePointerMove(event);
+    if (interacting) {
+      setHovered(null);
       return;
     }
 
@@ -550,54 +497,36 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     setHovered(prev => (sameHex(prev, coord) ? prev : coord));
   };
 
-  const clearPan = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!panRef.current) return;
-    if (event.pointerId !== panRef.current.pointerId) return;
-
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture can already be released/canceled; ignore.
-    }
-    panRef.current = null;
-    setIsPanning(false);
-  };
-
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const pan = panRef.current;
-    if (pan && pan.pointerId === event.pointerId) {
-      const isClick = !pan.didPan && pan.movedSq < CLICK_DRAG_THRESHOLD_SQ;
+    const wasTap = cameraControls.handlePointerUp(event);
+    if (!wasTap || !map) return;
 
-      clearPan(event);
+    const coord = pickCoord(event.clientX, event.clientY);
+    setSelected(coord);
 
-      if (isClick && map) {
-        const coord = pickCoord(event.clientX, event.clientY);
-        setSelected(coord);
-
-        // If the user is issuing an order, treat the click as a target selection.
-        if (coord && onIssueCommand && selectedArmyId && body) {
-          const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
-          if (selectedArmy && selectedArmy.state === ArmyState.DEPLOYED && selectedArmy.containerId === body.id) {
-            if (orderMode === 'move') {
-              onIssueCommand({ type: 'ORDER_GROUND_MOVE', armyId: selectedArmyId, to: { bodyId: body.id, q: coord.q, r: coord.r } });
-              setOrderMode('none');
-            } else if (orderMode === 'attack') {
-              const target = normalizedArmies
-                .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
-                .map(m => m.army)
-                .find(a => a.factionId !== playerFactionId);
-              if (target) {
-                onIssueCommand({ type: 'ORDER_GROUND_ATTACK', attackerId: selectedArmyId, targetArmyId: target.id });
-                setOrderMode('none');
-              }
-            }
+    if (coord && onIssueCommand && selectedArmyId && body) {
+      const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
+      if (selectedArmy && selectedArmy.state === ArmyState.DEPLOYED && selectedArmy.containerId === body.id) {
+        if (orderMode === 'move') {
+          onIssueCommand({ type: 'ORDER_GROUND_MOVE', armyId: selectedArmyId, to: { bodyId: body.id, q: coord.q, r: coord.r } });
+          setOrderMode('none');
+        } else if (orderMode === 'attack') {
+          const target = normalizedArmies
+            .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
+            .map(m => m.army)
+            .find(a => a.factionId !== playerFactionId);
+          if (target) {
+            onIssueCommand({ type: 'ORDER_GROUND_ATTACK', attackerId: selectedArmyId, targetArmyId: target.id });
+            setOrderMode('none');
           }
         }
       }
-      return;
     }
+  };
 
-    clearPan(event);
+  const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    cameraControls.handlePointerCancel(event);
+    setHovered(null);
   };
 
   const activeCoord = selected ?? hovered;
@@ -1072,14 +1001,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       <div ref={containerRef} className="absolute inset-0">
         <canvas
           ref={canvasRef}
-          className={`w-full h-full touch-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`w-full h-full touch-none ${cameraControls.isInteracting ? 'cursor-grabbing' : 'cursor-grab'}`}
+          style={{ touchAction: 'none' }}
           onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={clearPan}
+          onPointerCancel={handlePointerCancel}
           onPointerLeave={(event) => {
-            clearPan(event);
+            handlePointerCancel(event);
             setHovered(null);
           }}
         />
@@ -1132,17 +1062,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             <button
               onClick={() => {
                 userCameraRef.current = true;
-                const focusX = viewport.width / 2;
-                const focusY = viewport.height / 2;
-                setCamera(prev => {
-                  const nextZoom = clamp(prev.zoom * 1.15, MIN_ZOOM, MAX_ZOOM);
-                  const scale = nextZoom / prev.zoom;
-                  const nextOffset = {
-                    x: focusX - (focusX - prev.offset.x) * scale,
-                    y: focusY - (focusY - prev.offset.y) * scale
-                  };
-                  return { zoom: nextZoom, offset: clampOffset(nextOffset, nextZoom) };
-                });
+                const focus = { x: viewport.width / 2, y: viewport.height / 2 };
+                setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom * 1.15, clampOffset, MIN_ZOOM, MAX_ZOOM));
               }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >
@@ -1151,17 +1072,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
             <button
               onClick={() => {
                 userCameraRef.current = true;
-                const focusX = viewport.width / 2;
-                const focusY = viewport.height / 2;
-                setCamera(prev => {
-                  const nextZoom = clamp(prev.zoom / 1.15, MIN_ZOOM, MAX_ZOOM);
-                  const scale = nextZoom / prev.zoom;
-                  const nextOffset = {
-                    x: focusX - (focusX - prev.offset.x) * scale,
-                    y: focusY - (focusY - prev.offset.y) * scale
-                  };
-                  return { zoom: nextZoom, offset: clampOffset(nextOffset, nextZoom) };
-                });
+                const focus = { x: viewport.width / 2, y: viewport.height / 2 };
+                setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom / 1.15, clampOffset, MIN_ZOOM, MAX_ZOOM));
               }}
               className="rounded bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide hover:border-slate-400"
             >
