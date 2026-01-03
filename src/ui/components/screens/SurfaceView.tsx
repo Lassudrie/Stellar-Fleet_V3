@@ -154,6 +154,26 @@ const roundAxial = ({ q, r }: { q: number; r: number }): HexCoord => {
   return { q: rx, r: rz };
 };
 
+const offsetToAxial = (coord: HexCoord): HexCoord => ({
+  q: coord.q - Math.floor(coord.r / 2),
+  r: coord.r
+});
+
+const axialToOffset = (coord: HexCoord): HexCoord => ({
+  q: coord.q + Math.floor(coord.r / 2),
+  r: coord.r
+});
+
+const gridToPixel = (coord: HexCoord, size: number): { x: number; y: number } => {
+  const axial = offsetToAxial(coord);
+  return axialToPixel(axial.q, axial.r, size);
+};
+
+const pixelToGrid = (x: number, y: number, size: number): HexCoord => {
+  const axial = roundAxial(pixelToAxial(x, y, size));
+  return axialToOffset(axial);
+};
+
 type MapBoundsPx = {
   minX: number;
   maxX: number;
@@ -164,19 +184,23 @@ type MapBoundsPx = {
 };
 
 const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['config'], size: number): MapBoundsPx => {
-  // For pointy-top axial coords:
-  // - center x = size * (sqrt(3)*q + sqrt(3)/2*r)
-  // - center y = size * (3/2*r)
-  // Hex polygon bounds from center:
-  // - half width = sqrt(3)/2 * size
-  // - half height = size
   const halfW = (Math.sqrt(3) / 2) * size;
-  const minX = -halfW;
-  const minY = -size;
+  const halfH = size;
 
-  const bottomRight = axialToPixel(config.w - 1, config.h - 1, size);
-  const maxX = bottomRight.x + halfW;
-  const maxY = bottomRight.y + size;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (let r = 0; r < config.h; r += 1) {
+    for (let q = 0; q < config.w; q += 1) {
+      const { x, y } = gridToPixel({ q, r }, size);
+      minX = Math.min(minX, x - halfW);
+      maxX = Math.max(maxX, x + halfW);
+      minY = Math.min(minY, y - halfH);
+      maxY = Math.max(maxY, y + halfH);
+    }
+  }
 
   return {
     minX,
@@ -440,8 +464,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const bounds = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
     if (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY || worldY > bounds.maxY) return null;
 
-    const axial = pixelToAxial(worldX, worldY, HEX_SIZE);
-    const rounded = roundAxial(axial);
+    const rounded = pixelToGrid(worldX, worldY, HEX_SIZE);
     const normalized = normalizePos({ ...rounded, bodyId: map.bodyId }, map.descriptor.config);
     return normalized;
   }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
@@ -772,7 +795,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       for (let q = 0; q < activeMapConfig.w; q += 1) {
         const tile = map.tiles[r * activeMapConfig.w + q];
         if (!tile) continue;
-        const { x, y } = axialToPixel(q, r, HEX_SIZE);
+        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
         const center = {
           x: x * camera.zoom + camera.offset.x,
           y: y * camera.zoom + camera.offset.y
@@ -788,7 +811,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         for (let q = 0; q < activeMapConfig.w; q += 1) {
           const idx = r * activeMapConfig.w + q;
           if (!enemyZocMask[idx]) continue;
-          const { x, y } = axialToPixel(q, r, HEX_SIZE);
+          const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
           const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
           drawHex(ctx, center, hexSize, { fill: 'rgba(244, 63, 94, 0.10)' });
         }
@@ -803,7 +826,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         if (!Number.isFinite(q) || !Number.isFinite(r)) return;
         const tile = map.tiles[r * activeMapConfig.w + q];
         if (!tile || !isPassable(tile.biome)) return;
-        const { x, y } = axialToPixel(q, r, HEX_SIZE);
+        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
         const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
         drawHex(ctx, center, hexSize, { fill: 'rgba(56, 189, 248, 0.10)' });
       });
@@ -812,7 +835,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (movePreview?.path && movePreview.path.length > 1) {
       ctx.beginPath();
       movePreview.path.forEach((c, i) => {
-        const { x, y } = axialToPixel(c.q, c.r, HEX_SIZE);
+        const { x, y } = gridToPixel(c, HEX_SIZE);
         const px = x * camera.zoom + camera.offset.x;
         const py = y * camera.zoom + camera.offset.y;
         if (i === 0) ctx.moveTo(px, py);
@@ -827,7 +850,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const labelCell = Math.max(70, hexSize * 3.2);
 
     settlements.forEach(settlement => {
-      const { x, y } = axialToPixel(settlement.coord.q, settlement.coord.r, HEX_SIZE);
+      const { x, y } = gridToPixel(settlement.coord, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
@@ -913,7 +936,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     });
 
     normalizedBuildings.forEach(marker => {
-      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
+      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
@@ -929,7 +952,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     });
 
     normalizedArmies.forEach(marker => {
-      const { x, y } = axialToPixel(marker.coord.q, marker.coord.r, HEX_SIZE);
+      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
@@ -945,7 +968,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     });
 
     const drawHighlight = (coord: HexCoord, color: string) => {
-      const { x, y } = axialToPixel(coord.q, coord.r, HEX_SIZE);
+      const { x, y } = gridToPixel(coord, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
