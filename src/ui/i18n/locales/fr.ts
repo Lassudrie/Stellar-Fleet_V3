@@ -164,6 +164,7 @@ export const fr = {
   'surfaceView.loadingOverlay': 'Chargement…',
   'surfaceView.backToGalaxy': 'Retour à la galaxie',
   'surfaceView.backToSystem': 'Retour à la vue système',
+  'surfaceView.bodyHeader': 'Surface — {{name}}',
   'surfaceView.mapSize': 'Grille {{width}} × {{height}}',
   'surfaceView.zoomIn': 'Zoom avant',
   'surfaceView.zoomOut': 'Zoom arrière',
