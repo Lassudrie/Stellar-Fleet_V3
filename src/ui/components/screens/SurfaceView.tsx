@@ -244,8 +244,21 @@ const getTileAt = (map: PlanetSurfaceMap, coord: HexCoord) => {
   return map.tiles[index] ?? null;
 };
 
+const surfaceMapKey = (surfaceMap: PlanetSurfaceMap): string => {
+  const { descriptor, bodyId } = surfaceMap;
+  const { config } = descriptor;
+  return [
+    bodyId,
+    descriptor.seed,
+    config.w,
+    config.h,
+    config.generatorVersion,
+    config.wrapX ? 'wrap' : 'nowrap'
+  ].join('|');
+};
+
 const SurfaceView: React.FC<SurfaceViewProps> = ({
-  map,
+  map: mapProp,
   mapStatus = 'ready',
   system,
   body,
@@ -270,11 +283,45 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [selected, setSelected] = useState<HexCoord | null>(null);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
+  const [readyMapCache, setReadyMapCache] = useState<{ key: string; map: PlanetSurfaceMap } | null>(null);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
     return acc;
   }, {}), [factions]);
+
+  const mapKeyFromProp = useMemo(() => (mapProp ? surfaceMapKey(mapProp) : null), [mapProp]);
+
+  useEffect(() => {
+    setReadyMapCache(prev => {
+      if (mapProp && mapStatus === 'ready' && mapKeyFromProp) {
+        if (prev?.key === mapKeyFromProp && prev.map === mapProp) return prev;
+        return { key: mapKeyFromProp, map: mapProp };
+      }
+
+      if (mapKeyFromProp && prev && prev.key !== mapKeyFromProp) {
+        return null;
+      }
+
+      if (!mapKeyFromProp && body?.id && prev && prev.map.bodyId !== body.id) {
+        return null;
+      }
+
+      return prev;
+    });
+  }, [body?.id, mapKeyFromProp, mapProp, mapStatus]);
+
+  const currentMapKey = useMemo(() => {
+    if (mapProp && mapKeyFromProp) return mapKeyFromProp;
+    if (readyMapCache && body?.id === readyMapCache.map.bodyId) return readyMapCache.key;
+    return null;
+  }, [body?.id, mapKeyFromProp, mapProp, readyMapCache]);
+
+  const map = useMemo(() => {
+    if (mapProp && mapKeyFromProp) return mapProp;
+    if (readyMapCache && currentMapKey === readyMapCache.key) return readyMapCache.map;
+    return null;
+  }, [currentMapKey, mapKeyFromProp, mapProp, readyMapCache]);
 
   const activeMapConfig = map?.descriptor.config ?? null;
 
