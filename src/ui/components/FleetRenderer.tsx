@@ -1,7 +1,7 @@
 
 import React, { useRef, useMemo, useLayoutEffect, useEffect } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion, ExtrudeGeometry, SphereGeometry, RingGeometry } from 'three';
 import { Fleet, FleetState } from '../../shared/types';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../../content/data/static';
 import { Text, Billboard } from '@react-three/drei';
@@ -33,6 +33,14 @@ const EXTRUDE_SETTINGS = {
   bevelSize: 0.1,
   bevelSegments: 2
 };
+
+// OPTIMIZATION: Shared Geometries
+// Instantiating these once at module level saves memory and setup overhead
+// for every single fleet instance (which can be hundreds).
+const SHARED_FLEET_GEOMETRY = new ExtrudeGeometry(CHEVRON_SHAPE, EXTRUDE_SETTINGS);
+const SHARED_HITBOX_GEOMETRY = new SphereGeometry(2.5, 8, 8);
+const SHARED_FLASH_GEOMETRY = new SphereGeometry(1, 16, 16);
+const SHARED_RING_GEOMETRY = new RingGeometry(1, 1.2, 32);
 
 // Reusable scratch vector to avoid GC pressure in the render loop
 const _vec3 = new Vector3();
@@ -231,6 +239,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
     <group ref={groupRef}>
         {/* HITBOX: Large invisible sphere for easier selection on mobile/desktop */}
         <mesh 
+            geometry={SHARED_HITBOX_GEOMETRY}
             onClick={(e) => {
                 e.stopPropagation();
                 onSelect(e, false, resolvePointerType(e));
@@ -256,13 +265,11 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             onPointerOver={() => document.body.style.cursor = 'pointer'}
             onPointerOut={() => document.body.style.cursor = 'auto'}
         >
-            <sphereGeometry args={[2.5, 8, 8]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
 
         {/* HYPERDRIVE FLASH FX */}
-        <mesh ref={flashMeshRef} scale={[0,0,0]}>
-            <sphereGeometry args={[1, 16, 16]} />
+        <mesh ref={flashMeshRef} scale={[0,0,0]} geometry={SHARED_FLASH_GEOMETRY}>
             <meshBasicMaterial color="#cceeff" transparent opacity={0} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <pointLight ref={flashLightRef} color="#cceeff" distance={20} decay={2} intensity={0} />
@@ -271,8 +278,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         <mesh 
             ref={meshRef}
             scale={[0.6, 0.6, 0.6]} 
+            geometry={SHARED_FLEET_GEOMETRY}
         >
-            <extrudeGeometry args={[CHEVRON_SHAPE, EXTRUDE_SETTINGS]} />
             <meshStandardMaterial
                 color={color}
                 emissive={emissiveColor}
@@ -284,8 +291,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         
         {/* SELECTION RING */}
         {isSelected && (
-            <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]}>
-                <ringGeometry args={[1, 1.2, 32]} />
+            <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]} geometry={SHARED_RING_GEOMETRY}>
                 <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} />
             </mesh>
         )}
