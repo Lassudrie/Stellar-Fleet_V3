@@ -123,6 +123,7 @@ export const fr = {
   'systemView.bodyInfo.atmosphere': 'Atmosphère',
   'systemView.bodyInfo.habitability': 'Habitabilité',
   'systemView.bodyInfo.center': 'Centrer',
+  'systemView.bodyInfo.viewSurface': 'Voir la surface',
   'systemView.bodyInfo.clearSelection': 'Effacer la sélection',
   'systemView.bodyInfo.unknown': 'Inconnu',
   'systemView.objectInfo.title': 'Infos objet',

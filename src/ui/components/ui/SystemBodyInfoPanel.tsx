@@ -10,6 +10,8 @@ export type SystemBodyInfo = {
   radiusKm?: number;
   atmosphere?: string;
   habitabilityScore?: number;
+  isSolid?: boolean;
+  surfaceBodyId?: string;
 };
 
 interface SystemBodyInfoPanelProps {
@@ -17,6 +19,7 @@ interface SystemBodyInfoPanelProps {
   isSelected: boolean;
   onClearSelection?: () => void;
   onCenter?: (bodyId: string) => void;
+  onOpenSurfaceView?: (bodyId: string) => void;
 }
 
 const formatRadius = (radiusKm: number | undefined, unknown: string): string => {
@@ -30,7 +33,13 @@ const formatHabitability = (score: number | undefined, unknown: string): string 
   return score.toFixed(2);
 };
 
-const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelected, onClearSelection, onCenter }) => {
+const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({
+  body,
+  isSelected,
+  onClearSelection,
+  onCenter,
+  onOpenSurfaceView
+}) => {
   const { t } = useI18n();
   const unknown = t('systemView.bodyInfo.unknown');
 
@@ -45,6 +54,13 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelec
 
   const badgeLabel = t(`systemView.bodyInfo.bodyType.${body.bodyType}`);
   const isHover = !isSelected;
+  const surfaceTargetId = body.surfaceBodyId ?? body.id;
+  const showSurfaceButton = Boolean(
+    onOpenSurfaceView
+    && isSelected
+    && body.bodyType !== 'star'
+    && (body.isSolid ?? true)
+  );
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-900/85 p-4 text-sm text-slate-100 shadow-xl backdrop-blur">
@@ -57,6 +73,15 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({ body, isSelec
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
+          {showSurfaceButton && (
+            <button
+              type="button"
+              onClick={() => onOpenSurfaceView(surfaceTargetId)}
+              className="rounded border border-emerald-700 bg-emerald-800 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-50 transition hover:border-emerald-500 hover:bg-emerald-700"
+            >
+              {t('systemView.bodyInfo.viewSurface')}
+            </button>
+          )}
           {onCenter && (
             <button
               type="button"

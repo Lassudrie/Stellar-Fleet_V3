@@ -124,6 +124,7 @@ export const en = {
   'systemView.bodyInfo.atmosphere': 'Atmosphere',
   'systemView.bodyInfo.habitability': 'Habitability',
   'systemView.bodyInfo.center': 'Center',
+  'systemView.bodyInfo.viewSurface': 'View surface',
   'systemView.bodyInfo.clearSelection': 'Clear selection',
   'systemView.bodyInfo.unknown': 'Unknown',
   'systemView.objectInfo.title': 'Object info',
