@@ -478,7 +478,7 @@ const bfsDistanceToWater = (waterMask: Uint8Array, w: number, h: number, wrapX: 
     for (const n of ns) {
       const ni = axialToIndex(n, w);
       if (dist[ni] !== 0xffff) continue;
-      dist[ni] = (d + 1) as any;
+      dist[ni] = d + 1;
       queue[tail++] = ni;
     }
   }
@@ -1484,11 +1484,9 @@ export const isInsideGrid = (pos: SurfacePos, descriptor: PlanetSurfaceDescripto
   return pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h;
 };
 
-const isWaterBiome2 = (b: Biome): boolean => b === 'ocean' || b === 'coast' || b === 'lake';
+export const isPassable = (biome: Biome): boolean => !isWaterBiome(biome);
 
-export const isPassable = (biome: Biome): boolean => !isWaterBiome2(biome);
-
-export const isBuildable = (biome: Biome): boolean => !isWaterBiome2(biome) && biome !== 'mountain' && biome !== 'ice';
+export const isBuildable = (biome: Biome): boolean => !isWaterBiome(biome) && biome !== 'mountain' && biome !== 'ice';
 
 const axialDirs = [
   { q: 1, r: 0 },
@@ -1498,12 +1496,6 @@ const axialDirs = [
   { q: -1, r: 1 },
   { q: 0, r: 1 }
 ] as const;
-
-const wrapQ2 = (q: number, w: number, wrapX: boolean): number => {
-  if (!wrapX) return q;
-  const m = q % w;
-  return m < 0 ? m + w : m;
-};
 
 const axialRing = (center: { q: number; r: number }, radius: number): Array<{ q: number; r: number }> => {
   if (radius <= 0) return [center];
@@ -1542,22 +1534,25 @@ export const relocateSurfacePosDeterministic = (params: {
   const occupied = params.isOccupied ?? (() => false);
 
   const maxRadius = w + h;
-  for (let radius = 0; radius <= maxRadius; radius += 1) {
-    const ring = axialRing(params.origin, radius);
-    const candidates: Array<{ q: number; r: number; score: number }> = [];
-    for (const c of ring) {
-      const q = wrapQ2(c.q, w, wrapX);
-      const r = c.r;
-      if (!inBounds(q, r)) continue;
-      if (occupied(q, r)) continue;
-      const biome = map.tiles[r * w + q].biome;
-      if (!params.predicate(biome, q, r)) continue;
-      const score = fnv1a32(`${entityId}|${bodyId}|${q}|${r}`) >>> 0;
-      candidates.push({ q, r, score });
+  const originFinite = Number.isFinite(params.origin.q) && Number.isFinite(params.origin.r);
+  if (originFinite) {
+    for (let radius = 0; radius <= maxRadius; radius += 1) {
+      const ring = axialRing(params.origin, radius);
+      const candidates: Array<{ q: number; r: number; score: number }> = [];
+      for (const c of ring) {
+        const q = wrapQ(c.q, w, wrapX);
+        const r = c.r;
+        if (!inBounds(q, r)) continue;
+        if (occupied(q, r)) continue;
+        const biome = map.tiles[r * w + q].biome;
+        if (!params.predicate(biome, q, r)) continue;
+        const score = fnv1a32(`${entityId}|${bodyId}|${q}|${r}`) >>> 0;
+        candidates.push({ q, r, score });
+      }
+      if (candidates.length === 0) continue;
+      candidates.sort((a, b) => a.score - b.score);
+      return { bodyId, q: candidates[0].q, r: candidates[0].r };
     }
-    if (candidates.length === 0) continue;
-    candidates.sort((a, b) => a.score - b.score);
-    return { bodyId, q: candidates[0].q, r: candidates[0].r };
   }
 
   // Fallback: scan whole map
@@ -1578,7 +1573,7 @@ export const relocateSurfacePosDeterministic = (params: {
 // Positions (was: planetSurface/positions.ts)
 // ==========================================
 
-const clampInt2 = (x: number): number => (Number.isFinite(x) ? Math.floor(x) : 0);
+const clampInt2 = (x: number): number => (Number.isFinite(x) ? Math.floor(x) : NaN);
 
 const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): SurfacePos | null => {
   const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
@@ -1644,7 +1639,7 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
       const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
       occupied.add(key);
       finalPosById.set(b.id, finalPos);
-      if (q !== b.surfacePos.q || r !== b.surfacePos.r) buildingsChanged = true;
+      buildingsChanged = true;
       continue;
     }
 
@@ -1653,7 +1648,7 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
       const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
       occupied.add(key);
       finalPosById.set(b.id, finalPos);
-      if (q !== b.surfacePos.q || r !== b.surfacePos.r) buildingsChanged = true;
+      buildingsChanged = true;
       continue;
     }
 
