@@ -160,6 +160,7 @@ export const fr = {
   'surfaceView.noData': 'Aucune donnée de surface disponible pour ce corps.',
   'surfaceView.loadingTitle': 'Génération de la carte de surface',
   'surfaceView.loadingSubtitle': 'Cela peut prendre un instant sur les grandes planètes.',
+  'surfaceView.loadingOverlay': 'Chargement…',
   'surfaceView.backToGalaxy': 'Retour à la galaxie',
   'surfaceView.backToSystem': 'Retour à la vue système',
   'surfaceView.mapSize': 'Grille {{width}} × {{height}}',

@@ -994,7 +994,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   }, [draw]);
 
   useEffect(() => {
-    if (!map || resolvedMapStatus !== 'ready') return;
+    if (!map || resolvedMapStatus === 'missing' || resolvedMapStatus === 'error') return;
 
     scheduleDraw();
 
@@ -1047,14 +1047,16 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return renderPlaceholder(t('surfaceView.noData'));
   }
 
-  if (resolvedMapStatus === 'loading') {
+  const isMapUnavailable = !map;
+  const isMapErrored = resolvedMapStatus === 'missing' || resolvedMapStatus === 'error';
+  const showLoadingOverlay = !isMapUnavailable && resolvedMapStatus === 'loading';
+
+  if (isMapUnavailable && resolvedMapStatus === 'loading') {
     return renderPlaceholder(t('surfaceView.loadingTitle'), t('surfaceView.loadingSubtitle'));
   }
 
-  if (!map || resolvedMapStatus === 'missing' || resolvedMapStatus === 'error') {
-    return (
-      renderPlaceholder(t('surfaceView.noData'))
-    );
+  if (isMapUnavailable || isMapErrored) {
+    return renderPlaceholder(t('surfaceView.noData'));
   }
 
   const mapBoundsPx = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
@@ -1082,6 +1084,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           }}
         />
       </div>
+
+      {showLoadingOverlay && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex justify-end p-4">
+          <div className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-sm font-semibold text-slate-100 shadow-lg">
+            {t('surfaceView.loadingOverlay')}
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
         <div className="pointer-events-auto m-4 p-4 bg-slate-900/80 border border-slate-700 rounded-xl backdrop-blur max-w-4xl w-[calc(100%-2rem)] max-h-[34vh] overflow-auto md:max-h-none">
