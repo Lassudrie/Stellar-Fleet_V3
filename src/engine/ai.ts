@@ -9,7 +9,7 @@ import { distSq } from './math/vec3';
 import { applyFogOfWar, getObservedSystemIds } from './fogOfWar';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ } from '../content/data/static';
 import { getDefaultSolidPlanet } from './planets';
-import { isFleetOrbitingSystem } from './orbit';
+import { getOrbitingSystem, isFleetOrbitingSystem } from './orbit';
 
 
 type AiProfile = 'aggressive' | 'defensive' | 'balanced';
@@ -858,7 +858,10 @@ const generateCommands = (
       const hasTransportCapacity = fleet.ships.some(ship => ship.type === ShipType.TRANSPORTER);
       const useInvasionOrder = task.type === 'INVADE' && hasTransportCapacity;
 
-      if (fleet.state === FleetState.ORBIT && isFleetOrbitingSystem(fleet, targetSystem)) {
+      const orbitingSystem = getOrbitingSystem(fleet, state.systems);
+      const isAlreadyAtTarget = orbitingSystem?.id === targetSystem.id;
+
+      if (isAlreadyAtTarget && isFleetOrbitingSystem(fleet, targetSystem)) {
           if (task.type === 'INVADE') {
               const targetPlanet = getDefaultSolidPlanet(targetSystem);
               if (!targetPlanet) return;
