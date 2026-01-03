@@ -462,6 +462,11 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
 }) => {
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
+  const hitboxMaterial = useMemo(
+    () => new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    []
+  );
+  useEffect(() => () => hitboxMaterial.dispose(), [hitboxMaterial]);
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(moon.orbitRadius - orbitThickness, 0.0025), moon.orbitRadius + orbitThickness, 96),
     [moon.orbitRadius, orbitThickness]
@@ -471,11 +476,50 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     () => computeOrbitPosition(moon.orbitRadius, moon.orbitAngle),
     [moon.orbitAngle, moon.orbitRadius]
   );
+  const moonHitboxScale = useMemo<[number, number, number]>(
+    () => [moon.radius * 2, moon.radius * 2, moon.radius * 2],
+    [moon.radius]
+  );
   const moonScale = useMemo<[number, number, number]>(() => [moon.radius, moon.radius, moon.radius], [moon.radius]);
 
   return (
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
+      <mesh
+        geometry={moonGeometry}
+        material={hitboxMaterial}
+        position={moonPosition}
+        scale={moonHitboxScale}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onFocus(moon.id);
+        }}
+        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+            lastTouchRef.current = 0;
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+            onFocus(moon.id);
+          } else {
+            lastTouchRef.current = now;
+          }
+        }}
+        onPointerOver={(event) => {
+          event.stopPropagation();
+          onHover(moon.id);
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation();
+          onBlur(moon.id);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(moon.id);
+        }}
+        frustumCulled
+      />
       <mesh
         geometry={moonGeometry}
         material={moonMaterial}
@@ -544,6 +588,11 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
 }) => {
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
+  const hitboxMaterial = useMemo(
+    () => new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    []
+  );
+  useEffect(() => () => hitboxMaterial.dispose(), [hitboxMaterial]);
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(planet.orbitRadius - orbitThickness, 0.01), planet.orbitRadius + orbitThickness, 128),
     [orbitThickness, planet.orbitRadius]
@@ -557,11 +606,49 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     () => [planet.radius, planet.radius, planet.radius],
     [planet.radius]
   );
+  const planetHitboxScale = useMemo<[number, number, number]>(
+    () => [planet.radius * 1.5, planet.radius * 1.5, planet.radius * 1.5],
+    [planet.radius]
+  );
 
   return (
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
       <group position={planetPosition}>
+        <mesh
+          geometry={planetGeometry}
+          material={hitboxMaterial}
+          scale={planetHitboxScale}
+          onDoubleClick={(event) => {
+            event.stopPropagation();
+            onFocus(planet.id);
+          }}
+          onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+            if (event.pointerType !== 'touch') return;
+            const now = performance.now();
+            if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+              lastTouchRef.current = 0;
+              event.stopPropagation();
+              event.nativeEvent.preventDefault();
+              onFocus(planet.id);
+            } else {
+              lastTouchRef.current = now;
+            }
+          }}
+          onPointerOver={(event) => {
+            event.stopPropagation();
+            onHover(planet.id);
+          }}
+          onPointerOut={(event) => {
+            event.stopPropagation();
+            onBlur(planet.id);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(planet.id);
+          }}
+          frustumCulled
+        />
         <mesh
           geometry={planetGeometry}
           material={planetMaterial}
