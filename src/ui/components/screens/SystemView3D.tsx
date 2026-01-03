@@ -381,7 +381,7 @@ interface StarMeshProps {
   radius: number;
   color: string;
   geometry: SphereGeometry;
-  onDoubleClick?: (event: ThreeEvent<MouseEvent>) => void;
+  onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
   onHover?: () => void;
   onBlur?: () => void;
   onSelect?: () => void;
@@ -398,6 +398,8 @@ const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleCl
     }),
     [color]
   );
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
 
   const scale = useMemo<[number, number, number]>(() => [radius, radius, radius], [radius]);
 
@@ -407,6 +409,18 @@ const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleCl
       material={material}
       scale={scale}
       onDoubleClick={onDoubleClick}
+      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+        if (event.pointerType !== 'touch') return;
+        const now = performance.now();
+        if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+          lastTouchRef.current = 0;
+          event.stopPropagation();
+          event.nativeEvent.preventDefault();
+          onDoubleClick?.(event);
+        } else {
+          lastTouchRef.current = now;
+        }
+      }}
       onPointerOver={(event) => {
         event.stopPropagation();
         onHover?.();
@@ -446,6 +460,8 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   onBlur,
   onSelect
 }) => {
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(moon.orbitRadius - orbitThickness, 0.0025), moon.orbitRadius + orbitThickness, 96),
     [moon.orbitRadius, orbitThickness]
@@ -468,6 +484,18 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         onDoubleClick={(event) => {
           event.stopPropagation();
           onFocus(moon.id);
+        }}
+        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+            lastTouchRef.current = 0;
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+            onFocus(moon.id);
+          } else {
+            lastTouchRef.current = now;
+          }
         }}
         onPointerOver={(event) => {
           event.stopPropagation();
@@ -514,6 +542,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   onBlur,
   onSelect
 }) => {
+  const lastTouchRef = useRef<number>(0);
+  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   const orbitGeometry = useDisposableMemo(
     () => new RingGeometry(Math.max(planet.orbitRadius - orbitThickness, 0.01), planet.orbitRadius + orbitThickness, 128),
     [orbitThickness, planet.orbitRadius]
@@ -539,6 +569,18 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           onDoubleClick={(event) => {
             event.stopPropagation();
             onFocus(planet.id);
+          }}
+          onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+            if (event.pointerType !== 'touch') return;
+            const now = performance.now();
+            if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+              lastTouchRef.current = 0;
+              event.stopPropagation();
+              event.nativeEvent.preventDefault();
+              onFocus(planet.id);
+            } else {
+              lastTouchRef.current = now;
+            }
           }}
           onPointerOver={(event) => {
             event.stopPropagation();
