@@ -467,7 +467,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const touchToPointerEvent = useCallback((
     touchEvent: React.TouchEvent<HTMLCanvasElement>,
-    touch: Touch
+    touch: React.Touch
   ): React.PointerEvent<HTMLCanvasElement> => {
     const target = touchEvent.currentTarget;
     return {
