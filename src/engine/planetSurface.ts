@@ -1619,23 +1619,35 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
   let armiesChanged = false;
   let buildingsChanged = false;
 
-  const buildingByTileKey = new Map<string, string>(); // `${bodyId}:${q}:${r}` -> buildingId (kept)
-  const nextBuildings: GroundBuilding[] = [];
-
   // 1) Normalize buildings (valid tile + uniqueness per tile)
-  for (const b of groundBuildings) {
+  const buildingsSorted = [...groundBuildings].sort((a, b) => a.id.localeCompare(b.id));
+  const finalPosById = new Map<string, SurfacePos>();
+  const occupied = new Set<string>(); // `${bodyId}:${q}:${r}`
+
+  for (const b of buildingsSorted) {
     const bodyId = b.surfacePos.bodyId;
     const descriptor = descriptors[bodyId];
-    if (!descriptor) continue;
-
     const q = clampInt2(b.surfacePos.q);
     const r = clampInt2(b.surfacePos.r);
-    const basePos: SurfacePos = { bodyId, q, r };
+    let finalPos: SurfacePos = { bodyId, q, r };
+
+    if (!descriptor) {
+      const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
+      occupied.add(key);
+      finalPosById.set(b.id, finalPos);
+      if (q !== b.surfacePos.q || r !== b.surfacePos.r) buildingsChanged = true;
+      continue;
+    }
 
     const map = generateSurfaceMapForState(state, bodyId);
-    if (!map) continue;
+    if (!map) {
+      const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
+      occupied.add(key);
+      finalPosById.set(b.id, finalPos);
+      if (q !== b.surfacePos.q || r !== b.surfacePos.r) buildingsChanged = true;
+      continue;
+    }
 
-    let finalPos = basePos;
     if (!isInsideGrid(finalPos, descriptor)) {
       const relocated = relocateSurfacePosDeterministic({
         state,
@@ -1644,7 +1656,7 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
         bodyId,
         origin: { q, r },
         predicate: biome => isBuildable(biome),
-        isOccupied: (qq, rr) => buildingByTileKey.has(`${bodyId}:${qq}:${rr}`)
+        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
       });
       if (!relocated) continue;
       finalPos = relocated;
@@ -1660,48 +1672,40 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
         bodyId,
         origin: { q: finalPos.q, r: finalPos.r },
         predicate: bb => isBuildable(bb),
-        isOccupied: (qq, rr) => buildingByTileKey.has(`${bodyId}:${qq}:${rr}`)
+        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
       });
       if (!relocated) continue;
       finalPos = relocated;
       buildingsChanged = true;
     }
 
-    const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
-    const existing = buildingByTileKey.get(key);
-    if (existing) {
-      // Collision: keep deterministic winner, relocate loser.
-      const winner = existing.localeCompare(b.id) <= 0 ? existing : b.id;
-      const loser = winner === existing ? b.id : existing;
-      if (winner !== existing) {
-        // Replace kept building in-place: rebuild map from nextBuildings
-        const keptIndex = nextBuildings.findIndex(x => x.id === existing);
-        if (keptIndex >= 0) {
-          nextBuildings[keptIndex] = { ...b, surfacePos: finalPos };
-          buildingsChanged = true;
-        }
-        buildingByTileKey.set(key, winner);
-      }
-
-      if (loser === b.id) {
-        const relocated = relocateSurfacePosDeterministic({
-          state,
-          entityId: b.id,
-          kind: 'building',
-          bodyId,
-          origin: { q: finalPos.q, r: finalPos.r },
-          predicate: biome2 => isBuildable(biome2),
-          isOccupied: (qq, rr) => buildingByTileKey.has(`${bodyId}:${qq}:${rr}`)
-        });
-        if (!relocated) continue;
-        finalPos = relocated;
-        buildingsChanged = true;
-      }
+    let key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
+    if (occupied.has(key)) {
+      const relocated = relocateSurfacePosDeterministic({
+        state,
+        entityId: b.id,
+        kind: 'building',
+        bodyId,
+        origin: { q: finalPos.q, r: finalPos.r },
+        predicate: biome2 => isBuildable(biome2),
+        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
+      });
+      if (!relocated) continue;
+      finalPos = relocated;
+      key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
+      buildingsChanged = true;
     }
 
-    buildingByTileKey.set(`${bodyId}:${finalPos.q}:${finalPos.r}`, b.id);
-    if (finalPos.q !== b.surfacePos.q || finalPos.r !== b.surfacePos.r) buildingsChanged = true;
-    nextBuildings.push({ ...b, surfacePos: finalPos });
+    occupied.add(key);
+    finalPosById.set(b.id, finalPos);
+  }
+
+  const nextBuildings: GroundBuilding[] = [];
+  for (const b of groundBuildings) {
+    const pos = finalPosById.get(b.id);
+    if (!pos) continue;
+    if (pos.bodyId !== b.surfacePos.bodyId || pos.q !== b.surfacePos.q || pos.r !== b.surfacePos.r) buildingsChanged = true;
+    nextBuildings.push({ ...b, surfacePos: pos });
   }
 
   // 2) Normalize armies (ensure surfacePos exists, in-grid, passable; stacking allowed)
