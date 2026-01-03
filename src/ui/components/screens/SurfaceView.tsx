@@ -465,6 +465,50 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     tapDragThresholdSq: CLICK_DRAG_THRESHOLD_SQ
   });
 
+  const touchToPointerEvent = useCallback((
+    touchEvent: React.TouchEvent<HTMLCanvasElement>,
+    touch: Touch
+  ): React.PointerEvent<HTMLCanvasElement> => {
+    const target = touchEvent.currentTarget;
+    return {
+      pointerId: touch.identifier,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      currentTarget: target,
+      target,
+      pointerType: 'touch',
+      preventDefault: () => touchEvent.preventDefault(),
+      stopPropagation: () => touchEvent.stopPropagation(),
+      persist: () => {},
+      setPointerCapture: () => {
+        try {
+          target.setPointerCapture(touch.identifier);
+        } catch {
+          // ignore
+        }
+      },
+      releasePointerCapture: () => {
+        try {
+          target.releasePointerCapture(touch.identifier);
+        } catch {
+          // ignore
+        }
+      }
+    } as unknown as React.PointerEvent<HTMLCanvasElement>;
+  }, []);
+
+  const forwardTouchEvent = useCallback((
+    touchEvent: React.TouchEvent<HTMLCanvasElement>,
+    handler: (event: React.PointerEvent<HTMLCanvasElement>) => void
+  ) => {
+    for (let i = 0; i < touchEvent.changedTouches.length; i += 1) {
+      const touch = touchEvent.changedTouches.item(i);
+      if (!touch) continue;
+      const pointerLike = touchToPointerEvent(touchEvent, touch);
+      handler(pointerLike);
+    }
+  }, [touchToPointerEvent]);
+
   // When viewport changes on mobile (address bar / chrome), preserve the world center to avoid jumps,
   // but only once the user has interacted with the camera.
   useEffect(() => {
@@ -713,6 +757,23 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
     cameraControls.handlePointerCancel(event);
     setHovered(null);
+  };
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
+    userCameraRef.current = true;
+    forwardTouchEvent(event, handlePointerDown);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
+    forwardTouchEvent(event, handlePointerMove);
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
+    forwardTouchEvent(event, handlePointerUp);
+  };
+
+  const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
+    forwardTouchEvent(event, handlePointerCancel);
   };
 
   const activeCoord = selected ?? hovered;
@@ -1169,6 +1230,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchCancel}
           onPointerLeave={(event) => {
             handlePointerCancel(event);
             setHovered(null);
