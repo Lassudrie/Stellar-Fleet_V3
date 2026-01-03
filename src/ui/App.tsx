@@ -842,16 +842,20 @@ const surfaceMapKeyRef = useRef<string | null>(null);
 const viewGameStateRef = useRef<GameState | null>(null);
 const surfaceMapWorkerRef = useRef<SurfaceMapWorkerClient | null>(null);
 
+// Prewarm the worker at app mount for faster first surface view load
 useEffect(() => {
-    viewGameStateRef.current = viewGameState;
-}, [viewGameState]);
-
-useEffect(() => {
+    if (!surfaceMapWorkerRef.current) {
+        surfaceMapWorkerRef.current = new SurfaceMapWorkerClient();
+    }
     return () => {
         surfaceMapWorkerRef.current?.dispose();
         surfaceMapWorkerRef.current = null;
     };
 }, []);
+
+useEffect(() => {
+    viewGameStateRef.current = viewGameState;
+}, [viewGameState]);
 
 const surfaceMapKey = useMemo(() => {
     if (!viewGameState || !surfaceDescriptor || !surfaceViewBodyId) return null;
@@ -879,7 +883,9 @@ const surfaceMapKey = useMemo(() => {
 }, [surfaceDescriptor, surfaceViewBodyId, viewGameState]);
 
 useEffect(() => {
-    if (screen !== 'SURFACE_VIEW') return;
+    // Start generation during transition (pendingScreen) for smoother entry
+    const shouldLoad = screen === 'SURFACE_VIEW' || pendingScreen === 'SURFACE_VIEW';
+    if (!shouldLoad) return;
 
     if (!surfaceMapKey || !surfaceDescriptor || !surfaceViewBodyId) {
         surfaceMapKeyRef.current = null;
@@ -918,6 +924,7 @@ useEffect(() => {
         return;
     }
 
+    // Use prewarmed worker (created at mount)
     const worker = surfaceMapWorkerRef.current ?? new SurfaceMapWorkerClient();
     surfaceMapWorkerRef.current = worker;
 
@@ -951,7 +958,7 @@ useEffect(() => {
     return () => {
         cancelled = true;
     };
-}, [screen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
+}, [screen, pendingScreen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
 
   const surfaceArmies = useMemo(() => {
       if (!viewGameState || !surfaceViewBodyId) return [];
