@@ -302,6 +302,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
   const [readyMapCache, setReadyMapCache] = useState<{ key: string; map: PlanetSurfaceMap } | null>(null);
   const terrainBufferRef = useRef<TerrainBuffer | null>(null);
+  const wheelFrameRef = useRef<number | null>(null);
+  const pointerMoveFrameRef = useRef<number | null>(null);
+  const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
+  const pendingPointerEvent = useRef<React.PointerEvent<HTMLCanvasElement> | null>(null);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -338,6 +342,19 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   useEffect(() => {
     terrainBufferRef.current = null;
   }, [currentMapKey]);
+
+  useEffect(() => () => {
+    if (wheelFrameRef.current !== null) {
+      cancelAnimationFrame(wheelFrameRef.current);
+      wheelFrameRef.current = null;
+    }
+    if (pointerMoveFrameRef.current !== null) {
+      cancelAnimationFrame(pointerMoveFrameRef.current);
+      pointerMoveFrameRef.current = null;
+    }
+    pendingWheelEvent.current = null;
+    pendingPointerEvent.current = null;
+  }, []);
 
   const map = useMemo(() => {
     if (mapProp && mapKeyFromProp) return mapProp;
@@ -574,8 +591,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         return el;
       })();
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
+    const context = canvas.getContext('2d');
+    if (!context || !('clearRect' in context)) return null;
+    const ctx = context as TerrainBufferContext;
 
     const gridStroke = 'rgba(148, 163, 184, 0.22)';
     const hexSize = HEX_SIZE * zoom * dpr;
@@ -622,7 +640,18 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
-    cameraControls.handleWheel(event);
+    event.preventDefault();
+    event.persist();
+    pendingWheelEvent.current = event;
+    if (wheelFrameRef.current === null) {
+      wheelFrameRef.current = requestAnimationFrame(() => {
+        wheelFrameRef.current = null;
+        const pending = pendingWheelEvent.current;
+        pendingWheelEvent.current = null;
+        if (!pending) return;
+        cameraControls.handleWheel(pending);
+      });
+    }
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -631,16 +660,27 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const interacting = cameraControls.handlePointerMove(event);
-    if (interacting) {
-      setHovered(null);
-      return;
+    event.persist();
+    pendingPointerEvent.current = event;
+    if (pointerMoveFrameRef.current === null) {
+      pointerMoveFrameRef.current = requestAnimationFrame(() => {
+        pointerMoveFrameRef.current = null;
+        const pending = pendingPointerEvent.current;
+        pendingPointerEvent.current = null;
+        if (!pending) return;
+
+        const interacting = cameraControls.handlePointerMove(pending);
+        if (interacting) {
+          setHovered(null);
+          return;
+        }
+
+        if (!map) return;
+
+        const coord = pickCoord(pending.clientX, pending.clientY);
+        setHovered(prev => (sameHex(prev, coord) ? prev : coord));
+      });
     }
-
-    if (!map) return;
-
-    const coord = pickCoord(event.clientX, event.clientY);
-    setHovered(prev => (sameHex(prev, coord) ? prev : coord));
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
