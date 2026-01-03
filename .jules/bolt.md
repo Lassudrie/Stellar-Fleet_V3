@@ -1,0 +1,3 @@
+## 2025-05-23 - Shared Geometry in React Three Fiber
+**Learning:** In React Three Fiber, intrinsic elements like `<extrudeGeometry args={[...]} />` create a *new* instance of the geometry every time the component renders, even if the `args` are identical. This is because React sees the JSX element as a new instruction to create the object.
+**Action:** For identical objects rendered in large numbers (like Fleets), instantiate the Geometry *once* at the module level (or in a global store) and pass it to the `<mesh geometry={sharedInstance} />` prop. This avoids hundreds of unnecessary allocations and WebGL buffer creations per frame/render.
