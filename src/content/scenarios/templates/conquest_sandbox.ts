@@ -16,6 +16,7 @@ export const conquestSandbox: ScenarioTemplate = {
     systemCount: 80,
     radius: 120,
     topology: 'ring',
+    surfaceGeneratorVersion: 3,
     staticSystems: [
       {
         id: 'galactic_core',

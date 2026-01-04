@@ -10,7 +10,7 @@ import { devLog, devWarn } from '../../shared/shared';
 import { generateStellarSystem } from './stellarSystem';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { sorted } from '../../shared/shared';
-import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from '../planetSurface';
+import { createPlanetSurfaceDescriptor, normalizeSurfacePositions, DEFAULT_PLANET_SURFACE_GENERATOR_VERSION } from '../planetSurface';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
@@ -485,12 +485,13 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   systems.forEach(system => {
     system.planets.forEach(body => {
       if (!body.isSolid) return;
-      planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
-        gameSeed: scenario.seed,
-        systemId: system.id,
-        body
-      });
+    planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
+      gameSeed: scenario.seed,
+      systemId: system.id,
+      body,
+      generatorVersion: scenario.generation?.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION
     });
+  });
   });
 
   // --- 3. GENERATE FLEETS & ARMIES ---

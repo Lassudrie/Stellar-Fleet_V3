@@ -69,6 +69,12 @@ export interface WorldGenerationConfig {
     resourceType: 'gas' | 'none';
     planets?: PlanetBodyDefinition[];
   }>;
+
+  /**
+   * Version du générateur de surface planétaire à utiliser (v1/v2 legacy, v3 pour wrapX sans couture, océans par composante, cleanup micro-îles).
+   * Par défaut : valeur engine (`DEFAULT_PLANET_SURFACE_GENERATOR_VERSION`).
+   */
+  surfaceGeneratorVersion?: number;
 }
 
 // --- 3. SETUP (Initial State) ---
