@@ -53,14 +53,20 @@ const LOADING_FLOW_STAGES: Record<LoadingFlow, LoadingStage[]> = {
 const LOADING_FLOW_WEIGHTS: Record<LoadingFlow, Record<LoadingStage, number>> = {
   newGame: {
     prepare: 0.05,
+    read: 0,
     worldgen: 0.7,
+    deserialize: 0,
     engine: 0.2,
+    assets: 0,
     render: 0.05
   },
   loadGame: {
+    prepare: 0,
     read: 0.1,
+    worldgen: 0,
     deserialize: 0.6,
     engine: 0.25,
+    assets: 0,
     render: 0.05
   }
 };

@@ -47,7 +47,7 @@ import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../f
 import { SpatialIndex } from '../spatialIndex';
 import { deepFreezeDev } from '../state';
 import { buildPlanetBodies } from '../planets';
-import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState } from '../planetSurface';
+import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState, neighborsAxial } from '../planetSurface';
 import { deriveTerrainType, resolveEngagement, rollTriangularCentered } from '../ground';
 import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
 import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
@@ -3024,6 +3024,47 @@ const engine_hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number 
   return h >>> 0;
 };
 
+const engine_isWaterBiome = (biome: string): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+
+const engine_labelComponents = (mask: Uint8Array, w: number, h: number, wrapX: boolean): { labels: Int32Array; sizes: number[] } => {
+  const n = w * h;
+  const labels = new Int32Array(n);
+  labels.fill(-1);
+  const sizes: number[] = [];
+  const queue = new Int32Array(n);
+  let label = 0;
+
+  for (let i = 0; i < n; i += 1) {
+    if (labels[i] !== -1) continue;
+    if (!mask[i]) continue;
+
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = i;
+    labels[i] = label;
+    let size = 0;
+
+    while (head < tail) {
+      const idx = queue[head++];
+      size += 1;
+      const c = { q: idx % w, r: Math.floor(idx / w) };
+      const ns = neighborsAxial(c, w, h, wrapX);
+      for (const nCoord of ns) {
+        const ni = nCoord.r * w + nCoord.q;
+        if (labels[ni] !== -1) continue;
+        if (!mask[ni]) continue;
+        labels[ni] = label;
+        queue[tail++] = ni;
+      }
+    }
+
+    sizes[label] = size;
+    label += 1;
+  }
+
+  return { labels, sizes };
+};
+
 const engine_getFirstSolidPlanet = (
   worldSeed: number,
   systemId: string
@@ -3099,6 +3140,93 @@ tests.push(
       const frac = water / map.tiles.length;
 
       assert.ok(Math.abs(frac - params.waterFraction) < 0.08, `Water fraction ${frac} deviates from expected ${params.waterFraction}`);
+    }
+  },
+  {
+    name: 'Surface v3 ocean tiles belong to the largest water component',
+    run: () => {
+      const worldSeed = 314;
+      const systemId = 'sys_surface_ocean';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      const waterMask = new Uint8Array(map.tiles.length);
+      let oceanTiles = 0;
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (engine_isWaterBiome(map.tiles[i].biome)) waterMask[i] = 1;
+        if (map.tiles[i].biome === 'ocean') oceanTiles += 1;
+      }
+      const { labels, sizes } = engine_labelComponents(waterMask, w, h, wrapX);
+      if (sizes.length === 0 || oceanTiles === 0) return;
+
+      let largestIdx = 0;
+      let largestSize = sizes[0] ?? 0;
+      for (let i = 1; i < sizes.length; i += 1) {
+        if ((sizes[i] ?? 0) > largestSize) {
+          largestSize = sizes[i] ?? 0;
+          largestIdx = i;
+        }
+      }
+
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (map.tiles[i].biome !== 'ocean') continue;
+        assert.strictEqual(labels[i], largestIdx, 'Ocean tiles should belong to the largest water component');
+      }
+    }
+  },
+  {
+    name: 'Surface v3 wrapX seam elevation deltas are within internal range',
+    run: () => {
+      const worldSeed = 271;
+      const systemId = 'sys_surface_seam';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      if (!wrapX || w < 2) return;
+
+      const seamDiffs: number[] = [];
+      const internalDiffs: number[] = [];
+      for (let r = 0; r < h; r += 1) {
+        const leftIdx = r * w;
+        const rightIdx = r * w + (w - 1);
+        seamDiffs.push(Math.abs(map.tiles[leftIdx].elev - map.tiles[rightIdx].elev));
+        for (let q = 0; q < w - 1; q += 1) {
+          const a = r * w + q;
+          const b = a + 1;
+          internalDiffs.push(Math.abs(map.tiles[a].elev - map.tiles[b].elev));
+        }
+      }
+
+      const maxSeam = Math.max(...seamDiffs);
+      const maxInternal = Math.max(...internalDiffs);
+      assert.ok(
+        maxSeam <= maxInternal * 1.5 + 1,
+        `Wrap seam delta ${maxSeam} exceeds internal max ${maxInternal}`
+      );
+    }
+  },
+  {
+    name: 'Surface v3 water/land respects sea level after cleanup',
+    run: () => {
+      const worldSeed = 177;
+      const systemId = 'sys_surface_sea_level';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const seaLevel = map.seaLevelElev;
+      const tolerance = 1;
+      for (const tile of map.tiles) {
+        if (engine_isWaterBiome(tile.biome)) {
+          assert.ok(tile.elev <= seaLevel + tolerance, `Water tile above sea level: ${tile.elev} > ${seaLevel}`);
+        } else {
+          assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
+        }
+      }
     }
   }
 );

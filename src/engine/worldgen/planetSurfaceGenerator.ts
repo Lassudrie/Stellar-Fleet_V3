@@ -174,24 +174,35 @@ export const fbm2D = (seed: number, x: number, y: number, octaves: number, lacun
   return norm > 0 ? sum / norm : 0; // ~[-1..1]
 };
 
-const periodicCoord = (x: number): { u: number; v: number } => {
+const periodicCoord = (x: number, radius = 1): { u: number; v: number } => {
   const angle = x * Math.PI * 2;
-  return { u: Math.cos(angle), v: Math.sin(angle) };
+  return { u: Math.cos(angle) * radius, v: Math.sin(angle) * radius };
 };
 
-export const valueNoise2DPeriodicX = (seed: number, x: number, y: number): number => {
-  const { u, v } = periodicCoord(x);
-  return valueNoise3D(seed, u, v, y);
+export const valueNoise2DPeriodicX = (seed: number, x: number, y: number, freqX = 1, freqY = 1): number => {
+  const { u, v } = periodicCoord(x, freqX);
+  return valueNoise3D(seed, u, v, y * freqY);
 };
 
-export const fbm2DPeriodicX = (seed: number, x: number, y: number, octaves: number, lacunarity = 2, gain = 0.5): number => {
+export const fbm2DPeriodicX = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  lacunarity = 2,
+  gain = 0.5,
+  baseFreqX = 1,
+  baseFreqY = 1
+): number => {
   let amp = 1;
   let freq = 1;
   let sum = 0;
   let norm = 0;
 
   for (let i = 0; i < octaves; i += 1) {
-    sum += (valueNoise2DPeriodicX(seed + i * 1013, x * freq, y * freq) * 2 - 1) * amp;
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    sum += (valueNoise2DPeriodicX(seed + i * 1013, x, y, fx, fy) * 2 - 1) * amp;
     norm += amp;
     amp *= gain;
     freq *= lacunarity;
@@ -199,14 +210,23 @@ export const fbm2DPeriodicX = (seed: number, x: number, y: number, octaves: numb
   return norm > 0 ? sum / norm : 0;
 };
 
-export const ridgedFbm2DPeriodicX = (seed: number, x: number, y: number, octaves: number): number => {
+export const ridgedFbm2DPeriodicX = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  baseFreqX = 1,
+  baseFreqY = 1
+): number => {
   let amp = 1;
   let freq = 1;
   let sum = 0;
   let norm = 0;
 
   for (let i = 0; i < octaves; i += 1) {
-    const n = valueNoise2DPeriodicX(seed + i * 2179, x * freq, y * freq);
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    const n = valueNoise2DPeriodicX(seed + i * 2179, x, y, fx, fy);
     const ridge = 1 - Math.abs(n * 2 - 1); // 0..1
     const v = ridge * 2 - 1; // [-1..1]
     sum += v * amp;
@@ -241,9 +261,16 @@ export const domainWarp2D = (seed: number, x: number, y: number, strength: numbe
   return { x: x + dx * strength, y: y + dy * strength };
 };
 
-export const domainWarp2DPeriodicX = (seed: number, x: number, y: number, strength: number): { x: number; y: number } => {
-  const dx = fbm2DPeriodicX(seed ^ 0x68bc21eb, x * 0.8, y * 0.8, 3);
-  const dy = fbm2DPeriodicX(seed ^ 0x02e5be93, x * 0.8, y * 0.8, 3);
+export const domainWarp2DPeriodicX = (
+  seed: number,
+  x: number,
+  y: number,
+  strength: number,
+  baseFreqX = 1,
+  baseFreqY = 1
+): { x: number; y: number } => {
+  const dx = fbm2DPeriodicX(seed ^ 0x68bc21eb, x, y, 3, 2, 0.5, baseFreqX * 0.8, baseFreqY * 0.8);
+  const dy = fbm2DPeriodicX(seed ^ 0x02e5be93, x, y, 3, 2, 0.5, baseFreqX * 0.8, baseFreqY * 0.8);
   return { x: x + dx * strength, y: y + dy * strength };
 };
 
@@ -396,7 +423,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
 // Descriptor (was: planetSurface/descriptor.ts)
 // ==========================================
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 2;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 3;
 
 const clampInt = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, Math.round(x)));
 
@@ -1576,10 +1603,24 @@ const generateSurfaceMapV3 = (params: {
         };
 
   const baseSeed = descriptor.seed;
-  const fbm = wrapX ? fbm2DPeriodicX : fbm2D;
-  const ridged = wrapX ? ridgedFbm2DPeriodicX : ridgedFbm2D;
-  const warp = wrapX ? domainWarp2DPeriodicX : domainWarp2D;
-  const valNoise = wrapX ? valueNoise2DPeriodicX : valueNoise2D;
+  const warp2D = wrapX
+    ? (seed: number, x: number, y: number, strength: number, fx: number, fy: number) =>
+        domainWarp2DPeriodicX(seed, x, y, strength, fx, fy)
+    : (seed: number, x: number, y: number, strength: number, fx: number, fy: number) =>
+        domainWarp2D(seed, x * fx, y * fy, strength);
+  const fbm2DGen = wrapX
+    ? (seed: number, x: number, y: number, octaves: number, fx: number, fy: number, lac = 2, gain = 0.5) =>
+        fbm2DPeriodicX(seed, x, y, octaves, lac, gain, fx, fy)
+    : (seed: number, x: number, y: number, octaves: number, fx: number, fy: number, lac = 2, gain = 0.5) =>
+        fbm2D(seed, x * fx, y * fy, octaves, lac, gain);
+  const ridged2DGen = wrapX
+    ? (seed: number, x: number, y: number, octaves: number, fx: number, fy: number) =>
+        ridgedFbm2DPeriodicX(seed, x, y, octaves, fx, fy)
+    : (seed: number, x: number, y: number, octaves: number, fx: number, fy: number) =>
+        ridgedFbm2D(seed, x * fx, y * fy, octaves);
+  const noise2D = wrapX
+    ? (seed: number, x: number, y: number, fx: number, fy: number) => valueNoise2DPeriodicX(seed, x, y, fx, fy)
+    : (seed: number, x: number, y: number, fx: number, fy: number) => valueNoise2D(seed, x * fx, y * fy);
 
   // --- Elevation field ---
   const elev = new Float32Array(n);
@@ -1589,11 +1630,11 @@ const generateSurfaceMapV3 = (params: {
       const x = q / w;
       const y = r / h;
 
-      const warped = warp(baseSeed ^ 0x1b873593, x * 3.2, y * 2.4, 0.25);
-      const continents = fbm(baseSeed ^ 0xa2b3c4d5, warped.x * 1.1, warped.y * 1.1, 5);
-      const mountains = ridged(baseSeed ^ 0x7f4a7c15, warped.x * 2.8, warped.y * 2.8, 4);
+      const warped = warp2D(baseSeed ^ 0x1b873593, x, y, 0.25, 3.2, 2.4);
+      const continents = fbm2DGen(baseSeed ^ 0xa2b3c4d5, warped.x, warped.y, 5, 1.1, 1.1);
+      const mountains = ridged2DGen(baseSeed ^ 0x7f4a7c15, warped.x, warped.y, 4, 2.8, 2.8);
 
-      const craterNoise = valNoise(baseSeed ^ 0x165667b1, x * 6.0, y * 6.0) * 2 - 1;
+      const craterNoise = noise2D(baseSeed ^ 0x165667b1, x, y, 6.0, 6.0) * 2 - 1;
       const crater = env.surfaceClass === 'airless' ? craterNoise * env.craterIntensity * 0.45 : 0;
 
       const raw = continents * 0.85 + mountains * 0.55 + crater;
@@ -1608,6 +1649,16 @@ const generateSurfaceMapV3 = (params: {
   for (let i = 0; i < n; i += 1) initialWaterMask[i] = elev[i] <= seaLevelElev ? 1 : 0;
 
   const cleanedWaterMask = applyMicroCleanup(initialWaterMask, w, h, wrapX, 3, 3);
+  // Keep elevation consistent with cleanup flips (avoids land below sea level and water above it).
+  const seaLevelEps = 0.001;
+  for (let i = 0; i < n; i += 1) {
+    if (cleanedWaterMask[i] === initialWaterMask[i]) continue;
+    if (cleanedWaterMask[i] === 1) {
+      if (elev[i] > seaLevelElev - seaLevelEps) elev[i] = seaLevelElev - seaLevelEps;
+    } else {
+      if (elev[i] < seaLevelElev + seaLevelEps) elev[i] = seaLevelElev + seaLevelEps;
+    }
+  }
   const waterMask = cleanedWaterMask;
 
   const { oceanMask } = classifyWaterComponents(waterMask, w, h, wrapX);
@@ -1720,7 +1771,7 @@ const generateSurfaceMapV3 = (params: {
         if (isWaterBiome(tiles[i].biome)) continue;
         const x = q / w;
         const y = r / h;
-        const hot = fbm(baseSeed ^ 0xdeadbeef, x * 4.0, y * 4.0, 4);
+        const hot = fbm2DGen(baseSeed ^ 0xdeadbeef, x, y, 4, 4.0, 4.0);
         if (hot > 0.72 + (1 - env.volcanismIndex) * 0.25) {
           tiles[i].biome = 'volcanic';
         }
