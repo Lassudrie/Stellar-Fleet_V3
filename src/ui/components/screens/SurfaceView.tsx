@@ -31,7 +31,7 @@ import {
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
 import { isPassable, neighborsAxial } from '../../../engine/planetSurface';
-import { useMapControlsCamera } from '../../hooks';
+import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
 import {
   approxRngRange,
   CENTER_SLOP_PX,
@@ -72,6 +72,7 @@ interface SurfaceViewProps {
 }
 
 type CameraState = { zoom: number; offset: { x: number; y: number } };
+type WheelInput = { clientX: number; clientY: number; deltaY: number; currentTarget: EventTarget | null };
 
 const biomeColors: Record<Biome, string> = {
   ocean: '#0a75c2',        // deep ocean blue
@@ -142,7 +143,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const terrainBufferRef = useRef<TerrainBuffer | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
-  const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
+  const pendingWheelEvent = useRef<WheelInput | null>(null);
   const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
@@ -267,8 +268,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Only enable touch handlers when Pointer Events are unavailable to avoid duplicate input streams on mobile.
-  const touchFallbackEnabled = typeof window !== 'undefined' && !('PointerEvent' in window);
+  // Prefer touch handlers on coarse pointers to avoid flaky PointerEvent streams on some Android devices.
+  const supportsPointerEvents = typeof window !== 'undefined' && 'PointerEvent' in window;
+  const prefersTouchFallback = typeof window !== 'undefined' && (
+    (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+    || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+  );
+  const touchFallbackEnabled = !supportsPointerEvents || prefersTouchFallback;
+  const pointerHandlersEnabled = supportsPointerEvents && !prefersTouchFallback;
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
@@ -477,21 +484,41 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   // draw() is defined later, after overlay computations.
 
-  const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
+  const queueWheel = useCallback((event: WheelEvent) => {
     userCameraRef.current = true;
-    event.preventDefault();
-    event.persist();
-    pendingWheelEvent.current = event;
+    if (event.cancelable) event.preventDefault();
+    pendingWheelEvent.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      deltaY: event.deltaY,
+      currentTarget: event.currentTarget
+    };
     if (wheelFrameRef.current === null) {
       wheelFrameRef.current = requestAnimationFrame(() => {
         wheelFrameRef.current = null;
         const pending = pendingWheelEvent.current;
         pendingWheelEvent.current = null;
         if (!pending) return;
-        cameraControls.handleWheel(pending);
+        const target = pending.currentTarget as HTMLElement | null;
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const focus = {
+          x: pending.clientX - rect.left,
+          y: pending.clientY - rect.top
+        };
+        const zoomFactor = pending.deltaY < 0 ? 1.1 : 0.9;
+        setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom * zoomFactor, clampOffset, MIN_ZOOM, MAX_ZOOM));
       });
     }
-  };
+  }, [clampOffset, setCamera]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => queueWheel(event);
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [queueWheel]);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
@@ -1053,11 +1080,18 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           ref={canvasRef}
           className={`w-full h-full touch-none ${cameraControls.isInteracting ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ touchAction: 'none' }}
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
+          {...(pointerHandlersEnabled
+            ? {
+                onPointerDown: handlePointerDown,
+                onPointerMove: handlePointerMove,
+                onPointerUp: handlePointerUp,
+                onPointerCancel: handlePointerCancel,
+                onPointerLeave: (event: React.PointerEvent<HTMLCanvasElement>) => {
+                  handlePointerCancel(event);
+                  setHovered(null);
+                }
+              }
+            : {})}
           {...(touchFallbackEnabled
             ? {
                 onTouchStart: handleTouchStart,
@@ -1066,10 +1100,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                 onTouchCancel: handleTouchCancel
               }
             : {})}
-          onPointerLeave={(event) => {
-            handlePointerCancel(event);
-            setHovered(null);
-          }}
         />
       </div>
 
@@ -1103,6 +1133,13 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           )}
         </div>
       </div>
+      {touchFallbackEnabled && (
+        <div className="pointer-events-none absolute top-16 right-4 z-10">
+          <div className="rounded border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 backdrop-blur">
+            Touch input active
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-end">
         <div className="pointer-events-auto m-4 self-end w-full max-w-md">

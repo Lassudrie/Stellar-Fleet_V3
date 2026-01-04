@@ -377,6 +377,19 @@ export const fr = {
 
   // Loading
   'loading.init': 'Initialisation Simulation',
+  'loading.stage.prepare': 'Préparation',
+  'loading.stage.read': 'Lecture de la sauvegarde',
+  'loading.stage.worldgen': 'Génération du monde',
+  'loading.stage.deserialize': 'Restauration simulation',
+  'loading.stage.engine': 'Initialisation moteur',
+  'loading.stage.assets': 'Chargement des assets',
+  'loading.stage.render': 'Préparation rendu',
+  'loading.error.title': 'Échec du chargement',
+  'loading.error.subtitle': 'Une erreur est survenue pendant le chargement.',
+  'loading.error.back': 'Retour menu',
+  'loading.percent': '{{p}}%',
+  'loading.indeterminate': 'Chargement',
+  'loading.detail.count': '{{current}} / {{total}}',
   'loading.version': 'V1.1 ⬢ MOTEUR DETERMINISTE',
 
   // App / Engine Messages

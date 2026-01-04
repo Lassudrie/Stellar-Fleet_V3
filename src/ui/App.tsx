@@ -11,13 +11,12 @@ import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
 import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
 import SurfaceView from './components/screens/SurfaceView';
 import { buildScenario } from '../content/scenarios';
-import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower } from '../engine/world';
 import { Vec3, clone, equals } from '../engine/math/vec3';
-import { serializeGameState, deserializeGameState } from '../engine/serialization';
+import { serializeGameState } from '../engine/serialization';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
@@ -25,15 +24,64 @@ import { processCommandResult } from './commands/processCommandResult';
 import { sorted } from '../shared/shared';
 import { getDefaultSolidPlanet, getPlanetById } from '../engine/planets';
 import type { GameCommand } from '../engine/commands';
-import { buildSurfaceMapWorkerRequest, SurfaceMapWorkerClient } from './workers';
+import { BootstrapWorkerClient, buildSurfaceMapWorkerRequest, SurfaceMapWorkerClient } from './workers';
+import type { BootstrapProgressUpdate } from './workers';
 
 type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
+type LoadingStage = 'prepare' | 'read' | 'worldgen' | 'deserialize' | 'engine' | 'assets' | 'render';
+type LoadingStatus = 'loading' | 'error' | 'done';
+type LoadingFlow = 'newGame' | 'loadGame';
+type LoadingDetail = { current: number; total: number } | null;
+type LoadingState = {
+  active: boolean;
+  status: LoadingStatus;
+  stage: LoadingStage | null;
+  progress: number | null;
+  detail: LoadingDetail;
+  error: { message: string } | null;
+};
 
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const SCREEN_TRANSITION_MS = 400;
 const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
+const LOADING_FLOW_STAGES: Record<LoadingFlow, LoadingStage[]> = {
+  newGame: ['prepare', 'worldgen', 'engine', 'render'],
+  loadGame: ['read', 'deserialize', 'engine', 'render']
+};
+const LOADING_FLOW_WEIGHTS: Record<LoadingFlow, Record<LoadingStage, number>> = {
+  newGame: {
+    prepare: 0.05,
+    worldgen: 0.7,
+    engine: 0.2,
+    render: 0.05
+  },
+  loadGame: {
+    read: 0.1,
+    deserialize: 0.6,
+    engine: 0.25,
+    render: 0.05
+  }
+};
+
+const clampProgress = (value: number) => Math.max(0, Math.min(1, value));
+const computeOverallProgress = (flow: LoadingFlow, stage: LoadingStage, stageProgress: number) => {
+  const weights = LOADING_FLOW_WEIGHTS[flow];
+  const stages = LOADING_FLOW_STAGES[flow];
+  let total = 0;
+
+  for (const key of stages) {
+    const weight = weights[key] ?? 0;
+    if (key === stage) {
+      total += weight * clampProgress(stageProgress);
+      return Math.min(1, total);
+    }
+    total += weight;
+  }
+
+  return Math.min(1, total);
+};
 
 // ------------------------------------------------------------
 // Surface navigation helper (was: ui/navigation/surfaceNavigation.ts)
@@ -82,7 +130,19 @@ const App: React.FC = () => {
   const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW' | 'SURFACE_VIEW'>('MENU');
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingState, setLoadingState] = useState<LoadingState>({
+    active: false,
+    status: 'loading',
+    stage: null,
+    progress: null,
+    detail: null,
+    error: null
+  });
+  const [renderReady, setRenderReady] = useState(false);
+  const [gameSceneKey, setGameSceneKey] = useState(0);
+  const loadingSessionRef = useRef(0);
+  const loadingFlowRef = useRef<LoadingFlow | null>(null);
+  const bootstrapWorkerRef = useRef<BootstrapWorkerClient | null>(null);
   const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
   const [surfaceViewBodyId, setSurfaceViewBodyId] = useState<string | null>(null);
   const [surfaceViewSystem, setSurfaceViewSystem] = useState<StarSystem | null>(null);
@@ -207,6 +267,13 @@ const App: React.FC = () => {
       return () => clearTransitionTimer();
   }, [clearTransitionTimer]);
 
+  useEffect(() => {
+      return () => {
+          bootstrapWorkerRef.current?.dispose();
+          bootstrapWorkerRef.current = null;
+      };
+  }, []);
+
   const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW', prepare?: () => void) => {
       clearTransitionTimer();
       prepare?.();
@@ -224,6 +291,134 @@ const App: React.FC = () => {
           }, SCREEN_TRANSITION_MS);
       }, SCREEN_TRANSITION_MS);
   }, [clearTransitionTimer]);
+
+  const startLoadingFlow = useCallback((flow: LoadingFlow, stage: LoadingStage) => {
+      const nextSessionId = loadingSessionRef.current + 1;
+      loadingSessionRef.current = nextSessionId;
+      loadingFlowRef.current = flow;
+      setRenderReady(false);
+      setLoadingState({
+        active: true,
+        status: 'loading',
+        stage,
+        progress: computeOverallProgress(flow, stage, 0),
+        detail: null,
+        error: null
+      });
+      return nextSessionId;
+  }, []);
+
+  const updateLoadingStage = useCallback(
+    (stage: LoadingStage, stageProgress: number | null, detail: LoadingDetail = null) => {
+      setLoadingState(prev => {
+        const flow = loadingFlowRef.current;
+        const normalizedProgress = stageProgress === null ? null : clampProgress(stageProgress);
+        const overallProgress =
+          flow && normalizedProgress !== null
+            ? computeOverallProgress(flow, stage, normalizedProgress)
+            : normalizedProgress;
+        const nextProgress = overallProgress === null ? null : Math.max(prev.progress ?? 0, overallProgress);
+
+        return {
+          ...prev,
+          active: true,
+          status: 'loading',
+          stage,
+          progress: nextProgress,
+          detail,
+          error: null
+        };
+      });
+    },
+    []
+  );
+
+  const getBootstrapWorker = useCallback(() => {
+    if (!bootstrapWorkerRef.current) {
+      bootstrapWorkerRef.current = new BootstrapWorkerClient();
+    }
+    return bootstrapWorkerRef.current;
+  }, []);
+
+  const failLoading = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    loadingSessionRef.current += 1;
+    bootstrapWorkerRef.current?.dispose();
+    bootstrapWorkerRef.current = null;
+    setEngine(null);
+    setViewGameState(null);
+    setRenderReady(false);
+    setLoadingState(prev => ({
+      ...prev,
+      active: true,
+      status: 'error',
+      error: { message },
+      progress: prev.progress ?? 0
+    }));
+  }, []);
+
+  const handleLoadingBack = useCallback(() => {
+    loadingSessionRef.current += 1;
+    loadingFlowRef.current = null;
+    bootstrapWorkerRef.current?.dispose();
+    bootstrapWorkerRef.current = null;
+    setEngine(null);
+    setViewGameState(null);
+    setRenderReady(false);
+    setEnemySightings({});
+    setUiMessages([]);
+    setSelectedFleetId(null);
+    setInspectedFleetId(null);
+    setFleetPickerMode(null);
+    setUiMode('NONE');
+    setSelectedBattleId(null);
+    setLoadingState({
+      active: false,
+      status: 'loading',
+      stage: null,
+      progress: null,
+      detail: null,
+      error: null
+    });
+    setScreen('MENU');
+  }, []);
+
+  const handleBootstrapProgress = useCallback(
+    (update: BootstrapProgressUpdate, sessionId: number) => {
+      if (sessionId !== loadingSessionRef.current) return;
+      updateLoadingStage(update.stage, update.progress, update.detail ?? null);
+    },
+    [updateLoadingStage]
+  );
+
+  const readFileWithProgress = useCallback(async (file: File, onProgress: (progress: number) => void) => {
+    const total = Math.max(1, file.size);
+
+    if (typeof file.stream !== 'function') {
+      const text = await file.text();
+      onProgress(1);
+      return text;
+    }
+
+    const reader = file.stream().getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        loaded += value.byteLength;
+        chunks.push(decoder.decode(value, { stream: true }));
+        onProgress(Math.min(1, loaded / total));
+      }
+    }
+
+    chunks.push(decoder.decode());
+    onProgress(1);
+    return chunks.join('');
+  }, []);
 
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
@@ -319,11 +514,35 @@ const App: React.FC = () => {
       }
     }, [engine, updateViewState]);
 
-  const handleLaunchGame = (scenarioArg: any) => {
-    setLoading(true);
-    setEnemySightings({}); 
+    const stateReady = Boolean(engine && viewGameState);
+
+    useEffect(() => {
+      if (!loadingState.active || loadingState.status === 'error') return;
+      if (!stateReady || !renderReady) return;
+      loadingFlowRef.current = null;
+      setLoadingState(prev => ({
+        ...prev,
+        active: false,
+        status: 'done',
+        stage: null,
+        progress: 1,
+        detail: null,
+        error: null
+      }));
+    }, [loadingState.active, loadingState.status, renderReady, stateReady]);
+
+  const handleLaunchGame = async (scenarioArg: any) => {
+    const sessionId = startLoadingFlow('newGame', 'prepare');
+    setEnemySightings({});
     setUiMessages([]);
-    setTimeout(() => {
+    setSelectedFleetId(null);
+    setInspectedFleetId(null);
+    setFleetPickerMode(null);
+    setUiMode('NONE');
+    setSelectedBattleId(null);
+    updateLoadingStage('prepare', 1);
+
+    try {
         // Handle both simple seed (number) and full Scenario object
         let scenario;
         if (typeof scenarioArg === 'number') {
@@ -332,12 +551,25 @@ const App: React.FC = () => {
              scenario = scenarioArg;
         }
 
-        const { state } = generateWorld(scenario);
+        updateLoadingStage('worldgen', 0);
+        const state = await getBootstrapWorker().startNewGame(
+          scenario,
+          (update) => handleBootstrapProgress(update, sessionId)
+        );
+        if (sessionId !== loadingSessionRef.current) return;
+
+        updateLoadingStage('engine', 0);
         const newEngine = new GameEngine(state);
         setEngine(newEngine);
+        updateViewState(newEngine.state);
         setScreen('GAME');
-        setLoading(false);
-    }, 500);
+        setGameSceneKey(prev => prev + 1);
+        updateLoadingStage('engine', 1);
+        updateLoadingStage('render', 0);
+    } catch (error) {
+        if (sessionId !== loadingSessionRef.current) return;
+        failLoading(error);
+    }
   };
 
   // --- SAVE / LOAD HANDLERS ---
@@ -383,26 +615,45 @@ const App: React.FC = () => {
   };
 
   const handleLoad = async (file: File) => {
-      setLoading(true);
+      const sessionId = startLoadingFlow('loadGame', 'read');
       try {
           if (file.size > MAX_SAVE_BYTES) {
               throw new Error(`Save file exceeds ${Math.floor(MAX_SAVE_BYTES / (1024 * 1024))}MB limit.`);
           }
-          const text = await file.text();
-          const state = deserializeGameState(text);
+
+          updateLoadingStage('read', 0);
+          const text = await readFileWithProgress(file, (progress) => {
+              if (sessionId !== loadingSessionRef.current) return;
+              updateLoadingStage('read', progress);
+          });
+          if (sessionId !== loadingSessionRef.current) return;
+
+          updateLoadingStage('deserialize', 0);
+          const state = await getBootstrapWorker().loadGame(
+            text,
+            (update) => handleBootstrapProgress(update, sessionId)
+          );
+          if (sessionId !== loadingSessionRef.current) return;
           
+          updateLoadingStage('engine', 0);
           const newEngine = new GameEngine(state);
           setEngine(newEngine);
 
           setEnemySightings({});
           setSelectedFleetId(null);
+          setInspectedFleetId(null);
           setFleetPickerMode(null);
           setUiMode('NONE');
           setUiMessages([]);
+          setSelectedBattleId(null);
           
           updateViewState(newEngine.state);
           
           setScreen('GAME');
+          setGameSceneKey(prev => prev + 1);
+          updateLoadingStage('engine', 1);
+          updateLoadingStage('render', 0);
+
           addUiMessage({
               title: t('msg.loadSuccessTitle'),
               subtitle: t('msg.loadSuccess'),
@@ -410,21 +661,17 @@ const App: React.FC = () => {
               priority: 1,
               type: 'ui'
           });
-      } catch (e) {
-          console.error("Load failed:", e);
-          addUiMessage({
-              title: t('msg.loadFailTitle'),
-              subtitle: t('msg.invalidSave'),
-              lines: [(e as Error).message],
-              priority: 2,
-              type: 'ui'
-          });
-      } finally {
-          setLoading(false);
+      } catch (error) {
+          if (sessionId !== loadingSessionRef.current) return;
+          failLoading(error);
       }
   };
 
   // --- INTERACTION HANDLERS ---
+
+  const handleSceneReady = useCallback(() => {
+      setRenderReady(true);
+  }, []);
 
   const handleSystemClick = (sys: StarSystem, event: any) => {
       setTargetSystem(sys);
@@ -972,9 +1219,12 @@ useEffect(() => {
       return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === surfaceViewBodyId);
   }, [surfaceViewBodyId, viewGameState]);
 
-  if (loading) return <LoadingScreen />;
-
-  const isGameInteractionLocked = screen !== 'GAME' || transitionPhase !== 'idle' || pendingScreen === 'SYSTEM_VIEW' || pendingScreen === 'SURFACE_VIEW';
+  const isGameInteractionLocked =
+    loadingState.active ||
+    screen !== 'GAME' ||
+    transitionPhase !== 'idle' ||
+    pendingScreen === 'SYSTEM_VIEW' ||
+    pendingScreen === 'SURFACE_VIEW';
 
   const transitionOverlayElement = (
     <div
@@ -986,12 +1236,21 @@ useEffect(() => {
     />
   );
 
-  if (screen === 'MENU') return <MainMenu onNavigate={(s) => setScreen(s === 'LOAD_GAME' ? 'LOAD_GAME' : 'SCENARIO')} />;
-  if (screen === 'SCENARIO') return <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
-  if (screen === 'LOAD_GAME') return <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
-  
-  if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
-      return (
+  const loadingStageLabel = loadingState.stage ? t(`loading.stage.${loadingState.stage}`) : t('loading.init');
+  const loadingDetailText = loadingState.detail
+    ? t('loading.detail.count', { current: loadingState.detail.current, total: loadingState.detail.total })
+    : null;
+
+  let screenContent: React.ReactNode = null;
+
+  if (screen === 'MENU') {
+      screenContent = <MainMenu onNavigate={(s) => setScreen(s === 'LOAD_GAME' ? 'LOAD_GAME' : 'SCENARIO')} />;
+  } else if (screen === 'SCENARIO') {
+      screenContent = <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
+  } else if (screen === 'LOAD_GAME') {
+      screenContent = <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
+  } else if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
+      screenContent = (
         <div className="relative w-full h-screen bg-black text-white">
             <FleetNameProvider fleets={viewGameState?.fleets ?? []}>
                 <SystemView3D
@@ -1056,11 +1315,8 @@ useEffect(() => {
             {transitionOverlayElement}
         </div>
       );
-  }
-
-  if (screen === 'SURFACE_VIEW') {
-      if (!viewGameState) return null;
-      return (
+  } else if (screen === 'SURFACE_VIEW') {
+      screenContent = viewGameState ? (
         <div className="relative w-full h-screen">
             <SurfaceView
               map={surfaceMap}
@@ -1077,19 +1333,18 @@ useEffect(() => {
             />
             {transitionOverlayElement}
         </div>
-      );
-  }
-
-  if (screen === 'GAME' && viewGameState && engine) {
+      ) : null;
+  } else if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
       const selectedFleet = viewGameState.fleets.find(f => f.id === selectedFleetId) || null;
       const inspectedFleet = viewGameState.fleets.find(f => f.id === inspectedFleetId) || null;
 
-      return (
+      screenContent = (
         <div className="relative w-full h-screen overflow-hidden bg-black text-white">
             <FleetNameProvider fleets={viewGameState.fleets}>
                 <GameScene
+                    key={gameSceneKey}
                     gameState={viewGameState}
                     enemySightings={enemySightings}
                     selectedFleetId={selectedFleetId}
@@ -1102,6 +1357,7 @@ useEffect(() => {
                         handleCloseMenu();
                         setSelectedFleetId(null);
                     }}
+                    onReady={handleSceneReady}
                 />
                 <UI
                     startYear={viewGameState.startYear}
@@ -1174,9 +1430,23 @@ useEffect(() => {
             </FleetNameProvider>
         </div>
       );
-}
+  }
 
-  return null;
+  return (
+    <div className="relative w-full h-screen">
+      {screenContent}
+      {loadingState.active ? (
+        <LoadingScreen
+          progress={loadingState.progress}
+          stageLabel={loadingStageLabel}
+          detail={loadingDetailText}
+          status={loadingState.status}
+          errorMessage={loadingState.error?.message ?? null}
+          onBack={loadingState.status === 'error' ? handleLoadingBack : undefined}
+        />
+      ) : null}
+    </div>
+  );
 };
 
 export default App;

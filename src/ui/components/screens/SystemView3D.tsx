@@ -1541,11 +1541,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     if (astro?.planets?.length) {
       return astro.planets.map((planet, index) => {
         const linkedBody = planetBodies[index];
-        const planetId = linkedBody?.id ?? (planet as { id?: string }).id ?? `planet-${index + 1}`;
+        const fallbackPlanetId = `planet-${starSystem.id}-${index + 1}`;
+        const planetId = linkedBody?.id ?? (planet as { id?: string }).id ?? fallbackPlanetId;
         const moonBodies = moonBodiesByPlanetIndex[index] ?? [];
         const moons: MoonSource[] = (planet.moons ?? []).map((moon, moonIndex) => ({
           ...moon,
-          id: moonBodies[moonIndex]?.id,
+          id: moonBodies[moonIndex]?.id ?? `moon-${starSystem.id}-${index + 1}-${moonIndex + 1}`,
           isSolid: moonBodies[moonIndex]?.isSolid ?? true
         }));
         return {
@@ -1578,7 +1579,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       planetType: 'Terrestrial' as PlanetType,
       moons: []
     }));
-  }, [astro?.planets, moonBodiesByPlanetIndex, planetBodies]);
+  }, [astro?.planets, moonBodiesByPlanetIndex, planetBodies, starSystem.id]);
 
   const planets = useMemo<OrbitingPlanet[]>(() => {
     const rawPlanets = sourcePlanets.map((planet, index) => buildPlanetModel(
@@ -1700,7 +1701,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     };
 
     sourcePlanets.forEach((planet, index) => {
-      const planetId = planet.id ?? `planet-${index + 1}`;
+      const fallbackPlanetId = `planet-${starSystem.id}-${index + 1}`;
+      const planetId = planet.id ?? fallbackPlanetId;
       const planetName = planet.name ?? t('systemView.bodyInfo.unnamedPlanet', { index: index + 1 });
       const planetType = getPlanetType(planet);
       const surfaceBodyId = planet.id ?? planetId;
@@ -1718,7 +1720,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
       const moons = (planet.moons ?? []) as MoonSource[];
       moons.forEach((moon, moonIndex) => {
-        const moonId = moon.id ?? `${planetId}-moon-${moonIndex + 1}`;
+        const moonId = moon.id ?? `moon-${starSystem.id}-${index + 1}-${moonIndex + 1}`;
         const moonName = t('systemView.bodyInfo.moonName', {
           parent: planetName,
           index: moonIndex + 1
@@ -1738,7 +1740,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     });
 
     return map;
-  }, [astro?.primarySpectralType, sourcePlanets, starBodyId, starRadiusKm, starSystem.name, t]);
+  }, [astro?.primarySpectralType, sourcePlanets, starBodyId, starRadiusKm, starSystem.id, starSystem.name, t]);
   const systemFleets = useMemo(() => getSystemFleets(starSystem, fleets), [fleets, starSystem]);
   const systemStations = useMemo(
     () => stations.filter((station) => station.systemId === starSystem.id),

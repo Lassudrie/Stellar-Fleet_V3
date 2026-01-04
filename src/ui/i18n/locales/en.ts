@@ -377,6 +377,19 @@ export const en = {
 
   // Loading
   'loading.init': 'Initializing Simulation',
+  'loading.stage.prepare': 'Preparing',
+  'loading.stage.read': 'Reading save file',
+  'loading.stage.worldgen': 'Generating world',
+  'loading.stage.deserialize': 'Restoring simulation',
+  'loading.stage.engine': 'Initializing engine',
+  'loading.stage.assets': 'Loading assets',
+  'loading.stage.render': 'Preparing render',
+  'loading.error.title': 'Load failed',
+  'loading.error.subtitle': 'Something went wrong while loading.',
+  'loading.error.back': 'Back to menu',
+  'loading.percent': '{{p}}%',
+  'loading.indeterminate': 'Loading',
+  'loading.detail.count': '{{current}} / {{total}}',
   'loading.version': 'V1.1 • DETERMINISTIC ENGINE',
 
   // App / Engine Messages

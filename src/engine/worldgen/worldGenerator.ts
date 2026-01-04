@@ -24,8 +24,74 @@ const PRIMARY_POSITION_ATTEMPTS = 200;
 const FALLBACK_POSITION_ATTEMPTS = 2000;
 const BEST_EFFORT_FALLBACK_SAMPLES = 250;
 
-export const generateWorld = (scenario: GameScenario): { state: GameState; rng: RNG } => {
+type WorldgenProgressDetail = { current: number; total: number };
+type WorldgenProgressUpdate = { stage: 'worldgen'; progress: number; detail?: WorldgenProgressDetail };
+export type WorldgenProgressReporter = (update: WorldgenProgressUpdate) => void;
+export type GenerateWorldOptions = { onProgress?: WorldgenProgressReporter };
+
+export const generateWorld = (
+  scenario: GameScenario,
+  options: GenerateWorldOptions = {}
+): { state: GameState; rng: RNG } => {
   const rng = new RNG(scenario.seed);
+  const onProgress = options.onProgress;
+  const clampProgress = (value: number) => Math.max(0, Math.min(1, value));
+  const reportProgress = (progress: number, detail?: WorldgenProgressDetail) => {
+    if (!onProgress) return;
+    onProgress({ stage: 'worldgen', progress: clampProgress(progress), detail });
+  };
+
+  type WorldgenStep =
+    | 'factions'
+    | 'systems'
+    | 'astro'
+    | 'territories'
+    | 'planets'
+    | 'surface'
+    | 'fleets'
+    | 'garrisons'
+    | 'finalize';
+
+  const stepWeights: Record<WorldgenStep, number> = {
+    factions: 0.05,
+    systems: 0.25,
+    astro: 0.15,
+    territories: 0.1,
+    planets: 0.15,
+    surface: 0.1,
+    fleets: 0.1,
+    garrisons: 0.07,
+    finalize: 0.03
+  };
+
+  const stepOrder: WorldgenStep[] = [
+    'factions',
+    'systems',
+    'astro',
+    'territories',
+    'planets',
+    'surface',
+    'fleets',
+    'garrisons',
+    'finalize'
+  ];
+
+  const stepOffsets = stepOrder.reduce<Record<WorldgenStep, number>>((acc, step, index) => {
+    if (index === 0) {
+      acc[step] = 0;
+      return acc;
+    }
+    const prev = stepOrder[index - 1];
+    acc[step] = acc[prev] + stepWeights[prev];
+    return acc;
+  }, {} as Record<WorldgenStep, number>);
+
+  const reportStep = (step: WorldgenStep, progress: number, detail?: WorldgenProgressDetail) => {
+    reportProgress(stepOffsets[step] + stepWeights[step] * clampProgress(progress), detail);
+  };
+
+  const shouldReport = (index: number, total: number, every: number) =>
+    index === 0 || index === total - 1 || index % every === 0;
 
   // --- 0. INITIALIZE FACTIONS ---
   const factions: FactionState[] = scenario.setup.factions.map(f => ({
@@ -39,6 +105,7 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   // Default player faction is the first playable one, or just the first one if none marked playable
   const playerFaction = factions.find(f => f.isPlayable) || factions[0];
   const playerFactionId = playerFaction.id;
+  reportStep('factions', 1);
 
   // --- 1. GENERATE SYSTEMS ---
   const systems: StarSystem[] = [];
@@ -284,19 +351,38 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       isHomeworld: false,
       planets: []
     });
+    if (systemsToGenerate > 0) {
+      const reportEvery = Math.max(1, Math.floor(systemsToGenerate / 50));
+      if (shouldReport(i, systemsToGenerate, reportEvery)) {
+        reportStep('systems', (i + 1) / systemsToGenerate, { current: i + 1, total: systemsToGenerate });
+      }
+    }
+  }
+  if (systemsToGenerate === 0) {
+    reportStep('systems', 1);
   }
 
   // 1c. Procedural astro payload (isolated per system by derived seed).
   // WHY: Strict determinism requirement. This must not consume the global world RNG.
-  for (const sys of systems) {
+  const astroTotal = systems.length;
+  const astroReportEvery = Math.max(1, Math.floor(astroTotal / 50));
+  for (let i = 0; i < systems.length; i++) {
+    const sys = systems[i];
     sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
     if (!sys.astro) {
       devWarn(`[WorldGen] Generated system '${sys.id}' is missing astro payload; regenerating with deterministic seed.`);
       sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
     }
+    if (astroTotal > 0 && shouldReport(i, astroTotal, astroReportEvery)) {
+      reportStep('astro', (i + 1) / astroTotal, { current: i + 1, total: astroTotal });
+    }
+  }
+  if (astroTotal === 0) {
+    reportStep('astro', 1);
   }
 
   // --- 2. FACTIONS & TERRITORIES ---
+  reportStep('territories', 0);
   const homeSystems = new Map<string, StarSystem>(); // FactionID -> System
   const distMode = scenario.setup.startingDistribution;
   const staticSystemIds = new Set<string>((scenario.generation.staticSystems || []).map(s => s.id));
@@ -469,36 +555,59 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
           }
       }
   }
+  reportStep('territories', 1);
 
   // --- 2.5. BUILD PLANETARY BODIES (from astro + scenario overrides) ---
-  systems.forEach(system => {
+  const planetSystemsTotal = systems.length;
+  const planetReportEvery = Math.max(1, Math.floor(planetSystemsTotal / 50));
+  systems.forEach((system, index) => {
     const overrides = staticPlanetOverrides.get(system.id) ?? [];
     system.planets = buildPlanetBodies(
       { id: system.id, name: system.name, ownerFactionId: system.ownerFactionId },
       system.astro,
       overrides
     );
+    if (planetSystemsTotal > 0 && shouldReport(index, planetSystemsTotal, planetReportEvery)) {
+      reportStep('planets', (index + 1) / planetSystemsTotal, { current: index + 1, total: planetSystemsTotal });
+    }
   });
+  if (planetSystemsTotal === 0) {
+    reportStep('planets', 1);
+  }
 
   // --- 2.6. INITIALIZE PLANET SURFACE DESCRIPTORS (lightweight, persisted) ---
   const planetSurfaceDescriptorsByBodyId: Record<string, import('../../shared/shared').PlanetSurfaceDescriptor> = {};
+  const surfaceBodiesTotal = systems.reduce((total, system) => total + system.planets.filter(body => body.isSolid).length, 0);
+  const surfaceReportEvery = Math.max(1, Math.floor(surfaceBodiesTotal / 50));
+  let surfaceBodiesDone = 0;
   systems.forEach(system => {
     system.planets.forEach(body => {
       if (!body.isSolid) return;
-    planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
-      gameSeed: scenario.seed,
-      systemId: system.id,
-      body,
-      generatorVersion: scenario.generation?.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION
+      planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
+        gameSeed: scenario.seed,
+        systemId: system.id,
+        body,
+        generatorVersion: scenario.generation?.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION
+      });
+      if (surfaceBodiesTotal > 0) {
+        surfaceBodiesDone += 1;
+        if (shouldReport(surfaceBodiesDone - 1, surfaceBodiesTotal, surfaceReportEvery)) {
+          reportStep('surface', surfaceBodiesDone / surfaceBodiesTotal, { current: surfaceBodiesDone, total: surfaceBodiesTotal });
+        }
+      }
     });
   });
-  });
+  if (surfaceBodiesTotal === 0) {
+    reportStep('surface', 1);
+  }
 
   // --- 3. GENERATE FLEETS & ARMIES ---
   const fleets: Fleet[] = [];
   const armies: Army[] = [];
 
-  scenario.setup.initialFleets.forEach(def => {
+  const fleetTotal = scenario.setup.initialFleets.length;
+  const fleetReportEvery = Math.max(1, Math.floor(fleetTotal / 50));
+  scenario.setup.initialFleets.forEach((def, index) => {
       const factionId = def.ownerFactionId;
       // Ensure the fleet belongs to a valid faction
       const factionDef = factions.find(f => f.id === factionId);
@@ -613,10 +722,18 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
       }
 
       fleets.push(fleet);
+      if (fleetTotal > 0 && shouldReport(index, fleetTotal, fleetReportEvery)) {
+        reportStep('fleets', (index + 1) / fleetTotal, { current: index + 1, total: fleetTotal });
+      }
   });
+  if (fleetTotal === 0) {
+    reportStep('fleets', 1);
+  }
 
   // --- 4. GARRISONS (Ground Defenses) ---
-  systems.forEach(sys => {
+  const garrisonTotal = systems.length;
+  const garrisonReportEvery = Math.max(1, Math.floor(garrisonTotal / 50));
+  systems.forEach((sys, index) => {
       if (sys.ownerFactionId) {
           const isCapital = sys.isHomeworld;
 
@@ -645,12 +762,19 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
               }
           }
       }
+      if (garrisonTotal > 0 && shouldReport(index, garrisonTotal, garrisonReportEvery)) {
+        reportStep('garrisons', (index + 1) / garrisonTotal, { current: index + 1, total: garrisonTotal });
+      }
   });
+  if (garrisonTotal === 0) {
+    reportStep('garrisons', 1);
+  }
 
   const spacingLabel = enforceMinimumSystemSpacing ? `${minimumSystemSpacingLy}ly` : 'disabled';
   devLog(`[WorldGen] Generated ${systems.length} systems (Topology: ${topology}, MinSpacing: ${spacingLabel}), ${fleets.length} fleets, ${armies.length} armies. Player: ${playerFactionId}`);
 
   // --- 5. ASSEMBLE STATE ---
+  reportStep('finalize', 0);
   const state: GameState = {
       scenarioId: scenario.id,
       scenarioTitle: scenario.meta.title,
@@ -686,5 +810,6 @@ export const generateWorld = (scenario: GameScenario): { state: GameState; rng: 
   };
 
   const normalizedState = normalizeSurfacePositions(state);
+  reportStep('finalize', 1);
   return { state: normalizedState, rng };
 };

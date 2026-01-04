@@ -1,6 +1,6 @@
 
 import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef, useState } from 'react';
-import { Canvas, ThreeEvent } from '@react-three/fiber';
+import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { BufferGeometry, BufferAttribute } from 'three';
@@ -19,6 +19,7 @@ interface GameSceneProps {
   selectedFleetId: string | null;
   isInteractive?: boolean;
   focusTarget?: Vec3 | null;
+  onReady?: () => void;
   onFleetSelect: (id: string | null) => void;
   onFleetInspect: (id: string) => void;
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
@@ -183,6 +184,18 @@ const TrajectoryRenderer: React.FC<{
     );
 });
 
+const SceneReadyReporter: React.FC<{ onReady?: () => void }> = ({ onReady }) => {
+  const firedRef = useRef(false);
+
+  useFrame(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    onReady?.();
+  });
+
+  return null;
+};
+
 const GameScene: React.FC<GameSceneProps> = ({
   gameState,
   enemySightings,
@@ -192,7 +205,8 @@ const GameScene: React.FC<GameSceneProps> = ({
   onSystemClick,
   onBackgroundClick,
   focusTarget,
-  isInteractive = true
+  isInteractive = true,
+  onReady
 }) => {
 
   const playerHomeworld = useMemo(() => {
@@ -375,6 +389,8 @@ const GameScene: React.FC<GameSceneProps> = ({
 
                 <LaserRenderer lasers={gameState.lasers} />
             </group>
+
+            <SceneReadyReporter onReady={onReady} />
 
             <EffectComposer enableNormalPass={false}>
                 <Bloom luminanceThreshold={0.2} mipmapBlur intensity={1.2} radius={0.4} />

@@ -282,6 +282,15 @@ export interface SaveFileV4 {
 
 export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4;
 
+export type DeserializeProgressDetail = { current: number; total: number };
+export type DeserializeProgressUpdate = {
+  stage: 'deserialize';
+  progress: number;
+  detail?: DeserializeProgressDetail;
+};
+export type DeserializeProgressReporter = (update: DeserializeProgressUpdate) => void;
+export type DeserializeOptions = { onProgress?: DeserializeProgressReporter };
+
 // --- HELPERS ---
 
 const serializeVector3 = (v: Vec3): Vector3DTO => ({ x: v.x, y: v.y, z: v.z });
@@ -860,13 +869,23 @@ export const serializeGameState = (state: GameState): string => {
   return JSON.stringify(saveFile, null, 2);
 };
 
-export const deserializeGameState = (json: string): GameState => {
+export const deserializeGameState = (json: string, options: DeserializeOptions = {}): GameState => {
+  const onProgress = options.onProgress;
+  const clampProgress = (value: number) => Math.max(0, Math.min(1, value));
+  const reportProgress = (progress: number, detail?: DeserializeProgressDetail) => {
+    if (!onProgress) return;
+    onProgress({ stage: 'deserialize', progress: clampProgress(progress), detail });
+  };
+  const shouldReport = (index: number, total: number, every: number) =>
+    index === 0 || index === total - 1 || index % every === 0;
+
   let raw: any;
   try {
     raw = JSON.parse(json);
   } catch (e) {
     throw new Error("File is not valid JSON.");
   }
+  reportProgress(0);
 
   const saveVersion: number | undefined = raw && typeof raw === 'object' && raw.version !== undefined
     ? Number(raw.version)
@@ -917,7 +936,35 @@ export const deserializeGameState = (json: string): GameState => {
       throw new Error("Field 'systems' must be an array.");
     }
 
-    const systems: StarSystem[] = systemsDto.map((s: any) => {
+    const systemsTotal = systemsDto.length;
+    const fleetsTotal = Array.isArray(dto.fleets) ? dto.fleets.length : 0;
+    const stationsTotal = Array.isArray(dto.stations) ? dto.stations.length : 0;
+    const armiesTotal = Array.isArray(dto.armies) ? Math.min(dto.armies.length, MAX_ARMY_ENTRIES) : 0;
+    const lasersTotal = Array.isArray(dto.lasers) ? dto.lasers.length : 0;
+    const battlesTotal = Array.isArray(dto.battles) ? Math.min(dto.battles.length, MAX_BATTLE_ENTRIES) : 0;
+    const logsTotal = Array.isArray(dto.logs) ? Math.min(dto.logs.length, MAX_LOG_ENTRIES) : 0;
+    const messagesTotal = Array.isArray(dto.messages) ? Math.min(dto.messages.length, MAX_MESSAGE_ENTRIES) : 0;
+    const totalUnits = Math.max(
+      1,
+      systemsTotal +
+        fleetsTotal +
+        stationsTotal +
+        armiesTotal +
+        lasersTotal +
+        battlesTotal +
+        logsTotal +
+        messagesTotal
+    );
+    let processed = 0;
+    const reportEvery = (total: number) => Math.max(1, Math.floor(total / 50));
+    const reportLoopProgress = (index: number, total: number) => {
+      if (!onProgress || total <= 0) return;
+      if (!shouldReport(index, total, reportEvery(total))) return;
+      reportProgress((processed + index + 1) / totalUnits, { current: index + 1, total });
+    };
+
+    const systems: StarSystem[] = systemsDto.map((s: any, index: number) => {
+      reportLoopProgress(index, systemsTotal);
       if (typeof s.id !== 'string' || typeof s.name !== 'string') {
         throw new Error('System entry is missing a valid id or name.');
       }
@@ -956,6 +1003,7 @@ export const deserializeGameState = (json: string): GameState => {
     });
 
     const systemIds = new Set(systems.map(system => system.id));
+    processed += systemsTotal;
 
     // Fleets
     const fleetsDto = Array.isArray(dto.fleets) ? dto.fleets : [];
@@ -979,6 +1027,7 @@ export const deserializeGameState = (json: string): GameState => {
     }
 
     const fleets: Fleet[] = fleetsDto.map((f: any, index: number) => {
+      reportLoopProgress(index, fleetsTotal);
       if (typeof f?.id !== 'string') {
         throw new Error(`Fleet entry at index ${index} is missing a valid id.`);
       }
@@ -1063,6 +1112,7 @@ export const deserializeGameState = (json: string): GameState => {
     });
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
+    processed += fleetsTotal;
     const planetIds = new Set(systems.flatMap(system => system.planets.map(planet => planet.id)));
     const planetSurfaceDescriptorsByBodyIdFromSave = sanitizePlanetSurfaceDescriptorRecord(
       dto.planetSurfaceDescriptorsByBodyId,
@@ -1076,6 +1126,7 @@ export const deserializeGameState = (json: string): GameState => {
     }
     const stations: Station[] = stationsDto
       .map((entry: any, index: number) => {
+        reportLoopProgress(index, stationsTotal);
         if (typeof entry?.id !== 'string') {
           console.warn(`[Serialization] Station entry at index ${index} missing id; skipping.`);
           return null;
@@ -1110,12 +1161,14 @@ export const deserializeGameState = (json: string): GameState => {
         };
       })
       .filter((station): station is Station => Boolean(station));
+    processed += stationsTotal;
 
     // Armies
     const armiesDto = Array.isArray(dto.armies) ? dto.armies : [];
     const clampedArmiesDto = clampArray(armiesDto, MAX_ARMY_ENTRIES, 'armies');
     const armies: Army[] = clampedArmiesDto
       .map((a: any, index: number) => {
+        reportLoopProgress(index, armiesTotal);
         if (typeof a?.id !== 'string') {
           console.warn(`[Serialization] Army entry at index ${index} missing id; skipping.`);
           return null;
@@ -1190,9 +1243,11 @@ export const deserializeGameState = (json: string): GameState => {
         return baseArmy;
       })
       .filter((army): army is Army => Boolean(army));
+    processed += armiesTotal;
 
     const lasersDto = Array.isArray(dto.lasers) ? dto.lasers : [];
     const lasers: LaserShot[] = lasersDto.map((l: any, index: number) => {
+      reportLoopProgress(index, lasersTotal);
       if (typeof l?.id !== 'string') {
         throw new Error(`Laser entry at index ${index} is missing a valid id.`);
       }
@@ -1207,6 +1262,7 @@ export const deserializeGameState = (json: string): GameState => {
         end: deserializeVector3(l.end, `laser '${l.id ?? 'unknown'}' end`)
       };
     });
+    processed += lasersTotal;
 
     // Battles
     const battlesDto = Array.isArray(dto.battles) ? dto.battles : [];
@@ -1214,6 +1270,7 @@ export const deserializeGameState = (json: string): GameState => {
     const battles: Battle[] = [];
 
     clampedBattlesDto.forEach((b: any, index: number) => {
+      reportLoopProgress(index, battlesTotal);
       if (typeof b?.id !== 'string') {
         console.warn(`[Serialization] Battle entry at index ${index} missing id; skipping.`);
         return;
@@ -1307,28 +1364,37 @@ export const deserializeGameState = (json: string): GameState => {
 
       battles.push(battle);
     });
+    processed += battlesTotal;
 
     const logsDto: unknown[] = Array.isArray(dto.logs) ? dto.logs : [];
     const normalizedLogs = logsDto
-      .map((entry: unknown, index: number) => sanitizeLogEntry(entry, index))
+      .map((entry: unknown, index: number) => {
+        reportLoopProgress(index, logsTotal);
+        return sanitizeLogEntry(entry, index);
+      })
       .filter((entry): entry is LogEntry => Boolean(entry));
     const sanitizedLogs = clampArray<LogEntry>(normalizedLogs, MAX_LOG_ENTRIES, 'logs', true);
+    processed += logsTotal;
 
     const messagesDto = Array.isArray(dto.messages) ? dto.messages : [];
     const clampedMessagesDto = clampArray(messagesDto, MAX_MESSAGE_ENTRIES, 'messages', true);
-    const messages: GameMessage[] = clampedMessagesDto.map((m: any, index: number) => ({
-      id: typeof m.id === 'string' ? m.id : `message-${index}`,
-      day: isFiniteNumber(m.day) ? m.day : 0,
-      type: clampText(m.type, MAX_MESSAGE_TYPE_LENGTH, 'generic'),
-      priority: isFiniteNumber(m.priority) ? m.priority : 0,
-      title: clampText(m.title, MAX_MESSAGE_TITLE_LENGTH, 'Untitled message'),
-      subtitle: clampText(m.subtitle, MAX_MESSAGE_SUBTITLE_LENGTH, ''),
-      lines: sanitizeMessageLines(m.lines),
-      payload: sanitizeMessagePayload(m.payload),
-      read: Boolean(m.read),
-      dismissed: Boolean(m.dismissed),
-      createdAtTurn: isFiniteNumber(m.createdAtTurn) ? m.createdAtTurn : 0
-    }));
+    const messages: GameMessage[] = clampedMessagesDto.map((m: any, index: number) => {
+      reportLoopProgress(index, messagesTotal);
+      return {
+        id: typeof m.id === 'string' ? m.id : `message-${index}`,
+        day: isFiniteNumber(m.day) ? m.day : 0,
+        type: clampText(m.type, MAX_MESSAGE_TYPE_LENGTH, 'generic'),
+        priority: isFiniteNumber(m.priority) ? m.priority : 0,
+        title: clampText(m.title, MAX_MESSAGE_TITLE_LENGTH, 'Untitled message'),
+        subtitle: clampText(m.subtitle, MAX_MESSAGE_SUBTITLE_LENGTH, ''),
+        lines: sanitizeMessageLines(m.lines),
+        payload: sanitizeMessagePayload(m.payload),
+        read: Boolean(m.read),
+        dismissed: Boolean(m.dismissed),
+        createdAtTurn: isFiniteNumber(m.createdAtTurn) ? m.createdAtTurn : 0
+      };
+    });
+    processed += messagesTotal;
 
     if (dto.aiStates !== undefined && (!dto.aiStates || typeof dto.aiStates !== 'object' || Array.isArray(dto.aiStates))) {
       throw new Error("Field 'aiStates' must be an object.");
@@ -1416,6 +1482,7 @@ export const deserializeGameState = (json: string): GameState => {
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
 
+    reportProgress(1);
     return normalizeSurfacePositions(state);
   } catch (e) {
     throw new Error(`Error reconstructing game state: ${(e as Error).message}`);
