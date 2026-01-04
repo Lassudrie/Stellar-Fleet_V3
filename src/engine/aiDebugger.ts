@@ -97,7 +97,7 @@ class AIDebugger {
     this.currentLog = {
       turn,
       factionId,
-      timestamp: Date.now(),
+      timestamp: turn,
       meta: {
         ...meta,
         globalThreat: 0 // Will be updated during analysis via setGlobalThreat

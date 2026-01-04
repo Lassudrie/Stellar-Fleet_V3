@@ -22,6 +22,20 @@ const parseTurnCount = (): number => {
   return turns;
 };
 
+const parseSeed = (): number => {
+  const raw = process.env.SMOKE_SEED;
+  if (raw === undefined || raw === '') {
+    return Date.now();
+  }
+
+  const seed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(seed)) {
+    throw new Error(`SMOKE_SEED must be a safe integer (received: ${raw})`);
+  }
+
+  return seed;
+};
+
 const assertFiniteNumber = (value: number, label: string) => {
   if (!Number.isFinite(value)) {
     throw new Error(`Detected invalid number (${label}): ${value}`);
@@ -79,7 +93,7 @@ const countAiOrders = (state: GameState, rngSnapshot: RNG): number => {
 
 const runSmokeTest = () => {
   const turnsToPlay = parseTurnCount();
-  const seed = Date.now();
+  const seed = parseSeed();
   const scenario = buildScenario('conquest_sandbox', seed);
   const { state } = generateWorld(scenario);
   const engine = new GameEngine(state);

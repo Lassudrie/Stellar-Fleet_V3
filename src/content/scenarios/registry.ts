@@ -1,4 +1,4 @@
-import { ShipType, sorted } from '../../shared/shared';
+import { ShipType, devError, devWarn, sorted } from '../../shared/shared';
 import { GameScenario, ScenarioTemplate } from './schema';
 import { templatesToLoad } from './templates';
 
@@ -100,7 +100,7 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
 
       fleet.ships.forEach((t: string) => {
         if (!knownShipTypes.has(t)) {
-          console.warn(
+          devWarn(
             `[ScenarioRegistry] Fleet '${fleet.ownerFactionId}' declares unknown ship type '${t}'. ` +
               'It will be replaced with a fallback during world generation.'
           );
@@ -110,7 +110,7 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
 
     return s as ScenarioTemplate;
   } catch (e) {
-    console.warn(`[ScenarioRegistry] Failed to load scenario '${fileName}': ${(e as Error).message}`);
+    devWarn(`[ScenarioRegistry] Failed to load scenario '${fileName}': ${(e as Error).message}`);
     return null;
   }
 }
@@ -128,7 +128,7 @@ for (const { data, name } of templatesToLoad) {
 }
 
 if (failedCount > 0) {
-  console.error(`[ScenarioRegistry] ${failedCount} scenario(s) failed to load. Check warnings above for details.`);
+  devError(`[ScenarioRegistry] ${failedCount} scenario(s) failed to load. Check warnings above for details.`);
 }
 
 const SCENARIO_REGISTRY = sorted(loadedScenarios, (a, b) => {

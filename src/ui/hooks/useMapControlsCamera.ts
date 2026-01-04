@@ -191,7 +191,11 @@ export const useMapControlsCamera = ({
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const point = getPoint(event);
     if (!point) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some mobile browsers (older Android webviews) may not support pointer capture; continue without it.
+    }
     pointersRef.current.set(event.pointerId, point);
 
     if (pointersRef.current.size === 1) {

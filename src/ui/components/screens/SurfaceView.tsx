@@ -321,6 +321,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const pointerMoveFrameRef = useRef<number | null>(null);
   const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
   const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
+  const hasNativePointerEventsRef = useRef(false);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -727,10 +728,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
+    if ((event as { nativeEvent?: Event }).nativeEvent) {
+      hasNativePointerEventsRef.current = true;
+    }
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+    }
     cameraControls.handlePointerDown(event);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if ((event as { nativeEvent?: Event }).nativeEvent) {
+      hasNativePointerEventsRef.current = true;
+    }
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+    }
     event.persist();
     pendingPointerEvents.current.set(event.pointerId, event);
     if (pointerMoveFrameRef.current === null) {
@@ -764,6 +777,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if ((event as { nativeEvent?: Event }).nativeEvent) {
+      hasNativePointerEventsRef.current = true;
+    }
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+    }
     // Clean up pending moves for this pointer
     pendingPointerEvents.current.delete(event.pointerId);
     
@@ -794,6 +813,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if ((event as { nativeEvent?: Event }).nativeEvent) {
+      hasNativePointerEventsRef.current = true;
+    }
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+    }
     // Clean up pending moves for this pointer
     pendingPointerEvents.current.delete(event.pointerId);
     
@@ -801,30 +826,30 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     setHovered(null);
   };
 
-  // Only attach touch handlers if Pointer Events are not available
-  // This prevents double event streams (Pointer Events + Touch Events) on modern browsers
-  const supportsPointerEvents = typeof window !== 'undefined' && 'PointerEvent' in window;
-  
-  const handleTouchStart = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
     event.preventDefault();
+    if (hasNativePointerEventsRef.current) return;
     forwardTouchEvent(event, handlePointerDown, event.changedTouches);
-  });
+  };
 
-  const handleTouchMove = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
+    if (hasNativePointerEventsRef.current) return;
     forwardTouchEvent(event, handlePointerMove, event.touches);
-  });
+  };
 
-  const handleTouchEnd = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
+    if (hasNativePointerEventsRef.current) return;
     forwardTouchEvent(event, handlePointerUp, event.changedTouches);
-  });
+  };
 
-  const handleTouchCancel = supportsPointerEvents ? undefined : ((event: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
+    if (hasNativePointerEventsRef.current) return;
     forwardTouchEvent(event, handlePointerCancel, event.changedTouches);
-  });
+  };
 
   const activeCoord = selected ?? hovered;
   const activeTile = map && activeCoord ? getTileAt(map, activeCoord) : null;
