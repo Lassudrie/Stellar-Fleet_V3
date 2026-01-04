@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Vector3 } from 'three';
-import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction, WheelEvent as ReactWheelEvent } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 
 export interface ClampBounds {
   minX: number;
@@ -89,6 +89,24 @@ export interface MapControlsCameraState {
   offset: { x: number; y: number };
 }
 
+export interface PointEventLike {
+  clientX: number;
+  clientY: number;
+  currentTarget: HTMLElement;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+export interface PointerEventLike extends PointEventLike {
+  pointerId: number;
+  pointerType: string;
+}
+
+export interface WheelEventLike extends PointEventLike {
+  deltaY: number;
+  preventDefault: () => void;
+}
+
 type GestureState =
   | {
     type: 'pan';
@@ -115,11 +133,11 @@ export interface MapControlsCameraOptions {
 }
 
 export interface MapControlsCameraHandlers {
-  handleWheel: (event: ReactWheelEvent<HTMLElement>) => void;
-  handlePointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
-  handlePointerMove: (event: ReactPointerEvent<HTMLElement>) => boolean;
-  handlePointerUp: (event: ReactPointerEvent<HTMLElement>) => boolean;
-  handlePointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
+  handleWheel: (event: WheelEventLike) => void;
+  handlePointerDown: (event: PointerEventLike) => void;
+  handlePointerMove: (event: PointerEventLike) => boolean;
+  handlePointerUp: (event: PointerEventLike) => boolean;
+  handlePointerCancel: (event: PointerEventLike) => void;
   isInteracting: boolean;
 }
 
@@ -169,7 +187,10 @@ export const useMapControlsCamera = ({
     cameraRef.current = camera;
   }, [camera]);
 
-  const getPoint = useCallback((event: ReactPointerEvent<HTMLElement> | ReactWheelEvent<HTMLElement>) => {
+  const getPoint = useCallback((event: PointEventLike) => {
+    if (typeof event.offsetX === 'number' && typeof event.offsetY === 'number') {
+      return { x: event.offsetX, y: event.offsetY };
+    }
     const target = event.currentTarget as HTMLElement | null;
     if (!target) return null;
     const rect = target.getBoundingClientRect();
@@ -179,7 +200,7 @@ export const useMapControlsCamera = ({
     };
   }, []);
 
-  const handleWheel = useCallback((event: ReactWheelEvent<HTMLElement>) => {
+  const handleWheel = useCallback((event: WheelEventLike) => {
     const focus = getPoint(event);
     if (!focus) return;
     event.preventDefault();
@@ -188,7 +209,7 @@ export const useMapControlsCamera = ({
     setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom * zoomFactor, clampOffset, minZoom, maxZoom));
   }, [clampOffset, getPoint, maxZoom, minZoom, setCamera]);
 
-  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+  const handlePointerDown = useCallback((event: PointerEventLike) => {
     const point = getPoint(event);
     if (!point) return;
     try {
@@ -222,7 +243,7 @@ export const useMapControlsCamera = ({
     }
   }, [getPoint]);
 
-  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+  const handlePointerMove = useCallback((event: PointerEventLike) => {
     if (!pointersRef.current.has(event.pointerId)) return gestureRef.current !== null;
     const point = getPoint(event);
     if (!point) return gestureRef.current !== null;
@@ -326,7 +347,7 @@ export const useMapControlsCamera = ({
     }
   }, []);
 
-  const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+  const handlePointerUp = useCallback((event: PointerEventLike) => {
     const gesture = gestureRef.current;
     pointersRef.current.delete(event.pointerId);
     try {
@@ -343,7 +364,7 @@ export const useMapControlsCamera = ({
     return Boolean(wasTap);
   }, [resetGestureFromPointers, tapDragThresholdSq]);
 
-  const handlePointerCancel = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+  const handlePointerCancel = useCallback((event: PointerEventLike) => {
     pointersRef.current.delete(event.pointerId);
     gestureRef.current = null;
     setIsInteracting(false);

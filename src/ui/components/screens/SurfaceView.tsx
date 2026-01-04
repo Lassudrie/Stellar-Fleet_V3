@@ -73,6 +73,17 @@ interface SurfaceViewProps {
 
 type CameraState = { zoom: number; offset: { x: number; y: number } };
 type WheelInput = { clientX: number; clientY: number; deltaY: number; currentTarget: EventTarget | null };
+type PointerSnapshot = {
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  pointerType: string;
+  currentTarget: HTMLCanvasElement;
+};
+
+const INTERACTION_COOLDOWN_MS = 140;
+const MAX_DPR_MOBILE = 1.25;
+const MAX_DPR_DESKTOP = 1.75;
 
 const biomeColors: Record<Biome, string> = {
   ocean: '#0a75c2',        // deep ocean blue
@@ -143,8 +154,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const terrainBufferRef = useRef<TerrainBuffer | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
+  const interactionDeadlineRef = useRef(0);
   const pendingWheelEvent = useRef<WheelInput | null>(null);
-  const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
+  const pendingPointerEvents = useRef<Map<number, PointerSnapshot>>(new Map());
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -276,6 +288,20 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   );
   const touchFallbackEnabled = !supportsPointerEvents || prefersTouchFallback;
   const pointerHandlersEnabled = supportsPointerEvents && !prefersTouchFallback;
+  const markInteraction = useCallback(() => {
+    if (typeof performance === 'undefined') return;
+    interactionDeadlineRef.current = performance.now() + INTERACTION_COOLDOWN_MS;
+  }, []);
+  const isInteractionActive = useCallback(() => {
+    if (typeof performance === 'undefined') return false;
+    return performance.now() < interactionDeadlineRef.current;
+  }, []);
+  const getRenderDpr = useCallback(() => {
+    if (typeof window === 'undefined') return 1;
+    const raw = window.devicePixelRatio || 1;
+    const cap = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
+    return Math.min(raw, cap);
+  }, [prefersTouchFallback]);
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
@@ -312,7 +338,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = getRenderDpr();
     const nextWidth = Math.max(1, Math.floor(viewport.width * dpr));
     const nextHeight = Math.max(1, Math.floor(viewport.height * dpr));
 
@@ -321,7 +347,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
-  }, [viewport.width, viewport.height]);
+  }, [getRenderDpr, viewport.width, viewport.height]);
 
   const cameraControls = useMapControlsCamera({
     camera,
@@ -348,6 +374,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       pointerId: touch.identifier,
       clientX: normalized.clientX,
       clientY: normalized.clientY,
+      offsetX: normalized.clientX - rect.left,
+      offsetY: normalized.clientY - rect.top,
       currentTarget: target,
       target,
       pointerType: 'touch',
@@ -450,12 +478,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return set;
   }, [map, normalizedArmies]);
 
-  const pickCoord = useCallback((clientX: number, clientY: number): HexCoord | null => {
+  const pickCoord = useCallback((clientX: number, clientY: number, rectOverride?: DOMRect): HexCoord | null => {
     if (!map) return null;
     const canvas = canvasRef.current;
     if (!canvas) return null;
 
-    const rect = canvas.getBoundingClientRect();
+    const rect = rectOverride ?? canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
     const worldX = (x - camera.offset.x) / camera.zoom;
@@ -473,19 +501,26 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!map || !activeMapConfig || !currentMapKey) return null;
     const targetZoom = quantizeZoom(camera.zoom, TERRAIN_ZOOM_STEP, MIN_ZOOM, MAX_ZOOM);
     const cached = terrainBufferRef.current;
-    if (cached && cached.key === currentMapKey && cached.zoom === targetZoom && cached.dpr === dpr) {
+    const hot = isInteractionActive();
+    if (cached && cached.key === currentMapKey && cached.dpr === dpr) {
+      if (cached.zoom === targetZoom || hot) {
+        return cached;
+      }
+    }
+    if (hot && cached && cached.key === currentMapKey && cached.dpr === dpr) {
       return cached;
     }
 
     const buffer = renderTerrainLayer(map, activeMapConfig, targetZoom, dpr, HEX_SIZE, biomeColors);
     terrainBufferRef.current = buffer;
     return buffer;
-  }, [activeMapConfig, camera.zoom, currentMapKey, map, renderTerrainLayer]);
+  }, [activeMapConfig, camera.zoom, currentMapKey, isInteractionActive, map, renderTerrainLayer]);
 
   // draw() is defined later, after overlay computations.
 
   const queueWheel = useCallback((event: WheelEvent) => {
     userCameraRef.current = true;
+    markInteraction();
     if (event.cancelable) event.preventDefault();
     pendingWheelEvent.current = {
       clientX: event.clientX,
@@ -510,7 +545,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         setCamera(prev => zoomAroundPoint(prev, focus, prev.zoom * zoomFactor, clampOffset, MIN_ZOOM, MAX_ZOOM));
       });
     }
-  }, [clampOffset, setCamera]);
+  }, [clampOffset, markInteraction, setCamera]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -532,24 +567,37 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
-    event.persist();
-    pendingPointerEvents.current.set(event.pointerId, event);
+    pendingPointerEvents.current.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerType: event.pointerType,
+      currentTarget: event.currentTarget
+    });
     if (pointerMoveFrameRef.current === null) {
       pointerMoveFrameRef.current = requestAnimationFrame(() => {
         pointerMoveFrameRef.current = null;
         const pendingMap = pendingPointerEvents.current;
-        pendingPointerEvents.current = new Map();
-        
+        pendingPointerEvents.current = new Map<number, PointerSnapshot>();
+
+        const canvas = canvasRef.current;
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+
         // Process all pending pointer moves
         let anyInteracting = false;
         for (const pending of pendingMap.values()) {
-          const interacting = cameraControls.handlePointerMove(pending);
+          const interacting = cameraControls.handlePointerMove({
+            ...pending,
+            offsetX: rect ? pending.clientX - rect.left : undefined,
+            offsetY: rect ? pending.clientY - rect.top : undefined
+          });
           if (interacting) {
             anyInteracting = true;
           }
         }
-        
+
         if (anyInteracting) {
+          markInteraction();
           setHovered(null);
           return;
         }
@@ -558,7 +606,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
         // Use the last pointer event for hover (or primary pointer if available)
         const lastEvent = Array.from(pendingMap.values())[pendingMap.size - 1];
-        const coord = pickCoord(lastEvent.clientX, lastEvent.clientY);
+        const coord = pickCoord(lastEvent.clientX, lastEvent.clientY, rect ?? undefined);
         setHovered(prev => (sameHex(prev, coord) ? prev : coord));
       });
     }
@@ -777,8 +825,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = getRenderDpr();
     const terrainBuffer = requestTerrainBuffer(dpr);
+    const hot = isInteractionActive();
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -908,7 +957,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       }
 
       // Labels
-      if (camera.zoom >= style.labelZoom) {
+      if (!hot && camera.zoom >= style.labelZoom) {
         const fontPx = Math.round(clamp(hexSize * 0.45 * style.labelScale, 9, 18));
         const lx = center.x;
         const ly = center.y - size * 1.2;
@@ -985,6 +1034,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     normalizedArmies,
     normalizedBuildings,
     requestTerrainBuffer,
+    getRenderDpr,
+    isInteractionActive,
     playerFactionId,
     reachableCosts,
     selected,
