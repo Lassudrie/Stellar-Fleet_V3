@@ -321,7 +321,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const pointerMoveFrameRef = useRef<number | null>(null);
   const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
   const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
-  const hasNativePointerEventsRef = useRef(false);
+  const pointerMoveSeenRef = useRef(false);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -728,9 +728,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
-    if ((event as { nativeEvent?: Event }).nativeEvent) {
-      hasNativePointerEventsRef.current = true;
-    }
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
@@ -738,9 +735,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if ((event as { nativeEvent?: Event }).nativeEvent) {
-      hasNativePointerEventsRef.current = true;
-    }
+    pointerMoveSeenRef.current = true;
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
@@ -777,9 +772,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if ((event as { nativeEvent?: Event }).nativeEvent) {
-      hasNativePointerEventsRef.current = true;
-    }
+    // We only mark pointer streams as reliable once we have seen moves; up events alone should not disable touch fallback.
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
@@ -813,9 +806,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if ((event as { nativeEvent?: Event }).nativeEvent) {
-      hasNativePointerEventsRef.current = true;
-    }
+    // Pointer cancel often fires when the browser takes over the gesture; do not disable the touch fallback because of it.
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
@@ -829,25 +820,25 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
     event.preventDefault();
-    if (hasNativePointerEventsRef.current) return;
+    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerDown, event.changedTouches);
   };
 
   const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (hasNativePointerEventsRef.current) return;
+    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerMove, event.touches);
   };
 
   const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (hasNativePointerEventsRef.current) return;
+    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerUp, event.changedTouches);
   };
 
   const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (hasNativePointerEventsRef.current) return;
+    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerCancel, event.changedTouches);
   };
 
