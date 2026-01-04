@@ -154,6 +154,11 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
   - incrémenter generatorVersion,
   - ou maintenir la compat bit-for-bit (rarement souhaitable).
 
+### Implémentation actuelle (repo)
+- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v3 par défaut quand validée).
+- Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
+- Spécificités v3 (P0 qualité) : bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
+
 ## 5. Pipeline de génération (cohérence environnementale)
 
 Le pipeline standard produit trois champs continus puis discrétise :
@@ -231,4 +236,3 @@ Phase 2 :
 10) Markers villes + unités (phase 1)
 11) Cache LRU (Lazy)
 12) Tests determinism + invariants
-

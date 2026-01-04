@@ -15,7 +15,7 @@ import type {
   SettlementType,
   SurfacePos
 } from '../../shared/shared';
-import { ArmyState, FeatureBits } from '../../shared/shared';
+import { ArmyState, FeatureBits, sorted } from '../../shared/shared';
 import { RNG } from '../rng';
 import { getPlanetById } from '../planets';
 
@@ -492,8 +492,7 @@ const quantile = (values: Float32Array, q: number): number => {
   const n = values.length;
   if (n === 0) return 0;
   const qq = clamp(q, 0, 1);
-  const sortedVals = Array.from(values);
-  sortedVals.sort((a, b) => a - b);
+  const sortedVals = sorted(Array.from(values), (a, b) => a - b);
   const idx = Math.floor(qq * (n - 1));
   return sortedVals[idx];
 };
@@ -690,25 +689,6 @@ const classifyWaterComponents = (
     }
   }
   return { oceanMask, labels };
-};
-
-const settlementTypeRank = (type: SettlementType): number => {
-  switch (type) {
-    case 'outpost':
-      return 0;
-    case 'colony':
-      return 1;
-    case 'frontierTown':
-      return 2;
-    case 'city':
-      return 3;
-    case 'metropolis':
-      return 4;
-    case 'megalopolis':
-      return 5;
-    default:
-      return 0;
-  }
 };
 
 const SETTLEMENT_BASE_POPULATION: Readonly<Record<SettlementType, number>> = {
@@ -1249,8 +1229,7 @@ const placeSettlementsV2 = (params: {
   for (let i = 0; i < frontierCount; i += 1) schedule.push('frontierTown');
   for (let i = 0; i < colonyCount; i += 1) schedule.push('colony');
 
-  // Place larger settlements first.
-  schedule.sort((a, b) => settlementTypeRank(b) - settlementTypeRank(a));
+  // Place larger settlements first (schedule already built from largest → smallest).
 
   const settlements: Settlement[] = [];
   const usedNames = new Set<string>();
@@ -1344,8 +1323,7 @@ const addRivers = (params: {
     downhill[i] = best;
   }
 
-  const order = Array.from({ length: n }, (_, i) => i);
-  order.sort((a, b) => elev[b] - elev[a]); // high->low
+  const order = sorted(Array.from({ length: n }, (_, i) => i), (a, b) => elev[b] - elev[a]); // high->low
 
   const acc = new Uint32Array(n);
   for (let i = 0; i < n; i += 1) acc[i] = elev[i] > seaLevelElev && !isWaterBiome(tiles[i].biome) ? 1 : 0;
@@ -1965,8 +1943,8 @@ export const relocateSurfacePosDeterministic = (params: {
         candidates.push({ q, r, score });
       }
       if (candidates.length === 0) continue;
-      candidates.sort((a, b) => a.score - b.score);
-      return { bodyId, q: candidates[0].q, r: candidates[0].r };
+      const rankedCandidates = sorted(candidates, (a, b) => a.score - b.score);
+      return { bodyId, q: rankedCandidates[0].q, r: rankedCandidates[0].r };
     }
   }
 
@@ -2039,7 +2017,7 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
   let buildingsChanged = false;
 
   // 1) Normalize buildings (valid tile + uniqueness per tile)
-  const buildingsSorted = [...groundBuildings].sort((a, b) => a.id.localeCompare(b.id));
+  const buildingsSorted = sorted(groundBuildings, (a, b) => a.id.localeCompare(b.id));
   const finalPosById = new Map<string, SurfacePos>();
   const occupied = new Set<string>(); // `${bodyId}:${q}:${r}`
 

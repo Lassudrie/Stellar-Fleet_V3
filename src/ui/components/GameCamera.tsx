@@ -104,7 +104,6 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   useEffect(() => {
     if (!focusTarget || !controlsRef.current || !ready) return;
 
-    const controls = controlsRef.current;
     const targetX = Array.isArray(focusTarget) ? focusTarget[0] : focusTarget.x;
     const targetY = Array.isArray(focusTarget) ? focusTarget[1] : focusTarget.y;
     const targetZ = Array.isArray(focusTarget) ? focusTarget[2] : focusTarget.z;

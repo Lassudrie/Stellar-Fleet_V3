@@ -3,7 +3,7 @@ import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
 import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
-import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem } from '../../shared/shared';
+import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem, sorted } from '../../shared/shared';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
 import { findOrbitingSystem } from './ui/orbiting';
 import { GAS_GIANT_ICON } from '../constants/icons';
@@ -257,7 +257,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
           const solidPlanets = system.planets.filter(planet => planet.isSolid);
           if (solidPlanets.length === 0) return;
 
-          const orderedPlanets = [...solidPlanets].sort((a, b) => a.name.localeCompare(b.name));
+          const orderedPlanets = sorted(solidPlanets, (a, b) => a.name.localeCompare(b.name));
           const ownershipSet = new Set<string>();
           const deployedFactions = new Set<string>();
           let hasOnGoingConflict = false;

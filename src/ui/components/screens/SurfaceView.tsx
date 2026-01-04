@@ -74,20 +74,20 @@ interface SurfaceViewProps {
 type CameraState = { zoom: number; offset: { x: number; y: number } };
 
 const biomeColors: Record<Biome, string> = {
-  ocean: '#0ea5e9',        // vivid blue
-  coast: '#2dd4bf',        // teal
-  lake: '#60a5fa',         // light indigo
-  ice: '#e2e8f0',          // light gray
-  tundra: '#cbd5a7',       // muted khaki
-  taiga: '#0f766e',        // deep teal-green
-  grassland: '#9acd32',    // yellow-green
-  forest: '#15803d',       // rich green
-  rainforest: '#4ade80',   // bright lime
-  desert: '#e3a008',       // amber
-  rocky: '#a8a29e',        // neutral stone
-  mountain: '#6b7280',     // slate gray
-  volcanic: '#ef4444',     // red
-  cratered: '#7c3aed'      // violet
+  ocean: '#0a75c2',        // deep ocean blue
+  coast: '#2bb9a8',        // bright teal shallows
+  lake: '#4f9dfd',         // clear lake blue
+  ice: '#f2f7fb',          // icy white-blue
+  tundra: '#ced4a4',       // pale sage tundra
+  taiga: '#1b6b4b',        // pine green
+  grassland: '#8ccb4a',    // fresh prairie green
+  forest: '#1e7c2f',       // dense forest green
+  rainforest: '#22a95f',   // lush rainforest jade
+  desert: '#e3b04c',       // warm sand
+  rocky: '#9b8974',        // stone brown
+  mountain: '#565f6b',     // slate mountain
+  volcanic: '#e05b3c',     // lava orange
+  cratered: '#8a60c6'      // impact purple
 };
 
 type SettlementMarkerShape = 'circle' | 'square' | 'diamond' | 'triangle' | 'hex';
@@ -144,7 +144,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const pointerMoveFrameRef = useRef<number | null>(null);
   const pendingWheelEvent = useRef<React.WheelEvent<HTMLCanvasElement> | null>(null);
   const pendingPointerEvents = useRef<Map<number, React.PointerEvent<HTMLCanvasElement>>>(new Map());
-  const pointerMoveSeenRef = useRef(false);
 
   const factionIndex = useMemo(() => factions.reduce<Record<FactionId, FactionState>>((acc, faction) => {
     acc[faction.id] = faction;
@@ -267,6 +266,9 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
     return () => observer.disconnect();
   }, []);
+
+  // Only enable touch handlers when Pointer Events are unavailable to avoid duplicate input streams on mobile.
+  const touchFallbackEnabled = typeof window !== 'undefined' && !('PointerEvent' in window);
 
   useEffect(() => {
     if (!map || !activeMapConfig) return;
@@ -500,7 +502,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    pointerMoveSeenRef.current = true;
     if (event.pointerType === 'touch') {
       event.preventDefault();
     }
@@ -585,25 +586,21 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const handleTouchStart = (event: React.TouchEvent<HTMLCanvasElement>) => {
     userCameraRef.current = true;
     event.preventDefault();
-    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerDown, event.changedTouches);
   };
 
   const handleTouchMove = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerMove, event.touches);
   };
 
   const handleTouchEnd = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerUp, event.changedTouches);
   };
 
   const handleTouchCancel = (event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
-    if (pointerMoveSeenRef.current) return;
     forwardTouchEvent(event, handlePointerCancel, event.changedTouches);
   };
 
@@ -1061,10 +1058,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          {...(handleTouchStart ? { onTouchStart: handleTouchStart } : {})}
-          {...(handleTouchMove ? { onTouchMove: handleTouchMove } : {})}
-          {...(handleTouchEnd ? { onTouchEnd: handleTouchEnd } : {})}
-          {...(handleTouchCancel ? { onTouchCancel: handleTouchCancel } : {})}
+          {...(touchFallbackEnabled
+            ? {
+                onTouchStart: handleTouchStart,
+                onTouchMove: handleTouchMove,
+                onTouchEnd: handleTouchEnd,
+                onTouchCancel: handleTouchCancel
+              }
+            : {})}
           onPointerLeave={(event) => {
             handlePointerCancel(event);
             setHovered(null);

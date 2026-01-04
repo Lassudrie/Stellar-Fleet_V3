@@ -615,8 +615,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
     // Place primary occupant per hex (lexicographically smallest id)
     stacks.forEach((ids, key) => {
-      ids.sort((a, b) => a.localeCompare(b));
-      occupancy.set(key, ids[0]);
+      const sortedIds = sorted(ids, (a, b) => a.localeCompare(b));
+      occupancy.set(key, sortedIds[0]);
     });
 
     const isOccupied = (coord: HexCoord): boolean => occupancy.has(hexKey(coord));
@@ -628,10 +628,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     // Resolve stacks by relocating non-primary occupants to the nearest free passable tile.
     stacks.forEach((ids, key) => {
       if (ids.length <= 1) return;
-      ids.sort((a, b) => a.localeCompare(b));
+      const sortedIds = sorted(ids, (a, b) => a.localeCompare(b));
       const origin = originByKey.get(key);
       if (!origin) return;
-      const extras = ids.slice(1);
+      const extras = sortedIds.slice(1);
       extras.forEach(extraId => {
         const relocated = relocateSurfacePosDeterministic({
           state,

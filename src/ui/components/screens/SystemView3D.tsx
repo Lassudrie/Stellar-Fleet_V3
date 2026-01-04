@@ -34,7 +34,7 @@ import {
   StarSystemAstro
 } from '../../../shared/shared';
 import { calculateFleetPower } from '../../../engine/world';
-import { shortId } from '../../../shared/shared';
+import { shortId, sorted } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import { useFleetName } from '../../context/FleetNames';
 import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';
@@ -1155,17 +1155,14 @@ const SystemStationMesh: React.FC<SystemStationMeshProps> = ({
 };
 
 interface SystemEntitiesLayerProps {
-  starSystem: StarSystem;
   starBodyId: string;
   fleets: Fleet[];
   stations: Station[];
   day: number;
   starRadius: number;
-  planets: OrbitingPlanet[];
   bodyWorldPositions: Record<string, [number, number, number]>;
   bodyRadii: Record<string, number>;
   clampedScale: number;
-  focusDistanceFloor: number;
   selectedFleetId: string | null;
   selectedObjectId: SystemObjectId | null;
   hoveredObjectId: SystemObjectId | null;
@@ -1179,17 +1176,14 @@ interface SystemEntitiesLayerProps {
 }
 
 const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
-  starSystem,
   starBodyId,
   fleets,
   stations,
   day,
   starRadius,
-  planets,
   bodyWorldPositions,
   bodyRadii,
   clampedScale,
-  focusDistanceFloor,
   selectedFleetId,
   selectedObjectId,
   hoveredObjectId,
@@ -1211,7 +1205,7 @@ const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
   }, day), [day, fleetLayoutConfig, fleets]);
 
   const stationLayouts = useMemo(() => {
-    const orderedStations = [...stations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+    const orderedStations = sorted(stations, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
     const slotCapacity = 8;
     const stationScale = 0.55 * clampedScale;
     const stationSpacing = Math.max(stationScale * 2.6, clampedScale * 0.9);
@@ -1541,7 +1535,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         buckets[planetIndex].push(body);
       }
     });
-    return buckets.map(bucket => bucket.sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' })));
+    return buckets.map(bucket => sorted(bucket, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' })));
   }, [starSystem.planets]);
   const sourcePlanets = useMemo<PlanetSource[]>(() => {
     if (astro?.planets?.length) {
@@ -1857,7 +1851,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     [fleetLayoutsForFocus]
   );
   const stationPositionById = useMemo(() => {
-    const orderedStations = [...systemStations].sort((a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+    const orderedStations = sorted(systemStations, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
     const slotCapacity = 8;
     const stationSpacing = Math.max(stationIconScale * 2.6, clampedScale * 0.9);
     const stationYOffset = stationIconScale * 0.3;
@@ -2065,17 +2059,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             />
           ))}
           <SystemEntitiesLayer
-            starSystem={starSystem}
             starBodyId={starBodyId}
             fleets={systemFleets}
             stations={systemStations}
             day={day}
             starRadius={starRadius}
-            planets={planets}
             bodyWorldPositions={bodyWorldPositions}
             bodyRadii={bodyRadii}
             clampedScale={clampedScale}
-            focusDistanceFloor={focusDistanceFloor}
             selectedFleetId={selectedFleetId}
             selectedObjectId={selectedObjectId}
             hoveredObjectId={hoveredObjectId}
