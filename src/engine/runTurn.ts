@@ -25,17 +25,20 @@ import { moveFleet, executeArrivalOperations, MovementStepResult } from './movem
 import { generateSurfaceMapForState, isPassable, neighborsAxial, normalizeSurfacePositions, relocateSurfacePosDeterministic } from './planetSurface';
 import { checkVictoryConditions } from './objectives';
 import { ORBIT_PROXIMITY_RANGE_SQ, COLORS, CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { isOrbitContested, getOrbitingSystem } from './orbit';
 import { distSq } from './math/vec3';
 import { resolveOrbitalBombardment } from './orbitalBombardment';
 import {
   applyOverrunPenalty,
   chooseDefenderRetreat,
+  computeEffectiveMP,
   computeSupplyDistanceMapForBody,
   computeZocSnapshotForBody,
   deriveTerrainType,
   executeMoveOrder,
   hexKey,
+  isInEnemyZoc,
   resolveEngagement,
   SUPPLY_RADIUS
 } from './ground';
@@ -354,7 +357,7 @@ export function phaseAI(state: GameState, ctx: TurnContext): GameState {
     const commands = planAiTurn(nextState, faction.id, existingAiState, ctx.rng);
 
     for (const cmd of commands) {
-      const result = applyCommand(nextState, cmd, ctx.rng);
+      const result = applyCommand(nextState, cmd, ctx.rng, ctx.turn);
       const updatedState = result.state;
       nextState = updatedState.day === ctx.turn ? updatedState : { ...updatedState, day: ctx.turn };
     }
@@ -568,7 +571,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
   });
 
   // Transient movement stats needed for attack situation flags
-  const moveStatsByArmyId = new Map<string, { mpEff: number; mpUsedCenti: number; used75pct: boolean; supplied: boolean }>();
+  const moveStatsByArmyId = new Map<string, { mpEff: number; mpUsedCenti: number; supplied: boolean }>();
 
   // Patch armies incrementally via a map (structural sharing at the end)
   const armiesById = new Map(state.armies.map(a => [a.id, a]));
@@ -725,7 +728,6 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       moveStatsByArmyId.set(updatedArmy.id, {
         mpEff: result.mpEff,
         mpUsedCenti: result.mpUsedCenti,
-        used75pct: result.used75pct,
         supplied
       });
 
@@ -754,6 +756,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       .map(a => armiesById.get(a.id) ?? a)
       .filter(a => a.state === ArmyState.DEPLOYED && a.containerId === bodyId && a.surfacePos && !removeArmyIds.has(a.id));
     const zocPost = computeZocSnapshotForBody(state, bodyId, postMoveArmies) ?? null;
+    const combatParticipants = new Set<string>();
 
     // --- Execute attack orders ---
     const attackers = sorted(postMoveArmies.filter(a => a.groundOrder?.type === 'attack'), (a, b) => a.id.localeCompare(b.id));
@@ -785,14 +788,31 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       const aMove = moveStatsByArmyId.get(attacker.id);
       const aSupplied = aMove?.supplied ?? isArmySupplied(attacker);
       const dSupplied = isArmySupplied(defender);
+      const isAmphibiousAssault = attacker.lastDeployedTurn === ctx.turn;
+      const mpEff = aMove?.mpEff ?? computeEffectiveMP(attacker, aSupplied);
+      const mpUsedCenti = isAmphibiousAssault ? mpEff * 100 : (aMove?.mpUsedCenti ?? 0);
+      const mpUsedRatio = mpEff > 0 ? mpUsedCenti / (mpEff * 100) : 0;
+      const spent75pctMp = mpUsedRatio >= 0.75;
+      const isArtillery = GROUND_UNIT_STATS[attacker.unitType].tags?.includes('artillery') ?? false;
+      if (isArtillery && mpUsedRatio > 0.5) return;
+
+      const encircled = zocPost
+        ? neighborsAxial(defenderHex, w, h, wrapX).reduce(
+            (count, coord) => count + (isInEnemyZoc(zocPost, coord, defender.factionId) ? 1 : 0),
+            0
+          ) >= 3
+        : false;
+
+      combatParticipants.add(attacker.id);
+      combatParticipants.add(defender.id);
 
       const engagement = resolveEngagement(attacker, defender, {
         turn: ctx.turn,
         terrainType,
-        attackerSituation: { spent75pctMp: aMove?.used75pct ?? false },
-        defenderSituation: {},
-        attackerStatus: { outOfSupply: !aSupplied },
-        defenderStatus: { outOfSupply: !dSupplied }
+        attackerSituation: { spent75pctMp, amphibiousOrAirborneAssault: isAmphibiousAssault, encirclement: encircled },
+        defenderSituation: { preparedDefense: defender.posture === 'prepared_defense' },
+        attackerStatus: { outOfSupply: !aSupplied, fatigueExtreme: attacker.condition < 0.3 },
+        defenderStatus: { outOfSupply: !dSupplied, fatigueExtreme: defender.condition < 0.3 }
       });
 
       let attackerAfter = engagement.attackerAfter;
@@ -859,6 +879,26 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         }.`
       });
     });
+
+    // --- Recovery (no combat this turn) ---
+    postMoveArmies
+      .map(army => armiesById.get(army.id) ?? army)
+      .filter(
+        army =>
+          army.state === ArmyState.DEPLOYED &&
+          army.containerId === bodyId &&
+          army.surfacePos &&
+          !removeArmyIds.has(army.id) &&
+          !combatParticipants.has(army.id)
+      )
+      .forEach(army => {
+        const supplied = isArmySupplied(army);
+        const recovery = supplied ? 0.08 : 0.04;
+        const nextCondition = Math.min(1, army.condition + recovery);
+        if (nextCondition !== army.condition) {
+          armiesById.set(army.id, { ...army, condition: nextCondition });
+        }
+      });
   });
 
   const nextArmies: Army[] = state.armies
@@ -966,7 +1006,6 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
     const newOwnerFactionId = soleGroundFaction ?? uniformSolidOwner ?? system.ownerFactionId;
     const ownerChanged = newOwnerFactionId !== system.ownerFactionId;
-    const solidBodiesHeldByNewOwner = solidBodies.filter(planet => planet.ownerFactionId === newOwnerFactionId);
 
     if (ownerChanged && newOwnerFactionId && aiFactionIds.has(newOwnerFactionId)) {
       if (!holdUpdates[newOwnerFactionId]) {
@@ -976,7 +1015,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     }
 
     if (ownerChanged && newOwnerFactionId) {
-      const sortedBodies = sorted(solidBodies, (a, b) => a.name.localeCompare(b.name));
+      const sortedBodies = sorted(solidBodies, (a, b) => a.id.localeCompare(b.id));
       const involvedFactionIds = new Set<FactionId>([system.ownerFactionId, newOwnerFactionId].filter((factionId): factionId is FactionId =>
         Boolean(factionId)
       ));
@@ -1007,7 +1046,9 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
             groundFactionIds.length > 0
               ? `No opposing ground armies remain; ${newOwnerFactionId} holds surface control.`
               : `${newOwnerFactionId} controls the system following ground resolution.`,
-            `Solid bodies held: ${solidBodiesHeldByNewOwner.map(body => body.name).join(', ') || 'None'}.`
+            `Solid bodies held: ${
+              sortedBodies.filter(body => body.ownerFactionId === newOwnerFactionId).map(body => body.name).join(', ') || 'None'
+            }.`
           ],
           payload: {
             systemId: system.id,

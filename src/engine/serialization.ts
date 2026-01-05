@@ -145,6 +145,7 @@ export interface ArmyDTO {
 
   posture?: 'normal' | 'prepared_defense';
   groundOrder?: any;
+  lastDeployedTurn?: number;
   state: ArmyState;
   containerId: string;
   surfacePos?: SurfacePos;
@@ -1042,6 +1043,7 @@ export const serializeGameState = (state: GameState): string => {
       attack: a.attack,
       defense: a.defense,
       condition: a.condition,
+      lastDeployedTurn: Number.isFinite(a.lastDeployedTurn) ? a.lastDeployedTurn : undefined,
       state: a.state,
       containerId: a.containerId,
       surfacePos: a.surfacePos
@@ -1438,6 +1440,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
             : undefined;
 
         const groundOrder = sanitizeGroundOrder(a.groundOrder, planetIds);
+        const lastDeployedTurn = isFiniteNumber(a.lastDeployedTurn) ? Math.max(0, Math.floor(a.lastDeployedTurn)) : undefined;
 
         const baseArmy: Army = {
           id: a.id,
@@ -1452,7 +1455,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
           condition,
           state: a.state,
           containerId: a.containerId,
-          ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {})
+          ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {}),
+          ...(lastDeployedTurn !== undefined ? { lastDeployedTurn } : {})
         };
 
         return baseArmy;

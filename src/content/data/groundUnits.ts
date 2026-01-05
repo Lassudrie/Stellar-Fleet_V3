@@ -15,7 +15,7 @@ export interface GroundUnitStats {
 // Balance tuning is expected after the system is playable.
 export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
   light_infantry: {
-    baseMP: 6,
+    baseMP: 4,
     defaultMaxMembers: 10000,
     baseAttack: 1.0,
     baseDefense: 1.0,
@@ -59,7 +59,7 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     }
   },
   heavy_armor: {
-    baseMP: 4,
+    baseMP: 5,
     defaultMaxMembers: 8000,
     baseAttack: 1.25,
     baseDefense: 1.15,
@@ -82,7 +82,7 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     }
   },
   artillery: {
-    baseMP: 4,
+    baseMP: 3,
     defaultMaxMembers: 6000,
     baseAttack: 1.2,
     baseDefense: 0.9,
@@ -104,4 +104,3 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     tags: ['artillery']
   }
 };
-

@@ -29,6 +29,7 @@ export interface UnloadOpsParams extends ArmyOpsOptions {
     day: number;
     rng: RNG;
     targetPlanetId?: string;
+    deployTurn?: number;
     allowedArmyIds?: Set<string>;
     allowedShipIds?: Set<string>;
 }
@@ -137,8 +138,9 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
 };
 
 export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
-    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds, targetPlanetId } = params;
+    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds, targetPlanetId, deployTurn } = params;
     const label = fleetLabel ?? shortId(fleet.id);
+    const effectiveDeployTurn = Number.isFinite(deployTurn) ? deployTurn : day;
     const fallbackPlanet = getDefaultSolidPlanet(system);
     const targetPlanet =
         system.planets.find(planet => planet.id === targetPlanetId && planet.isSolid) ??
@@ -182,7 +184,8 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
         return {
             ...army,
             state: ArmyState.DEPLOYED,
-            containerId: targetPlanet.id
+            containerId: targetPlanet.id,
+            lastDeployedTurn: effectiveDeployTurn
         };
     });
 
@@ -274,7 +277,8 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
                     members: Math.max(0, army.members - membersLoss),
                     condition: Math.max(0, Math.min(1, army.condition - conditionLoss)),
                     state: ArmyState.DEPLOYED,
-                    containerId: targetPlanetId ?? army.containerId
+                    containerId: targetPlanetId ?? army.containerId,
+                    lastDeployedTurn: day
                 };
             }
             failed.push(army.id);

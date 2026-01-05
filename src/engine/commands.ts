@@ -73,7 +73,7 @@ const getAvailableTransportsInOrbit = (
 
 const isCombatLocked = (fleet: Fleet | undefined | null): boolean => fleet?.state === FleetState.COMBAT;
 
-export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): CommandResult => {
+export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, executionTurn?: number): CommandResult => {
     // Enforce Immutability in Dev
     deepFreezeDev(state);
 
@@ -522,12 +522,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG): 
 
             const contested = isOrbitContested(system, state);
 
+            const deployTurn = Number.isFinite(executionTurn) ? executionTurn : state.day + 1;
             const unloadResult = computeUnloadOps({
                 fleet,
                 system,
                 armies: state.armies,
                 day: state.day,
                 rng,
+                deployTurn,
                 fleetLabel: fleet.id,
                 targetPlanetId: targetPlanet.planet.id,
                 allowedArmyIds: new Set([command.armyId]),

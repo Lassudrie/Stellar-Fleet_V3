@@ -358,6 +358,11 @@ export interface Army {
   unitType: GroundUnitType;
   posture?: GroundPosture;
   groundOrder?: GroundOrder;
+  /**
+   * Turn index when the army last transitioned to DEPLOYED.
+   * Used for amphibious/airborne assault penalties (first turn after landing).
+   */
+  lastDeployedTurn?: number;
 
   // --- Strict combat profile (used by ground resolver) ---
   maxMembers: number; // MM

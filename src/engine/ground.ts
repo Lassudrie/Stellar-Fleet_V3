@@ -65,10 +65,10 @@ export const K_TERRAIN_BASE: Record<TerrainType, number> = {
   Forest: 0.9,
   Hills: 0.95,
   Mountains: 0.85,
-  Urban: 1.05,
-  Swamp: 0.9,
-  Desert: 0.95,
-  Coastal: 0.95
+  Urban: 0.9,
+  Swamp: 0.8,
+  Desert: 0.9,
+  Coastal: 1.0
 };
 
 export const MOVE_COST: Record<TerrainType, number> = {
@@ -548,12 +548,16 @@ export const findPathWithCost = (params: FindPathParams): PathResult | null => {
 // --------------------------------
 
 export interface SituationFlags {
+  preparedDefense?: boolean;
+  encirclement?: boolean;
   spent75pctMp?: boolean;
   amphibiousOrAirborneAssault?: boolean;
 }
 
 export interface StatusFlags {
   outOfSupply?: boolean;
+  fatigueExtreme?: boolean;
+  moraleCritical?: boolean;
 }
 
 export interface KBreakdown {
@@ -590,15 +594,18 @@ export const computeKBreakdown = (params: {
   const kTerrain = kTerrainBase * kAffinity;
 
   const situation: Array<{ label: string; k: number }> = [];
+  if (situationFlags.preparedDefense) situation.push({ label: 'prepared_defense', k: 1.2 });
+  if (situationFlags.encirclement) situation.push({ label: 'encirclement', k: 1.4 });
   if (situationFlags.spent75pctMp) situation.push({ label: 'spent_75pct_mp', k: 0.9 });
   if (situationFlags.amphibiousOrAirborneAssault) situation.push({ label: 'amphibious_or_airborne', k: 0.7 });
   const kSituationRaw = situation.reduce((acc, x) => acc * x.k, 1);
   const kSituationClamped = clamp(kSituationRaw, 0.7, 1.6);
 
   const status: Array<{ label: string; k: number }> = [];
-  // NOTE: This is the minimal operational status flag required by the movement model.
-  // If you have a canonical Ki table, update this constant + tests/spec.
-  if (statusFlags.outOfSupply) status.push({ label: 'out_of_supply', k: 0.85 });
+  // Status flags are penalties only (operational readiness).
+  if (statusFlags.outOfSupply) status.push({ label: 'out_of_supply', k: 0.6 });
+  if (statusFlags.fatigueExtreme) status.push({ label: 'fatigue_extreme', k: 0.5 });
+  if (statusFlags.moraleCritical) status.push({ label: 'moral_critical', k: 0.7 });
   const kStatusRaw = status.reduce((acc, x) => acc * x.k, 1);
   const kStatusClamped = clamp(kStatusRaw, 0.4, 1.0);
 
@@ -977,7 +984,7 @@ export const previewEngagement = (attacker: Army, defender: Army, ctx: Engagemen
   const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
   const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
   const advantage = clamp(r >= 2.5 ? 1.0 : r - 1.1, 0.0, 1.0);
-  const breakChance = clamp(breakScore * (0.15 + 0.55 * advantage), 0.0, 0.85);
+  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
 
   return {
     attackerId: attacker.id,
@@ -1053,7 +1060,7 @@ export const resolveEngagement = (attacker: Army, defender: Army, ctx: Engagemen
   const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
   const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
   const advantage = clamp(r >= 2.5 ? 1.0 : r - 1.1, 0.0, 1.0);
-  const breakChance = clamp(breakScore * (0.15 + 0.55 * advantage), 0.0, 0.85);
+  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
 
   const forcedBreak = defenderConditionAfter <= 0.2 || srDefAfter <= 0.15;
   const breakRoll = rng.next();
@@ -1100,4 +1107,3 @@ export const resolveEngagement = (attacker: Army, defender: Army, ctx: Engagemen
     defenderAfter
   };
 };
-

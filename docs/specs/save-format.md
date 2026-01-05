@@ -45,7 +45,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
 - `stations`: structures orbitales (id, systemId, factionId, type, anchorBodyId?, slotIndex?).
-- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, position surface optionnelle, ordres).
+- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, position surface optionnelle, ordres, `lastDeployedTurn` optionnel).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
 - `lasers` : tirs (`start`, `end`, couleur, durée de vie) conservés pour l’animation.
 - `logs` : journaux texte.
@@ -85,6 +85,7 @@ Les champs legacy `strength/maxStrength/morale` ne sont plus écrits en V4.
 - `systems`, `fleets`, `armies`, `lasers`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
 - `stateStartTurn`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
 - `members/maxMembers/condition` : si absents (legacy), reconstruits via la politique de migration ci-dessus.
+- `lastDeployedTurn` : optionnel, ignoré si absent ou invalide.
 - `objectives` et `rules` : valeurs par défaut si manquantes (`conditions: []`, règles activées).
 - **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
 

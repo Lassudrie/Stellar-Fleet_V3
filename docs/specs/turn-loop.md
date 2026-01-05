@@ -79,7 +79,8 @@
     3) exécution des mouvements (MP, collisions no-stacking, fatigue) ;
     4) exécution des attaques (engagement 1v1 localisé, break/retraite/avance) ;
     5) suppression des unités hors de combat ;
-    6) nettoyage des ordres.
+    6) récupération des unités sans combat (selon ravitaillement) ;
+    7) nettoyage des ordres.
   - Conquête minimale : si, sur un body, il ne reste qu’une seule faction au sol, `ownerFactionId` du body passe à cette faction.
   - Génère logs combat et messages synthétiques (conquête et pertes) via `canonicalizeMessages`.
   - Met à jour `aiStates` (hold) pour les factions IA gagnant le contrôle d’un body/système.

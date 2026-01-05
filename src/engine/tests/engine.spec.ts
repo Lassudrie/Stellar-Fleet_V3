@@ -48,7 +48,7 @@ import { SpatialIndex } from '../spatialIndex';
 import { deepFreezeDev } from '../state';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState, neighborsAxial } from '../planetSurface';
-import { deriveTerrainType, resolveEngagement, rollTriangularCentered } from '../ground';
+import { computeKBreakdown, deriveTerrainType, previewEngagement, resolveEngagement, rollTriangularCentered } from '../ground';
 import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
 import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
 
@@ -4376,6 +4376,44 @@ tests.push(
       const r0 = threshold;
       const rMax = r0 * maxRatio;
       assert.ok(rMax <= 1.0 + 1e-12, `Expected rMax<=1, got ${rMax}`);
+    }
+  },
+  {
+    name: 'Kstatus uses 0.60 for out-of-supply',
+    run: () => {
+      const breakdown = computeKBreakdown({
+        unitType: 'light_infantry',
+        terrainType: 'Open',
+        status: { outOfSupply: true }
+      });
+      assert.strictEqual(breakdown.kStatusRaw, 0.6);
+      assert.strictEqual(breakdown.kStatusClamped, 0.6);
+    }
+  },
+  {
+    name: 'break chance follows BreakScore * Advantage clamp',
+    run: () => {
+      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => ({
+        id: overrides.id,
+        factionId: overrides.factionId,
+        state: ArmyState.DEPLOYED,
+        containerId: 'body-1',
+        surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
+        unitType: 'mechanized_infantry',
+        posture: 'normal',
+        maxMembers: 10000,
+        members: 10000,
+        attack: 1,
+        defense: 1,
+        condition: 1,
+        ...overrides
+      });
+
+      const attacker = mkArmy({ id: 'a-break', factionId: 'blue', attack: 2 });
+      const defender = mkArmy({ id: 'd-break', factionId: 'red', defense: 1.2 });
+      const preview = previewEngagement(attacker, defender, { turn: 0, terrainType: 'Open' });
+      const expected = Math.min(0.85, Math.max(0, preview.breakScore * preview.advantage));
+      assert.ok(Math.abs(preview.breakChance - expected) < 1e-12, `Expected ${preview.breakChance} ~= ${expected}`);
     }
   }
 );

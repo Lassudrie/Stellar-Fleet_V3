@@ -40,6 +40,7 @@ Les unités terrestres sont stockées dans `GameState.armies` (type `Army`).
 - `unitType: GroundUnitType`
 - `posture?: 'normal' | 'prepared_defense'`
 - `groundOrder?: GroundOrder` (ordre du tour, stocké côté unité)
+- `lastDeployedTurn?: number` (tour du dernier passage à `DEPLOYED`, utilisé pour l’assaut amphibie/aéroporté)
 
 #### Profil de combat strict
 - `maxMembers: number` (MM)
@@ -90,6 +91,32 @@ Le moteur maintient deux tables :
 
 2) `MoveCost[TerrainType]` (coût de base en MP)
 
+**Kterrain_base (normatif)** :
+
+| TerrainType | Kterrain_base |
+| --- | --- |
+| Open | 1.00 |
+| Forest | 0.90 |
+| Hills | 0.95 |
+| Mountains | 0.85 |
+| Urban | 0.90 |
+| Swamp | 0.80 |
+| Desert | 0.90 |
+| Coastal | 1.00 |
+
+**MoveCost (normatif)** :
+
+| TerrainType | MoveCost |
+| --- | --- |
+| Open | 1 |
+| Forest | 2 |
+| Hills | 2 |
+| Mountains | 3 |
+| Urban | 2 |
+| Swamp | 3 |
+| Desert | 2 |
+| Coastal | 2 |
+
 > Les valeurs exactes doivent être alignées sur les constantes du moteur et les tests associés. Toute modification nécessite mise à jour des tests.
 
 ---
@@ -103,6 +130,15 @@ MPeff = floor(BaseMP * C * SupplyFactor)
 SupplyFactor = 1.0 (ravitaillé) | 0.7 (hors ravitaillement)
 MPeff >= 1 si l’unité n’est pas hors de combat
 ```
+
+**BaseMP (normatif, mapping actuel)** :
+
+| UnitType | BaseMP |
+| --- | --- |
+| light_infantry | 4 |
+| mechanized_infantry | 5 |
+| heavy_armor | 5 |
+| artillery | 3 |
 
 ### 5.2. Supply (MVP)
 
@@ -162,7 +198,7 @@ Règles :
 - si `mpUsedRatio >= 0.75` : appliquer un modificateur de situation `Ki = 0.9` sur l’attaquant.
 - si `C < 0.4` : l’unité **ne peut pas attaquer**.
 - artillerie (si activée par type/tag) : pas de tir si `mpUsedRatio > 0.5`.
-- amphibie/aéroporté (si activé) : consomme 100% MP et applique `Ki = 0.70`.
+- amphibie/aéroporté (si activé) : consomme 100% MP et applique `Ki = 0.70` **le premier tour après un débarquement**.
 
 ---
 
@@ -204,6 +240,17 @@ Construire `K` dans cet ordre :
 5. `K = clamp(kTerrainBase * kAffinity * kSituation * kStatus, 0.5, 1.8)`
 
 Le moteur doit pouvoir exposer un breakdown complet (debug + UI).
+
+**Ki_situation (normatif)** :
+- `prepared_defense` : 1.20 (si `posture = prepared_defense`).
+- `encirclement` : 1.40 (si le défenseur a ≥ 3 hex adjacents en ZOC ennemie).
+- `spent_75pct_mp` : 0.90 (si `mpUsedRatio >= 0.75`).
+- `amphibious_or_airborne` : 0.70 (premier tour après débarquement).
+
+**Ki_status (normatif)** :
+- `out_of_supply` : 0.60.
+- `fatigue_extreme` : 0.50 (déclenché si `C < 0.30`).
+- `moral_critical` : 0.70 (optionnel, si activé par règles).
 
 ### 6.5. Puissance effective et ratio R
 
@@ -254,6 +301,12 @@ Une unité est retirée du jeu si :
 - `members === 0`, ou
 - `condition < 0.20`.
 
+### 6.10. Récupération (hors combat)
+
+Par tour **sans combat** :
+- Ravitaillé : `C += 0.08`
+- Hors ravitaillement : `C += 0.04`
+
 ---
 
 ## 7. Outcome sur carte (break / retraite / avance)
@@ -292,8 +345,9 @@ Ordre normatif :
 4. Exécuter `Move` (pathfinding + MP limit + fatigue + collisions), collecter `mpUsedRatio`.
 5. (Option) ZOC post‑mouvement (si utilisée pour retraite).
 6. Exécuter `Attack` (validation, engagement, outcome break, retrait hors de combat).
-7. Nettoyer ordres (`groundOrder = undefined`).
-8. Conquête minimale : si, sur un body, une seule faction garde des unités, `ownerFactionId = faction`.
+7. Appliquer la récupération sur les unités **sans combat** (selon ravitaillement).
+8. Nettoyer ordres (`groundOrder = undefined`).
+9. Conquête minimale : si, sur un body, une seule faction garde des unités, `ownerFactionId = faction`.
 
 ---
 
@@ -303,4 +357,3 @@ Ordre normatif :
 2. RNG triangulaire bornée \([1-ε, 1+ε]\).
 3. Déterminisme : même état + mêmes ordres + même tour ⇒ même résultat (incluant retraite/collisions).
 4. Non-inversion : si `R0 <= 0.8519...` alors aucune combinaison RA/RD (ε=0.08) ne doit produire `R > 1.0`.
-

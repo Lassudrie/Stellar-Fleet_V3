@@ -804,17 +804,23 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const terrainType = deriveTerrainTypeFromSurfaceMap(map, buildings, hovered);
     const suppliedAtt = isArmySupplied(selectedArmy, selectedArmyCoord);
     const suppliedDef = isArmySupplied(enemy, hovered);
+    const encircled = zocSnapshot
+      ? neighborsAxial(hovered, map.descriptor.config.w, map.descriptor.config.h, map.descriptor.config.wrapX)
+          .filter(coord => isInEnemyZoc(zocSnapshot, coord, enemy.factionId)).length >= 3
+      : false;
 
     const preview = previewEngagement(selectedArmy, enemy, {
       turn: 0,
       terrainType,
-      attackerStatus: { outOfSupply: !suppliedAtt },
-      defenderStatus: { outOfSupply: !suppliedDef }
+      attackerSituation: { encirclement: encircled },
+      defenderSituation: { preparedDefense: enemy.posture === 'prepared_defense' },
+      attackerStatus: { outOfSupply: !suppliedAtt, fatigueExtreme: selectedArmy.condition < 0.3 },
+      defenderStatus: { outOfSupply: !suppliedDef, fatigueExtreme: enemy.condition < 0.3 }
     });
 
     const rRange = approxRngRange(preview.r, 0.08);
     return { enemy, terrainType, preview, rRange };
-  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord]);
+  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, zocSnapshot]);
 
   const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
 

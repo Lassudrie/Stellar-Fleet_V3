@@ -277,7 +277,9 @@ export const executeArrivalOperations = (
             });
           } else {
             updatedArmies = updatedArmies.map(existing =>
-              existing.id === army.id ? { ...existing, state: ArmyState.DEPLOYED, containerId: targetPlanet.id } : existing
+              existing.id === army.id
+                ? { ...existing, state: ArmyState.DEPLOYED, containerId: targetPlanet.id, lastDeployedTurn: day }
+                : existing
             );
             landingResults.push({ armyId: army.id, planet: targetPlanet, success: true });
           }
@@ -393,4 +395,3 @@ export const resolveFleetMovement = (
 
   return { nextFleet, logs: generatedLogs, armyUpdates: computeArmyUpdates(allArmies, armiesAfterOps) };
 };
-
