@@ -162,6 +162,7 @@ type MoonSource = MoonData & {
   orbitDistanceKm?: number;
   habitabilityScore?: number;
   id?: string;
+  name?: string;
   isSolid?: boolean;
 };
 
@@ -1159,7 +1160,7 @@ interface BodyLabelProps {
   color?: string;
 }
 
-const BodyLabel: React.FC<BodyLabelProps> = ({ target, baseScale, color = '#e2e8f0' }) => {
+const BodyLabel: React.FC<BodyLabelProps> = ({ target, baseScale, color = '#ffffff' }) => {
   const { camera } = useThree();
   const groupRef = useRef<Group | null>(null);
   const textRef = useRef<Mesh | null>(null);
@@ -1957,6 +1958,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         const moons: MoonSource[] = (planet.moons ?? []).map((moon, moonIndex) => ({
           ...moon,
           id: moonBodies[moonIndex]?.id ?? `moon-${starSystem.id}-${index + 1}-${moonIndex + 1}`,
+          name: (moon as MoonSource).name ?? moonBodies[moonIndex]?.name,
           isSolid: moonBodies[moonIndex]?.isSolid ?? true
         }));
         return {
@@ -2144,10 +2146,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       const moons = (planet.moons ?? []) as MoonSource[];
       moons.forEach((moon, moonIndex) => {
         const moonId = moon.id ?? `moon-${starSystem.id}-${index + 1}-${moonIndex + 1}`;
-        const moonName = t('systemView.bodyInfo.moonName', {
-          parent: planetName,
-          index: moonIndex + 1
-        });
+        const moonName = moon.name ?? t('moon.name', { index: moonIndex + 1 });
         map[moonId] = {
           id: moonId,
           name: moonName,
