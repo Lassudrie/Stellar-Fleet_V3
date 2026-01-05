@@ -18,6 +18,11 @@ export const spiralConvergence: ScenarioTemplate = {
     radius: 140,
     topology: 'spiral',
     minimumSystemSpacingLy: 6,
+    settlements: {
+      neutralOutpostChance: 0.05,
+      neutralOutpostRuinsChance: 0.6,
+      developmentBias: 0
+    },
     staticSystems: [
       {
         id: 'aurora_gate',

@@ -28,6 +28,7 @@ const formatMoonIndex = (index: number): string => MOON_LETTERS[index] ?? `${ind
 export const derivePlanetClass = (planetType: PlanetData['type']): PlanetClass => {
   if (planetType === 'GasGiant') return 'gas_giant';
   if (planetType === 'IceGiant') return 'ice_giant';
+  if (planetType === 'SubNeptune') return 'ice_giant';
   return 'solid';
 };
 

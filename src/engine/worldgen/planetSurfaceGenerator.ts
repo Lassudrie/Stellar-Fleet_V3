@@ -12,6 +12,7 @@ import type {
   PlanetSurfaceMap,
   PlanetSurfaceTile,
   Settlement,
+  SettlementGenerationConfig,
   SettlementType,
   SurfacePos
 } from '../../shared/shared';
@@ -279,9 +280,19 @@ export const domainWarp2DPeriodicX = (
 // ==========================================
 
 export type SurfaceClass = 'airless' | 'icy' | 'temperate' | 'hot' | 'dense';
+export type SurfaceClassReason =
+  | 'no_atmosphere'
+  | 'low_pressure'
+  | 'cold'
+  | 'hot'
+  | 'high_pressure'
+  | 'co2_greenhouse'
+  | 'h2he_envelope'
+  | 'temperate';
 
 export interface SurfaceParams {
   surfaceClass: SurfaceClass;
+  surfaceClassReason: SurfaceClassReason;
   waterFraction: number; // 0..1
   reliefScale: number; // >0
   humidityFactor: number; // 0..1
@@ -311,14 +322,20 @@ const atmosphereDensityFactor = (atm: AtmosphereType): number => {
   }
 };
 
-const pickSurfaceClass = (atm: AtmosphereType, pressureBar: number | undefined, temperatureK: number): SurfaceClass => {
+const pickSurfaceClass = (
+  atm: AtmosphereType,
+  pressureBar: number | undefined,
+  temperatureK: number
+): { surfaceClass: SurfaceClass; surfaceClassReason: SurfaceClassReason } => {
   const p = typeof pressureBar === 'number' && Number.isFinite(pressureBar) ? pressureBar : undefined;
-  if (atm === 'None' || (p !== undefined && p < 0.03)) return 'airless';
-  if (temperatureK < 190) return 'icy';
-  if (temperatureK > 380) return 'hot';
-  if (p !== undefined && p > 5) return 'dense';
-  if (atm === 'CO2' || atm === 'H2He') return 'dense';
-  return 'temperate';
+  if (atm === 'None') return { surfaceClass: 'airless', surfaceClassReason: 'no_atmosphere' };
+  if (p !== undefined && p < 0.03) return { surfaceClass: 'airless', surfaceClassReason: 'low_pressure' };
+  if (temperatureK < 190) return { surfaceClass: 'icy', surfaceClassReason: 'cold' };
+  if (temperatureK > 380) return { surfaceClass: 'hot', surfaceClassReason: 'hot' };
+  if (atm === 'H2He') return { surfaceClass: 'dense', surfaceClassReason: 'h2he_envelope' };
+  if (p !== undefined && p > 5) return { surfaceClass: 'dense', surfaceClassReason: 'high_pressure' };
+  if (atm === 'CO2' && p !== undefined && p >= 1.5) return { surfaceClass: 'dense', surfaceClassReason: 'co2_greenhouse' };
+  return { surfaceClass: 'temperate', surfaceClassReason: 'temperate' };
 };
 
 const computeWaterFraction = (params: {
@@ -354,7 +371,7 @@ const computeWaterFraction = (params: {
 
 export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams => {
   const density = atmosphereDensityFactor(planet.atmosphere);
-  const surfaceClass = pickSurfaceClass(planet.atmosphere, planet.pressureBar, planet.temperatureK);
+  const { surfaceClass, surfaceClassReason } = pickSurfaceClass(planet.atmosphere, planet.pressureBar, planet.temperatureK);
 
   const reliefScale = 1 / Math.sqrt(Math.max(0.15, planet.gravityG));
   const waterFraction = computeWaterFraction({
@@ -374,6 +391,7 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
 
   return {
     surfaceClass,
+    surfaceClassReason,
     waterFraction,
     reliefScale,
     humidityFactor,
@@ -388,12 +406,16 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
 export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
   // Moons share similar heuristics, but allow tidal heating to drive volcanism.
   const density = atmosphereDensityFactor(moon.atmosphere as AtmosphereType);
-  const surfaceClass = pickSurfaceClass(moon.atmosphere as AtmosphereType, undefined, moon.temperatureK);
+  const { surfaceClass, surfaceClassReason } = pickSurfaceClass(
+    moon.atmosphere as AtmosphereType,
+    moon.pressureBar,
+    moon.temperatureK
+  );
 
   const reliefScale = 1 / Math.sqrt(Math.max(0.15, moon.gravityG));
   const waterFraction = computeWaterFraction({
     atmosphere: moon.atmosphere as AtmosphereType,
-    pressureBar: undefined,
+    pressureBar: moon.pressureBar,
     temperatureK: moon.temperatureK,
     albedo: moon.albedo
   });
@@ -408,6 +430,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
 
   return {
     surfaceClass,
+    surfaceClassReason,
     waterFraction,
     reliefScale,
     humidityFactor,
@@ -489,6 +512,7 @@ export const createPlanetSurfaceDescriptor = (params: {
   systemId: string;
   body: PlanetBody;
   generatorVersion?: number;
+  settlementConfig?: SettlementGenerationConfig;
 }): PlanetSurfaceDescriptor => {
   const generatorVersion = params.generatorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION;
   const config = computeDefaultSurfaceConfig(params.body, generatorVersion);
@@ -505,7 +529,8 @@ export const createPlanetSurfaceDescriptor = (params: {
     seed,
     config,
     // Contract requires an astroRef; fall back deterministically for custom bodies.
-    astroRef: astroRef ?? { planetIndex: 0 }
+    astroRef: astroRef ?? { planetIndex: 0 },
+    settlementConfig: normalizeSettlementConfig(params.settlementConfig)
   };
 };
 
@@ -718,6 +743,10 @@ const classifyWaterComponents = (
   return { oceanMask, labels };
 };
 
+const DEFAULT_NEUTRAL_OUTPOST_CHANCE = 0.05;
+const DEFAULT_NEUTRAL_OUTPOST_RUINS_CHANCE = 0.6;
+const DEFAULT_DEVELOPMENT_BIAS = 0;
+
 const SETTLEMENT_BASE_POPULATION: Readonly<Record<SettlementType, number>> = {
   outpost: 1_000,
   colony: 1_000,
@@ -744,6 +773,23 @@ const SETTLEMENT_CANDIDATE_SAMPLES: Readonly<Record<SettlementType, number>> = {
   metropolis: 380,
   megalopolis: 520
 };
+
+const normalizeSettlementConfig = (config?: SettlementGenerationConfig): Required<SettlementGenerationConfig> => {
+  const raw = config ?? {};
+  const neutralOutpostChance = typeof raw.neutralOutpostChance === 'number' ? raw.neutralOutpostChance : DEFAULT_NEUTRAL_OUTPOST_CHANCE;
+  const neutralOutpostRuinsChance =
+    typeof raw.neutralOutpostRuinsChance === 'number' ? raw.neutralOutpostRuinsChance : DEFAULT_NEUTRAL_OUTPOST_RUINS_CHANCE;
+  const developmentBias = typeof raw.developmentBias === 'number' ? raw.developmentBias : DEFAULT_DEVELOPMENT_BIAS;
+
+  return {
+    neutralOutpostChance: clamp(neutralOutpostChance, 0, 1),
+    neutralOutpostRuinsChance: clamp(neutralOutpostRuinsChance, 0, 1),
+    developmentBias: clamp(developmentBias, -1, 1)
+  };
+};
+
+const resolveSettlementConfig = (descriptor: PlanetSurfaceDescriptor): Required<SettlementGenerationConfig> =>
+  normalizeSettlementConfig(descriptor.settlementConfig);
 
 const hexDistanceWrapped = (a: HexCoord, b: HexCoord, w: number, wrapX: boolean): number => {
   const dr = b.r - a.r;
@@ -888,6 +934,7 @@ const placeSettlementsV1 = (params: {
   ownerFactionId?: string | null;
 }): Settlement[] => {
   const { descriptor, tiles, w, h, wrapX, ownerFactionId } = params;
+  const settlementConfig = resolveSettlementConfig(descriptor);
   const n = w * h;
   const rng = new RNG(descriptor.seed ^ 0x9e3779b9);
 
@@ -952,20 +999,22 @@ const placeSettlementsV1 = (params: {
   };
 
   if (!ownerFactionId) {
-    // Neutral: 0..1 outpost depending on RNG.
-    if (rng.next() < 0.55) return [];
+    // Neutral: 0..1 outpost depending on scenario config.
+    if (rng.next() > settlementConfig.neutralOutpostChance) return [];
     const idx = placeOne(120, []);
     if (idx === null) return [];
     const coord = indexToAxial(idx, w);
+    const isRuins = rng.next() < settlementConfig.neutralOutpostRuinsChance;
     settlements.push({
       id: rng.id('settlement'),
-      name: 'Outpost',
+      name: isRuins ? 'Ruins' : 'Outpost',
       coord,
       factionId: undefined,
       type: 'outpost',
-      population: SETTLEMENT_BASE_POPULATION.outpost
+      population: isRuins ? 0 : SETTLEMENT_BASE_POPULATION.outpost,
+      status: isRuins ? 'ruins' : 'active'
     });
-    tiles[idx].featureBits |= FeatureBits.City;
+    if (!isRuins) tiles[idx].featureBits |= FeatureBits.City;
     return settlements;
   }
 
@@ -1017,6 +1066,7 @@ const placeSettlementsV2 = (params: {
   env: SurfaceParams;
 }): Settlement[] => {
   const { descriptor, tiles, w, h, wrapX, ownerFactionId, env } = params;
+  const settlementConfig = resolveSettlementConfig(descriptor);
   const n = w * h;
   const rng = new RNG(descriptor.seed ^ 0x9e3779b9);
 
@@ -1142,25 +1192,27 @@ const placeSettlementsV2 = (params: {
     return null;
   };
 
-  // Neutral: keep legacy "maybe one outpost" behavior.
+  // Neutral: 0..1 outpost depending on scenario config.
   if (!ownerFactionId) {
-    if (rng.next() < 0.55) return [];
+    if (rng.next() > settlementConfig.neutralOutpostChance) return [];
     const idx = placeOne('outpost');
     if (idx === null) return [];
 
     const coord = indexToAxial(idx, w);
+    const isRuins = rng.next() < settlementConfig.neutralOutpostRuinsChance;
     const settlements: Settlement[] = [
       {
         id: rng.id('settlement'),
-        name: 'Outpost',
+        name: isRuins ? 'Ruins' : 'Outpost',
         coord,
         factionId: undefined,
         type: 'outpost',
-        population: SETTLEMENT_BASE_POPULATION.outpost
+        population: isRuins ? 0 : SETTLEMENT_BASE_POPULATION.outpost,
+        status: isRuins ? 'ruins' : 'active'
       }
     ];
 
-    tiles[idx].featureBits |= FeatureBits.City;
+    if (!isRuins) tiles[idx].featureBits |= FeatureBits.City;
     return settlements;
   }
 
@@ -1188,7 +1240,12 @@ const placeSettlementsV2 = (params: {
   const sizeScore = clamp((landCount - 500) / 2600, 0, 1);
   const waterScore = clamp((env.waterFraction - 0.05) / 0.35, 0, 1);
 
-  const development = clamp(0.12 + 0.55 * surfaceClassScore + 0.18 * sizeScore + 0.12 * waterScore + 0.25 * rng.next(), 0, 1);
+  const developmentBias = settlementConfig.developmentBias ?? 0;
+  const development = clamp(
+    0.12 + 0.55 * surfaceClassScore + 0.18 * sizeScore + 0.12 * waterScore + 0.25 * rng.next() + developmentBias,
+    0,
+    1
+  );
 
   let stage = 0;
   if (development >= 0.25) stage = 1;
@@ -1390,6 +1447,7 @@ const generateSurfaceMapV2 = (params: {
       : // Fallback: treat as airless small body.
         {
           surfaceClass: 'airless',
+          surfaceClassReason: 'no_atmosphere',
           waterFraction: 0.02,
           reliefScale: 1,
           humidityFactor: 0.05,
@@ -1592,6 +1650,7 @@ const generateSurfaceMapV3 = (params: {
       ? deriveSurfaceParamsFromMoon(params.moonData)
       : {
           surfaceClass: 'airless',
+          surfaceClassReason: 'no_atmosphere',
           waterFraction: 0.02,
           reliefScale: 1,
           humidityFactor: 0.05,
@@ -1817,6 +1876,231 @@ export const generateSurfaceMap = (params: {
     return generateSurfaceMapV3(params);
   }
   return generateSurfaceMapV2(params);
+};
+
+// ==========================================
+// Summary (audit/debug)
+// ==========================================
+
+export interface SurfaceMapSummary {
+  tileCount: number;
+  seaLevelElev: number;
+  tilesHash: number;
+  tileStats: {
+    elev: { min: number; max: number; avg: number };
+    tempC2: { min: number; max: number; avg: number };
+    moist: { min: number; max: number; avg: number };
+  };
+  biomeHistogram: Record<Biome, number>;
+  settlements: {
+    total: number;
+    byType: Record<SettlementType, number>;
+    byStatus: Record<string, number>;
+    byFactionId: Record<string, number>;
+    capitals: Array<{ id: string; name: string; coord: HexCoord; factionId?: string }>;
+  };
+  tileSample: Array<{
+    index: number;
+    coord: HexCoord;
+    elev: number;
+    tempC2: number;
+    moist: number;
+    biome: Biome;
+    featureBits: number;
+  }>;
+}
+
+const BIOME_ORDER: Biome[] = [
+  'ocean',
+  'coast',
+  'lake',
+  'ice',
+  'tundra',
+  'taiga',
+  'grassland',
+  'forest',
+  'rainforest',
+  'desert',
+  'rocky',
+  'mountain',
+  'volcanic',
+  'cratered'
+];
+
+const SETTLEMENT_TYPE_ORDER: SettlementType[] = [
+  'outpost',
+  'colony',
+  'frontierTown',
+  'city',
+  'metropolis',
+  'megalopolis'
+];
+
+const createCountRecord = <T extends string>(keys: readonly T[]): Record<T, number> => {
+  const out = {} as Record<T, number>;
+  keys.forEach(key => {
+    out[key] = 0;
+  });
+  return out;
+};
+
+const toSortedRecord = (entries: Array<[string, number]>): Record<string, number> => {
+  const out: Record<string, number> = {};
+  sorted(entries, (a, b) => a[0].localeCompare(b[0])).forEach(([key, value]) => {
+    out[key] = value;
+  });
+  return out;
+};
+
+const buildTileSample = (tiles: PlanetSurfaceTile[], w: number, h: number): SurfaceMapSummary['tileSample'] => {
+  if (tiles.length === 0 || w <= 0 || h <= 0) return [];
+  const rows = Math.min(4, h);
+  const cols = Math.min(8, w);
+  const sample: SurfaceMapSummary['tileSample'] = [];
+  for (let rIndex = 0; rIndex < rows; rIndex += 1) {
+    const r = Math.floor(((rIndex + 0.5) * h) / rows);
+    for (let qIndex = 0; qIndex < cols; qIndex += 1) {
+      const q = Math.floor(((qIndex + 0.5) * w) / cols);
+      const index = r * w + q;
+      const tile = tiles[index];
+      if (!tile) continue;
+      sample.push({
+        index,
+        coord: { q, r },
+        elev: tile.elev,
+        tempC2: tile.tempC2,
+        moist: tile.moist,
+        biome: tile.biome,
+        featureBits: tile.featureBits
+      });
+    }
+  }
+  return sample;
+};
+
+export const summarizeSurfaceMap = (map: PlanetSurfaceMap): SurfaceMapSummary => {
+  const { tiles, settlements } = map;
+  const tileCount = tiles.length;
+
+  let elevMin = Number.POSITIVE_INFINITY;
+  let elevMax = Number.NEGATIVE_INFINITY;
+  let elevSum = 0;
+  let tempMin = Number.POSITIVE_INFINITY;
+  let tempMax = Number.NEGATIVE_INFINITY;
+  let tempSum = 0;
+  let moistMin = Number.POSITIVE_INFINITY;
+  let moistMax = Number.NEGATIVE_INFINITY;
+  let moistSum = 0;
+
+  const biomeHistogram = createCountRecord(BIOME_ORDER);
+
+  let tilesHash = hashJoin32(
+    map.systemId,
+    map.bodyId,
+    map.descriptor.seed,
+    map.seaLevelElev,
+    tileCount
+  );
+
+  for (let i = 0; i < tileCount; i += 1) {
+    const tile = tiles[i];
+    elevMin = Math.min(elevMin, tile.elev);
+    elevMax = Math.max(elevMax, tile.elev);
+    elevSum += tile.elev;
+
+    tempMin = Math.min(tempMin, tile.tempC2);
+    tempMax = Math.max(tempMax, tile.tempC2);
+    tempSum += tile.tempC2;
+
+    moistMin = Math.min(moistMin, tile.moist);
+    moistMax = Math.max(moistMax, tile.moist);
+    moistSum += tile.moist;
+
+    biomeHistogram[tile.biome] += 1;
+    tilesHash = hashJoin32(
+      tilesHash,
+      tile.elev,
+      tile.tempC2,
+      tile.moist,
+      tile.biome,
+      tile.featureBits
+    );
+  }
+
+  if (tileCount === 0) {
+    elevMin = 0;
+    elevMax = 0;
+    tempMin = 0;
+    tempMax = 0;
+    moistMin = 0;
+    moistMax = 0;
+  }
+
+  const orderedSettlements = sorted(settlements, (a, b) => a.id.localeCompare(b.id));
+  const byType = createCountRecord(SETTLEMENT_TYPE_ORDER);
+  const byStatus: Record<string, number> = { active: 0, ruins: 0 };
+  const factionCounts = new Map<string, number>();
+  const capitals: Array<{ id: string; name: string; coord: HexCoord; factionId?: string }> = [];
+
+  orderedSettlements.forEach(settlement => {
+    byType[settlement.type] += 1;
+    const statusKey = settlement.status === 'ruins' ? 'ruins' : 'active';
+    byStatus[statusKey] += 1;
+    const factionKey = settlement.factionId ?? '__neutral__';
+    factionCounts.set(factionKey, (factionCounts.get(factionKey) ?? 0) + 1);
+    if (settlement.isCapital) {
+      capitals.push({
+        id: settlement.id,
+        name: settlement.name,
+        coord: settlement.coord,
+        factionId: settlement.factionId
+      });
+    }
+    tilesHash = hashJoin32(
+      tilesHash,
+      settlement.id,
+      settlement.name,
+      settlement.coord.q,
+      settlement.coord.r,
+      settlement.type,
+      settlement.population,
+      settlement.status ?? '',
+      settlement.factionId ?? '',
+      settlement.isCapital ? 1 : 0
+    );
+  });
+
+  return {
+    tileCount,
+    seaLevelElev: map.seaLevelElev,
+    tilesHash,
+    tileStats: {
+      elev: {
+        min: elevMin,
+        max: elevMax,
+        avg: tileCount > 0 ? elevSum / tileCount : 0
+      },
+      tempC2: {
+        min: tempMin,
+        max: tempMax,
+        avg: tileCount > 0 ? tempSum / tileCount : 0
+      },
+      moist: {
+        min: moistMin,
+        max: moistMax,
+        avg: tileCount > 0 ? moistSum / tileCount : 0
+      }
+    },
+    biomeHistogram,
+    settlements: {
+      total: settlements.length,
+      byType,
+      byStatus,
+      byFactionId: toSortedRecord(Array.from(factionCounts.entries())),
+      capitals
+    },
+    tileSample: buildTileSample(tiles, map.descriptor.config.w, map.descriptor.config.h)
+  };
 };
 
 // ==========================================

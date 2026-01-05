@@ -13,10 +13,12 @@ import type {
   StarSystemAstro,
   StellarClassBounds,
   StellarDerived,
+  StellarAgeClass,
   StellarMultiplicityByPrimaryType,
   StellarSystemGenParams,
   StellarSystemPlan,
-  WeightedSpectralType
+  WeightedSpectralType,
+  WorldgenAuditSink
 } from '../../shared/shared';
 
 // ============================================================
@@ -44,6 +46,28 @@ export const SPECTRAL_WEIGHTS: WeightedSpectralType[] = [
   { type: 'B', weight: 0.008 },
   { type: 'O', weight: 0.002 }
 ];
+
+const STELLAR_AGE_BINS: Array<{ class: StellarAgeClass; minGyr: number; maxGyr: number }> = [
+  { class: 'young', minGyr: 0.1, maxGyr: 2.0 },
+  { class: 'mid', minGyr: 2.0, maxGyr: 6.0 },
+  { class: 'old', minGyr: 6.0, maxGyr: 11.0 }
+];
+
+const STELLAR_AGE_WEIGHTS_CORE: Record<StellarAgeClass, number> = {
+  young: 0.2,
+  mid: 0.35,
+  old: 0.45
+};
+
+const STELLAR_AGE_WEIGHTS_RIM: Record<StellarAgeClass, number> = {
+  young: 0.4,
+  mid: 0.4,
+  old: 0.2
+};
+
+const METALLICITY_FEH_CENTER = 0.12;
+const METALLICITY_FEH_GRADIENT = -0.6;
+const METALLICITY_FEH_SIGMA = 0.14;
 
 export const STELLAR_CLASS_BOUNDS: Record<SpectralType, StellarClassBounds> = {
   M: { massSun: [0.08, 0.45], teffK: [2400, 3700] },
@@ -125,6 +149,13 @@ export const ATMOSPHERE_PRESSURE_BAR: Record<AtmosphereType, [number, number]> =
   H2He: [10, 200]
 };
 
+export const MOON_ATMOSPHERE_PRESSURE_BAR: Record<Exclude<AtmosphereType, 'H2He'>, [number, number]> = {
+  None: [0, 0],
+  Thin: [0.01, 0.2],
+  Earthlike: [0.2, 1.2],
+  CO2: [0.3, 3.0]
+};
+
 export const DEFAULT_PLANET_ALBEDO: Record<PlanetType, number> = {
   Terrestrial: 0.3,
   SubNeptune: 0.45,
@@ -150,6 +181,50 @@ export function clamp(x: number, min: number, max: number): number {
   if (x > max) return max;
   return x;
 }
+
+const clamp01 = (x: number): number => clamp(x, 0, 1);
+
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+const computeGalacticRadiusNorm = (
+  position: { x: number; y: number; z: number } | undefined,
+  galacticRadius: number | undefined
+): number => {
+  if (!position || !Number.isFinite(galacticRadius) || (galacticRadius as number) <= 0) return 0.5;
+  const r = Math.sqrt(position.x * position.x + position.z * position.z);
+  return clamp01(r / (galacticRadius as number));
+};
+
+const drawStellarAge = (rng: RNG, radiusNorm: number): { ageGyr: number; ageClass: StellarAgeClass } => {
+  const t = clamp01(radiusNorm);
+  const youngWeight = lerp(STELLAR_AGE_WEIGHTS_CORE.young, STELLAR_AGE_WEIGHTS_RIM.young, t);
+  const midWeight = lerp(STELLAR_AGE_WEIGHTS_CORE.mid, STELLAR_AGE_WEIGHTS_RIM.mid, t);
+  const oldWeight = lerp(STELLAR_AGE_WEIGHTS_CORE.old, STELLAR_AGE_WEIGHTS_RIM.old, t);
+  const ageClass = weightedPick(rng, [
+    { key: 'young', weight: youngWeight },
+    { key: 'mid', weight: midWeight },
+    { key: 'old', weight: oldWeight }
+  ]);
+  const bin = STELLAR_AGE_BINS.find(b => b.class === ageClass) ?? STELLAR_AGE_BINS[1];
+  const ageGyr = rng.range(bin.minGyr, bin.maxGyr);
+  return { ageGyr, ageClass };
+};
+
+const scaleSpectralWeightsForAge = (ageClass: StellarAgeClass): WeightedSpectralType[] => {
+  return SPECTRAL_WEIGHTS.map(entry => {
+    let scale = 1;
+    if (ageClass === 'mid') {
+      if (entry.type === 'O' || entry.type === 'B') scale = 0;
+      if (entry.type === 'A') scale = 0.35;
+      if (entry.type === 'F') scale = 0.8;
+    } else if (ageClass === 'old') {
+      if (entry.type === 'O' || entry.type === 'B') scale = 0;
+      if (entry.type === 'A') scale = 0.1;
+      if (entry.type === 'F') scale = 0.45;
+    }
+    return { type: entry.type, weight: entry.weight * scale };
+  });
+};
 
 export function logUniform(rng: RNG, min: number, max: number): number {
   if (min <= 0 || max <= 0) {
@@ -288,8 +363,10 @@ export function refineStar(rng: RNG, type: SpectralType, massSun: number, role: 
 // Planets (was: worldgen/stellar/planets.ts)
 // ============================================================
 
-export function drawMetallicityFeH(rng: RNG): number {
-  return rng.range(-0.6, 0.3);
+export function drawMetallicityFeH(rng: RNG, radiusNorm: number): number {
+  const noise = normal(rng, 0, METALLICITY_FEH_SIGMA);
+  const feh = METALLICITY_FEH_CENTER + METALLICITY_FEH_GRADIENT * clamp01(radiusNorm) + noise;
+  return clamp(feh, -0.9, 0.5);
 }
 
 export function computeSnowLineAu(L_total: number): number {
@@ -518,9 +595,17 @@ export function drawPlanetTypes(rng: RNG, planetCount: number, primaryType: Spec
   if (planetCount <= 0) return [];
 
   const pGiant = (() => {
-    if (primaryType === 'M') return clamp(0.03 * Math.exp(1.3 * metallicityFeH), 0.01, 0.1);
-    if (primaryType === 'F' || primaryType === 'G' || primaryType === 'K') return clamp(0.06 * Math.exp(1.6 * metallicityFeH), 0.02, 0.2);
-    return clamp(0.05 * Math.exp(1.5 * metallicityFeH), 0.02, 0.18);
+    if (primaryType === 'M') return clamp(0.04 * Math.exp(1.3 * metallicityFeH), 0.01, 0.12);
+    if (primaryType === 'F' || primaryType === 'G' || primaryType === 'K') {
+      return clamp(0.08 * Math.exp(1.6 * metallicityFeH), 0.03, 0.22);
+    }
+    return clamp(0.06 * Math.exp(1.5 * metallicityFeH), 0.03, 0.2);
+  })();
+
+  const gasBias = (() => {
+    const spectralBonus = primaryType === 'F' || primaryType === 'G' ? 0.08 : primaryType === 'M' ? -0.08 : 0;
+    const metallicityBonus = 0.25 * (metallicityFeH + 0.1);
+    return clamp(0.35 + metallicityBonus + spectralBonus, 0.2, 0.75);
   })();
 
   let giantCount = 0;
@@ -532,7 +617,15 @@ export function drawPlanetTypes(rng: RNG, planetCount: number, primaryType: Spec
   let outerSlots = planetCount - innerSlots;
 
   const innerProbs: PlanetTypeProbs = { Terrestrial: 0.65, SubNeptune: 0.3, Dwarf: 0.05, IceGiant: 0, GasGiant: 0 };
-  const outerProbs: PlanetTypeProbs = { Dwarf: 0.45, IceGiant: 0.3, SubNeptune: 0.15, Terrestrial: 0.1, GasGiant: 0 };
+  const outerGasWeight = clamp(0.02 + 0.08 * Math.exp(1.2 * metallicityFeH), 0.02, 0.12);
+  const outerIceWeight = clamp(0.3 - outerGasWeight * 0.6, 0.15, 0.3);
+  const outerProbs: PlanetTypeProbs = {
+    Dwarf: 0.45,
+    IceGiant: outerIceWeight,
+    GasGiant: outerGasWeight,
+    SubNeptune: 0.15,
+    Terrestrial: 0.1
+  };
 
   const plan: PlanetTypePlan = [];
 
@@ -547,7 +640,7 @@ export function drawPlanetTypes(rng: RNG, planetCount: number, primaryType: Spec
 
   // Inject giants (replace first Dwarf/SubNeptune if needed).
   for (let g = 0; g < giantCount; g++) {
-    const giantType: PlanetType = rng.next() < 0.6 ? 'GasGiant' : 'IceGiant';
+    const giantType: PlanetType = rng.next() < gasBias ? 'GasGiant' : 'IceGiant';
     let replaced = false;
     for (let j = 0; j < outer.length; j++) {
       if (outer[j] === 'Dwarf' || outer[j] === 'SubNeptune') {
@@ -590,7 +683,7 @@ export function buildPlanet(
 
   const climateTag = deriveClimateTag(planetType, temperatureK, atmosphere);
 
-  return {
+  const planet: PlanetData = {
     type: planetType,
     semiMajorAxisAu,
     eccentricity,
@@ -600,11 +693,18 @@ export function buildPlanet(
     albedo,
     teqK,
     atmosphere,
-    pressureBar,
     temperatureK,
-    climateTag,
     moons: []
   };
+
+  if (pressureBar !== undefined) {
+    planet.pressureBar = pressureBar;
+  }
+  if (climateTag !== undefined) {
+    planet.climateTag = climateTag;
+  }
+
+  return planet;
 }
 
 // ============================================================
@@ -733,6 +833,17 @@ export function canHoldMoonAtmosphere(massEarth: number, gravityG: number): bool
   return massEarth >= 0.01 || gravityG >= 0.18;
 }
 
+export function drawMoonPressureBar(
+  rng: RNG,
+  atmosphere: Exclude<AtmosphereType, 'H2He'>,
+  gravityG: number
+): number | undefined {
+  if (atmosphere === 'None') return undefined;
+  const [minP, maxP] = MOON_ATMOSPHERE_PRESSURE_BAR[atmosphere];
+  const gravityScale = clamp(0.3 + gravityG * 0.9, 0.25, 1.1);
+  return rng.range(minP, maxP) * gravityScale;
+}
+
 export function assignMoonAtmosphere(
   rng: RNG,
   moonType: MoonType,
@@ -749,7 +860,7 @@ export function assignMoonAtmosphere(
   }
 
   if (moonType === 'Volcanic') {
-    if (canHold) return { atmosphere: 'CO2', finalMoonType: 'Volcanic' };
+    if (canHold && temperatureK > 180 && rng.next() < 0.4) return { atmosphere: 'CO2', finalMoonType: 'Volcanic' };
     return { atmosphere: 'Thin', finalMoonType: 'Regular' };
   }
 
@@ -811,9 +922,10 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
 
     const canHold = canHoldMoonAtmosphere(massEarth, gravityG);
     const { atmosphere, finalMoonType } = assignMoonAtmosphere(rng, t0, canHold, provisionalT);
+    const pressureBar = drawMoonPressureBar(rng, atmosphere, gravityG);
     const temperatureK = clamp(provisionalT + MOON_GREENHOUSE_OFFSETS_K[atmosphere], 30, 2000);
 
-    out.push({
+    const moon: MoonData = {
       type: finalMoonType,
       orbitDistanceRp,
       massEarth,
@@ -824,7 +936,13 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
       tidalBonusK: tidal,
       atmosphere,
       temperatureK
-    });
+    };
+
+    if (pressureBar !== undefined) {
+      moon.pressureBar = pressureBar;
+    }
+
+    out.push(moon);
   }
 
   return out;
@@ -837,7 +955,10 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
 export interface GenerateStellarSystemInput {
   worldSeed: number;
   systemId: string;
+  systemPosition?: { x: number; y: number; z: number };
+  galacticRadius?: number;
   params?: Partial<StellarSystemGenParams>;
+  audit?: WorldgenAuditSink;
 }
 
 function mergeParams(p?: Partial<StellarSystemGenParams>): StellarSystemGenParams {
@@ -851,12 +972,15 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   const params = mergeParams(input.params);
   const seed = deriveSeed32(input.worldSeed, input.systemId, 'astro');
   const rng = new RNG(seed);
+  const rngStateBefore = rng.getState();
+  const radiusNorm = computeGalacticRadiusNorm(input.systemPosition, input.galacticRadius);
+  const contextRng = new RNG(deriveSeed32(input.worldSeed, input.systemId, 'astro_context'));
+
+  const { ageGyr: stellarAgeGyr, ageClass: stellarAgeClass } = drawStellarAge(contextRng, radiusNorm);
 
   // Phase A: discrete plan
-  const primarySpectralType = weightedPick(
-    rng,
-    SPECTRAL_WEIGHTS.map(x => ({ key: x.type, weight: x.weight }))
-  );
+  const spectralWeights = scaleSpectralWeightsForAge(stellarAgeClass);
+  const primarySpectralType = weightedPick(rng, spectralWeights.map(x => ({ key: x.type, weight: x.weight })));
 
   const primaryMassRange = STELLAR_CLASS_BOUNDS[primarySpectralType].massSun;
   const primaryMassSun = rng.range(primaryMassRange[0], primaryMassRange[1]);
@@ -865,7 +989,7 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   const companionCount = Math.max(0, starCount - 1);
   const companionMasses = drawCompanionMasses(rng, primaryMassSun, companionCount);
 
-  const metallicityFeH = drawMetallicityFeH(rng);
+  const metallicityFeH = drawMetallicityFeH(contextRng, radiusNorm);
 
   const lambda = PLANET_COUNT_LAMBDA_BY_PRIMARY[primarySpectralType];
   const planetCount = Math.max(0, Math.min(params.maxPlanets, poisson(rng, lambda)));
@@ -913,12 +1037,65 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   }
 
   const orderedPlanets = sorted(planets, (a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu);
+  const rngStateAfter = rng.getState();
+
+  const planetTypeCounts: Record<PlanetType, number> = {
+    Terrestrial: 0,
+    SubNeptune: 0,
+    IceGiant: 0,
+    GasGiant: 0,
+    Dwarf: 0
+  };
+  orderedPlanets.forEach(planet => {
+    planetTypeCounts[planet.type] += 1;
+  });
+
+  const astroHash = fnv1a32(JSON.stringify({ stars, planets: orderedPlanets }));
+
+  input.audit?.({
+    step: 'astro',
+    kind: 'astro_generated',
+    entityId: input.systemId,
+    rngStateBefore,
+    rngStateAfter,
+    outputs: {
+      seed,
+      primarySpectralType,
+      starCount,
+      companionCount,
+      metallicityFeH,
+      stellarAgeGyr,
+      stellarAgeClass,
+      galacticRadiusNorm: radiusNorm,
+      planetCount: orderedPlanets.length,
+      planetTypes: orderedPlanets.map(planet => planet.type),
+      planetTypeCounts,
+      moonCountsByPlanet: orderedPlanets.map(planet => planet.moons?.length ?? 0),
+      derived: {
+        luminosityTotalLSun,
+        snowLineAu,
+        hzInnerAu,
+        hzOuterAu
+      },
+      stars: stars.map(star => ({
+        role: star.role,
+        spectralType: star.spectralType,
+        massSun: star.massSun,
+        radiusSun: star.radiusSun,
+        luminositySun: star.luminositySun,
+        teffK: star.teffK
+      })),
+      astroHash
+    }
+  });
 
   return {
     seed,
     primarySpectralType,
     starCount,
     metallicityFeH,
+    stellarAgeGyr,
+    stellarAgeClass,
     derived: {
       luminosityTotalLSun,
       snowLineAu,
@@ -929,4 +1106,3 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
     planets: orderedPlanets
   };
 }
-

@@ -82,6 +82,7 @@ Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup
 | `topology` | `"spiral" \| "cluster" \| "ring" \| "scattered"` | Oui | Algorithme de placement. |
 | `minimumSystemSpacingLy` | number | Non | Distance minimale entre systèmes. Défaut : `5`. Mettre `0` pour désactiver. |
 | `staticSystems` | array | Non | Points fixes injectés dans la carte. |
+| `settlements` | object | Non | Paramètres de colonisation neutre et biais de développement. |
 
 ### 6.1 `staticSystems` (optionnel)
 ```ts
@@ -98,6 +99,15 @@ Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup
     size?: number;
     ownerFactionId?: string | null;
   }>;
+}
+```
+
+### 6.2 `settlements` (optionnel)
+```ts
+{
+  neutralOutpostChance?: number;       // 0..1
+  neutralOutpostRuinsChance?: number;  // 0..1
+  developmentBias?: number;            // -1..1
 }
 ```
 

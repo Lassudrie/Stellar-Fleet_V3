@@ -15,11 +15,17 @@ Chaque système stellaire possède un bloc `StarSystemAstro` décrivant son cont
   - Deux appels avec le même couple (`worldSeed`, `systemId`) produisent exactement le même résultat, indépendamment de l’ordre des appels ou de l’état des autres systèmes.
   - La présence du namespace fixe `'astro'` évite les collisions avec d’autres dérivations utilisant le même couple.
 
+## 2.1 Contexte galactique
+`generateStellarSystem` accepte en entrée la position du système et le rayon galactique pour calculer un rayon normalisé (0..1). Ce rayon influence :
+- l’âge stellaire (bins `young/mid/old`),
+- la métallicité `[Fe/H]` via un gradient radial + dispersion.
+
 ## 3. Contenu du payload `StarSystemAstro`
 Le payload est structuré selon `src/shared/types.ts` et suit les règles suivantes :
 - **Racine** :
   - `seed` : seed dérivée spécifique au système (debug / reproductibilité).
   - `primarySpectralType`, `starCount`, `metallicityFeH` : données globales sur le système.
+  - `stellarAgeGyr`, `stellarAgeClass` : âge stellaire simplifié (bins), utilisé pour limiter les types B/O (et une partie des A) aux systèmes jeunes.
   - `derived` : valeurs calculées à partir de la luminosité totale (`luminosityTotalLSun`) incluant `snowLineAu`, `hzInnerAu`, `hzOuterAu`.
 - **Étoiles (`stars`)** :
   - Tableau ordonné : la primaire en premier (`role: 'primary'`), puis les compagnons (`role: 'companion'`).
@@ -29,7 +35,7 @@ Le payload est structuré selon `src/shared/types.ts` et suit les règles suivan
   - Les orbites sont générées, éventuellement ajustées à la ligne de neige, puis triées par demi‑grand axe croissant (`semiMajorAxisAu`).
   - Chaque planète enregistre `type`, `eccentricity`, masse/rayon/gravité, `albedo`, `teqK`, `atmosphere`, pression éventuelle, température et éventuelle `climateTag`.
 - **Lunes (`moons`)** :
-  - Chaque planète possède un tableau `moons` (éventuellement vide) détaillant `type`, paramètres orbitaux, masse/rayon/gravité, `albedo`, `teqK`, bonus de marée (`tidalBonusK`), type d’atmosphère et température.
+  - Chaque planète possède un tableau `moons` (éventuellement vide) détaillant `type`, paramètres orbitaux, masse/rayon/gravité, `albedo`, `teqK`, bonus de marée (`tidalBonusK`), type d’atmosphère, pression éventuelle et température.
 
 ## 4. Invariants de sérialisation
 - Lors de la désérialisation, `sanitizeStarSystemAstro` impose la présence des champs obligatoires : `seed`, `primarySpectralType`, `starCount`, `metallicityFeH`, bloc `derived` complet, ainsi que les tableaux `stars` et `planets`.

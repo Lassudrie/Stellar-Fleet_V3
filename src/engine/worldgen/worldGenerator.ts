@@ -1,4 +1,20 @@
-import { GameState, StarSystem, Fleet, ShipType, Army, ArmyState, FleetState, FactionState } from '../../shared/shared';
+import {
+  GameState,
+  StarSystem,
+  Fleet,
+  ShipType,
+  Army,
+  ArmyState,
+  FleetState,
+  FactionState,
+  ResourceType,
+  WorldgenAuditCollector,
+  WorldgenAuditLog,
+  WorldgenAuditMode,
+  devLog,
+  devWarn,
+  sorted
+} from '../../shared/shared';
 import { RNG } from '../rng';
 import { GameScenario } from '../../content/scenarios';
 import { createArmy, MIN_ARMY_CREATION_MEMBERS } from '../army';
@@ -6,10 +22,8 @@ import { createShip } from '../world';
 import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
 import { SHIP_STATS } from '../../content/data/static';
-import { devLog, devWarn } from '../../shared/shared';
 import { generateStellarSystem } from './stellarSystem';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
-import { sorted } from '../../shared/shared';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions, DEFAULT_PLANET_SURFACE_GENERATOR_VERSION } from '../planetSurface';
 
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
@@ -25,15 +39,142 @@ const FALLBACK_POSITION_ATTEMPTS = 2000;
 const BEST_EFFORT_FALLBACK_SAMPLES = 250;
 
 type WorldgenProgressDetail = { current: number; total: number };
+
+const deriveResourceTypeFromAstro = (astro?: StarSystem['astro']): ResourceType => {
+  if (!astro) return 'none';
+  const snowLineAu = astro.derived?.snowLineAu ?? 0;
+  const planets = astro.planets ?? [];
+  const hasGasRich =
+    planets.some(p => p.type === 'GasGiant' || p.type === 'IceGiant') ||
+    planets.some(p => p.type === 'SubNeptune' && p.semiMajorAxisAu > snowLineAu * 0.9);
+  const hasVolatiles = planets.some(p => p.type === 'Dwarf' && p.semiMajorAxisAu > snowLineAu * 1.1);
+  return hasGasRich || hasVolatiles ? 'gas' : 'none';
+};
 type WorldgenProgressUpdate = { stage: 'worldgen'; progress: number; detail?: WorldgenProgressDetail };
 export type WorldgenProgressReporter = (update: WorldgenProgressUpdate) => void;
-export type GenerateWorldOptions = { onProgress?: WorldgenProgressReporter };
+export type GenerateWorldOptions = { onProgress?: WorldgenProgressReporter; audit?: WorldgenAuditCollector };
+
+export const createWorldgenAuditCollector = (
+  scenario: GameScenario,
+  mode: WorldgenAuditMode = 'summary'
+): WorldgenAuditCollector => {
+  const minimumSystemSpacingLyRaw = scenario.generation.minimumSystemSpacingLy;
+  const minimumSystemSpacingLy =
+    (typeof minimumSystemSpacingLyRaw === 'number' && Number.isFinite(minimumSystemSpacingLyRaw))
+      ? Math.max(0, minimumSystemSpacingLyRaw)
+      : DEFAULT_MINIMUM_SYSTEM_SPACING_LY;
+  const surfaceGeneratorVersion =
+    scenario.generation.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION;
+
+  const staticSystems = scenario.generation.staticSystems
+    ? sorted(scenario.generation.staticSystems, (a, b) => a.id.localeCompare(b.id)).map(def => ({
+        id: def.id,
+        name: def.name,
+        position: vec3(def.position.x, def.position.y, def.position.z),
+        resourceType: def.resourceType,
+        planets: def.planets?.map(planet => ({
+          id: planet.id,
+          name: planet.name,
+          bodyType: planet.bodyType,
+          class: planet.class,
+          size: planet.size,
+          ownerFactionId: planet.ownerFactionId ?? null
+        }))
+      }))
+    : [];
+
+  const log: WorldgenAuditLog = {
+    schemaVersion: 1,
+    mode,
+    meta: {
+      scenarioId: scenario.id,
+      scenarioTitle: scenario.meta.title,
+      seed: scenario.seed,
+      topology: scenario.generation.topology,
+      radius: scenario.generation.radius,
+      systemCountRequested: scenario.generation.systemCount,
+      systemCountGenerated: 0,
+      minimumSystemSpacingLy,
+      surfaceGeneratorVersion,
+      rngStartState: new RNG(scenario.seed).getState(),
+      rngEndState: 0
+    },
+    inputs: {
+      generation: {
+        systemCount: scenario.generation.systemCount,
+        radius: scenario.generation.radius,
+        topology: scenario.generation.topology,
+        minimumSystemSpacingLy: scenario.generation.minimumSystemSpacingLy,
+        surfaceGeneratorVersion: scenario.generation.surfaceGeneratorVersion,
+        settlements: scenario.generation.settlements,
+        staticSystems: staticSystems.length > 0 ? staticSystems : undefined
+      },
+      setup: {
+        startingDistribution: scenario.setup.startingDistribution,
+        territoryAllocation: scenario.setup.territoryAllocation,
+        factions: scenario.setup.factions.map(f => ({
+          id: f.id,
+          name: f.name,
+          colorHex: f.colorHex,
+          isPlayable: f.isPlayable,
+          aiProfile: f.aiProfile
+        })),
+        initialFleetsCount: scenario.setup.initialFleets.length
+      }
+    },
+    events: [],
+    summaries: {
+      systems: {
+        total: 0,
+        staticCount: 0,
+        proceduralCount: 0,
+        homeworldCount: 0,
+        byResourceType: {
+          gas: 0,
+          none: 0
+        },
+        byOwnerFactionId: {},
+        spacingFallbacks: {
+          fallbackUsed: 0,
+          bestEffortUsed: 0
+        }
+      },
+      astro: {
+        total: 0,
+        missingAstroCount: 0,
+        starCountHistogram: {},
+        planetCountStats: { min: 0, max: 0, avg: 0 }
+      },
+      planets: {
+        totalBodies: 0,
+        planets: 0,
+        moons: 0,
+        solids: 0,
+        fallbackBodies: 0,
+        overrideCount: 0
+      }
+    }
+  };
+
+  let seq = 0;
+  const emit: WorldgenAuditCollector['emit'] = event => {
+    log.events.push({ seq, ...event });
+    seq += 1;
+  };
+
+  return { mode, log, emit };
+};
 
 export const generateWorld = (
   scenario: GameScenario,
   options: GenerateWorldOptions = {}
 ): { state: GameState; rng: RNG } => {
   const rng = new RNG(scenario.seed);
+  const audit = options.audit;
+  const emit = audit?.emit;
+  if (audit) {
+    audit.log.meta.rngStartState = rng.getState();
+  }
   const onProgress = options.onProgress;
   const clampProgress = (value: number) => Math.max(0, Math.min(1, value));
   const reportProgress = (progress: number, detail?: WorldgenProgressDetail) => {
@@ -105,6 +246,20 @@ export const generateWorld = (
   // Default player faction is the first playable one, or just the first one if none marked playable
   const playerFaction = factions.find(f => f.isPlayable) || factions[0];
   const playerFactionId = playerFaction.id;
+  emit?.({
+    step: 'factions',
+    kind: 'factions_initialized',
+    outputs: {
+      playerFactionId,
+      factions: factions.map(f => ({
+        id: f.id,
+        name: f.name,
+        color: f.color,
+        isPlayable: f.isPlayable,
+        aiProfile: f.aiProfile
+      }))
+    }
+  });
   reportStep('factions', 1);
 
   // --- 1. GENERATE SYSTEMS ---
@@ -121,11 +276,23 @@ export const generateWorld = (
 
   const enforceMinimumSystemSpacing = minimumSystemSpacingLy > 0;
   const minimumSystemSpacingSq = minimumSystemSpacingLy * minimumSystemSpacingLy;
+  if (audit) {
+    audit.log.meta.minimumSystemSpacingLy = minimumSystemSpacingLy;
+  }
+  emit?.({
+    step: 'systems',
+    kind: 'system_spacing_config',
+    outputs: {
+      minimumSystemSpacingLy,
+      enforceMinimumSystemSpacing
+    }
+  });
   
   // 1a. Static Systems (Overrides)
   const staticDefs = scenario.generation.staticSystems || [];
   const staticPlanetOverrides = new Map<string, PlanetBodySeed[]>();
   const staticNames = new Set<string>();
+  const staticSystemIds = new Set<string>(staticDefs.map(def => def.id));
 
   staticDefs.forEach(def => {
     systems.push({
@@ -139,6 +306,17 @@ export const generateWorld = (
       isHomeworld: false,
       planets: []
     });
+    emit?.({
+      step: 'systems',
+      kind: 'static_system_added',
+      entityId: def.id,
+      outputs: {
+        name: def.name,
+        position: { x: def.position.x, y: def.position.y, z: def.position.z },
+        resourceType: def.resourceType,
+        planetsOverrideCount: def.planets?.length ?? 0
+      }
+    });
     staticNames.add(def.name);
     if (def.planets && def.planets.length > 0) {
       staticPlanetOverrides.set(def.id, def.planets);
@@ -147,18 +325,28 @@ export const generateWorld = (
 
   // Validate static systems spacing (static positions are not auto-adjusted).
   if (enforceMinimumSystemSpacing && systems.length > 1) {
-      for (let a = 0; a < systems.length; a++) {
-          for (let b = a + 1; b < systems.length; b++) {
-              const d2 = distSq(systems[a].position, systems[b].position);
-              if (d2 < minimumSystemSpacingSq) {
-                  const d = Math.sqrt(d2);
-                  devWarn(
-                      `[WorldGen] Static systems '${systems[a].name}' and '${systems[b].name}' are only ${d.toFixed(2)} ly apart (< ${minimumSystemSpacingLy}). ` +
-                      `Static positions are not auto-adjusted; consider updating scenario.generation.staticSystems.`
-                  );
-              }
-          }
+    for (let a = 0; a < systems.length; a++) {
+      for (let b = a + 1; b < systems.length; b++) {
+        const d2 = distSq(systems[a].position, systems[b].position);
+        if (d2 < minimumSystemSpacingSq) {
+          const d = Math.sqrt(d2);
+          devWarn(
+            `[WorldGen] Static systems '${systems[a].name}' and '${systems[b].name}' are only ${d.toFixed(2)} ly apart (< ${minimumSystemSpacingLy}). ` +
+            `Static positions are not auto-adjusted; consider updating scenario.generation.staticSystems.`
+          );
+          emit?.({
+            step: 'systems',
+            kind: 'static_spacing_violation',
+            inputs: {
+              systemAId: systems[a].id,
+              systemBId: systems[b].id,
+              distanceLy: d,
+              minimumSystemSpacingLy
+            }
+          });
+        }
       }
+    }
   }
 
   // 1b. Procedural Systems
@@ -170,12 +358,24 @@ export const generateWorld = (
   // For 'cluster' map topology, pre-calculate centers
   const mapClusterCenters: Vec3[] = [];
   if (topology === 'cluster') {
+    const rngStateBefore = rng.getState();
     const clusterCount = rng.int(3, 5);
     for(let k=0; k<clusterCount; k++) {
         const r = rng.range(radius * 0.3, radius * 0.8);
         const theta = rng.next() * Math.PI * 2;
         mapClusterCenters.push(vec3(Math.cos(theta) * r, 0, Math.sin(theta) * r));
     }
+    const rngStateAfter = rng.getState();
+    emit?.({
+      step: 'systems',
+      kind: 'cluster_centers_generated',
+      rngStateBefore,
+      rngStateAfter,
+      outputs: {
+        count: clusterCount,
+        centers: mapClusterCenters.map(center => ({ x: center.x, y: center.y, z: center.z }))
+      }
+    });
   }
 
   // Helper: Position Generator
@@ -244,6 +444,19 @@ export const generateWorld = (
       );
   };
 
+  let spacingFallbackUsed = 0;
+  let spacingBestEffortUsed = 0;
+
+  type PositionPlacementMethod = 'topology' | 'fallback' | 'best_effort' | 'no_spacing';
+  type PositionPlacement = {
+      method: PositionPlacementMethod;
+      primaryAttempts?: number;
+      fallbackAttempts?: number;
+      bestEffortSamples?: number;
+      nearestDistanceLy?: number;
+  };
+  type PositionPlacementResult = { position: Vec3; placement: PositionPlacement };
+
   // --- Minimum System Spacing Helpers ---
   const getFallbackScatteredPosition = (): Vec3 => {
       // Uniform distribution in a circle requires sqrt of random for radius
@@ -275,24 +488,46 @@ export const generateWorld = (
       return getMinDistSqToExistingSystems(pos) >= minimumSystemSpacingSq;
   };
 
-  const getProceduralPositionWithMinSpacing = (index: number): Vec3 => {
-      if (!enforceMinimumSystemSpacing) return getProceduralPosition(index);
+  const getProceduralPositionWithMinSpacing = (index: number): PositionPlacementResult => {
+      if (!enforceMinimumSystemSpacing) {
+        return { position: getProceduralPosition(index), placement: { method: 'no_spacing' } };
+      }
 
       // 1) Primary attempts: keep the requested topology
       for (let attempt = 0; attempt < PRIMARY_POSITION_ATTEMPTS; attempt++) {
           const p = getProceduralPosition(index);
-          if (isPositionValidWithSpacing(p)) return p;
+          if (isPositionValidWithSpacing(p)) {
+            const minDistSq = getMinDistSqToExistingSystems(p);
+            return {
+              position: p,
+              placement: {
+                method: 'topology',
+                primaryAttempts: attempt + 1,
+                nearestDistanceLy: Math.sqrt(Math.max(0, minDistSq))
+              }
+            };
+          }
       }
 
       // 2) Fallback attempts: escape local density by sampling the full disk
       for (let attempt = 0; attempt < FALLBACK_POSITION_ATTEMPTS; attempt++) {
           const p = getFallbackScatteredPosition();
           if (isPositionValidWithSpacing(p)) {
+              const minDistSq = getMinDistSqToExistingSystems(p);
+              spacingFallbackUsed += 1;
               devWarn(
                   `[WorldGen] Minimum spacing fallback used for system #${index} ` +
                   `after ${PRIMARY_POSITION_ATTEMPTS} failed primary attempts (minSpacing=${minimumSystemSpacingLy}).`
               );
-              return p;
+              return {
+                position: p,
+                placement: {
+                  method: 'fallback',
+                  primaryAttempts: PRIMARY_POSITION_ATTEMPTS,
+                  fallbackAttempts: attempt + 1,
+                  nearestDistanceLy: Math.sqrt(Math.max(0, minDistSq))
+                }
+              };
           }
       }
 
@@ -311,13 +546,23 @@ export const generateWorld = (
       }
 
       const bestDist = Math.sqrt(Math.max(0, bestMinDistSq));
+      spacingBestEffortUsed += 1;
       devWarn(
           `[WorldGen] Failed to place a system with minimum spacing of ${minimumSystemSpacingLy} ly. ` +
           `Placing best-effort candidate with nearest distance=${bestDist.toFixed(2)} ly. ` +
           `If overlaps are unacceptable, increase radius, reduce systemCount, or set minimumSystemSpacingLy=0 to disable.`
       );
 
-      return bestPos;
+      return {
+        position: bestPos,
+        placement: {
+          method: 'best_effort',
+          primaryAttempts: PRIMARY_POSITION_ATTEMPTS,
+          fallbackAttempts: FALLBACK_POSITION_ATTEMPTS,
+          bestEffortSamples: BEST_EFFORT_FALLBACK_SAMPLES,
+          nearestDistanceLy: bestDist
+        }
+      };
   };
 
   // Name Generator
@@ -332,6 +577,7 @@ export const generateWorld = (
   const usedNames = new Set<string>(staticNames);
 
   for (let i = 0; i < systemsToGenerate; i++) {
+    const rngStateBefore = rng.getState();
     let name = generateName();
     let attempts = 0;
     while(usedNames.has(name) && attempts < 20) {
@@ -339,17 +585,42 @@ export const generateWorld = (
         attempts++;
     }
     usedNames.add(name);
-
-    systems.push({
-      id: rng.id('sys'),
-      name: name,
-      position: getProceduralPositionWithMinSpacing(i),
+    const nameAttempts = attempts;
+    const id = rng.id('sys');
+    const placement = getProceduralPositionWithMinSpacing(i);
+    const size = rng.range(0.8, 1.2);
+    const resourceType = rng.next() > 0.75 ? 'gas' : 'none';
+    const system: StarSystem = {
+      id,
+      name,
+      position: placement.position,
       color: '#ffffff',
-      size: rng.range(0.8, 1.2),
+      size,
       ownerFactionId: null,
-      resourceType: rng.next() > 0.75 ? 'gas' : 'none',
+      resourceType,
       isHomeworld: false,
       planets: []
+    };
+    const rngStateAfter = rng.getState();
+    systems.push(system);
+    emit?.({
+      step: 'systems',
+      kind: 'system_generated',
+      entityId: id,
+      rngStateBefore,
+      rngStateAfter,
+      inputs: {
+        index: i,
+        topology
+      },
+      outputs: {
+        name,
+        nameAttempts,
+        position: { x: system.position.x, y: system.position.y, z: system.position.z },
+        size,
+        resourceType,
+        placement: placement.placement
+      }
     });
     if (systemsToGenerate > 0) {
       const reportEvery = Math.max(1, Math.floor(systemsToGenerate / 50));
@@ -368,10 +639,28 @@ export const generateWorld = (
   const astroReportEvery = Math.max(1, Math.floor(astroTotal / 50));
   for (let i = 0; i < systems.length; i++) {
     const sys = systems[i];
-    sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
+    sys.astro = generateStellarSystem({
+      worldSeed: scenario.seed,
+      systemId: sys.id,
+      systemPosition: sys.position,
+      galacticRadius: scenario.generation.radius,
+      audit: emit
+    });
     if (!sys.astro) {
       devWarn(`[WorldGen] Generated system '${sys.id}' is missing astro payload; regenerating with deterministic seed.`);
-      sys.astro = generateStellarSystem({ worldSeed: scenario.seed, systemId: sys.id });
+      emit?.({
+        step: 'astro',
+        kind: 'astro_missing',
+        entityId: sys.id,
+        warning: 'missing_astro_payload'
+      });
+      sys.astro = generateStellarSystem({
+        worldSeed: scenario.seed,
+        systemId: sys.id,
+        systemPosition: sys.position,
+        galacticRadius: scenario.generation.radius,
+        audit: emit
+      });
     }
     if (astroTotal > 0 && shouldReport(i, astroTotal, astroReportEvery)) {
       reportStep('astro', (i + 1) / astroTotal, { current: i + 1, total: astroTotal });
@@ -381,11 +670,41 @@ export const generateWorld = (
     reportStep('astro', 1);
   }
 
+  // 1d. Resource assignment from astro (non-static systems only).
+  systems.forEach(system => {
+    if (staticSystemIds.has(system.id)) return;
+    const planets = system.astro?.planets ?? [];
+    const snowLineAu = system.astro?.derived?.snowLineAu ?? 0;
+    const hasGasGiant = planets.some(p => p.type === 'GasGiant');
+    const hasIceGiant = planets.some(p => p.type === 'IceGiant');
+    const hasSubNeptune = planets.some(p => p.type === 'SubNeptune' && p.semiMajorAxisAu > snowLineAu * 0.9);
+    const hasVolatileBelt = planets.some(p => p.type === 'Dwarf' && p.semiMajorAxisAu > snowLineAu * 1.1);
+    const derivedResource = deriveResourceTypeFromAstro(system.astro);
+    if (system.resourceType !== derivedResource) {
+      const previous = system.resourceType;
+      system.resourceType = derivedResource;
+      emit?.({
+        step: 'systems',
+        kind: 'system_resource_assigned',
+        entityId: system.id,
+        inputs: {
+          previous
+        },
+        outputs: {
+          resourceType: derivedResource,
+          hasGasGiant,
+          hasIceGiant,
+          hasSubNeptune,
+          hasVolatileBelt
+        }
+      });
+    }
+  });
+
   // --- 2. FACTIONS & TERRITORIES ---
   reportStep('territories', 0);
   const homeSystems = new Map<string, StarSystem>(); // FactionID -> System
   const distMode = scenario.setup.startingDistribution;
-  const staticSystemIds = new Set<string>((scenario.generation.staticSystems || []).map(s => s.id));
 
   if (distMode !== 'none') {
       const usedIndices = new Set<number>();
@@ -393,10 +712,14 @@ export const generateWorld = (
       // A. Assign Home Systems
       factions.forEach((faction, idx) => {
           let bestIdx = -1;
+          const rngStateBefore = idx === 0 ? rng.getState() : undefined;
+          let selectionMethod = idx === 0 ? 'random' : 'max_distance';
+          let candidateCount = 0;
           
           if (idx === 0) {
               // First faction: Pick random non-static system preferably
               const candidates = systems.map((s, i) => ({s, i})).filter(x => !staticNames.has(x.s.name));
+              candidateCount = candidates.length;
               if (candidates.length > 0) {
                   const picked = rng.pick(candidates);
                   bestIdx = picked ? picked.i : rng.int(0, systems.length - 1);
@@ -406,6 +729,7 @@ export const generateWorld = (
           } else {
              // Maximize distance from existing homes
              let maxDist = -1;
+             candidateCount = systems.length - usedIndices.size;
              
              systems.forEach((sys, sysIdx) => {
                  if (usedIndices.has(sysIdx)) return;
@@ -432,6 +756,23 @@ export const generateWorld = (
               sys.color = faction.color; // IMMEDIATE COLOR UPDATE
               sys.isHomeworld = true;
               homeSystems.set(faction.id, sys);
+              const rngStateAfter = idx === 0 ? rng.getState() : undefined;
+              emit?.({
+                step: 'territories',
+                kind: 'homeworld_assigned',
+                entityId: sys.id,
+                rngStateBefore,
+                rngStateAfter,
+                inputs: {
+                  factionId: faction.id,
+                  method: selectionMethod,
+                  candidateCount
+                },
+                outputs: {
+                  systemId: sys.id,
+                  systemName: sys.name
+                }
+              });
           }
       });
 
@@ -453,6 +794,18 @@ export const generateWorld = (
                   n.sys.ownerFactionId = faction.id;
                   n.sys.color = faction.color; // IMMEDIATE COLOR UPDATE
               });
+              emit?.({
+                step: 'territories',
+                kind: 'cluster_territory_assigned',
+                entityId: home.id,
+                inputs: {
+                  factionId: faction.id,
+                  homeSystemId: home.id
+                },
+                outputs: {
+                  systemIds: neighbors.map(n => n.sys.id)
+                }
+              });
           });
       }
 
@@ -467,6 +820,7 @@ export const generateWorld = (
           // Compute targets based on TOTAL systemCount (including static). We generally keep static systems neutral.
           const total = systems.length;
           const targets = new Map<string, number>();
+          const territoryAssignments: Array<{ factionId: string; systemId: string }> = [];
 
           // Determine target counts per faction with controlled rounding.
           // We floor each target then distribute the remainder by largest fractional parts.
@@ -545,6 +899,7 @@ export const generateWorld = (
                   candidate.ownerFactionId = fid;
                   candidate.color = factionDef.color; // IMMEDIATE COLOR UPDATE
                   progressed = true;
+                  territoryAssignments.push({ factionId: fid, systemId: candidate.id });
               }
 
               if (!progressed) break; // No more unowned candidates
@@ -553,6 +908,24 @@ export const generateWorld = (
               const allDone = growOrder.every(fid => ownedCount(fid) >= (targets.get(fid) || 0));
               if (allDone) break;
           }
+
+          const targetsRecord: Record<string, number> = {};
+          sorted(Array.from(targets.entries()), (a, b) => a[0].localeCompare(b[0]))
+            .forEach(([fid, count]) => {
+              targetsRecord[fid] = count;
+            });
+          emit?.({
+            step: 'territories',
+            kind: 'territory_allocation',
+            inputs: {
+              totalSystems: total,
+              neutralTarget,
+              targets: targetsRecord
+            },
+            outputs: {
+              assignments: territoryAssignments
+            }
+          });
       }
   }
   reportStep('territories', 1);
@@ -567,6 +940,21 @@ export const generateWorld = (
       system.astro,
       overrides
     );
+    emit?.({
+      step: 'planets',
+      kind: 'planet_bodies_built',
+      entityId: system.id,
+      inputs: {
+        overridesCount: overrides.length
+      },
+      outputs: {
+        bodyIds: system.planets.map(body => body.id),
+        planetCount: system.planets.filter(body => body.bodyType === 'planet').length,
+        moonCount: system.planets.filter(body => body.bodyType === 'moon').length,
+        solidCount: system.planets.filter(body => body.isSolid).length,
+        fallbackBodies: system.planets.filter(body => body.id.startsWith(`planet-${system.id}-fallback`)).length
+      }
+    });
     if (planetSystemsTotal > 0 && shouldReport(index, planetSystemsTotal, planetReportEvery)) {
       reportStep('planets', (index + 1) / planetSystemsTotal, { current: index + 1, total: planetSystemsTotal });
     }
@@ -577,17 +965,37 @@ export const generateWorld = (
 
   // --- 2.6. INITIALIZE PLANET SURFACE DESCRIPTORS (lightweight, persisted) ---
   const planetSurfaceDescriptorsByBodyId: Record<string, import('../../shared/shared').PlanetSurfaceDescriptor> = {};
+  const surfaceGeneratorVersion =
+    scenario.generation?.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION;
   const surfaceBodiesTotal = systems.reduce((total, system) => total + system.planets.filter(body => body.isSolid).length, 0);
   const surfaceReportEvery = Math.max(1, Math.floor(surfaceBodiesTotal / 50));
   let surfaceBodiesDone = 0;
   systems.forEach(system => {
     system.planets.forEach(body => {
       if (!body.isSolid) return;
-      planetSurfaceDescriptorsByBodyId[body.id] = createPlanetSurfaceDescriptor({
+      const descriptor = createPlanetSurfaceDescriptor({
         gameSeed: scenario.seed,
         systemId: system.id,
         body,
-        generatorVersion: scenario.generation?.surfaceGeneratorVersion ?? DEFAULT_PLANET_SURFACE_GENERATOR_VERSION
+        generatorVersion: surfaceGeneratorVersion,
+        settlementConfig: scenario.generation.settlements
+      });
+      planetSurfaceDescriptorsByBodyId[body.id] = descriptor;
+      emit?.({
+        step: 'surface',
+        kind: 'surface_descriptor_created',
+        entityId: body.id,
+        inputs: {
+          systemId: system.id,
+          bodyId: body.id,
+          generatorVersion: surfaceGeneratorVersion
+        },
+        outputs: {
+          seed: descriptor.seed,
+          config: descriptor.config,
+          astroRef: descriptor.astroRef,
+          settlementConfig: descriptor.settlementConfig
+        }
       });
       if (surfaceBodiesTotal > 0) {
         surfaceBodiesDone += 1;
@@ -810,6 +1218,105 @@ export const generateWorld = (
   };
 
   const normalizedState = normalizeSurfacePositions(state);
+  if (audit) {
+    audit.log.meta.systemCountGenerated = normalizedState.systems.length;
+    audit.log.meta.rngEndState = rng.getState();
+    audit.log.meta.surfaceGeneratorVersion = surfaceGeneratorVersion;
+
+    const byResourceType: Record<string, number> = { gas: 0, none: 0 };
+    const ownerCounts = new Map<string, number>();
+    let homeworldCount = 0;
+    normalizedState.systems.forEach(system => {
+      byResourceType[system.resourceType] = (byResourceType[system.resourceType] ?? 0) + 1;
+      const ownerKey = system.ownerFactionId ?? '__neutral__';
+      ownerCounts.set(ownerKey, (ownerCounts.get(ownerKey) ?? 0) + 1);
+      if (system.isHomeworld) homeworldCount += 1;
+    });
+
+    const byOwnerFactionId: Record<string, number> = {};
+    sorted(Array.from(ownerCounts.entries()), (a, b) => a[0].localeCompare(b[0]))
+      .forEach(([ownerId, count]) => {
+        byOwnerFactionId[ownerId] = count;
+      });
+
+    const starCountHistogram: Record<string, number> = {};
+    const starCountEntries = new Map<number, number>();
+    const planetCounts: number[] = [];
+    let missingAstroCount = 0;
+    normalizedState.systems.forEach(system => {
+      if (!system.astro) {
+        missingAstroCount += 1;
+        return;
+      }
+      const starCount = system.astro.starCount;
+      starCountEntries.set(starCount, (starCountEntries.get(starCount) ?? 0) + 1);
+      planetCounts.push(system.astro.planets?.length ?? 0);
+    });
+    sorted(Array.from(starCountEntries.entries()), (a, b) => a[0] - b[0])
+      .forEach(([count, value]) => {
+        starCountHistogram[String(count)] = value;
+      });
+
+    let planetCountMin = 0;
+    let planetCountMax = 0;
+    let planetCountAvg = 0;
+    if (planetCounts.length > 0) {
+      planetCountMin = Math.min(...planetCounts);
+      planetCountMax = Math.max(...planetCounts);
+      planetCountAvg = planetCounts.reduce((acc, value) => acc + value, 0) / planetCounts.length;
+    }
+
+    let totalBodies = 0;
+    let planetsCount = 0;
+    let moonsCount = 0;
+    let solidsCount = 0;
+    let fallbackBodies = 0;
+    normalizedState.systems.forEach(system => {
+      system.planets.forEach(body => {
+        totalBodies += 1;
+        if (body.bodyType === 'planet') planetsCount += 1;
+        if (body.bodyType === 'moon') moonsCount += 1;
+        if (body.isSolid) solidsCount += 1;
+        if (body.id.startsWith(`planet-${system.id}-fallback`)) fallbackBodies += 1;
+      });
+    });
+
+    const overrideCount = Array.from(staticPlanetOverrides.values())
+      .reduce((acc, overrides) => acc + overrides.length, 0);
+
+    audit.log.summaries.systems = {
+      total: normalizedState.systems.length,
+      staticCount: staticDefs.length,
+      proceduralCount: normalizedState.systems.length - staticDefs.length,
+      homeworldCount,
+      byResourceType,
+      byOwnerFactionId,
+      spacingFallbacks: {
+        fallbackUsed: spacingFallbackUsed,
+        bestEffortUsed: spacingBestEffortUsed
+      }
+    };
+
+    audit.log.summaries.astro = {
+      total: normalizedState.systems.length,
+      missingAstroCount,
+      starCountHistogram,
+      planetCountStats: {
+        min: planetCountMin,
+        max: planetCountMax,
+        avg: planetCountAvg
+      }
+    };
+
+    audit.log.summaries.planets = {
+      totalBodies,
+      planets: planetsCount,
+      moons: moonsCount,
+      solids: solidsCount,
+      fallbackBodies,
+      overrideCount
+    };
+  }
   reportStep('finalize', 1);
   return { state: normalizedState, rng };
 };

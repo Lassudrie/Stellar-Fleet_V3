@@ -17,6 +17,11 @@ export const conquestSandbox: ScenarioTemplate = {
     radius: 120,
     topology: 'ring',
     surfaceGeneratorVersion: 3,
+    settlements: {
+      neutralOutpostChance: 0.05,
+      neutralOutpostRuinsChance: 0.6,
+      developmentBias: 0
+    },
     staticSystems: [
       {
         id: 'galactic_core',

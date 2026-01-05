@@ -25,6 +25,12 @@ On distingue deux niveaux :
   - mode **Lazy** (recommandé) : calcul à l’ouverture de la vue + cache LRU,
   - mode **Precompute** : calcul de toutes les grilles au lancement, au prix d’un coût CPU/mémoire initial plus élevé.
 
+### Audit log (debug)
+
+Un audit JSON deterministe peut etre genere pour diagnostiquer les surfaces
+sans stocker toutes les tuiles. Il contient des seeds, des stats et un hash
+par surface (voir `docs/specs/worldgen-audit-log.md`).
+
 ## 2. Représentation de la surface (topologie et grille)
 
 Choix pragmatique (4X) : projection 2D cylindrique.
@@ -78,6 +84,11 @@ export interface PlanetSurfaceDescriptor {
   seed: number;                 // uint32
   config: PlanetSurfaceConfig;
   astroRef: { planetIndex: number; moonIndex?: number }; // requis (lien stable vers astro)
+  settlementConfig?: {
+    neutralOutpostChance?: number;
+    neutralOutpostRuinsChance?: number;
+    developmentBias?: number;
+  };
 }
 
 export const enum FeatureBits {
@@ -101,8 +112,10 @@ export interface Settlement {
   name: string;
   coord: HexCoord;
   factionId?: string;       // undefined si neutre
-  kind: 'outpost' | 'city' | 'capital';
-  size: number;             // 1..N
+  type: 'outpost' | 'colony' | 'frontierTown' | 'city' | 'metropolis' | 'megalopolis';
+  population: number;
+  status?: 'active' | 'ruins';
+  isCapital?: boolean;
 }
 
 export interface PlanetSurfaceMap {

@@ -44,6 +44,27 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
       }
     }
 
+    // 3c. Optional Settlement Config
+    if (s.generation.settlements !== undefined && s.generation.settlements !== null) {
+      const sc = s.generation.settlements as any;
+      if (typeof sc !== 'object') throw new Error("Invalid 'generation.settlements' (expected an object)");
+      if (sc.neutralOutpostChance !== undefined && sc.neutralOutpostChance !== null) {
+        if (typeof sc.neutralOutpostChance !== 'number' || !isFinite(sc.neutralOutpostChance) || sc.neutralOutpostChance < 0 || sc.neutralOutpostChance > 1) {
+          throw new Error("Invalid 'generation.settlements.neutralOutpostChance' (expected 0..1)");
+        }
+      }
+      if (sc.neutralOutpostRuinsChance !== undefined && sc.neutralOutpostRuinsChance !== null) {
+        if (typeof sc.neutralOutpostRuinsChance !== 'number' || !isFinite(sc.neutralOutpostRuinsChance) || sc.neutralOutpostRuinsChance < 0 || sc.neutralOutpostRuinsChance > 1) {
+          throw new Error("Invalid 'generation.settlements.neutralOutpostRuinsChance' (expected 0..1)");
+        }
+      }
+      if (sc.developmentBias !== undefined && sc.developmentBias !== null) {
+        if (typeof sc.developmentBias !== 'number' || !isFinite(sc.developmentBias) || sc.developmentBias < -1 || sc.developmentBias > 1) {
+          throw new Error("Invalid 'generation.settlements.developmentBias' (expected -1..1)");
+        }
+      }
+    }
+
     // 4. Setup
     if (!s.setup || typeof s.setup !== 'object') throw new Error("Missing 'setup'");
     if (!Array.isArray(s.setup.factions) || s.setup.factions.length === 0) throw new Error("Missing or empty 'setup.factions'");

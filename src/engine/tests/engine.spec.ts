@@ -3234,6 +3234,7 @@ tests.push(
 // --- planetSurfacePositions.spec.ts ---
 
 const engine_ps_isWater = (biome: string): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+const engine_ps_isBuildable = (biome: string): boolean => !engine_ps_isWater(biome) && biome !== 'mountain' && biome !== 'ice';
 
 const engine_ps_createArmy = (params: {
   id: string;
@@ -3273,10 +3274,34 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
   };
 
   system.planets = buildPlanetBodies({ id: system.id, name: system.name, ownerFactionId: system.ownerFactionId }, astro, []);
-  const body = system.planets.find(p => p.isSolid && p.bodyType === 'planet')!;
-  assert.ok(body, 'Expected a solid planet body');
+  const candidatePlanets = system.planets.filter(p => p.isSolid && p.bodyType === 'planet');
+  assert.ok(candidatePlanets.length > 0, 'Expected at least one solid planet body');
 
-  const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+  let body = candidatePlanets[0];
+  let descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
+
+  for (const candidate of candidatePlanets) {
+    const candidateDescriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body: candidate });
+    const planetIndex = candidateDescriptor.astroRef.planetIndex;
+    const planetData = astro.planets?.[planetIndex];
+    if (!planetData) continue;
+
+    const map = generateSurfaceMap({
+      systemId,
+      bodyId: candidate.id,
+      descriptor: candidateDescriptor,
+      planetData,
+      ownerFactionId: system.ownerFactionId
+    });
+
+    const hasWater = map.tiles.some(tile => engine_ps_isWater(tile.biome));
+    const hasBuildable = map.tiles.some(tile => engine_ps_isBuildable(tile.biome));
+    if (hasWater && hasBuildable) {
+      body = candidate;
+      descriptor = candidateDescriptor;
+      break;
+    }
+  }
 
   const singleFaction: FactionState[] = [{ id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true }];
 

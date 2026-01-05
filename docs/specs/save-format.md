@@ -87,7 +87,7 @@ Les champs legacy `strength/maxStrength/morale` ne sont plus écrits en V4.
 - **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
 
 ## 6. Régénération et dérivations (astro, seeds)
-- **Bloc `astro`** : si absent ou invalide, il est régénéré via `generateStellarSystem({ worldSeed: seed, systemId })` à condition de disposer d’une `seed` valide et d’un `id` de système non vide. Sinon, `astro` reste `undefined` et les planètes sont simplement normalisées.
+- **Bloc `astro`** : si absent ou invalide, il est régénéré via `generateStellarSystem({ worldSeed: seed, systemId, systemPosition, galacticRadius })` quand ces infos sont disponibles, à condition de disposer d’une `seed` valide et d’un `id` de système non vide. Sinon, `astro` reste `undefined` et les planètes sont simplement normalisées.
 - **Planètes** : toujours passées par `normalizePlanetBodies` avec le contexte système pour garantir la cohérence des références et des types.
 - **RNG** : `rngState` hérite de `seed` lorsqu’il manque, assurant une continuité de génération entre anciennes sauvegardes v2 et les réécritures v3.
 - **Consommables navals** : les stocks sont recalculés à partir des `SHIP_STATS` lorsque les champs de munitions sont manquants, évitant des vaisseaux bloqués sans armement.

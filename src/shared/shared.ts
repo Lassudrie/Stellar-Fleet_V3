@@ -57,6 +57,7 @@ export type ResourceType = 'none' | 'gas';
 // NOTE: This is intentionally JSON-serializable (numbers/strings/arrays only) to support save files.
 
 export type SpectralType = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
+export type StellarAgeClass = 'young' | 'mid' | 'old';
 export type PlanetType = 'Terrestrial' | 'SubNeptune' | 'IceGiant' | 'GasGiant' | 'Dwarf';
 export type MoonType = 'Regular' | 'Icy' | 'Volcanic' | 'Eden' | 'Irregular';
 export type AtmosphereType = 'None' | 'Thin' | 'Earthlike' | 'CO2' | 'H2He';
@@ -107,6 +108,7 @@ export interface MoonData {
   teqK: number;
   tidalBonusK?: number;
   atmosphere: Exclude<AtmosphereType, 'H2He'>;
+  pressureBar?: number;
   temperatureK: number;
 }
 
@@ -175,6 +177,7 @@ export interface PlanetSurfaceDescriptor {
   seed: number; // uint32
   config: PlanetSurfaceConfig;
   astroRef: { planetIndex: number; moonIndex?: number };
+  settlementConfig?: SettlementGenerationConfig;
 }
 
 export const enum FeatureBits {
@@ -194,6 +197,13 @@ export interface PlanetSurfaceTile {
 }
 
 export type SettlementType = 'outpost' | 'colony' | 'frontierTown' | 'city' | 'metropolis' | 'megalopolis';
+export type SettlementStatus = 'active' | 'ruins';
+
+export interface SettlementGenerationConfig {
+  neutralOutpostChance?: number;
+  neutralOutpostRuinsChance?: number;
+  developmentBias?: number;
+}
 
 export interface Settlement {
   id: string;
@@ -202,6 +212,7 @@ export interface Settlement {
   factionId?: string; // undefined if neutral
   type: SettlementType;
   population: number;
+  status?: SettlementStatus;
   /**
    * Marks the primary settlement for the owning faction on this body.
    * Used as a deterministic anchor point for initial ground deployments.
@@ -246,6 +257,8 @@ export interface StarSystemAstro {
   primarySpectralType: SpectralType;
   starCount: number;
   metallicityFeH: number;
+  stellarAgeGyr?: number;
+  stellarAgeClass?: StellarAgeClass;
   derived: {
     luminosityTotalLSun: number;
     snowLineAu: number;
@@ -524,6 +537,136 @@ export interface GameState {
 }
 
 // ============================================================
+// Worldgen audit log (debug only, JSON serializable)
+// ============================================================
+
+export type WorldgenAuditMode = 'summary';
+
+export interface WorldgenAuditEvent {
+  seq: number;
+  step: string;
+  kind: string;
+  entityId?: string;
+  rngStateBefore?: number;
+  rngStateAfter?: number;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  note?: string;
+  warning?: string;
+}
+
+export type WorldgenAuditEventInput = Omit<WorldgenAuditEvent, 'seq'>;
+
+export type WorldgenAuditSink = (event: WorldgenAuditEventInput) => void;
+
+export interface WorldgenAuditLog {
+  schemaVersion: number;
+  mode: WorldgenAuditMode;
+  meta: {
+    scenarioId: string;
+    scenarioTitle?: string;
+    seed: number;
+    topology: string;
+    radius: number;
+    systemCountRequested: number;
+    systemCountGenerated: number;
+    minimumSystemSpacingLy: number;
+    surfaceGeneratorVersion: number;
+    rngStartState: number;
+    rngEndState: number;
+  };
+  inputs: {
+    generation: {
+      systemCount: number;
+      radius: number;
+      topology: string;
+      minimumSystemSpacingLy?: number;
+      surfaceGeneratorVersion?: number;
+      settlements?: {
+        neutralOutpostChance?: number;
+        neutralOutpostRuinsChance?: number;
+        developmentBias?: number;
+      };
+      staticSystems?: Array<{
+        id: string;
+        name: string;
+        position: Vec3;
+        resourceType: ResourceType;
+        planets?: Array<{
+          id?: string;
+          name?: string;
+          bodyType: PlanetBodyType;
+          class: PlanetClass;
+          size?: number;
+          ownerFactionId?: string | null;
+        }>;
+      }>;
+    };
+    setup: {
+      startingDistribution: string;
+      territoryAllocation?: {
+        type: 'percentages';
+        byFactionId: Record<string, number>;
+        neutralShare?: number;
+        contiguity?: 'clustered';
+      };
+      factions: Array<{
+        id: string;
+        name: string;
+        colorHex: string;
+        isPlayable: boolean;
+        aiProfile?: string;
+      }>;
+      initialFleetsCount: number;
+    };
+  };
+  events: WorldgenAuditEvent[];
+  summaries: {
+    systems: {
+      total: number;
+      staticCount: number;
+      proceduralCount: number;
+      homeworldCount: number;
+      byResourceType: Record<string, number>;
+      byOwnerFactionId: Record<string, number>;
+      spacingFallbacks: {
+        fallbackUsed: number;
+        bestEffortUsed: number;
+      };
+    };
+    astro: {
+      total: number;
+      missingAstroCount: number;
+      starCountHistogram: Record<string, number>;
+      planetCountStats: { min: number; max: number; avg: number };
+    };
+    planets: {
+      totalBodies: number;
+      planets: number;
+      moons: number;
+      solids: number;
+      fallbackBodies: number;
+      overrideCount: number;
+    };
+    surfaces?: {
+      total: number;
+      bySurfaceClass: Record<string, number>;
+      settlementTotals: {
+        total: number;
+        byType: Record<string, number>;
+        byStatus?: Record<string, number>;
+      };
+    };
+  };
+}
+
+export interface WorldgenAuditCollector {
+  mode: WorldgenAuditMode;
+  log: WorldgenAuditLog;
+  emit: WorldgenAuditSink;
+}
+
+// ============================================================
 // Shared utilities (was: shared/shared.ts, shared/shared.ts, shared/shared.ts)
 // ============================================================
 
@@ -615,4 +758,3 @@ export const shortId = (id: string): string => {
 export const fleetLabel = (id: string): string => {
   return `FLEET ${shortId(id)}`;
 };
-

@@ -26,6 +26,7 @@ import {
   Station,
   StationType,
   PlanetSurfaceDescriptor,
+  SettlementGenerationConfig,
   GroundBuilding,
   GroundBuildingType,
   SurfacePos,
@@ -310,6 +311,22 @@ const deserializeVector3 = (v: Vector3DTO | undefined, context = 'vector'): Vec3
   return vec3(v.x, v.y, v.z);
 };
 
+const estimateGalacticRadius = (systemsDto: unknown): number | undefined => {
+  if (!Array.isArray(systemsDto)) return undefined;
+  let maxR = 0;
+  for (const s of systemsDto) {
+    if (!s || typeof s !== 'object') continue;
+    const p = (s as any).position;
+    if (!p || typeof p !== 'object') continue;
+    const x = (p as any).x;
+    const z = (p as any).z;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    const r = Math.sqrt(x * x + z * z);
+    if (r > maxR) maxR = r;
+  }
+  return maxR > 0 ? maxR : undefined;
+};
+
 const isFiniteNumber = (value: unknown): value is number => (
   typeof value === 'number' && Number.isFinite(value)
 );
@@ -333,6 +350,7 @@ const FLEET_STATES = new Set(Object.values(FleetState));
 const SHIP_TYPES = new Set(Object.values(ShipType));
 const STATION_TYPES = new Set<StationType>(['shipyard', 'mining', 'defense', 'relay', 'outpost']);
 const BATTLE_STATUSES = new Set<BattleStatus>(['scheduled', 'resolved']);
+const STELLAR_AGE_CLASSES = new Set(['young', 'mid', 'old']);
 
 const isEnumValue = <T>(set: Set<T>, value: unknown): value is T => set.has(value as T);
 const normalizeShipType = (value: unknown): ShipType | null => {
@@ -359,6 +377,8 @@ const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined =>
   if (typeof a.primarySpectralType !== 'string') return undefined;
   if (!isFiniteNumber(a.starCount)) return undefined;
   if (!isFiniteNumber(a.metallicityFeH)) return undefined;
+  if (a.stellarAgeGyr !== undefined && !isFiniteNumber(a.stellarAgeGyr)) return undefined;
+  if (a.stellarAgeClass !== undefined && !STELLAR_AGE_CLASSES.has(a.stellarAgeClass)) return undefined;
   if (!a.derived || typeof a.derived !== 'object') return undefined;
   if (!isFiniteNumber(a.derived.luminosityTotalLSun)) return undefined;
   if (!isFiniteNumber(a.derived.snowLineAu)) return undefined;
@@ -373,7 +393,9 @@ const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined =>
 const restoreAstro = (
   astro: unknown,
   worldSeed: number | undefined,
-  systemId: string | undefined
+  systemId: string | undefined,
+  systemPosition: Vec3 | undefined,
+  galacticRadius: number | undefined
 ): StarSystemAstro | undefined => {
   const sanitized = sanitizeStarSystemAstro(astro);
   if (sanitized) return sanitized;
@@ -381,7 +403,12 @@ const restoreAstro = (
     if (astro) {
       console.warn(`[Serialization] Astro data for system '${systemId}' was invalid; regenerating from seed.`);
     }
-    return generateStellarSystem({ worldSeed, systemId });
+    return generateStellarSystem({
+      worldSeed,
+      systemId,
+      systemPosition,
+      galacticRadius
+    });
   }
   if (astro) {
     console.warn(`[Serialization] Cannot restore astro for system '${systemId}': invalid data and no seed available.`);
@@ -554,6 +581,25 @@ const sanitizeGroundBuildings = (
   return out.length > 0 ? out : undefined;
 };
 
+const sanitizeSettlementConfig = (value: unknown): SettlementGenerationConfig | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw: any = value;
+  const out: SettlementGenerationConfig = {};
+  const clamp = (x: number, min: number, max: number) => Math.max(min, Math.min(max, x));
+
+  if (isFiniteNumber(raw.neutralOutpostChance)) {
+    out.neutralOutpostChance = clamp(raw.neutralOutpostChance, 0, 1);
+  }
+  if (isFiniteNumber(raw.neutralOutpostRuinsChance)) {
+    out.neutralOutpostRuinsChance = clamp(raw.neutralOutpostRuinsChance, 0, 1);
+  }
+  if (isFiniteNumber(raw.developmentBias)) {
+    out.developmentBias = clamp(raw.developmentBias, -1, 1);
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescriptor | null => {
   if (!value || typeof value !== 'object') return null;
   const d: any = value;
@@ -578,6 +624,8 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
   if (!isFiniteNumber(planetIndex) || planetIndex < 0) return null;
   if (moonIndex !== undefined && (!isFiniteNumber(moonIndex) || moonIndex < 0)) return null;
 
+  const settlementConfig = sanitizeSettlementConfig(d.settlementConfig);
+
   return {
     seed: (d.seed >>> 0),
     config: {
@@ -589,7 +637,8 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
     astroRef: {
       planetIndex: Math.floor((astroRef as any).planetIndex),
       moonIndex: (astroRef as any).moonIndex !== undefined ? Math.floor((astroRef as any).moonIndex) : undefined
-    }
+    },
+    settlementConfig: settlementConfig ?? undefined
   };
 };
 
@@ -935,6 +984,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     if (!Array.isArray(systemsDto)) {
       throw new Error("Field 'systems' must be an array.");
     }
+    const galacticRadius = estimateGalacticRadius(systemsDto);
 
     const systemsTotal = systemsDto.length;
     const fleetsTotal = Array.isArray(dto.fleets) ? dto.fleets.length : 0;
@@ -968,6 +1018,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       if (typeof s.id !== 'string' || typeof s.name !== 'string') {
         throw new Error('System entry is missing a valid id or name.');
       }
+      const position = deserializeVector3(s.position, `system '${s.id ?? 'unknown'}' position`);
       const ownerFactionId = s.ownerFactionId !== undefined ? s.ownerFactionId : (s.owner || null);
       const ownerColor = ownerFactionId
         ? factions.find(faction => faction.id === ownerFactionId)?.color
@@ -980,7 +1031,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         console.warn(`System '${s.id ?? 'unknown'}' had an invalid color; applying fallback.`);
       }
 
-      const astro = restoreAstro(s.astro, worldSeed, s.id);
+      const astro = restoreAstro(s.astro, worldSeed, s.id, position, galacticRadius);
       const planets = normalizePlanetBodies(
         { id: s.id, name: s.name, ownerFactionId },
         s.planets,
@@ -990,7 +1041,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       return {
         id: s.id,
         name: s.name,
-        position: deserializeVector3(s.position, `system '${s.id ?? 'unknown'}' position`),
+        position,
         color,
         size: s.size,
         resourceType: s.resourceType,

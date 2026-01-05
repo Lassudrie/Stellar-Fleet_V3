@@ -75,6 +75,18 @@ export interface WorldGenerationConfig {
    * Par défaut : valeur engine (`DEFAULT_PLANET_SURFACE_GENERATOR_VERSION`).
    */
   surfaceGeneratorVersion?: number;
+
+  /**
+   * Paramètres de colonisation neutre / maturité de civilisation.
+   * - neutralOutpostChance: probabilité (0..1) qu'un corps neutre ait un avant-poste.
+   * - neutralOutpostRuinsChance: probabilité (0..1) que cet avant-poste soit en ruines.
+   * - developmentBias: biais (-1..1) appliqué au stade de développement des colonies.
+   */
+  settlements?: {
+    neutralOutpostChance?: number;
+    neutralOutpostRuinsChance?: number;
+    developmentBias?: number;
+  };
 }
 
 // --- 3. SETUP (Initial State) ---

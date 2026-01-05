@@ -24,6 +24,12 @@ La forme globale de la galaxie est contrôlée par `generation.topology` (`spira
 - Les planètes peuvent être surchargées par `planets` (copiées dans le `buildPlanetBodies`).  
 - Avertissement si deux systèmes statiques sont plus proches que l’espacement minimal lorsque celui-ci est actif.
 
+### 3.1 Paramètres de colonisation neutre (optionnel)
+`generation.settlements` pilote la présence d’implantations neutres lors de la génération des surfaces :
+- `neutralOutpostChance` : probabilité qu’un corps neutre reçoive un avant‑poste.
+- `neutralOutpostRuinsChance` : probabilité que cet avant‑poste soit en ruines (trace).
+- `developmentBias` : biais (-1..1) appliqué au stade de développement des colonies.
+
 ## 4. Allocation Territoriale Initiale
 ### 4.1 Distribution de départ (`setup.startingDistribution`)
 - **scattered** : chaque faction reçoit un unique homeworld choisi pour maximiser la distance entre factions (la première évite si possible les systèmes statiques).  
@@ -37,6 +43,10 @@ Optionnelle, de type `percentages`. Calcule une cible de systèmes par faction �
 
 ## 5. Construction des Planètes
 Après l’affectation des systèmes et des propriétaires, chaque système reçoit son payload astro déterministe (`generateStellarSystem`). Les corps planétaires sont ensuite construits via `buildPlanetBodies`, intégrant les overrides éventuels des systèmes statiques.
+
+Notes astro :
+- La métallicité `[Fe/H]` suit un gradient radial (centre → bord) avec dispersion déterministe.
+- Un âge stellaire (bins `young/mid/old`) est assigné ; les types B/O (et une partie des A) sont réservés aux systèmes jeunes.
 
 ## 6. Distribution des Flottes et Armées Initiales
 Les flottes décrites dans `setup.initialFleets` sont instanciées par faction :
@@ -54,3 +64,14 @@ Tous les systèmes possédés reçoivent des armées déployées sur les planèt
 - Les systèmes non affectés après allocation demeurent neutres ; la part neutre cible est pilotée par `neutralShare`.  
 - Un log d’initialisation documente le seed et la topologie (`[WorldGen] Generated …`).  
 - Les systèmes générés conservent `ownerFactionId = null` lorsque laissés neutres, tout en exposant leurs ressources et corps planétaires.
+- La ressource `gas` est dérivée du contenu astro (présence de géantes/volatiles) pour les systèmes procéduraux.
+
+## 9. Audit log (debug)
+Un export JSON deterministe est disponible pour auditer la generation monde + surfaces:
+
+```bash
+npm run worldgen:audit -- --scenario conquest_sandbox --seed 1234
+```
+
+Le fichier est ecrit dans `log/worldgen-audit.json` (local, gitignored).
+Schema: `docs/specs/worldgen-audit-log.md`.
