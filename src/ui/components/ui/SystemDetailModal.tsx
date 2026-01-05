@@ -1,8 +1,10 @@
 import React from 'react';
 import { useI18n } from '../../i18n';
-import { MoonData, PlanetData, StarSystem } from '../../../shared/shared';
+import { MoonData, PlanetData, StarData, StarSystem } from '../../../shared/shared';
 import { formatAu, formatCelsius, formatGravity } from '../../format/units';
 import { GAS_GIANT_ICON } from '../../constants/icons';
+
+const DAYS_PER_YEAR = 365.25;
 
 interface SystemDetailModalProps {
   system: StarSystem | null;
@@ -25,6 +27,79 @@ const formatLuminosity = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)} L☉` : fallback;
 const formatTwoDecimals = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : fallback;
+const formatSolarMass = (value: number | undefined, fallback: string) =>
+  typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)} M☉` : fallback;
+const formatSolarRadius = (value: number | undefined, fallback: string) =>
+  typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)} R☉` : fallback;
+const formatKelvin = (value: number | undefined, fallback: string) =>
+  typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} K` : fallback;
+const formatOrbitPeriod = (value: number | undefined, fallback: string) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  if (value >= DAYS_PER_YEAR) {
+    return `${(value / DAYS_PER_YEAR).toFixed(2)} yr`;
+  }
+  return `${value.toFixed(0)} d`;
+};
+
+const StarEntry: React.FC<{
+  star: StarData;
+  index: number;
+  systemName: string;
+  unknown: string;
+  t: ReturnType<typeof useI18n>['t'];
+}> = ({ star, index, systemName, unknown, t }) => {
+  const suffix = String.fromCharCode(65 + index);
+  const name = t('system.star.name', { system: systemName, suffix });
+  const roleLabel = t(`system.star.role.${star.role}`);
+  const orbit = star.orbit;
+
+  return (
+    <li className="bg-slate-800/70 border border-slate-700 rounded-lg p-4 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="text-lg font-semibold text-white">{name}</div>
+        <div className="text-xs px-3 py-1 rounded-full bg-slate-900/60 border border-slate-700 text-slate-200 uppercase tracking-wide">
+          {roleLabel}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-sm text-slate-200">
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('system.star.label.spectralType')}</div>
+          <div className="font-semibold">{star.spectralType}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('system.star.label.mass')}</div>
+          <div className="font-semibold">{formatSolarMass(star.massSun, unknown)}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('system.star.label.radius')}</div>
+          <div className="font-semibold">{formatSolarRadius(star.radiusSun, unknown)}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('system.star.label.luminosity')}</div>
+          <div className="font-semibold">{formatLuminosity(star.luminositySun, unknown)}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('system.star.label.temperature')}</div>
+          <div className="font-semibold">{formatKelvin(star.teffK, unknown)}</div>
+        </div>
+      </div>
+
+      {orbit && (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-md p-3">
+          <div className="text-xs uppercase tracking-wide text-slate-400">{t('system.star.label.orbit')}</div>
+          <div className="mt-1 text-sm font-semibold text-slate-100">
+            {formatAu(orbit.semiMajorAxisAu, unknown)}
+          </div>
+          <div className="mt-2 text-xs uppercase tracking-wide text-slate-400">{t('system.star.label.orbitPeriod')}</div>
+          <div className="mt-1 text-sm font-semibold text-slate-100">
+            {formatOrbitPeriod(orbit.periodDays, unknown)}
+          </div>
+        </div>
+      )}
+    </li>
+  );
+};
 
 const MoonEntry: React.FC<{
   moon: MoonData;
@@ -227,6 +302,22 @@ const SystemDetailModal: React.FC<SystemDetailModalProps> = ({ system, onClose }
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <div className="text-lg font-semibold text-white mb-3">{t('system.stars.title')}</div>
+                <ol className="space-y-4">
+                  {(astro.stars || []).map((star, idx) => (
+                    <StarEntry
+                      key={`star-${idx}`}
+                      star={star}
+                      index={idx}
+                      systemName={system.name}
+                      unknown={unknown}
+                      t={t}
+                    />
+                  ))}
+                </ol>
               </div>
 
               <div>

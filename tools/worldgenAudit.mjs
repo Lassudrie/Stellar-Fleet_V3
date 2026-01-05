@@ -148,12 +148,38 @@ const run = async () => {
     const astro = getAstroForBody(state, bodyId, descriptor);
     const system = systemById.get(systemId);
     const luminosity = system?.astro?.derived?.luminosityTotalLSun;
-    const env = astro?.planetData
+    const isMoon = descriptor.astroRef.moonIndex !== undefined;
+    const env = isMoon
+      ? astro?.moonData
+        ? deriveSurfaceParamsFromMoon(astro.moonData)
+        : null
+      : astro?.planetData
       ? deriveSurfaceParamsFromPlanet(astro.planetData)
       : astro?.moonData
       ? deriveSurfaceParamsFromMoon(astro.moonData)
       : null;
     const bodySummary = (() => {
+      if (isMoon) {
+        if (!astro?.moonData) return null;
+        const moon = astro.moonData;
+        const flux = Number.isFinite(luminosity) && astro?.planetData
+          ? computeFluxEarth(luminosity, astro.planetData.semiMajorAxisAu)
+          : undefined;
+        return {
+          bodyType: 'moon',
+          moonType: moon.type,
+          orbitDistanceRp: moon.orbitDistanceRp,
+          flux,
+          teqK: moon.teqK,
+          temperatureK: moon.temperatureK,
+          massEarth: moon.massEarth,
+          radiusEarth: moon.radiusEarth,
+          gravityG: moon.gravityG,
+          albedo: moon.albedo,
+          atmosphere: moon.atmosphere,
+          pressureBar: moon.pressureBar
+        };
+      }
       if (astro?.planetData) {
         const planet = astro.planetData;
         const flux = Number.isFinite(luminosity) ? computeFluxEarth(luminosity, planet.semiMajorAxisAu) : undefined;

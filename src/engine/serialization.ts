@@ -21,6 +21,7 @@ import {
   LogEntry,
   ResourceType,
   StarSystemAstro,
+  StarOrbit,
   GameMessage,
   PlanetBody,
   Station,
@@ -40,7 +41,8 @@ import { getAiFactionIds, getLegacyAiFactionId } from './ai';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
-import { generateStellarSystem } from './worldgen/stellarSystem';
+import { RNG } from './rng';
+import { drawCompanionOrbits, deriveSeed32, generateStellarSystem } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './planetSurface';
@@ -369,6 +371,40 @@ const clampArray = <T>(items: T[], max: number, label: string, sliceFromEnd = fa
   return sliceFromEnd ? items.slice(-max) : items.slice(0, max);
 };
 
+const isStarOrbit = (orbit: unknown): orbit is StarOrbit => {
+  if (!orbit || typeof orbit !== 'object') return false;
+  const o: any = orbit;
+  return isFiniteNumber(o.semiMajorAxisAu)
+    && isFiniteNumber(o.periodDays)
+    && isFiniteNumber(o.phaseDeg)
+    && isFiniteNumber(o.inclinationDeg)
+    && isFiniteNumber(o.ascendingNodeDeg);
+};
+
+const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
+  if (!Array.isArray(astro.stars) || astro.stars.length === 0) return astro;
+  const primaryMassSun = isFiniteNumber(astro.stars[0]?.massSun) ? astro.stars[0].massSun : 1;
+  const companionStars = astro.stars.slice(1);
+  const needsOrbit = companionStars.some(star => !isStarOrbit(star?.orbit));
+  if (!needsOrbit) return astro;
+
+  const orbitRng = new RNG(deriveSeed32(astro.seed, 'star_orbits'));
+  const companionMasses = companionStars.map(star => (isFiniteNumber(star?.massSun) ? star.massSun : 1));
+  const companionOrbits = drawCompanionOrbits(orbitRng, primaryMassSun, companionMasses);
+  const normalizedStars = astro.stars.map((star, index) => {
+    if (index === 0) return star;
+    if (isStarOrbit(star.orbit)) return star;
+    const orbit = companionOrbits[index - 1];
+    return orbit ? { ...star, orbit } : star;
+  });
+
+  return {
+    ...astro,
+    starCount: normalizedStars.length,
+    stars: normalizedStars
+  };
+};
+
 const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined => {
   if (!astro || typeof astro !== 'object') return undefined;
   const a: any = astro;
@@ -387,7 +423,7 @@ const sanitizeStarSystemAstro = (astro: unknown): StarSystemAstro | undefined =>
   if (!Array.isArray(a.stars)) return undefined;
   if (!Array.isArray(a.planets)) return undefined;
 
-  return a as StarSystemAstro;
+  return normalizeStarSystemAstro(a as StarSystemAstro);
 };
 
 const restoreAstro = (
@@ -1171,12 +1207,12 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     );
     const groundBuildings = sanitizeGroundBuildings(dto.groundBuildings, planetIds, validFactionIds);
 
-    const stationsDto = Array.isArray(dto.stations) ? dto.stations : [];
+    const stationsDto: unknown[] = Array.isArray(dto.stations) ? dto.stations : [];
     if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
       throw new Error("Field 'stations' must be an array.");
     }
     const stations: Station[] = stationsDto
-      .map((entry: any, index: number) => {
+      .map((entry: any, index: number): Station | null => {
         reportLoopProgress(index, stationsTotal);
         if (typeof entry?.id !== 'string') {
           console.warn(`[Serialization] Station entry at index ${index} missing id; skipping.`);

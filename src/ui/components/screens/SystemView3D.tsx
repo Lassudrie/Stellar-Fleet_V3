@@ -35,6 +35,8 @@ import {
   PlanetBodyType,
   PlanetBody,
   Station,
+  StarData,
+  StarOrbit,
   StarSystem,
   StarSystemAstro
 } from '../../../shared/shared';
@@ -87,6 +89,7 @@ const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
 const STAR_TINT_STRENGTH = 0.18;
 const STAR_FALLBACK_TINT_STRENGTH = 0.08;
+const DAYS_PER_YEAR = 365.25;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -120,6 +123,16 @@ type OrbitingPlanet = {
   orbitAngle: number;
   type: PlanetType;
   moons: OrbitingMoon[];
+};
+
+type OrbitingStar = {
+  id: string;
+  data: StarData;
+  radius: number;
+  radiusKm: number;
+  tintColor: string;
+  seedKey: string;
+  position: [number, number, number];
 };
 
 type PlanetSource = (PlanetData & {
@@ -190,6 +203,51 @@ const useDisposableMemo = <T extends { dispose: () => void }>(
 const computeOrbitPosition = (radius: number, angle: number): [number, number, number] => (
   [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
 );
+
+const computeOrbitalPeriodDays = (semiMajorAxisAu: number, massSun: number): number => {
+  const safeA = Math.max(semiMajorAxisAu, 0.01);
+  const safeMass = Math.max(massSun, 0.1);
+  const periodYears = Math.sqrt((safeA * safeA * safeA) / safeMass);
+  return Math.max(periodYears * DAYS_PER_YEAR, 1);
+};
+
+const computeOrbitAngle = (baseAngle: number, periodDays: number, day: number): number => {
+  if (!Number.isFinite(periodDays) || periodDays <= 0) return baseAngle;
+  return MathUtils.euclideanModulo(baseAngle + (day * Math.PI * 2) / periodDays, Math.PI * 2);
+};
+
+const computeInclinedOrbitPosition = (
+  radius: number,
+  angle: number,
+  inclinationDeg: number,
+  ascendingNodeDeg: number
+): [number, number, number] => {
+  const inclination = MathUtils.degToRad(inclinationDeg);
+  const ascendingNode = MathUtils.degToRad(ascendingNodeDeg);
+  const x = Math.cos(angle) * radius;
+  const z = Math.sin(angle) * radius;
+  const yInclined = z * Math.sin(inclination);
+  const zInclined = z * Math.cos(inclination);
+  const cosNode = Math.cos(ascendingNode);
+  const sinNode = Math.sin(ascendingNode);
+  return [
+    x * cosNode - zInclined * sinNode,
+    yInclined,
+    x * sinNode + zInclined * cosNode
+  ];
+};
+
+const createFallbackStarOrbit = (seedKey: string, index: number, primaryMassSun: number): StarOrbit => {
+  const baseAu = 0.4 + index * 0.6;
+  const periodDays = computeOrbitalPeriodDays(baseAu, primaryMassSun);
+  return {
+    semiMajorAxisAu: baseAu,
+    periodDays,
+    phaseDeg: hashStringToUnit(`${seedKey}-phase`) * 360,
+    inclinationDeg: hashStringToUnit(`${seedKey}-inclination`) * 12,
+    ascendingNodeDeg: hashStringToUnit(`${seedKey}-node`) * 360
+  };
+};
 
 const SPECTRAL_TINTS: Record<string, string> = {
   O: '#9bb0ff',
@@ -432,14 +490,18 @@ const buildPlanetModel = (
   total: number,
   sceneScale: number,
   minPlanetRadius: number,
-  minMoonRadius: number
+  minMoonRadius: number,
+  orbitMassSun: number,
+  day: number
 ): OrbitingPlanet => {
   const radiusKm = getPlanetRadiusKm(planet);
   const semiMajorAxisKm = getSemiMajorAxisKm(planet, index);
-  const orbitAngle = (index / Math.max(total, 1)) * Math.PI * 2;
+  const planetId = planet.id ?? `planet-${index + 1}`;
+  const baseAngle = hashStringToAngle(planetId);
+  const orbitPeriodDays = computeOrbitalPeriodDays(semiMajorAxisKm / KM_PER_AU, orbitMassSun);
+  const orbitAngle = computeOrbitAngle(baseAngle, orbitPeriodDays, day);
   const orbitRadius = semiMajorAxisKm * sceneScale;
   const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
-  const planetId = planet.id ?? `planet-${index + 1}`;
   const planetType = getPlanetType(planet);
 
   const moons = (planet.moons ?? []).map((moon, moonIndex) => {
@@ -946,11 +1008,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
 };
 
 interface SystemCelestialLayerProps {
-  starBodyId: string;
-  starRadius: number;
-  starTintColor: string;
+  stars: OrbitingStar[];
   starGeometry: SphereGeometry;
-  starSeedKey: string;
   planets: OrbitingPlanet[];
   orbitMaterial: MeshBasicMaterial;
   planetGeometry: SphereGeometry;
@@ -965,11 +1024,8 @@ interface SystemCelestialLayerProps {
 }
 
 const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
-  starBodyId,
-  starRadius,
-  starTintColor,
+  stars,
   starGeometry,
-  starSeedKey,
   planets,
   orbitMaterial,
   planetGeometry,
@@ -984,19 +1040,23 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
 }) => {
   return (
     <group name="SystemCelestialLayer">
-      <StarMesh
-        radius={starRadius}
-        tintColor={starTintColor}
-        geometry={starGeometry}
-        seedKey={starSeedKey}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onFocusBody(starBodyId);
-        }}
-        onHover={() => onHoverBody(starBodyId)}
-        onBlur={() => onBlurBody(starBodyId)}
-        onSelect={() => onSelectBody(starBodyId)}
-      />
+      {stars.map((star) => (
+        <group key={star.id} position={star.position}>
+          <StarMesh
+            radius={star.radius}
+            tintColor={star.tintColor}
+            geometry={starGeometry}
+            seedKey={star.seedKey}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onFocusBody(star.id);
+            }}
+            onHover={() => onHoverBody(star.id)}
+            onBlur={() => onBlurBody(star.id)}
+            onSelect={() => onSelectBody(star.id)}
+          />
+        </group>
+      ))}
       {planets.map(planet => (
         <PlanetOrbitGroup
           key={planet.id}
@@ -1822,8 +1882,52 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => [0, 6 * clampedScale, 12 * clampedScale],
     [clampedScale]
   );
-  const starRadiusKm = (astro?.stars?.[0]?.radiusSun ?? 1) * SOLAR_RADIUS_KM;
-  const starRadius = Math.max(starRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
+  const starModels = useMemo<OrbitingStar[]>(() => {
+    const fallbackStar: StarData = {
+      role: 'primary',
+      spectralType: astro?.primarySpectralType ?? 'G',
+      massSun: 1,
+      radiusSun: 1,
+      luminositySun: 1,
+      teffK: 5800
+    };
+    const sourceStars = astro?.stars?.length ? astro.stars : [fallbackStar];
+    const primaryMassSun = Math.max(sourceStars[0]?.massSun ?? 1, 0.1);
+
+    return sourceStars.map((star, index) => {
+      const isPrimary = index === 0;
+      const starId = isPrimary
+        ? `${starSystem.id}-star-primary`
+        : `${starSystem.id}-star-companion-${index}`;
+      const radiusKm = Math.max((star.radiusSun ?? 1) * SOLAR_RADIUS_KM, 1);
+      const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
+      const spectralType = star.spectralType ?? astro?.primarySpectralType;
+      const tintColor = getSpectralTint(spectralType, starSystem.color || '#ffffff');
+      const seedKey = `${starSystem.id}-star-${index + 1}`;
+      let position: [number, number, number] = [0, 0, 0];
+      if (!isPrimary) {
+        const orbit = star.orbit ?? createFallbackStarOrbit(seedKey, index, primaryMassSun);
+        const orbitAngle = computeOrbitAngle(MathUtils.degToRad(orbit.phaseDeg), orbit.periodDays, day);
+        const orbitRadius = orbit.semiMajorAxisAu * KM_PER_AU * sceneScale;
+        position = computeInclinedOrbitPosition(orbitRadius, orbitAngle, orbit.inclinationDeg, orbit.ascendingNodeDeg);
+      }
+
+      return {
+        id: starId,
+        data: star,
+        radius,
+        radiusKm,
+        tintColor,
+        seedKey,
+        position
+      };
+    });
+  }, [astro?.primarySpectralType, astro?.stars, day, minStarRadius, sceneScale, starSystem.color, starSystem.id]);
+  const primaryStar = starModels[0];
+  const starBodyId = primaryStar?.id ?? `${starSystem.id}-star-primary`;
+  const starRadius = primaryStar?.radius ?? minStarRadius;
+  const starTintColor = primaryStar?.tintColor ?? getSpectralTint(astro?.primarySpectralType, starSystem.color || '#ffffff');
+  const orbitMassSun = Math.max(primaryStar?.data.massSun ?? 1, 0.1);
   const planetBodies = useMemo(
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
@@ -1894,7 +1998,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       sourcePlanets.length,
       sceneScale,
       minPlanetRadius,
-      minMoonRadius
+      minMoonRadius,
+      orbitMassSun,
+      day
     ));
     const planetsWithSpacedMoons = rawPlanets.map(planet => ({
       ...planet,
@@ -1902,9 +2008,11 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }));
     return applyPlanetOrbitSpacing(planetsWithSpacedMoons, starRadius, planetOrbitClearance);
   }, [
+    day,
     minMoonRadius,
     minPlanetRadius,
     moonOrbitClearance,
+    orbitMassSun,
     planetOrbitClearance,
     sceneScale,
     sourcePlanets,
@@ -1951,15 +2059,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const planetGeometry = useDisposableMemo(() => new SphereGeometry(1, 48, 48), []);
   const moonGeometry = useDisposableMemo(() => new SphereGeometry(1, 32, 32), []);
 
-  const starBodyId = useMemo(() => `${starSystem.id}-star-primary`, [starSystem.id]);
-  const starTintColor = useMemo(
-    () => getSpectralTint(astro?.primarySpectralType, starSystem.color || '#ffffff'),
-    [astro?.primarySpectralType, starSystem.color]
-  );
   const bodyWorldPositions = useMemo<Record<string, [number, number, number]>>(() => {
-    const positions: Record<string, [number, number, number]> = {
-      [starBodyId]: [0, 0, 0]
-    };
+    const positions: Record<string, [number, number, number]> = {};
+
+    starModels.forEach((star) => {
+      positions[star.id] = star.position;
+    });
 
     planets.forEach((planet) => {
       const planetPosition = computeOrbitPosition(planet.orbitRadius, planet.orbitAngle);
@@ -1976,11 +2081,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     });
 
     return positions;
-  }, [planets, starBodyId]);
+  }, [planets, starModels]);
   const bodyRadii = useMemo<Record<string, number>>(() => {
-    const radii: Record<string, number> = {
-      [starBodyId]: starRadius
-    };
+    const radii: Record<string, number> = {};
+
+    starModels.forEach((star) => {
+      radii[star.id] = star.radius;
+    });
 
     planets.forEach((planet) => {
       radii[planet.id] = planet.radius;
@@ -1990,7 +2097,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     });
 
     return radii;
-  }, [planets, starBodyId, starRadius]);
+  }, [planets, starModels]);
   const resolvedAnchoredBodyId = useMemo(() => {
     if (initialCameraState?.anchoredBodyId && bodyWorldPositions[initialCameraState.anchoredBodyId]) {
       return initialCameraState.anchoredBodyId;
@@ -2000,14 +2107,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [anchoredBodyId, setAnchoredBodyId] = useState<string | undefined>(resolvedAnchoredBodyId);
   const bodyInfoMap = useMemo<Record<string, SystemBodyInfo>>(() => {
     const map: Record<string, SystemBodyInfo> = {};
-    map[starBodyId] = {
-      id: starBodyId,
-      name: t('systemView.bodyInfo.starName', { system: starSystem.name }),
-      bodyType: 'star' as CelestialBodyType,
-      bodySubType: astro?.primarySpectralType,
-      radiusKm: starRadiusKm,
-      isSolid: false
-    };
+    const hasMultipleStars = starModels.length > 1;
+    starModels.forEach((star, index) => {
+      const suffix = String.fromCharCode(65 + index);
+      const starName = hasMultipleStars
+        ? t('systemView.bodyInfo.starNameWithSuffix', { system: starSystem.name, suffix })
+        : t('systemView.bodyInfo.starName', { system: starSystem.name });
+      map[star.id] = {
+        id: star.id,
+        name: starName,
+        bodyType: 'star' as CelestialBodyType,
+        bodySubType: star.data.spectralType ?? astro?.primarySpectralType,
+        radiusKm: star.radiusKm,
+        isSolid: false
+      };
+    });
 
     sourcePlanets.forEach((planet, index) => {
       const fallbackPlanetId = `planet-${starSystem.id}-${index + 1}`;
@@ -2049,7 +2163,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     });
 
     return map;
-  }, [astro?.primarySpectralType, sourcePlanets, starBodyId, starRadiusKm, starSystem.id, starSystem.name, t]);
+  }, [astro?.primarySpectralType, sourcePlanets, starModels, starSystem.id, starSystem.name, t]);
   const systemFleets = useMemo(() => getSystemFleets(starSystem, fleets), [fleets, starSystem]);
   const systemStations = useMemo(
     () => stations.filter((station) => station.systemId === starSystem.id),
@@ -2191,6 +2305,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     );
   }, [bodyRadii, bodyWorldPositions, clampedScale, starBodyId, starRadius, stationIconScale, systemStations]);
   const maxOrbitRadius = useMemo(() => {
+    const starExtent = starModels.reduce((max, star) => {
+      const [x, y, z] = star.position;
+      const distance = Math.sqrt(x * x + y * y + z * z);
+      return Math.max(max, distance + star.radius);
+    }, starRadius);
+
     return planets.reduce((max, planet) => {
       const planetExtent = planet.orbitRadius + planet.radius;
       const moonExtent = planet.moons.reduce(
@@ -2198,8 +2318,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         planetExtent
       );
       return Math.max(max, moonExtent);
-    }, starRadius);
-  }, [planets, starRadius]);
+    }, starExtent);
+  }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
   const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.04, 0.1, 0.22);
   const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.05, 0.16, 0.32);
@@ -2373,11 +2493,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
         <SystemRoot>
           <SystemCelestialLayer
-            starBodyId={starBodyId}
-            starRadius={starRadius}
-            starTintColor={starTintColor}
+            stars={starModels}
             starGeometry={starGeometry}
-            starSeedKey={starSystem.id}
             planets={planets}
             orbitMaterial={orbitMaterial}
             planetGeometry={planetGeometry}

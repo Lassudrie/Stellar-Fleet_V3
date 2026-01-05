@@ -2977,6 +2977,14 @@ tests.push(
           assert.ok(engine_isFiniteNumber(star.radiusSun) && star.radiusSun > 0);
           assert.ok(engine_isFiniteNumber(star.luminositySun) && star.luminositySun > 0);
           assert.ok(engine_isFiniteNumber(star.teffK) && star.teffK > 0);
+          if (star.role === 'companion') {
+            assert.ok(star.orbit, 'Companion stars should include orbit data');
+            assert.ok(engine_isFiniteNumber(star.orbit?.semiMajorAxisAu) && star.orbit?.semiMajorAxisAu > 0);
+            assert.ok(engine_isFiniteNumber(star.orbit?.periodDays) && star.orbit?.periodDays > 0);
+            assert.ok(engine_isFiniteNumber(star.orbit?.phaseDeg));
+            assert.ok(engine_isFiniteNumber(star.orbit?.inclinationDeg));
+            assert.ok(engine_isFiniteNumber(star.orbit?.ascendingNodeDeg));
+          }
         }
 
         let lastA = 0;

@@ -10,6 +10,7 @@ import type {
   PlanetTypeProbs,
   SpectralType,
   StarData,
+  StarOrbit,
   StarSystemAstro,
   StellarClassBounds,
   StellarDerived,
@@ -342,6 +343,13 @@ export function computeRadiusSun(massSun: number): number {
   return Math.pow(massSun, 0.57);
 }
 
+export function computeOrbitalPeriodDays(semiMajorAxisAu: number, totalMassSun: number): number {
+  const safeA = Math.max(semiMajorAxisAu, 0.01);
+  const safeMass = Math.max(totalMassSun, 0.1);
+  const periodYears = Math.sqrt((safeA * safeA * safeA) / safeMass);
+  return Math.max(periodYears * 365.25, 1);
+}
+
 export function refineStar(rng: RNG, type: SpectralType, massSun: number, role: 'primary' | 'companion'): StarData {
   const bounds = STELLAR_CLASS_BOUNDS[type];
   const m = clamp(massSun, bounds.massSun[0], bounds.massSun[1]);
@@ -357,6 +365,38 @@ export function refineStar(rng: RNG, type: SpectralType, massSun: number, role: 
     luminositySun,
     teffK
   };
+}
+
+export function drawCompanionOrbits(
+  rng: RNG,
+  primaryMassSun: number,
+  companionMasses: number[],
+  params: StellarSystemGenParams = DEFAULT_STELLAR_SYSTEM_GEN_PARAMS
+): StarOrbit[] {
+  if (companionMasses.length === 0) return [];
+
+  const baseMinAu = 0.12;
+  const baseMaxAu = Math.max(baseMinAu * 1.5, Math.min(params.maxSemiMajorAxisAu * 0.35, 8));
+  const spacingMin = 2.5;
+  const spacingMax = 6.5;
+  let orbitAu = logUniform(rng, baseMinAu, baseMaxAu);
+
+  return companionMasses.map((massSun, index) => {
+    if (index > 0) {
+      orbitAu = Math.min(orbitAu * rng.range(spacingMin, spacingMax), params.maxSemiMajorAxisAu * 0.85);
+    }
+    const inclinationDeg = rng.range(0, 18);
+    const ascendingNodeDeg = rng.range(0, 360);
+    const phaseDeg = rng.range(0, 360);
+    const periodDays = computeOrbitalPeriodDays(orbitAu, primaryMassSun + massSun);
+    return {
+      semiMajorAxisAu: orbitAu,
+      periodDays,
+      phaseDeg,
+      inclinationDeg,
+      ascendingNodeDeg
+    };
+  });
 }
 
 // ============================================================
@@ -988,6 +1028,8 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   const starCount = drawStarCount(rng, primarySpectralType);
   const companionCount = Math.max(0, starCount - 1);
   const companionMasses = drawCompanionMasses(rng, primaryMassSun, companionCount);
+  const orbitRng = new RNG(deriveSeed32(seed, 'star_orbits'));
+  const companionOrbits = drawCompanionOrbits(orbitRng, primaryMassSun, companionMasses, params);
 
   const metallicityFeH = drawMetallicityFeH(contextRng, radiusNorm);
 
@@ -1008,10 +1050,12 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   const stars: StarData[] = [];
   stars.push(refineStar(rng, primarySpectralType, primaryMassSun, 'primary'));
 
-  for (const m of companionMasses) {
+  companionMasses.forEach((m, index) => {
     const t = typeFromMassSun(m);
-    stars.push(refineStar(rng, t, m, 'companion'));
-  }
+    const refined = refineStar(rng, t, m, 'companion');
+    const orbit = companionOrbits[index];
+    stars.push(orbit ? { ...refined, orbit } : refined);
+  });
 
   const luminosityTotalLSun = stars.reduce((sum, s) => sum + s.luminositySun, 0);
   const snowLineAu = computeSnowLineAu(luminosityTotalLSun);
@@ -1083,7 +1127,8 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
         massSun: star.massSun,
         radiusSun: star.radiusSun,
         luminositySun: star.luminositySun,
-        teffK: star.teffK
+        teffK: star.teffK,
+        orbit: star.orbit
       })),
       astroHash
     }

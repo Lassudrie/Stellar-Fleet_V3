@@ -38,7 +38,8 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
   - `id`, `name`, `position` (`{x,y,z}`), `color`, `size`, `resourceType`, `isHomeworld`.
   - `ownerFactionId` : identifiant de propriétaire (migration depuis `owner`).
   - `planets` : données de corps planétaires normalisées.
-  - `astro` : bloc astrophysique optionnel (spectral type, seeds par étoile, planètes). Peut être régénéré (voir § 5).
+  - `astro` : bloc astrophysique optionnel (spectral type, étoiles, planètes). Peut être régénéré (voir § 5).
+    - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`.
 
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.

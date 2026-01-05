@@ -89,6 +89,14 @@ export interface StellarSystemGenParams {
 export type PlanetTypePlan = PlanetType[];
 export type PlanetTypeProbs = Record<PlanetType, number>;
 
+export interface StarOrbit {
+  semiMajorAxisAu: number;
+  periodDays: number;
+  phaseDeg: number;
+  inclinationDeg: number;
+  ascendingNodeDeg: number;
+}
+
 export interface StarData {
   role: 'primary' | 'companion';
   spectralType: SpectralType;
@@ -96,6 +104,7 @@ export interface StarData {
   radiusSun: number;
   luminositySun: number;
   teffK: number;
+  orbit?: StarOrbit;
 }
 
 export interface MoonData {

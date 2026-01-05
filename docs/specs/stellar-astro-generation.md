@@ -30,6 +30,7 @@ Le payload est structuré selon `src/shared/types.ts` et suit les règles suivan
 - **Étoiles (`stars`)** :
   - Tableau ordonné : la primaire en premier (`role: 'primary'`), puis les compagnons (`role: 'companion'`).
   - Chaque entrée stocke le `spectralType`, la masse/raie de rayonnement (`massSun`, `radiusSun`, `luminositySun`, `teffK`).
+  - Les compagnons peuvent inclure un `orbit` déterministe (`semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`) généré via une RNG dérivée pour ne pas perturber le reste.
 - **Planètes (`planets`)** :
   - Le nombre total est borné par `maxPlanets` et par un tirage de Poisson dépendant du type spectral primaire.
   - Les orbites sont générées, éventuellement ajustées à la ligne de neige, puis triées par demi‑grand axe croissant (`semiMajorAxisAu`).
