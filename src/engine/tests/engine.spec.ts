@@ -4393,21 +4393,24 @@ tests.push(
   {
     name: 'break chance follows BreakScore * Advantage clamp',
     run: () => {
-      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => ({
-        id: overrides.id,
-        factionId: overrides.factionId,
-        state: ArmyState.DEPLOYED,
-        containerId: 'body-1',
-        surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
-        unitType: 'mechanized_infantry',
-        posture: 'normal',
-        maxMembers: 10000,
-        members: 10000,
-        attack: 1,
-        defense: 1,
-        condition: 1,
-        ...overrides
-      });
+      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
+        const { id, factionId, ...rest } = overrides;
+        return {
+          id,
+          factionId,
+          state: ArmyState.DEPLOYED,
+          containerId: 'body-1',
+          surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
+          unitType: 'mechanized_infantry',
+          posture: 'normal',
+          maxMembers: 10000,
+          members: 10000,
+          attack: 1,
+          defense: 1,
+          condition: 1,
+          ...rest
+        };
+      };
 
       const attacker = mkArmy({ id: 'a-break', factionId: 'blue', attack: 2 });
       const defender = mkArmy({ id: 'd-break', factionId: 'red', defense: 1.2 });
