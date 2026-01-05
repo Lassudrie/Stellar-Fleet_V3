@@ -14,11 +14,12 @@ import { computeFluxEarth } from '../src/engine/worldgen/stellarSystem.ts';
 import { sorted } from '../src/shared/shared.ts';
 
 const printHelp = () => {
-  console.log('Usage: npm run worldgen:audit -- --scenario <id> --seed <seed> [--out <path>]');
+  console.log('Usage: npm run worldgen:audit -- --scenario <id> --seed <seed> [--out <path>] [--mode <summary|climate>]');
   console.log('Options:');
   console.log('  --scenario <id>   Scenario template id');
   console.log('  --seed <seed>     Seed integer (default: 1)');
   console.log('  --out <path>      Output JSON path (default: log/worldgen-audit.json)');
+  console.log('  --mode <mode>     Audit mode: summary or climate (default: summary)');
   console.log('  --list            List available scenarios');
   console.log('  --help            Show this help');
 };
@@ -28,6 +29,7 @@ const parseArgs = (argv) => {
     scenarioId: null,
     seed: 1,
     outPath: 'log/worldgen-audit.json',
+    mode: 'summary',
     list: false,
     help: false
   };
@@ -52,6 +54,17 @@ const parseArgs = (argv) => {
     }
     if (arg === '--out') {
       options.outPath = argv[i + 1] ?? options.outPath;
+      i += 1;
+      continue;
+    }
+    if (arg === '--mode') {
+      const raw = argv[i + 1];
+      if (!raw) throw new Error('Missing value for --mode');
+      const mode = raw.toLowerCase();
+      if (mode !== 'summary' && mode !== 'climate') {
+        throw new Error(`Invalid mode '${raw}', expected summary or climate`);
+      }
+      options.mode = mode;
       i += 1;
       continue;
     }
@@ -86,6 +99,33 @@ const addCount = (record, key, value = 1) => {
   record[key] = (record[key] ?? 0) + value;
 };
 
+const summarizeMoonClimate = (moon) => ({
+  type: moon.type,
+  orbitDistanceRp: moon.orbitDistanceRp,
+  atmosphere: moon.atmosphere,
+  pressureBar: moon.pressureBar,
+  teqK: moon.teqK,
+  tidalBonusK: moon.tidalBonusK,
+  greenhouseK: moon.greenhouseK,
+  climateK: moon.climateK,
+  airMassIndex: moon.airMassIndex,
+  temperatureK: moon.temperatureK
+});
+
+const summarizePlanetClimate = (planet) => ({
+  type: planet.type,
+  semiMajorAxisAu: planet.semiMajorAxisAu,
+  atmosphere: planet.atmosphere,
+  pressureBar: planet.pressureBar,
+  teqK: planet.teqK,
+  greenhouseK: planet.greenhouseK,
+  climateK: planet.climateK,
+  airMassIndex: planet.airMassIndex,
+  temperatureK: planet.temperatureK,
+  climateTag: planet.climateTag ?? null,
+  moons: planet.moons?.map(summarizeMoonClimate) ?? []
+});
+
 const run = async () => {
   const options = parseArgs(process.argv.slice(2));
 
@@ -108,12 +148,13 @@ const run = async () => {
 
   const scenarioId = options.scenarioId ?? SCENARIO_TEMPLATES[0]?.id ?? 'conquest_sandbox';
   const scenario = buildScenario(scenarioId, options.seed);
-  const audit = createWorldgenAuditCollector(scenario, 'summary');
+  const audit = createWorldgenAuditCollector(scenario, options.mode);
   const { state } = generateWorld(scenario, { audit });
-  const systemById = new Map(state.systems.map(system => [system.id, system]));
+  const orderedSystems = sorted(state.systems, (a, b) => a.id.localeCompare(b.id));
+  const systemById = new Map(orderedSystems.map(system => [system.id, system]));
 
   const bodyRefs = [];
-  state.systems.forEach(system => {
+  orderedSystems.forEach(system => {
     system.planets.forEach(body => {
       if (!body.isSolid) return;
       bodyRefs.push({ systemId: system.id, bodyId: body.id });
@@ -132,6 +173,23 @@ const run = async () => {
       byStatus: { active: 0, ruins: 0 }
     }
   };
+
+  if (options.mode === 'climate') {
+    orderedSystems.forEach(system => {
+      if (!system.astro) return;
+      audit.emit({
+        step: 'astro',
+        kind: 'astro_climate_snapshot',
+        entityId: system.id,
+        outputs: {
+          primarySpectralType: system.astro.primarySpectralType,
+          starCount: system.astro.starCount,
+          planetCount: system.astro.planets.length,
+          planets: system.astro.planets.map(summarizePlanetClimate)
+        }
+      });
+    });
+  }
 
   orderedBodies.forEach(({ systemId, bodyId }) => {
     const descriptor = getSurfaceDescriptor(state, bodyId);
@@ -171,6 +229,9 @@ const run = async () => {
           orbitDistanceRp: moon.orbitDistanceRp,
           flux,
           teqK: moon.teqK,
+          greenhouseK: options.mode === 'climate' ? moon.greenhouseK : undefined,
+          climateK: options.mode === 'climate' ? moon.climateK : undefined,
+          airMassIndex: options.mode === 'climate' ? moon.airMassIndex : undefined,
           temperatureK: moon.temperatureK,
           massEarth: moon.massEarth,
           radiusEarth: moon.radiusEarth,
@@ -189,6 +250,9 @@ const run = async () => {
           semiMajorAxisAu: planet.semiMajorAxisAu,
           flux,
           teqK: planet.teqK,
+          greenhouseK: options.mode === 'climate' ? planet.greenhouseK : undefined,
+          climateK: options.mode === 'climate' ? planet.climateK : undefined,
+          airMassIndex: options.mode === 'climate' ? planet.airMassIndex : undefined,
           temperatureK: planet.temperatureK,
           massEarth: planet.massEarth,
           radiusEarth: planet.radiusEarth,
@@ -210,6 +274,9 @@ const run = async () => {
           orbitDistanceRp: moon.orbitDistanceRp,
           flux,
           teqK: moon.teqK,
+          greenhouseK: options.mode === 'climate' ? moon.greenhouseK : undefined,
+          climateK: options.mode === 'climate' ? moon.climateK : undefined,
+          airMassIndex: options.mode === 'climate' ? moon.airMassIndex : undefined,
           temperatureK: moon.temperatureK,
           massEarth: moon.massEarth,
           radiusEarth: moon.radiusEarth,

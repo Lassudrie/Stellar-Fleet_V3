@@ -564,7 +564,7 @@ export interface GameState {
 // Worldgen audit log (debug only, JSON serializable)
 // ============================================================
 
-export type WorldgenAuditMode = 'summary';
+export type WorldgenAuditMode = 'summary' | 'climate';
 
 export interface WorldgenAuditEvent {
   seq: number;
