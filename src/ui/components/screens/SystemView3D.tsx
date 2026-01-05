@@ -85,6 +85,8 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
+const STAR_TINT_STRENGTH = 0.18;
+const STAR_FALLBACK_TINT_STRENGTH = 0.08;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -189,6 +191,29 @@ const computeOrbitPosition = (radius: number, angle: number): [number, number, n
   [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
 );
 
+const SPECTRAL_TINTS: Record<string, string> = {
+  O: '#9bb0ff',
+  B: '#aabfff',
+  A: '#cad7ff',
+  F: '#f8f7ff',
+  G: '#fff1d6',
+  K: '#ffd2a1',
+  M: '#ffcc6f'
+};
+
+const getSpectralTint = (spectralType: string | undefined, fallback?: string): string => {
+  const key = spectralType?.trim().charAt(0).toUpperCase();
+  const tint = key ? SPECTRAL_TINTS[key] : undefined;
+  const base = new Color('#ffffff');
+  if (tint) {
+    return base.clone().lerp(new Color(tint), STAR_TINT_STRENGTH).getStyle();
+  }
+  if (fallback) {
+    return base.clone().lerp(new Color(fallback), STAR_FALLBACK_TINT_STRENGTH).getStyle();
+  }
+  return base.getStyle();
+};
+
 const createSeededRandom = (seed: number): (() => number) => {
   let state = seed >>> 0;
   return () => {
@@ -207,7 +232,7 @@ const toRgbaString = (color: Color, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
-const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTexture => {
+const createStarSurfaceTexture = (tintColor: string, seed: number): CanvasTexture => {
   const canvas = document.createElement('canvas');
   canvas.width = STAR_TEXTURE_SIZE;
   canvas.height = STAR_TEXTURE_SIZE;
@@ -221,9 +246,10 @@ const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTextur
     return texture;
   }
 
-  const base = new Color(baseColor);
-  const highlight = base.clone().lerp(new Color('#ffffff'), 0.35);
-  const shadow = base.clone().multiplyScalar(0.65);
+  const base = new Color('#ffffff');
+  const tint = new Color(tintColor).lerp(base, 0.6);
+  const highlight = base.clone().lerp(tint, 0.25);
+  const shadow = base.clone().lerp(tint, 0.2).multiplyScalar(0.9);
 
   context.fillStyle = base.getStyle();
   context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
@@ -238,7 +264,7 @@ const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTextur
   );
   gradient.addColorStop(0, highlight.getStyle());
   gradient.addColorStop(1, shadow.getStyle());
-  context.globalAlpha = 0.35;
+  context.globalAlpha = 0.25;
   context.fillStyle = gradient;
   context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
   context.globalAlpha = 1;
@@ -251,9 +277,9 @@ const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTextur
     const radius = STAR_TEXTURE_SIZE * (0.04 + rand() * 0.12);
     const x = rand() * STAR_TEXTURE_SIZE;
     const y = rand() * STAR_TEXTURE_SIZE;
-    const tint = base.clone().lerp(new Color('#ffffff'), 0.2 + rand() * 0.5);
+    const tintSpot = base.clone().lerp(tint, 0.15 + rand() * 0.45);
     context.globalAlpha = 0.08 + rand() * 0.18;
-    context.fillStyle = tint.getStyle();
+    context.fillStyle = tintSpot.getStyle();
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
     context.fill();
@@ -263,7 +289,7 @@ const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTextur
     const radius = STAR_TEXTURE_SIZE * (0.02 + rand() * 0.07);
     const x = rand() * STAR_TEXTURE_SIZE;
     const y = rand() * STAR_TEXTURE_SIZE;
-    const shade = base.clone().multiplyScalar(0.5 + rand() * 0.3);
+    const shade = base.clone().lerp(tint, 0.35).multiplyScalar(0.6 + rand() * 0.25);
     context.globalAlpha = 0.1 + rand() * 0.2;
     context.fillStyle = shade.getStyle();
     context.beginPath();
@@ -276,7 +302,7 @@ const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTextur
   return texture;
 };
 
-const createStarGlowTexture = (baseColor: string): CanvasTexture => {
+const createStarGlowTexture = (tintColor: string): CanvasTexture => {
   const canvas = document.createElement('canvas');
   canvas.width = STAR_TEXTURE_SIZE;
   canvas.height = STAR_TEXTURE_SIZE;
@@ -290,9 +316,10 @@ const createStarGlowTexture = (baseColor: string): CanvasTexture => {
     return texture;
   }
 
-  const base = new Color(baseColor);
-  const inner = base.clone().lerp(new Color('#ffffff'), 0.5);
-  const outer = base.clone().multiplyScalar(0.5);
+  const base = new Color('#ffffff');
+  const tint = new Color(tintColor).lerp(base, 0.55);
+  const inner = base.clone().lerp(tint, 0.3);
+  const outer = base.clone().lerp(tint, 0.4).multiplyScalar(0.55);
   const gradient = context.createRadialGradient(
     STAR_TEXTURE_SIZE * 0.5,
     STAR_TEXTURE_SIZE * 0.5,
@@ -517,7 +544,7 @@ const computeFleetRingBaseRadius = ({
 
 interface StarMeshProps {
   radius: number;
-  color: string;
+  tintColor: string;
   geometry: SphereGeometry;
   seedKey: string;
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
@@ -528,7 +555,7 @@ interface StarMeshProps {
 
 const StarMesh: React.FC<StarMeshProps> = ({
   radius,
-  color,
+  tintColor,
   geometry,
   seedKey,
   onDoubleClick,
@@ -541,12 +568,12 @@ const StarMesh: React.FC<StarMeshProps> = ({
     [seedKey]
   );
   const surfaceTexture = useDisposableMemo(
-    () => createStarSurfaceTexture(color, seed),
-    [color, seed]
+    () => createStarSurfaceTexture(tintColor, seed),
+    [seed, tintColor]
   );
   const glowTexture = useDisposableMemo(
-    () => createStarGlowTexture(color),
-    [color]
+    () => createStarGlowTexture(tintColor),
+    [tintColor]
   );
   const coreMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({
@@ -558,27 +585,27 @@ const StarMesh: React.FC<StarMeshProps> = ({
   );
   const innerGlowMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({
-      color: new Color(color).lerp(new Color('#ffffff'), 0.35),
+      color: new Color('#ffffff').lerp(new Color(tintColor), 0.25),
       map: glowTexture,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.5,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: false
     }),
-    [color, glowTexture]
+    [glowTexture, tintColor]
   );
   const outerGlowMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({
-      color: new Color(color).lerp(new Color('#ffffff'), 0.15),
+      color: new Color('#ffffff').lerp(new Color(tintColor), 0.2),
       map: glowTexture,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.2,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: false
     }),
-    [color, glowTexture]
+    [glowTexture, tintColor]
   );
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
@@ -914,6 +941,78 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           />
         ))}
       </group>
+    </group>
+  );
+};
+
+interface SystemCelestialLayerProps {
+  starBodyId: string;
+  starRadius: number;
+  starTintColor: string;
+  starGeometry: SphereGeometry;
+  starSeedKey: string;
+  planets: OrbitingPlanet[];
+  orbitMaterial: MeshBasicMaterial;
+  planetGeometry: SphereGeometry;
+  moonGeometry: SphereGeometry;
+  planetMaterialMap: Record<PlanetType, MeshStandardMaterial>;
+  moonMaterialMap: Record<MoonType, MeshStandardMaterial>;
+  orbitThickness: number;
+  onFocusBody: (bodyId: string) => void;
+  onHoverBody: (bodyId: string) => void;
+  onBlurBody: (bodyId: string) => void;
+  onSelectBody: (bodyId: string) => void;
+}
+
+const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
+  starBodyId,
+  starRadius,
+  starTintColor,
+  starGeometry,
+  starSeedKey,
+  planets,
+  orbitMaterial,
+  planetGeometry,
+  moonGeometry,
+  planetMaterialMap,
+  moonMaterialMap,
+  orbitThickness,
+  onFocusBody,
+  onHoverBody,
+  onBlurBody,
+  onSelectBody
+}) => {
+  return (
+    <group name="SystemCelestialLayer">
+      <StarMesh
+        radius={starRadius}
+        tintColor={starTintColor}
+        geometry={starGeometry}
+        seedKey={starSeedKey}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onFocusBody(starBodyId);
+        }}
+        onHover={() => onHoverBody(starBodyId)}
+        onBlur={() => onBlurBody(starBodyId)}
+        onSelect={() => onSelectBody(starBodyId)}
+      />
+      {planets.map(planet => (
+        <PlanetOrbitGroup
+          key={planet.id}
+          planet={planet}
+          orbitMaterial={orbitMaterial}
+          planetGeometry={planetGeometry}
+          moonGeometry={moonGeometry}
+          planetMaterial={planetMaterialMap[planet.type]}
+          moonMaterials={moonMaterialMap}
+          orbitThickness={orbitThickness}
+          onFocus={onFocusBody}
+          onHover={onHoverBody}
+          onBlur={onBlurBody}
+          onSelect={onSelectBody}
+        />
+      ))}
     </group>
   );
 };
@@ -1853,7 +1952,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const moonGeometry = useDisposableMemo(() => new SphereGeometry(1, 32, 32), []);
 
   const starBodyId = useMemo(() => `${starSystem.id}-star-primary`, [starSystem.id]);
-  const primaryColor = starSystem.color || '#7dd3fc';
+  const starTintColor = useMemo(
+    () => getSpectralTint(astro?.primarySpectralType, starSystem.color || '#ffffff'),
+    [astro?.primarySpectralType, starSystem.color]
+  );
   const bodyWorldPositions = useMemo<Record<string, [number, number, number]>>(() => {
     const positions: Record<string, [number, number, number]> = {
       [starBodyId]: [0, 0, 0]
@@ -2099,16 +2201,25 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starRadius);
   }, [planets, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
-  const ambientLightIntensity = MathUtils.clamp(0.05 + clampedScale * 0.02, 0.04, 0.12);
-  const starLightDistance = Math.max(maxOrbitRadius * 4, starRadius * 20);
-  const starLightIntensity = MathUtils.clamp(1.8 + starRadius * 0.9, 1.6, 6);
+  const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.04, 0.1, 0.22);
+  const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.05, 0.16, 0.32);
+  const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
+  const starLightIntensity = MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14);
   const ambientLightColor = useMemo(
-    () => new Color(primaryColor).lerp(new Color('#0b1020'), 0.75).getStyle(),
-    [primaryColor]
+    () => new Color(starTintColor).lerp(new Color('#0b1020'), 0.7).getStyle(),
+    [starTintColor]
+  );
+  const hemisphereSkyColor = useMemo(
+    () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
+    [starTintColor]
+  );
+  const hemisphereGroundColor = useMemo(
+    () => new Color('#0b1020').getStyle(),
+    []
   );
   const starLightColor = useMemo(
-    () => new Color(primaryColor).lerp(new Color('#ffffff'), 0.12).getStyle(),
-    [primaryColor]
+    () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
+    [starTintColor]
   );
   const cameraMinDistance = useMemo(() => {
     const anchoredRadius = bodyRadii[anchoredBodyId ?? ''];
@@ -2232,6 +2343,11 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       <Canvas camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}>
         <color attach="background" args={['#000000']} />
         <ambientLight intensity={ambientLightIntensity} color={ambientLightColor} />
+        <hemisphereLight
+          intensity={hemisphereLightIntensity}
+          color={hemisphereSkyColor}
+          groundColor={hemisphereGroundColor}
+        />
         <pointLight
           position={[0, 0, 0]}
           intensity={starLightIntensity}
@@ -2256,35 +2372,24 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         />
 
         <SystemRoot>
-          <StarMesh
-            radius={starRadius}
-            color={primaryColor}
-            geometry={starGeometry}
-            seedKey={starSystem.id}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              requestFocusOnBody(starBodyId);
-            }}
-            onHover={() => handleHoverBody(starBodyId)}
-            onBlur={() => handleBlurBody(starBodyId)}
-            onSelect={() => handleSelectBody(starBodyId)}
+          <SystemCelestialLayer
+            starBodyId={starBodyId}
+            starRadius={starRadius}
+            starTintColor={starTintColor}
+            starGeometry={starGeometry}
+            starSeedKey={starSystem.id}
+            planets={planets}
+            orbitMaterial={orbitMaterial}
+            planetGeometry={planetGeometry}
+            moonGeometry={moonGeometry}
+            planetMaterialMap={planetMaterialMap}
+            moonMaterialMap={moonMaterialMap}
+            orbitThickness={orbitThickness}
+            onFocusBody={requestFocusOnBody}
+            onHoverBody={handleHoverBody}
+            onBlurBody={handleBlurBody}
+            onSelectBody={handleSelectBody}
           />
-          {planets.map(planet => (
-            <PlanetOrbitGroup
-              key={planet.id}
-              planet={planet}
-              orbitMaterial={orbitMaterial}
-              planetGeometry={planetGeometry}
-              moonGeometry={moonGeometry}
-              planetMaterial={planetMaterialMap[planet.type]}
-              moonMaterials={moonMaterialMap}
-              orbitThickness={orbitThickness}
-              onFocus={requestFocusOnBody}
-              onHover={handleHoverBody}
-              onBlur={handleBlurBody}
-              onSelect={handleSelectBody}
-            />
-          ))}
           <SystemEntitiesLayer
             starBodyId={starBodyId}
             fleets={systemFleets}
