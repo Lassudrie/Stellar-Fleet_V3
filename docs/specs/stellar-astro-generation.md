@@ -47,6 +47,14 @@ Le payload est structuré selon `src/shared/types.ts` et suit les règles suivan
 - `climateTag` (Terrestres) : IceWorld <200K, Cold <250K, Eden 275–305K si Earthlike + `airMassIndex >= 0.45`, Desertic <=700K, sinon Volcanic.
 - `climateTag` (Géantes) : HotGiant >900K, WarmGiant >300K, sinon ColdGiant. Naines : IcyDwarf <180K sinon RockyDwarf.
 
+### 3.2 Atmosphères (primaire/secondaire)
+- L’atmosphère primaire (H/He) n’est conservée que par des corps massifs et froids (super‑Terres) : `massEarth >= 2.2`, flux faible et `teqK < 600K`.
+- En dessous de ~0.05 M⊕, l’atmosphère est considérée perdue (airless), même si un dégazage existe.
+- Les atmosphères secondaires dépendent d’un compromis entre rétention (masse/gravité) et érosion (flux stellaire + température).
+- Les petites masses (0.1–0.5 M⊕) tendent vers des atmosphères minces (Thin) ou CO2 lorsque le dégazage est suffisant.
+- Les masses proches de la Terre (`>= 0.7 M⊕`) peuvent atteindre Earthlike si la planète est dans la zone habitable et si l’érosion reste modérée.
+- Les lunes subissent une pénalité d’érosion additionnelle ; un chauffage de marée élevé augmente le dégazage (favorise CO2).
+
 ## 4. Invariants de sérialisation
 - Lors de la désérialisation, `sanitizeStarSystemAstro` impose la présence des champs obligatoires : `seed`, `primarySpectralType`, `starCount`, `metallicityFeH`, bloc `derived` complet, ainsi que les tableaux `stars` et `planets`.
 - Si un champ obligatoire est manquant, non numérique ou mal typé, le payload est considéré invalide et n’est pas réutilisé tel quel.

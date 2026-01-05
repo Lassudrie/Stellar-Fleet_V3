@@ -168,9 +168,9 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
   - ou maintenir la compat bit-for-bit (rarement souhaitable).
 
 ### Implémentation actuelle (repo)
-- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v3 par défaut quand validée).
+- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v4 par défaut).
 - Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
-- Spécificités v3 (P0 qualité) : bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
+- Spécificités v4 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
 
 ## 5. Pipeline de génération (cohérence environnementale)
 

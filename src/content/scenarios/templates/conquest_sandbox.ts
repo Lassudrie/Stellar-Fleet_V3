@@ -16,7 +16,7 @@ export const conquestSandbox: ScenarioTemplate = {
     systemCount: 80,
     radius: 120,
     topology: 'ring',
-    surfaceGeneratorVersion: 3,
+    surfaceGeneratorVersion: 4,
     settlements: {
       neutralOutpostChance: 0.05,
       neutralOutpostRuinsChance: 0.6,

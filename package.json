@@ -16,9 +16,9 @@
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "typecheck:watch": "tsc --noEmit --watch",
     "check:runtime": "node ./tools/runtimeCheck.mjs",
-    "smoke": "npm run check:runtime && tsx --tsconfig tsconfig.smoke.json src/engine/aiSmoke.ts",
+    "smoke": "npm run check:runtime && node --import ./tools/registerTsLoader.mjs src/engine/aiSmoke.ts",
     "battle:sim": "npm run check:runtime && tsx tools/battleSim.ts",
-    "worldgen:audit": "npm run check:runtime && node --loader ./tools/tsSmokeLoader.mjs ./tools/worldgenAudit.mjs",
+    "worldgen:audit": "npm run check:runtime && node --import ./tools/registerTsLoader.mjs ./tools/worldgenAudit.mjs",
     "test": "npm run check:runtime && tsx src/engine/tests/engine.spec.ts && tsx src/ui/ui.spec.ts"
   },
   "dependencies": {

@@ -275,6 +275,224 @@ export const domainWarp2DPeriodicX = (
   return { x: x + dx * strength, y: y + dy * strength };
 };
 
+type NoiseRotation2D = { cos: number; sin: number };
+type NoiseRotation3D = { cosX: number; sinX: number; cosY: number; sinY: number; cosZ: number; sinZ: number };
+
+const unitFromHash = (seed: number, salt: string): number => hashJoin32(seed, salt) / 0xffffffff;
+
+const buildRotation2D = (seed: number, salt: string): NoiseRotation2D => {
+  const angle = unitFromHash(seed, salt) * Math.PI * 2;
+  return { cos: Math.cos(angle), sin: Math.sin(angle) };
+};
+
+const buildRotation3D = (seed: number, salt: string): NoiseRotation3D => {
+  const ax = unitFromHash(seed, `${salt}-x`) * Math.PI * 2;
+  const ay = unitFromHash(seed, `${salt}-y`) * Math.PI * 2;
+  const az = unitFromHash(seed, `${salt}-z`) * Math.PI * 2;
+  return {
+    cosX: Math.cos(ax),
+    sinX: Math.sin(ax),
+    cosY: Math.cos(ay),
+    sinY: Math.sin(ay),
+    cosZ: Math.cos(az),
+    sinZ: Math.sin(az)
+  };
+};
+
+const rotate3D = (x: number, y: number, z: number, rot: NoiseRotation3D): { x: number; y: number; z: number } => {
+  const y1 = y * rot.cosX - z * rot.sinX;
+  const z1 = y * rot.sinX + z * rot.cosX;
+  const x2 = x * rot.cosY + z1 * rot.sinY;
+  const z2 = -x * rot.sinY + z1 * rot.cosY;
+  const x3 = x2 * rot.cosZ - y1 * rot.sinZ;
+  const y3 = x2 * rot.sinZ + y1 * rot.cosZ;
+  return { x: x3, y: y3, z: z2 };
+};
+
+const valueNoise2DRot = (seed: number, x: number, y: number, fx: number, fy: number, rot: NoiseRotation2D): number => {
+  const rx = x * fx;
+  const ry = y * fy;
+  const nx = rx * rot.cos - ry * rot.sin;
+  const ny = rx * rot.sin + ry * rot.cos;
+  return valueNoise2D(seed, nx, ny);
+};
+
+const fbm2DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  rot: NoiseRotation2D,
+  baseFreqX = 1,
+  baseFreqY = 1,
+  lacunarity = 2,
+  gain = 0.5
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    sum += (valueNoise2DRot(seed + i * 1013, x, y, fx, fy, rot) * 2 - 1) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const ridgedFbm2DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  rot: NoiseRotation2D,
+  baseFreqX = 1,
+  baseFreqY = 1
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    const n = valueNoise2DRot(seed + i * 2179, x, y, fx, fy, rot);
+    const ridge = 1 - Math.abs(n * 2 - 1);
+    const v = ridge * 2 - 1;
+    sum += v * amp;
+    norm += amp;
+    amp *= 0.55;
+    freq *= 2.1;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const domainWarp2DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  strength: number,
+  rot: NoiseRotation2D,
+  baseFreqX = 1,
+  baseFreqY = 1
+): { x: number; y: number } => {
+  const dx = fbm2DRot(seed ^ 0x68bc21eb, x, y, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8);
+  const dy = fbm2DRot(seed ^ 0x02e5be93, x, y, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8);
+  return { x: x + dx * strength, y: y + dy * strength };
+};
+
+const valueNoise2DPeriodicXRot = (
+  seed: number,
+  x: number,
+  y: number,
+  freqX: number,
+  freqY: number,
+  rot: NoiseRotation3D
+): number => {
+  const { u, v } = periodicCoord(x, freqX);
+  const p = rotate3D(u, v, y * freqY, rot);
+  return valueNoise3D(seed, p.x, p.y, p.z);
+};
+
+const fbm2DPeriodicXRot = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1,
+  lacunarity = 2,
+  gain = 0.5
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    sum += (valueNoise2DPeriodicXRot(seed + i * 1013, x, y, fx, fy, rot) * 2 - 1) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const ridgedFbm2DPeriodicXRot = (
+  seed: number,
+  x: number,
+  y: number,
+  octaves: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    const n = valueNoise2DPeriodicXRot(seed + i * 2179, x, y, fx, fy, rot);
+    const ridge = 1 - Math.abs(n * 2 - 1);
+    const v = ridge * 2 - 1;
+    sum += v * amp;
+    norm += amp;
+    amp *= 0.55;
+    freq *= 2.1;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const domainWarp2DPeriodicXRot = (
+  seed: number,
+  x: number,
+  y: number,
+  strength: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1
+): { x: number; y: number } => {
+  const dx = fbm2DPeriodicXRot(seed ^ 0x68bc21eb, x, y, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8);
+  const dy = fbm2DPeriodicXRot(seed ^ 0x02e5be93, x, y, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8);
+  return { x: x + dx * strength, y: y + dy * strength };
+};
+
+type NoiseSampler = {
+  warp: (seed: number, x: number, y: number, strength: number, fx: number, fy: number) => { x: number; y: number };
+  fbm: (seed: number, x: number, y: number, octaves: number, fx: number, fy: number, lac?: number, gain?: number) => number;
+  ridged: (seed: number, x: number, y: number, octaves: number, fx: number, fy: number) => number;
+  noise: (seed: number, x: number, y: number, fx: number, fy: number) => number;
+};
+
+const makeNoiseSampler = (wrapX: boolean, rot2D: NoiseRotation2D, rot3D: NoiseRotation3D): NoiseSampler => {
+  if (wrapX) {
+    return {
+      warp: (seed, x, y, strength, fx, fy) => domainWarp2DPeriodicXRot(seed, x, y, strength, rot3D, fx, fy),
+      fbm: (seed, x, y, octaves, fx, fy, lac = 2, gain = 0.5) => fbm2DPeriodicXRot(seed, x, y, octaves, rot3D, fx, fy, lac, gain),
+      ridged: (seed, x, y, octaves, fx, fy) => ridgedFbm2DPeriodicXRot(seed, x, y, octaves, rot3D, fx, fy),
+      noise: (seed, x, y, fx, fy) => valueNoise2DPeriodicXRot(seed, x, y, fx, fy, rot3D)
+    };
+  }
+
+  return {
+    warp: (seed, x, y, strength, fx, fy) => domainWarp2DRot(seed, x, y, strength, rot2D, fx, fy),
+    fbm: (seed, x, y, octaves, fx, fy, lac = 2, gain = 0.5) => fbm2DRot(seed, x, y, octaves, rot2D, fx, fy, lac, gain),
+    ridged: (seed, x, y, octaves, fx, fy) => ridgedFbm2DRot(seed, x, y, octaves, rot2D, fx, fy),
+    noise: (seed, x, y, fx, fy) => valueNoise2DRot(seed, x, y, fx, fy, rot2D)
+  };
+};
+
 // ==========================================
 // Params (was: planetSurface/params.ts)
 // ==========================================
@@ -506,7 +724,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
 // Descriptor (was: planetSurface/descriptor.ts)
 // ==========================================
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 3;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 4;
 
 const clampInt = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, Math.round(x)));
 
@@ -599,6 +817,11 @@ export const createPlanetSurfaceDescriptor = (params: {
 // ==========================================
 
 const clamp = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, x));
+
+const wrapDelta01 = (a: number, b: number, wrapX: boolean): number => {
+  const d = Math.abs(a - b);
+  return wrapX ? Math.min(d, 1 - d) : d;
+};
 
 const quantile = (values: Float32Array, q: number): number => {
   const n = values.length;
@@ -1931,6 +2154,363 @@ const generateSurfaceMapV3 = (params: {
   };
 };
 
+const generateSurfaceMapV4 = (params: {
+  systemId: string;
+  bodyId: string;
+  descriptor: PlanetSurfaceDescriptor;
+  planetData?: PlanetData;
+  moonData?: MoonData;
+  ownerFactionId?: string | null;
+}): PlanetSurfaceMap => {
+  const { descriptor } = params;
+  const { w, h, wrapX } = descriptor.config;
+  const n = w * h;
+
+  const env: SurfaceParams = params.planetData
+    ? deriveSurfaceParamsFromPlanet(params.planetData)
+    : params.moonData
+      ? deriveSurfaceParamsFromMoon(params.moonData)
+      : {
+          surfaceClass: 'airless',
+          surfaceClassReason: 'no_atmosphere',
+          waterFraction: 0.02,
+          reliefScale: 1,
+          humidityFactor: 0.05,
+          latGradientK: 65,
+          lapseRateK: 0,
+          craterIntensity: 0.9,
+          volcanismIndex: 0.1,
+          riversEnabled: false
+        };
+
+  const baseSeed = descriptor.seed;
+
+  const macroNoise = makeNoiseSampler(
+    wrapX,
+    buildRotation2D(baseSeed, 'macro'),
+    buildRotation3D(baseSeed, 'macro')
+  );
+  const reliefNoise = makeNoiseSampler(
+    wrapX,
+    buildRotation2D(baseSeed, 'relief'),
+    buildRotation3D(baseSeed, 'relief')
+  );
+  const detailNoise = makeNoiseSampler(
+    wrapX,
+    buildRotation2D(baseSeed, 'detail'),
+    buildRotation3D(baseSeed, 'detail')
+  );
+
+  const macroShiftX = unitFromHash(baseSeed, 'macro-shift-x');
+  const macroShiftY = unitFromHash(baseSeed, 'macro-shift-y');
+  const reliefShiftX = unitFromHash(baseSeed, 'relief-shift-x');
+  const reliefShiftY = unitFromHash(baseSeed, 'relief-shift-y');
+  const detailShiftX = unitFromHash(baseSeed, 'detail-shift-x');
+  const detailShiftY = unitFromHash(baseSeed, 'detail-shift-y');
+
+  const coreRng = new RNG(baseSeed ^ 0x6f0f3b1d);
+  const coreCount = coreRng.int(1, 3);
+  const cores: Array<{ x: number; y: number; radius: number; strength: number }> = [];
+  for (let i = 0; i < coreCount; i += 1) {
+    cores.push({
+      x: coreRng.next(),
+      y: coreRng.next(),
+      radius: coreRng.range(0.18, 0.34),
+      strength: coreRng.range(0.65, 1.1)
+    });
+  }
+
+  const macro = new Float32Array(n);
+  const coreInfluence = new Float32Array(n);
+  let macroMin = Number.POSITIVE_INFINITY;
+  let macroMax = Number.NEGATIVE_INFINITY;
+  let coreMax = 0;
+
+  for (let r = 0; r < h; r += 1) {
+    const yNorm = r / h;
+    for (let q = 0; q < w; q += 1) {
+      const i = r * w + q;
+      const xNorm = q / w;
+
+      const x = xNorm + macroShiftX;
+      const y = yNorm + macroShiftY;
+
+      const warped = macroNoise.warp(baseSeed ^ 0x1b873593, x, y, 0.42, 0.55, 0.45);
+      const macroBase = macroNoise.fbm(baseSeed ^ 0xa2b3c4d5, warped.x, warped.y, 3, 0.55, 0.42, 2.05, 0.5);
+      const macroDetail = macroNoise.fbm(baseSeed ^ 0x8f1bbcdc, warped.x, warped.y, 2, 1.25, 0.95, 2.2, 0.5);
+
+      let coreSum = 0;
+      for (const core of cores) {
+        const dx = wrapDelta01(xNorm, core.x, wrapX);
+        const dy = yNorm - core.y;
+        const d2 = dx * dx + dy * dy;
+        const influence = Math.exp(-d2 / (2 * core.radius * core.radius));
+        coreSum += influence * core.strength;
+      }
+
+      coreInfluence[i] = coreSum;
+      if (coreSum > coreMax) coreMax = coreSum;
+
+      const field = macroBase * 0.6 + macroDetail * 0.2 + coreSum * 0.85;
+      macro[i] = field;
+      if (field < macroMin) macroMin = field;
+      if (field > macroMax) macroMax = field;
+    }
+  }
+
+  const macroSeaBase = quantile(macro, env.waterFraction);
+  const macroRange = Math.max(0.0001, macroMax - macroMin);
+  const coastBand = clamp(macroRange * 0.18, 0.06, 0.28);
+  const coastStrength = macroRange * 0.12;
+
+  const macroAdjusted = new Float32Array(n);
+  let adjustedMin = Number.POSITIVE_INFINITY;
+  let adjustedMax = Number.NEGATIVE_INFINITY;
+
+  for (let r = 0; r < h; r += 1) {
+    const yNorm = r / h;
+    for (let q = 0; q < w; q += 1) {
+      const i = r * w + q;
+      const xNorm = q / w;
+
+      const x = xNorm + detailShiftX;
+      const y = yNorm + detailShiftY;
+
+      const coastNoise = detailNoise.fbm(baseSeed ^ 0x2c1b3c6d, x, y, 2, 4.6, 3.4, 2.1, 0.5);
+      const dist = Math.abs(macro[i] - macroSeaBase);
+      const t = dist < coastBand ? 1 - dist / coastBand : 0;
+      const coastWeight = fade(clamp(t, 0, 1));
+      const field = macro[i] + coastNoise * coastStrength * coastWeight;
+
+      macroAdjusted[i] = field;
+      if (field < adjustedMin) adjustedMin = field;
+      if (field > adjustedMax) adjustedMax = field;
+    }
+  }
+
+  const seaLevelElev = 0;
+  const seaLevelMacro = quantile(macroAdjusted, env.waterFraction);
+  const initialWaterMask = new Uint8Array(n);
+  for (let i = 0; i < n; i += 1) {
+    initialWaterMask[i] = macroAdjusted[i] > seaLevelMacro ? 0 : 1;
+  }
+
+  const microSize = Math.max(3, Math.floor(n / 1400));
+  const waterMask = applyMicroCleanup(initialWaterMask, w, h, wrapX, microSize, microSize);
+  const { oceanMask } = classifyWaterComponents(waterMask, w, h, wrapX);
+
+  const elev = new Float32Array(n);
+  const landSpan = Math.max(0.0001, adjustedMax - seaLevelMacro);
+  const oceanSpan = Math.max(0.0001, seaLevelMacro - adjustedMin);
+  const invLand = 1 / landSpan;
+  const invOcean = 1 / oceanSpan;
+  const coreScale = coreMax > 0 ? 1 / coreMax : 0;
+
+  for (let r = 0; r < h; r += 1) {
+    const yNorm = r / h;
+    for (let q = 0; q < w; q += 1) {
+      const i = r * w + q;
+      const xNorm = q / w;
+      const isWater = waterMask[i] === 1;
+      const macroVal = macroAdjusted[i];
+
+      const landness = isWater ? 0 : clamp((macroVal - seaLevelMacro) * invLand, 0, 1);
+      const oceanness = isWater ? clamp((seaLevelMacro - macroVal) * invOcean, 0, 1) : 0;
+      const coreBias = coreScale > 0 ? clamp(coreInfluence[i] * coreScale, 0, 1) : 0;
+
+      let base = isWater
+        ? -0.06 - oceanness * 0.55
+        : 0.06 + landness * 0.62 + coreBias * 0.14;
+
+      const x = xNorm + reliefShiftX;
+      const y = yNorm + reliefShiftY;
+
+      if (!isWater) {
+        const warped = reliefNoise.warp(baseSeed ^ 0x9e3779b9, x, y, 0.3, 1.8, 1.4);
+        const hills = reliefNoise.fbm(baseSeed ^ 0x3c6ef372, warped.x, warped.y, 4, 2.4, 2.1, 2.05, 0.5);
+        const ridges = reliefNoise.ridged(baseSeed ^ 0x1f123bb5, warped.x, warped.y, 4, 3.2, 3.0);
+        const reliefMask = 0.2 + 0.55 * landness + 0.25 * coreBias;
+        base += (hills * 0.4 + ridges * 0.6) * reliefMask * 0.35;
+      } else {
+        const seabed = reliefNoise.fbm(baseSeed ^ 0x7f4a7c15, x, y, 3, 1.4, 1.2, 2.1, 0.5);
+        base += seabed * 0.05;
+      }
+
+      const craterNoise = detailNoise.noise(
+        baseSeed ^ 0x165667b1,
+        xNorm + detailShiftX,
+        yNorm + detailShiftY,
+        6.0,
+        6.0
+      ) * 2 - 1;
+      const crater = env.surfaceClass === 'airless' ? craterNoise * env.craterIntensity * 0.45 : 0;
+
+      elev[i] = (base + crater) * env.reliefScale;
+    }
+  }
+
+  const seaLevelEps = 0.001;
+  for (let i = 0; i < n; i += 1) {
+    if (waterMask[i]) {
+      if (elev[i] > seaLevelElev - seaLevelEps) elev[i] = seaLevelElev - seaLevelEps;
+    } else if (elev[i] < seaLevelElev + seaLevelEps) {
+      elev[i] = seaLevelElev + seaLevelEps;
+    }
+  }
+
+  // --- Temperature field ---
+  const tempC2 = new Int16Array(n);
+  const baseT0K = params.planetData?.climateK
+    ?? params.planetData?.temperatureK
+    ?? params.moonData?.climateK
+    ?? params.moonData?.temperatureK
+    ?? 220;
+
+  for (let r = 0; r < h; r += 1) {
+    const lat = normalizedLatitude(r, h);
+    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), 1.45);
+    for (let q = 0; q < w; q += 1) {
+      const i = r * w + q;
+      const aboveSea = Math.max(0, elev[i] - seaLevelElev);
+      const altTerm = -env.lapseRateK * aboveSea;
+      const albedoTerm = params.planetData
+        ? -18 * clamp((params.planetData.albedo - 0.25) / 0.6, 0, 1)
+        : params.moonData
+          ? -18 * clamp((params.moonData.albedo - 0.25) / 0.6, 0, 1)
+          : 0;
+
+      const localK = baseT0K + latTerm + altTerm + albedoTerm;
+      const c = localK - 273.15;
+      tempC2[i] = Math.round(c * 2);
+    }
+  }
+
+  // --- Moisture field ---
+  const dist = bfsDistanceToWater(waterMask, w, h, wrapX);
+  const moistU8 = new Uint8Array(n);
+  const d0 = clamp(Math.round(Math.min(w, h) / 4), 6, 12);
+  for (let i = 0; i < n; i += 1) {
+    if (waterMask[i]) {
+      moistU8[i] = 255;
+      continue;
+    }
+    const d = dist[i] === 0xffff ? 999 : dist[i];
+    const m = 255 * Math.exp(-d / d0) * env.humidityFactor;
+    moistU8[i] = Math.round(clamp(m, 0, 255));
+  }
+
+  // --- Biomes base ---
+  const tiles: PlanetSurfaceTile[] = Array.from({ length: n }, (_, i): PlanetSurfaceTile => {
+    let biome: Biome = 'rocky';
+    if (waterMask[i]) biome = oceanMask[i] ? 'ocean' : 'lake';
+
+    return {
+      elev: Math.round(elev[i] * 1000),
+      tempC2: tempC2[i],
+      moist: moistU8[i],
+      biome,
+      featureBits: 0
+    };
+  });
+
+  // Coast refinement: any water adjacent to land becomes coast.
+  for (let i = 0; i < n; i += 1) {
+    if (!isWaterBiome(tiles[i].biome)) continue;
+    const c = indexToAxial(i, w);
+    const ns = neighborsAxial(c, w, h, wrapX);
+    const adjacentLand = ns.some(nc => !isWaterBiome(tiles[axialToIndex(nc, w)].biome));
+    if (adjacentLand) tiles[i].biome = 'coast';
+  }
+
+  // Land classification
+  for (let i = 0; i < n; i += 1) {
+    if (isWaterBiome(tiles[i].biome)) continue;
+    const elevRel = elev[i] - seaLevelElev;
+    if (env.surfaceClass === 'airless') {
+      tiles[i].biome = elevRel > 0.6 ? 'rocky' : 'cratered';
+      continue;
+    }
+
+    const r = Math.floor(i / w);
+    const q = i - r * w;
+    const x = q / w + detailShiftX;
+    const y = r / h + detailShiftY;
+
+    const tempJitter = detailNoise.fbm(baseSeed ^ 0x5bd1e995, x, y, 2, 6.4, 5.2, 2.1, 0.5);
+    const moistJitter = detailNoise.fbm(baseSeed ^ 0x27d4eb2d, x, y, 2, 7.1, 6.3, 2.1, 0.5);
+
+    const t = tiles[i].tempC2 / 2 + tempJitter * 1.6;
+    const m = clamp(tiles[i].moist + moistJitter * 12, 0, 255);
+
+    if (t < -18) {
+      tiles[i].biome = 'ice';
+      continue;
+    }
+    if (t < -6) {
+      tiles[i].biome = m > 110 ? 'taiga' : 'tundra';
+      continue;
+    }
+    if (elevRel > 0.85) {
+      tiles[i].biome = 'mountain';
+      continue;
+    }
+
+    if (t > 28 && m < 70) {
+      tiles[i].biome = 'desert';
+      continue;
+    }
+    if (t > 22 && m > 200) {
+      tiles[i].biome = 'rainforest';
+      continue;
+    }
+    if (m > 150) {
+      tiles[i].biome = 'forest';
+      continue;
+    }
+    tiles[i].biome = 'grassland';
+  }
+
+  // Volcanic hotspots
+  if (env.volcanismIndex > 0.55) {
+    for (let r = 0; r < h; r += 1) {
+      const y = r / h + detailShiftY;
+      for (let q = 0; q < w; q += 1) {
+        const i = r * w + q;
+        if (isWaterBiome(tiles[i].biome)) continue;
+        const x = q / w + detailShiftX;
+        const hot = detailNoise.fbm(baseSeed ^ 0xdeadbeef, x, y, 4, 4.0, 4.0, 2.0, 0.5);
+        if (hot > 0.72 + (1 - env.volcanismIndex) * 0.25) {
+          tiles[i].biome = 'volcanic';
+        }
+      }
+    }
+  }
+
+  // Rivers
+  if (env.riversEnabled) {
+    addRivers({ tiles, elev, seaLevelElev, w, h, wrapX });
+  }
+
+  const settlements = placeSettlements({
+    descriptor,
+    tiles,
+    w,
+    h,
+    wrapX,
+    ownerFactionId: params.ownerFactionId,
+    env
+  });
+
+  return {
+    systemId: params.systemId,
+    bodyId: params.bodyId,
+    descriptor,
+    seaLevelElev: Math.round(seaLevelElev * 1000),
+    tiles,
+    settlements
+  };
+};
+
 export const generateSurfaceMap = (params: {
   systemId: string;
   bodyId: string;
@@ -1940,6 +2520,9 @@ export const generateSurfaceMap = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const generatorVersion = params.descriptor.config?.generatorVersion ?? 1;
+  if (generatorVersion >= 4) {
+    return generateSurfaceMapV4(params);
+  }
   if (generatorVersion >= 3) {
     return generateSurfaceMapV3(params);
   }

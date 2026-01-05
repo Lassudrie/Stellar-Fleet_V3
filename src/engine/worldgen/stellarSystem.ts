@@ -628,12 +628,75 @@ export function computeMoonClimate(params: {
   return { climateK, greenhouseK, airMassIndex };
 }
 
+const MIN_SECONDARY_MASS_EARTH = 0.05;
+const MIN_MOON_SECONDARY_MASS_EARTH = 0.005;
+const EARTHLIKE_MIN_MASS_EARTH = 0.7;
+const PRIMARY_RETENTION_MASS_EARTH = 2.2;
+const PRIMARY_RETENTION_MAX_FLUX = 2.5;
+const PRIMARY_RETENTION_MAX_TEQ_K = 600;
+const MOON_EROSION_PENALTY = 0.12;
+
+const drawScaledPressureBar = (
+  rng: RNG,
+  range: [number, number],
+  scale: number,
+  minScale = 0.25,
+  maxScale = 1.8
+): number => {
+  const [minP, maxP] = range;
+  const base = rng.range(minP, maxP);
+  const clampedScale = clamp(scale, minScale, maxScale);
+  return clamp(base * clampedScale, minP * 0.2, maxP * 2.0);
+};
+
+const scalePressureBar = (
+  pressureBar: number,
+  range: [number, number],
+  scale: number,
+  minScale = 0.25,
+  maxScale = 1.8
+): number => {
+  const [minP, maxP] = range;
+  const clampedScale = clamp(scale, minScale, maxScale);
+  return clamp(pressureBar * clampedScale, minP * 0.2, maxP * 2.0);
+};
+
+const computeAtmosphereIndices = (params: {
+  massEarth: number;
+  gravityG: number;
+  teqK: number;
+  fluxEarth: number;
+  tidalBonusK?: number;
+  erosionBias?: number;
+  massFloor?: number;
+  massRange?: number;
+}): {
+  erosionIndex: number;
+  heavyRetention: number;
+  lightRetention: number;
+  outgassingIndex: number;
+} => {
+  const massFloor = params.massFloor ?? 0.05;
+  const massRange = params.massRange ?? 1.6;
+  const massScore = clamp01((params.massEarth - massFloor) / massRange);
+  const gravityScore = clamp01((params.gravityG - 0.12) / 1.0);
+  const tempScore = clamp01((params.teqK - 160) / 320);
+  const fluxScore = clamp01((params.fluxEarth - 0.6) / 6);
+  const erosionIndex = clamp01(0.55 * tempScore + 0.45 * fluxScore + (params.erosionBias ?? 0));
+  const heavyRetention = clamp01(0.62 * massScore + 0.38 * gravityScore - 0.5 * erosionIndex);
+  const lightRetention = clamp01(0.85 * massScore + 0.55 * gravityScore - 0.9 * erosionIndex - 0.15);
+  const tidalScore = clamp01((params.tidalBonusK ?? 0) / 140);
+  const outgassingIndex = clamp01(0.2 + 0.55 * massScore + 0.25 * tidalScore - 0.15 * erosionIndex);
+
+  return { erosionIndex, heavyRetention, lightRetention, outgassingIndex };
+};
+
 export function pickPlanetAlbedo(planetType: PlanetType): number {
   return DEFAULT_PLANET_ALBEDO[planetType];
 }
 
 export function canHoldAtmosphere(massEarth: number, gravityG: number): boolean {
-  return gravityG >= 0.25 && massEarth >= 0.08;
+  return gravityG >= 0.12 && massEarth >= MIN_SECONDARY_MASS_EARTH;
 }
 
 export function assignPlanetAtmosphere(
@@ -642,25 +705,38 @@ export function assignPlanetAtmosphere(
   massEarth: number,
   gravityG: number,
   teqK: number,
+  fluxEarth: number,
   derived: StellarDerived
 ): { atmosphere: AtmosphereType; pressureBar?: number } {
-  const canHold = canHoldAtmosphere(massEarth, gravityG);
-
   if (planetType === 'GasGiant' || planetType === 'IceGiant' || planetType === 'SubNeptune') {
-    const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.H2He[0], ATMOSPHERE_PRESSURE_BAR.H2He[1]);
+    const pressureBar = drawScaledPressureBar(
+      rng,
+      ATMOSPHERE_PRESSURE_BAR.H2He,
+      0.9 + 0.2 * clamp01((massEarth - 10) / 200),
+      0.7,
+      1.3
+    );
     return { atmosphere: 'H2He', pressureBar };
   }
 
-  if (planetType === 'Dwarf') {
-    if (canHold && teqK > 80) {
-      const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.Thin[0], ATMOSPHERE_PRESSURE_BAR.Thin[1]);
-      return { atmosphere: 'Thin', pressureBar };
-    }
+  const flux = Math.max(0.01, fluxEarth);
+  const indices = computeAtmosphereIndices({ massEarth, gravityG, teqK, fluxEarth: flux });
+
+  if (!canHoldAtmosphere(massEarth, gravityG) || indices.heavyRetention < 0.08) {
     return { atmosphere: 'None' };
   }
 
-  // Terrestrial
-  if (!canHold) return { atmosphere: 'None' };
+  if (
+    planetType === 'Terrestrial'
+    && massEarth >= PRIMARY_RETENTION_MASS_EARTH
+    && indices.lightRetention >= 0.7
+    && flux <= PRIMARY_RETENTION_MAX_FLUX
+    && teqK <= PRIMARY_RETENTION_MAX_TEQ_K
+  ) {
+    const scale = 0.3 + 0.6 * indices.lightRetention + 0.1 * clamp01((massEarth - PRIMARY_RETENTION_MASS_EARTH) / 4);
+    const pressureBar = drawScaledPressureBar(rng, ATMOSPHERE_PRESSURE_BAR.H2He, scale, 0.2, 0.9);
+    return { atmosphere: 'H2He', pressureBar };
+  }
 
   // Proxy surface climate using a nominal 1 bar Earthlike greenhouse.
   const proxySurface = computePlanetClimate({ teqK, atmosphere: 'Earthlike', pressureBar: 1 }).climateK;
@@ -668,25 +744,38 @@ export function assignPlanetAtmosphere(
   const inHz = proxySurface >= 240 && proxySurface <= 320;
   const orbitInHz = derived.hzInnerAu <= derived.semiMajorAxisAu && derived.semiMajorAxisAu <= derived.hzOuterAu;
 
-  if (inHz && orbitInHz) {
-    if (rng.next() < 0.4) {
-      const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.Earthlike[0], ATMOSPHERE_PRESSURE_BAR.Earthlike[1]);
-      return { atmosphere: 'Earthlike', pressureBar };
-    }
-    const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.Thin[0], ATMOSPHERE_PRESSURE_BAR.Thin[1]);
-    return { atmosphere: 'Thin', pressureBar };
+  const earthlikeEligible = planetType === 'Terrestrial'
+    && massEarth >= EARTHLIKE_MIN_MASS_EARTH
+    && indices.heavyRetention >= 0.55
+    && indices.erosionIndex <= 0.55
+    && inHz
+    && orbitInHz;
+  const earthlikeMassBias = clamp01(1 - Math.max(0, (massEarth - 1.2) / 2));
+  const earthlikeChance = clamp01(
+    0.25 + 0.5 * indices.outgassingIndex - 0.3 * indices.erosionIndex + 0.2 * earthlikeMassBias
+  );
+
+  if (earthlikeEligible && rng.next() < earthlikeChance) {
+    const scale = 0.6 + 0.7 * indices.heavyRetention + 0.3 * indices.outgassingIndex - 0.2 * indices.erosionIndex;
+    const pressureBar = drawScaledPressureBar(rng, ATMOSPHERE_PRESSURE_BAR.Earthlike, scale, 0.6, 1.6);
+    return { atmosphere: 'Earthlike', pressureBar };
   }
 
-  if (teqK > 330) {
-    if (rng.next() < 0.5) {
-      const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.CO2[0], ATMOSPHERE_PRESSURE_BAR.CO2[1]);
-      return { atmosphere: 'CO2', pressureBar };
-    }
-    const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.Thin[0], ATMOSPHERE_PRESSURE_BAR.Thin[1]);
-    return { atmosphere: 'Thin', pressureBar };
+  const co2Eligible = indices.outgassingIndex >= 0.35 && indices.heavyRetention >= 0.35;
+  const hotBias = clamp01((teqK - 260) / 220 + (flux - 1) / 5);
+  const co2Chance = clamp01(0.2 + 0.6 * hotBias + 0.2 * indices.outgassingIndex);
+  if (co2Eligible && rng.next() < co2Chance) {
+    const scale = 0.8 + 0.7 * indices.heavyRetention + 0.4 * indices.outgassingIndex;
+    const pressureBar = drawScaledPressureBar(rng, ATMOSPHERE_PRESSURE_BAR.CO2, scale, 0.6, 1.8);
+    return { atmosphere: 'CO2', pressureBar };
   }
 
-  const pressureBar = rng.range(ATMOSPHERE_PRESSURE_BAR.Thin[0], ATMOSPHERE_PRESSURE_BAR.Thin[1]);
+  if (indices.heavyRetention < 0.15 && indices.outgassingIndex < 0.25) {
+    return { atmosphere: 'None' };
+  }
+
+  const thinScale = 0.25 + 0.6 * indices.heavyRetention + 0.3 * indices.outgassingIndex;
+  const pressureBar = drawScaledPressureBar(rng, ATMOSPHERE_PRESSURE_BAR.Thin, thinScale, 0.2, 1.2);
   return { atmosphere: 'Thin', pressureBar };
 }
 
@@ -802,7 +891,7 @@ export function buildPlanet(
   const teqK = computeTeqK(flux, albedo);
 
   const derived: StellarDerived = { semiMajorAxisAu, hzInnerAu, hzOuterAu };
-  const { atmosphere, pressureBar } = assignPlanetAtmosphere(rng, planetType, massEarth, gravityG, teqK, derived);
+  const { atmosphere, pressureBar } = assignPlanetAtmosphere(rng, planetType, massEarth, gravityG, teqK, flux, derived);
   const { climateK, greenhouseK, airMassIndex } = computePlanetClimate({ teqK, atmosphere, pressureBar });
   const temperatureK = climateK;
 
@@ -958,7 +1047,7 @@ export function computeMoonGravityG(massEarth: number, radiusEarth: number): num
 }
 
 export function canHoldMoonAtmosphere(massEarth: number, gravityG: number): boolean {
-  return massEarth >= 0.01 || gravityG >= 0.18;
+  return massEarth >= MIN_MOON_SECONDARY_MASS_EARTH || gravityG >= 0.08;
 }
 
 export function drawMoonPressureBar(
@@ -974,30 +1063,79 @@ export function drawMoonPressureBar(
 
 export function assignMoonAtmosphere(
   rng: RNG,
-  moonType: MoonType,
-  canHold: boolean,
-  temperatureK: number
-): { atmosphere: Exclude<AtmosphereType, 'H2He'>; finalMoonType: MoonType } {
+  params: {
+    moonType: MoonType;
+    massEarth: number;
+    gravityG: number;
+    teqK: number;
+    fluxEarth: number;
+    tidalBonusK: number;
+  }
+): { atmosphere: Exclude<AtmosphereType, 'H2He'>; finalMoonType: MoonType; pressureBar?: number } {
+  const { moonType, massEarth, gravityG, teqK, fluxEarth, tidalBonusK } = params;
   if (moonType === 'Irregular') return { atmosphere: 'None', finalMoonType: moonType };
 
+  const proxyTempK = teqK + tidalBonusK;
+  const indices = computeAtmosphereIndices({
+    massEarth,
+    gravityG,
+    teqK: proxyTempK,
+    fluxEarth: Math.max(0.01, fluxEarth),
+    tidalBonusK,
+    erosionBias: MOON_EROSION_PENALTY,
+    massFloor: 0.002,
+    massRange: 0.02
+  });
+
+  if (!canHoldMoonAtmosphere(massEarth, gravityG) || indices.heavyRetention < 0.1) {
+    const finalMoonType = moonType === 'Eden' || moonType === 'Volcanic' ? 'Regular' : moonType;
+    return { atmosphere: 'None', finalMoonType };
+  }
+
   if (moonType === 'Eden') {
-    if (canHold && temperatureK >= 240 && temperatureK <= 320) {
-      return { atmosphere: 'Earthlike', finalMoonType: 'Eden' };
+    if (proxyTempK >= 240 && proxyTempK <= 320 && indices.heavyRetention >= 0.5 && indices.erosionIndex <= 0.55) {
+      const scale = 0.7 + 0.7 * indices.heavyRetention + 0.3 * indices.outgassingIndex - 0.2 * indices.erosionIndex;
+      const base = drawMoonPressureBar(rng, 'Earthlike', gravityG) ?? 1;
+      const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.Earthlike, scale, 0.5, 1.6);
+      return { atmosphere: 'Earthlike', finalMoonType: 'Eden', pressureBar };
     }
-    return { atmosphere: 'Thin', finalMoonType: 'Regular' };
+    const scale = 0.25 + 0.6 * indices.heavyRetention + 0.3 * indices.outgassingIndex;
+    const base = drawMoonPressureBar(rng, 'Thin', gravityG) ?? 0.02;
+    const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.Thin, scale, 0.2, 1.2);
+    return { atmosphere: 'Thin', finalMoonType: 'Regular', pressureBar };
   }
 
   if (moonType === 'Volcanic') {
-    if (canHold && temperatureK > 180 && rng.next() < 0.4) return { atmosphere: 'CO2', finalMoonType: 'Volcanic' };
-    return { atmosphere: 'Thin', finalMoonType: 'Regular' };
+    if (indices.outgassingIndex >= 0.45 && indices.heavyRetention >= 0.2) {
+      const scale = 0.8 + 0.6 * indices.heavyRetention + 0.4 * indices.outgassingIndex;
+      const base = drawMoonPressureBar(rng, 'CO2', gravityG) ?? 0.5;
+      const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.CO2, scale, 0.5, 1.8);
+      return { atmosphere: 'CO2', finalMoonType: 'Volcanic', pressureBar };
+    }
+    const scale = 0.25 + 0.6 * indices.heavyRetention + 0.3 * indices.outgassingIndex;
+    const base = drawMoonPressureBar(rng, 'Thin', gravityG) ?? 0.02;
+    const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.Thin, scale, 0.2, 1.2);
+    return { atmosphere: 'Thin', finalMoonType: 'Regular', pressureBar };
   }
 
   if (moonType === 'Icy') {
-    return { atmosphere: canHold ? 'Thin' : 'None', finalMoonType: 'Icy' };
+    if (indices.heavyRetention >= 0.25) {
+      const scale = 0.25 + 0.6 * indices.heavyRetention + 0.3 * indices.outgassingIndex;
+      const base = drawMoonPressureBar(rng, 'Thin', gravityG) ?? 0.02;
+      const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.Thin, scale, 0.2, 1.2);
+      return { atmosphere: 'Thin', finalMoonType: 'Icy', pressureBar };
+    }
+    return { atmosphere: 'None', finalMoonType: 'Icy' };
   }
 
-  // Regular
-  return { atmosphere: canHold ? 'Thin' : 'None', finalMoonType: 'Regular' };
+  if (indices.heavyRetention >= 0.25) {
+    const scale = 0.25 + 0.6 * indices.heavyRetention + 0.3 * indices.outgassingIndex;
+    const base = drawMoonPressureBar(rng, 'Thin', gravityG) ?? 0.02;
+    const pressureBar = scalePressureBar(base, MOON_ATMOSPHERE_PRESSURE_BAR.Thin, scale, 0.2, 1.2);
+    return { atmosphere: 'Thin', finalMoonType: 'Regular', pressureBar };
+  }
+
+  return { atmosphere: 'None', finalMoonType: 'Regular' };
 }
 
 export function tidalBonusK(rng: RNG, planetType: PlanetType, moonRank: number): number {
@@ -1046,11 +1184,15 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
     const teqK = computeTeqK(flux, albedo);
 
     const tidal = isRegular ? tidalBonusK(rng, planetType, rank) : 0;
-    const provisionalT = clamp(teqK + tidal, 30, 2000);
 
-    const canHold = canHoldMoonAtmosphere(massEarth, gravityG);
-    const { atmosphere, finalMoonType } = assignMoonAtmosphere(rng, t0, canHold, provisionalT);
-    const pressureBar = drawMoonPressureBar(rng, atmosphere, gravityG);
+    const { atmosphere, finalMoonType, pressureBar } = assignMoonAtmosphere(rng, {
+      moonType: t0,
+      massEarth,
+      gravityG,
+      teqK,
+      fluxEarth: flux,
+      tidalBonusK: tidal
+    });
     const { climateK, greenhouseK, airMassIndex } = computeMoonClimate({
       teqK,
       atmosphere,

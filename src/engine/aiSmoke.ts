@@ -25,7 +25,7 @@ const parseTurnCount = (): number => {
 const parseSeed = (): number => {
   const raw = process.env.SMOKE_SEED;
   if (raw === undefined || raw === '') {
-    return Date.now();
+    return 1337;
   }
 
   const seed = Number.parseInt(raw, 10);

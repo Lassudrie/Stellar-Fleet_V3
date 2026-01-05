@@ -40,7 +40,7 @@ import { checkVictoryConditions } from '../objectives';
 import { deserializeGameState, serializeGameState } from '../serialization';
 import { resolveFleetMovement } from '../movement';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isFleetWithinOrbitProximity, isOrbitContested } from '../orbit';
-import { generateStellarSystem } from '../worldgen/stellarSystem';
+import { assignMoonAtmosphere, assignPlanetAtmosphere, generateStellarSystem } from '../worldgen/stellarSystem';
 import { findNearestSystem } from '../world';
 import { FuelShortageError, quantizeFuel } from '../logistics/fuel';
 import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../fogOfWar';
@@ -3147,6 +3147,41 @@ tests.push(
     }
   },
   {
+    name: 'Atmosphere generation: low-mass rocky bodies are airless',
+    run: () => {
+      const rng = new RNG(1);
+      const derived = { semiMajorAxisAu: 1, hzInnerAu: 0.95, hzOuterAu: 1.5 };
+      const result = assignPlanetAtmosphere(rng, 'Terrestrial', 0.02, 0.05, 220, 1, derived);
+      assert.strictEqual(result.atmosphere, 'None');
+    }
+  },
+  {
+    name: 'Atmosphere generation: massive cold super-Earth can retain primary H2/He',
+    run: () => {
+      const rng = new RNG(1);
+      const derived = { semiMajorAxisAu: 5, hzInnerAu: 0.4, hzOuterAu: 1.2 };
+      const result = assignPlanetAtmosphere(rng, 'Terrestrial', 4.2, 1.6, 140, 0.3, derived);
+      assert.strictEqual(result.atmosphere, 'H2He');
+      assert.ok(engine_isFiniteNumber(result.pressureBar));
+    }
+  },
+  {
+    name: 'Atmosphere generation: irregular moons remain airless',
+    run: () => {
+      const rng = new RNG(2);
+      const result = assignMoonAtmosphere(rng, {
+        moonType: 'Irregular',
+        massEarth: 0.01,
+        gravityG: 0.12,
+        teqK: 200,
+        fluxEarth: 1,
+        tidalBonusK: 0
+      });
+      assert.strictEqual(result.atmosphere, 'None');
+      assert.strictEqual(result.pressureBar, undefined);
+    }
+  },
+  {
     name: 'Water fraction roughly matches derived waterFraction (quantile sea level invariant)',
     run: () => {
       const worldSeed = 123;
@@ -3236,6 +3271,93 @@ tests.push(
       const systemId = 'sys_surface_sea_level';
       const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const seaLevel = map.seaLevelElev;
+      const tolerance = 1;
+      for (const tile of map.tiles) {
+        if (engine_isWaterBiome(tile.biome)) {
+          assert.ok(tile.elev <= seaLevel + tolerance, `Water tile above sea level: ${tile.elev} > ${seaLevel}`);
+        } else {
+          assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
+        }
+      }
+    }
+  },
+  {
+    name: 'Surface v4 ocean tiles belong to the largest water component',
+    run: () => {
+      const worldSeed = 414;
+      const systemId = 'sys_surface_ocean_v4';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 4 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      const waterMask = new Uint8Array(map.tiles.length);
+      let oceanTiles = 0;
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (engine_isWaterBiome(map.tiles[i].biome)) waterMask[i] = 1;
+        if (map.tiles[i].biome === 'ocean') oceanTiles += 1;
+      }
+      const { labels, sizes } = engine_labelComponents(waterMask, w, h, wrapX);
+      if (sizes.length === 0 || oceanTiles === 0) return;
+
+      let largestIdx = 0;
+      let largestSize = sizes[0] ?? 0;
+      for (let i = 1; i < sizes.length; i += 1) {
+        if ((sizes[i] ?? 0) > largestSize) {
+          largestSize = sizes[i] ?? 0;
+          largestIdx = i;
+        }
+      }
+
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (map.tiles[i].biome !== 'ocean') continue;
+        assert.strictEqual(labels[i], largestIdx, 'Ocean tiles should belong to the largest water component');
+      }
+    }
+  },
+  {
+    name: 'Surface v4 wrapX seam elevation deltas are within internal range',
+    run: () => {
+      const worldSeed = 272;
+      const systemId = 'sys_surface_seam_v4';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 4 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      if (!wrapX || w < 2) return;
+
+      const seamDiffs: number[] = [];
+      const internalDiffs: number[] = [];
+      for (let r = 0; r < h; r += 1) {
+        const leftIdx = r * w;
+        const rightIdx = r * w + (w - 1);
+        seamDiffs.push(Math.abs(map.tiles[leftIdx].elev - map.tiles[rightIdx].elev));
+        for (let q = 0; q < w - 1; q += 1) {
+          const a = r * w + q;
+          const b = a + 1;
+          internalDiffs.push(Math.abs(map.tiles[a].elev - map.tiles[b].elev));
+        }
+      }
+
+      const maxSeam = Math.max(...seamDiffs);
+      const maxInternal = Math.max(...internalDiffs);
+      assert.ok(
+        maxSeam <= maxInternal * 1.5 + 1,
+        `Wrap seam delta ${maxSeam} exceeds internal max ${maxInternal}`
+      );
+    }
+  },
+  {
+    name: 'Surface v4 water/land respects sea level after cleanup',
+    run: () => {
+      const worldSeed = 178;
+      const systemId = 'sys_surface_sea_level_v4';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 4 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
       const seaLevel = map.seaLevelElev;

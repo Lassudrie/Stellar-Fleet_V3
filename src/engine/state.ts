@@ -1,4 +1,4 @@
-import type { Army, Battle, Fleet, GameMessage, GameState, GroundBuilding, LogEntry, StarSystem, Station } from '../shared/shared';
+import type { Army, Battle, Fleet, GameMessage, GameState, GroundBuilding, LaserShot, LogEntry, StarSystem, Station } from '../shared/shared';
 import { sorted } from '../shared/shared';
 
 // ============================================================
@@ -72,6 +72,7 @@ export const canonicalizeState = (state: GameState): GameState => {
     fleets: canonicalizeFleets(state.fleets),
     stations: canonicalizeStations(state.stations ?? []),
     armies: canonicalizeArmies(state.armies),
+    lasers: canonicalizeLasers(state.lasers),
     groundBuildings: canonicalizeGroundBuildings(state.groundBuildings ?? []),
     battles: canonicalizeBattles(state.battles),
     logs: canonicalizeLogs(state.logs),
@@ -103,6 +104,10 @@ export const canonicalizeStations = (stations: Station[]): Station[] => {
 
 export const canonicalizeArmies = (armies: Army[]): Army[] => {
   return sorted(armies, (a, b) => compareIds(a.id, b.id));
+};
+
+export const canonicalizeLasers = (lasers: LaserShot[]): LaserShot[] => {
+  return sorted(lasers, (a, b) => compareIds(a.id, b.id));
 };
 
 export const canonicalizeGroundBuildings = (buildings: GroundBuilding[]): GroundBuilding[] => {
@@ -147,9 +152,32 @@ export const isCanonical = (state: GameState): boolean => {
     }
   }
 
+  // Check ships order within fleets
+  for (const fleet of state.fleets) {
+    for (let i = 1; i < fleet.ships.length; i++) {
+      if (compareIds(fleet.ships[i].id, fleet.ships[i - 1].id) < 0) {
+        return false;
+      }
+    }
+  }
+
   // Check armies order
   for (let i = 1; i < state.armies.length; i++) {
     if (compareIds(state.armies[i].id, state.armies[i - 1].id) < 0) {
+      return false;
+    }
+  }
+
+  // Check lasers order
+  for (let i = 1; i < state.lasers.length; i++) {
+    if (compareIds(state.lasers[i].id, state.lasers[i - 1].id) < 0) {
+      return false;
+    }
+  }
+
+  const groundBuildings = state.groundBuildings ?? [];
+  for (let i = 1; i < groundBuildings.length; i++) {
+    if (compareIds(groundBuildings[i].id, groundBuildings[i - 1].id) < 0) {
       return false;
     }
   }
@@ -187,4 +215,3 @@ export const isCanonical = (state: GameState): boolean => {
 
   return true;
 };
-
