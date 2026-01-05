@@ -149,6 +149,7 @@ const SystemDetailModal: React.FC<SystemDetailModalProps> = ({ system, onClose }
   }
 
   const astro = system.astro;
+  const hasGasPlanet = system.planets.some(body => body.bodyType === 'planet' && !body.isSolid);
   const habitableZoneLabel = astro
     ? (() => {
         const inner = formatAu(astro.derived?.hzInnerAu, unknown);
@@ -167,7 +168,7 @@ const SystemDetailModal: React.FC<SystemDetailModalProps> = ({ system, onClose }
           <div>
             <div className="text-xs text-slate-400 uppercase tracking-wide">{t('system.modal.systemLabel')}</div>
             <div className="text-2xl font-bold">{system.name}</div>
-            {system.resourceType === 'gas' && (
+            {hasGasPlanet && (
               <div className="text-sm text-amber-300 mt-1 font-semibold">Resource: {GAS_GIANT_ICON}</div>
             )}
             {astro && (

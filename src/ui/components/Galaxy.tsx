@@ -37,6 +37,9 @@ interface GroundIndicatorInfo {
     squares: GroundIndicatorSquare[];
 }
 
+const hasGasPlanet = (system: StarSystem): boolean =>
+    system.planets.some(body => body.bodyType === 'planet' && !body.isSolid);
+
 const GroundIndicator: React.FC<{ indicator: GroundIndicatorInfo }> = ({ indicator }) => (
     <group position={indicator.position}>
         <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
@@ -70,10 +73,10 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor
     const armyIconRef = useRef<any>(null);
     const isOwned = system.ownerFactionId !== null;
     
-    const resourceIcon = useMemo(() => {
-        if (system.resourceType !== 'gas') return null;
-        return GAS_GIANT_ICON;
-    }, [system.resourceType]);
+    const resourceIcon = useMemo(
+        () => (hasGasPlanet(system) ? GAS_GIANT_ICON : null),
+        [system]
+    );
 
     const armyVisual = useMemo(() => {
         if (!armyInfo || (armyInfo.playerCount === 0 && armyInfo.enemyCount === 0)) return null;
@@ -324,10 +327,10 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
   }, [armiesByPlanetId, factionColorById, systems]);
 
   const resolveGasIconColor = (system: StarSystem): string => {
-      if (system.resourceType !== 'gas') return '#ffffff';
+      if (!hasGasPlanet(system)) return '#ffffff';
       if (!system.ownerFactionId) return '#ffffff';
       const extractingFactions = extractingBySystem.get(system.id);
-      if (extractingFactions?.has(system.ownerFactionId)) return '#22c55e';
+      if (system.resourceType === 'gas' && extractingFactions?.has(system.ownerFactionId)) return '#22c55e';
       return factionColorById.get(system.ownerFactionId) ?? '#ffffff';
   };
 
