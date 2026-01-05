@@ -3001,6 +3001,12 @@ tests.push(
           const expectedG = planet.massEarth / (planet.radiusEarth * planet.radiusEarth);
           assert.ok(Math.abs(planet.gravityG - expectedG) < 1e-9);
 
+          assert.ok(engine_isFiniteNumber(planet.climateK));
+          assert.ok(planet.climateK >= 30 && planet.climateK <= 2000);
+          assert.ok(engine_isFiniteNumber(planet.greenhouseK));
+          assert.ok(planet.greenhouseK >= 0);
+          assert.ok(engine_isFiniteNumber(planet.airMassIndex));
+          assert.ok(planet.airMassIndex >= 0 && planet.airMassIndex <= 1);
           assert.ok(engine_isFiniteNumber(planet.temperatureK));
           assert.ok(planet.temperatureK >= 30 && planet.temperatureK <= 2000);
 
@@ -3010,6 +3016,12 @@ tests.push(
             assert.ok(engine_isFiniteNumber(moon.massEarth) && moon.massEarth >= 0);
             assert.ok(engine_isFiniteNumber(moon.radiusEarth) && moon.radiusEarth > 0);
             assert.ok(engine_isFiniteNumber(moon.gravityG) && moon.gravityG >= 0);
+            assert.ok(engine_isFiniteNumber(moon.climateK));
+            assert.ok(moon.climateK >= 30 && moon.climateK <= 2000);
+            assert.ok(engine_isFiniteNumber(moon.greenhouseK));
+            assert.ok(moon.greenhouseK >= 0);
+            assert.ok(engine_isFiniteNumber(moon.airMassIndex));
+            assert.ok(moon.airMassIndex >= 0 && moon.airMassIndex <= 1);
             assert.ok(engine_isFiniteNumber(moon.temperatureK));
             assert.ok(moon.temperatureK >= 30 && moon.temperatureK <= 2000);
           }

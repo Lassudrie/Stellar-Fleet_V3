@@ -138,10 +138,10 @@ export interface SurfacePos {
 
 PlanetData contient déjà l’essentiel pour contraindre le générateur :
 
-- temperatureK / teqK
+- climateK / temperatureK / teqK
 - gravityG
 - albedo
-- atmosphere (+ pressureBar? si présent)
+- atmosphere (+ pressureBar? si présent) + greenhouseK + airMassIndex
 - semiMajorAxisAu
 - type/class (terrestrial / sub-neptune / etc.)
 - Côté lunes : MoonData.tidalBonusK? utile pour volcanisme.
@@ -181,6 +181,13 @@ Le pipeline standard produit trois champs continus puis discrétise :
 - Humidité (moist) → distance à l’eau + facteur atmosphère/pression + option “rain shadow”
 
 Puis : classification biomes + rivières + features (villes).
+
+#### Classification de surface (climat)
+- `airless` si `airMassIndex < 0.06`
+- `icy` si `climateK < 240`
+- `hot` si `climateK > 335`
+- `dense` si `airMassIndex >= 0.6` (CO2 + `greenhouseK >= 45` ⇒ `co2_greenhouse`)
+- sinon `temperate`
 
 ## 6. Stockage, sauvegarde, caches
 

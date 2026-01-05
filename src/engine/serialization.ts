@@ -34,7 +34,10 @@ import {
   GroundOrder,
   GroundPosture,
   GroundUnitType,
-  VictoryType
+  VictoryType,
+  PlanetData,
+  MoonData,
+  logger
 } from '../shared/shared';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -42,7 +45,13 @@ import { withUpdatedFleetDerived } from './fleetDerived';
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { RNG } from './rng';
-import { drawCompanionOrbits, deriveSeed32, generateStellarSystem } from './worldgen/stellarSystem';
+import {
+  drawCompanionOrbits,
+  deriveSeed32,
+  generateStellarSystem,
+  computePlanetClimate,
+  computeMoonClimate
+} from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './planetSurface';
@@ -365,9 +374,16 @@ const clampText = (value: unknown, maxLength: number, fallback: string): string 
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-const clampArray = <T>(items: T[], max: number, label: string, sliceFromEnd = false): T[] => {
+const clampArray = <T>(
+  items: T[],
+  max: number,
+  label: string,
+  sliceFromEnd = false,
+  logLevel: 'warn' | 'info' = 'warn'
+): T[] => {
   if (items.length <= max) return items;
-  console.warn(`[Serialization] ${label} truncated from ${items.length} to ${max}.`);
+  const log = logLevel === 'info' ? logger.info : logger.warn;
+  log(`[Serialization] ${label} truncated from ${items.length} to ${max}.`);
   return sliceFromEnd ? items.slice(-max) : items.slice(0, max);
 };
 
@@ -381,12 +397,120 @@ const isStarOrbit = (orbit: unknown): orbit is StarOrbit => {
     && isFiniteNumber(o.ascendingNodeDeg);
 };
 
+const needsMoonClimateNormalization = (moon: MoonData): boolean => (
+  !isFiniteNumber(moon.climateK)
+  || !isFiniteNumber(moon.greenhouseK)
+  || !isFiniteNumber(moon.airMassIndex)
+  || !isFiniteNumber(moon.temperatureK)
+);
+
+const normalizeMoonClimate = (moon: MoonData): MoonData => {
+  const needsClimate = !isFiniteNumber(moon.climateK) && !isFiniteNumber(moon.temperatureK);
+  const needsAirMass = !isFiniteNumber(moon.airMassIndex);
+  const computed = needsClimate || needsAirMass
+    ? computeMoonClimate({
+        teqK: moon.teqK,
+        atmosphere: moon.atmosphere,
+        pressureBar: moon.pressureBar,
+        tidalBonusK: moon.tidalBonusK
+      })
+    : undefined;
+
+  const climateK = isFiniteNumber(moon.climateK)
+    ? moon.climateK
+    : isFiniteNumber(moon.temperatureK)
+      ? moon.temperatureK
+      : computed!.climateK;
+  const greenhouseK = isFiniteNumber(moon.greenhouseK)
+    ? moon.greenhouseK
+    : Math.max(0, climateK - moon.teqK - (moon.tidalBonusK ?? 0));
+  const airMassIndex = isFiniteNumber(moon.airMassIndex)
+    ? moon.airMassIndex
+    : computed!.airMassIndex;
+  const temperatureK = isFiniteNumber(moon.temperatureK) ? moon.temperatureK : climateK;
+
+  if (
+    climateK === moon.climateK
+    && greenhouseK === moon.greenhouseK
+    && airMassIndex === moon.airMassIndex
+    && temperatureK === moon.temperatureK
+  ) {
+    return moon;
+  }
+
+  return {
+    ...moon,
+    climateK,
+    greenhouseK,
+    airMassIndex,
+    temperatureK
+  };
+};
+
+const needsPlanetClimateNormalization = (planet: PlanetData): boolean => (
+  !isFiniteNumber(planet.climateK)
+  || !isFiniteNumber(planet.greenhouseK)
+  || !isFiniteNumber(planet.airMassIndex)
+  || !isFiniteNumber(planet.temperatureK)
+  || (Array.isArray(planet.moons) && planet.moons.some(needsMoonClimateNormalization))
+);
+
+const normalizePlanetClimate = (planet: PlanetData): PlanetData => {
+  const needsClimate = !isFiniteNumber(planet.climateK) && !isFiniteNumber(planet.temperatureK);
+  const needsAirMass = !isFiniteNumber(planet.airMassIndex);
+  const computed = needsClimate || needsAirMass
+    ? computePlanetClimate({
+        teqK: planet.teqK,
+        atmosphere: planet.atmosphere,
+        pressureBar: planet.pressureBar
+      })
+    : undefined;
+
+  const climateK = isFiniteNumber(planet.climateK)
+    ? planet.climateK
+    : isFiniteNumber(planet.temperatureK)
+      ? planet.temperatureK
+      : computed!.climateK;
+  const greenhouseK = isFiniteNumber(planet.greenhouseK)
+    ? planet.greenhouseK
+    : Math.max(0, climateK - planet.teqK);
+  const airMassIndex = isFiniteNumber(planet.airMassIndex)
+    ? planet.airMassIndex
+    : computed!.airMassIndex;
+  const temperatureK = isFiniteNumber(planet.temperatureK) ? planet.temperatureK : climateK;
+
+  const moonsSource = Array.isArray(planet.moons) ? planet.moons : [];
+  const moons = moonsSource.some(needsMoonClimateNormalization)
+    ? moonsSource.map(moon => (needsMoonClimateNormalization(moon) ? normalizeMoonClimate(moon) : moon))
+    : moonsSource;
+
+  if (
+    climateK === planet.climateK
+    && greenhouseK === planet.greenhouseK
+    && airMassIndex === planet.airMassIndex
+    && temperatureK === planet.temperatureK
+    && moons === planet.moons
+  ) {
+    return planet;
+  }
+
+  return {
+    ...planet,
+    climateK,
+    greenhouseK,
+    airMassIndex,
+    temperatureK,
+    moons
+  };
+};
+
 const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
   if (!Array.isArray(astro.stars) || astro.stars.length === 0) return astro;
   const primaryMassSun = isFiniteNumber(astro.stars[0]?.massSun) ? astro.stars[0].massSun : 1;
   const companionStars = astro.stars.slice(1);
   const needsOrbit = companionStars.some(star => !isStarOrbit(star?.orbit));
-  if (!needsOrbit) return astro;
+  const needsPlanetClimate = astro.planets.some(needsPlanetClimateNormalization);
+  if (!needsOrbit && !needsPlanetClimate) return astro;
 
   const orbitRng = new RNG(deriveSeed32(astro.seed, 'star_orbits'));
   const companionMasses = companionStars.map(star => (isFiniteNumber(star?.massSun) ? star.massSun : 1));
@@ -397,11 +521,15 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
     const orbit = companionOrbits[index - 1];
     return orbit ? { ...star, orbit } : star;
   });
+  const normalizedPlanets = needsPlanetClimate
+    ? astro.planets.map(planet => (needsPlanetClimateNormalization(planet) ? normalizePlanetClimate(planet) : planet))
+    : astro.planets;
 
   return {
     ...astro,
     starCount: normalizedStars.length,
-    stars: normalizedStars
+    stars: normalizedStars,
+    planets: normalizedPlanets
   };
 };
 
@@ -735,7 +863,7 @@ const ensurePlanetSurfaceDescriptors = (params: {
   }
 
   if (created > 0) {
-    console.warn(
+    logger.info(
       `[Serialization] Backfilled ${created} missing planet surface descriptor(s). ` +
         'This save was likely created by an older version.'
     );
@@ -1374,7 +1502,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       const logs: string[] = rawLogs
         .map((entry: unknown) => clampText(entry, MAX_LOG_TEXT_LENGTH, ''))
         .filter((entry): entry is string => Boolean(entry));
-      const clampedLogs = clampArray(logs, MAX_BATTLE_LOGS, `battle logs for ${b.id}`, true);
+      const clampedLogs = clampArray(logs, MAX_BATTLE_LOGS, `battle logs for ${b.id}`, true, 'info');
 
       const turnCreated = isFiniteNumber(b.turnCreated) ? b.turnCreated : 0;
       const rawTurnResolved = isFiniteNumber(b.turnResolved) ? b.turnResolved : undefined;
@@ -1460,11 +1588,11 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         return sanitizeLogEntry(entry, index);
       })
       .filter((entry): entry is LogEntry => Boolean(entry));
-    const sanitizedLogs = clampArray<LogEntry>(normalizedLogs, MAX_LOG_ENTRIES, 'logs', true);
+    const sanitizedLogs = clampArray<LogEntry>(normalizedLogs, MAX_LOG_ENTRIES, 'logs', true, 'info');
     processed += logsTotal;
 
     const messagesDto = Array.isArray(dto.messages) ? dto.messages : [];
-    const clampedMessagesDto = clampArray(messagesDto, MAX_MESSAGE_ENTRIES, 'messages', true);
+    const clampedMessagesDto = clampArray(messagesDto, MAX_MESSAGE_ENTRIES, 'messages', true, 'info');
     const messages: GameMessage[] = clampedMessagesDto.map((m: any, index: number) => {
       reportLoopProgress(index, messagesTotal);
       return {

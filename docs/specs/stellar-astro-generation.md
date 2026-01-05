@@ -34,9 +34,18 @@ Le payload est structuré selon `src/shared/types.ts` et suit les règles suivan
 - **Planètes (`planets`)** :
   - Le nombre total est borné par `maxPlanets` et par un tirage de Poisson dépendant du type spectral primaire.
   - Les orbites sont générées, éventuellement ajustées à la ligne de neige, puis triées par demi‑grand axe croissant (`semiMajorAxisAu`).
-  - Chaque planète enregistre `type`, `eccentricity`, masse/rayon/gravité, `albedo`, `teqK`, `atmosphere`, pression éventuelle, température et éventuelle `climateTag`.
+- Chaque planète enregistre `type`, `eccentricity`, masse/rayon/gravité, `albedo`, `teqK`, `atmosphere`, pression éventuelle, `greenhouseK`, `climateK`, `airMassIndex`, température (compat) et éventuelle `climateTag`.
 - **Lunes (`moons`)** :
-  - Chaque planète possède un tableau `moons` (éventuellement vide) détaillant `type`, paramètres orbitaux, masse/rayon/gravité, `albedo`, `teqK`, bonus de marée (`tidalBonusK`), type d’atmosphère, pression éventuelle et température.
+- Chaque planète possède un tableau `moons` (éventuellement vide) détaillant `type`, paramètres orbitaux, masse/rayon/gravité, `albedo`, `teqK`, bonus de marée (`tidalBonusK`), type d’atmosphère, pression éventuelle, `greenhouseK`, `climateK`, `airMassIndex` et température.
+- `climateK` est dérivé de l’insolation et de l’albédo (`teqK`) puis ajusté par `greenhouseK`; `airMassIndex` est un indicateur 0..1 de densité atmosphérique (pression + composition).
+
+### 3.1 Climat simplifié
+- `teqK` : température d’équilibre (insolation + albédo).
+- `greenhouseK` : bonus d’effet de serre dérivé de la pression (log‑scale) et du type d’atmosphère.
+- `climateK = teqK + greenhouseK` (lunes : `teqK + tidalBonusK + greenhouseK`).
+- `airMassIndex` : indicateur 0..1 de densité atmosphérique (pression + composition).
+- `climateTag` (Terrestres) : IceWorld <200K, Cold <250K, Eden 275–305K si Earthlike + `airMassIndex >= 0.45`, Desertic <=700K, sinon Volcanic.
+- `climateTag` (Géantes) : HotGiant >900K, WarmGiant >300K, sinon ColdGiant. Naines : IcyDwarf <180K sinon RockyDwarf.
 
 ## 4. Invariants de sérialisation
 - Lors de la désérialisation, `sanitizeStarSystemAstro` impose la présence des champs obligatoires : `seed`, `primarySpectralType`, `starCount`, `metallicityFeH`, bloc `derived` complet, ainsi que les tableaux `stars` et `planets`.

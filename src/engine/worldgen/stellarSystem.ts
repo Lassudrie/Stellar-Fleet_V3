@@ -100,19 +100,29 @@ export const PLANET_COUNT_LAMBDA_BY_PRIMARY: Record<SpectralType, number> = {
   O: 1.5
 };
 
-export const GREENHOUSE_OFFSETS_K: Record<AtmosphereType, number> = {
-  None: 0,
-  Thin: 8,
-  Earthlike: 33,
-  CO2: 60,
-  H2He: 90
+export const PLANET_GREENHOUSE_K_RANGE: Record<AtmosphereType, [number, number]> = {
+  None: [0, 0],
+  Thin: [0, 12],
+  Earthlike: [28, 45],
+  CO2: [50, 150],
+  H2He: [80, 260]
 };
 
-export const MOON_GREENHOUSE_OFFSETS_K: Record<Exclude<AtmosphereType, 'H2He'>, number> = {
+export const MOON_GREENHOUSE_K_RANGE: Record<Exclude<AtmosphereType, 'H2He'>, [number, number]> = {
+  None: [0, 0],
+  Thin: [0, 8],
+  Earthlike: [18, 35],
+  CO2: [28, 85]
+};
+
+export const AIR_MASS_PRESSURE_RANGE_BAR: [number, number] = [0.02, 50];
+
+export const ATMOSPHERE_AIRMASS_WEIGHT: Record<AtmosphereType, number> = {
   None: 0,
-  Thin: 5,
-  Earthlike: 25,
-  CO2: 40
+  Thin: 0.6,
+  Earthlike: 1.0,
+  CO2: 1.1,
+  H2He: 1.25
 };
 
 export const MOON_ALBEDO: Record<MoonType, number> = {
@@ -545,9 +555,77 @@ export function computeTeqK(fluxEarth: number, albedo: number): number {
   return 278.5 * Math.pow(f, 0.25) * Math.pow((1 - a) / 0.7, 0.25);
 }
 
-export function computeTemperatureK(teqK: number, atmosphere: AtmosphereType): number {
-  const t = teqK + GREENHOUSE_OFFSETS_K[atmosphere];
-  return clamp(t, 30, 2000);
+const resolvePressureBar = (pressureBar: number | undefined, minP: number, maxP: number): number => {
+  if (typeof pressureBar === 'number' && Number.isFinite(pressureBar)) {
+    return clamp(pressureBar, minP, maxP);
+  }
+  return (minP + maxP) * 0.5;
+};
+
+const normalizeLog = (value: number, min: number, max: number): number => {
+  const safeMin = Math.max(min, 1e-6);
+  const safeMax = Math.max(max, safeMin + 1e-6);
+  const clamped = clamp(value, safeMin, safeMax);
+  const denom = Math.log10(safeMax / safeMin);
+  if (denom <= 0) return 0;
+  return clamp01(Math.log10(clamped / safeMin) / denom);
+};
+
+const computeGreenhouseK = <T extends string>(params: {
+  atmosphere: T;
+  pressureBar?: number;
+  pressureRanges: Record<T, [number, number]>;
+  greenhouseRanges: Record<T, [number, number]>;
+}): number => {
+  const { atmosphere, pressureBar, pressureRanges, greenhouseRanges } = params;
+  const [minK, maxK] = greenhouseRanges[atmosphere];
+  if (minK <= 0 && maxK <= 0) return 0;
+  const [minP, maxP] = pressureRanges[atmosphere];
+  const resolvedP = resolvePressureBar(pressureBar, Math.max(minP, 1e-6), Math.max(maxP, minP + 1e-6));
+  const t = normalizeLog(resolvedP, Math.max(minP, 1e-6), Math.max(maxP, minP + 1e-6));
+  return lerp(minK, maxK, t);
+};
+
+const computeAirMassIndex = (atmosphere: AtmosphereType, pressureBar?: number): number => {
+  if (atmosphere === 'None') return 0;
+  const [minP, maxP] = AIR_MASS_PRESSURE_RANGE_BAR;
+  const resolvedP = resolvePressureBar(pressureBar, minP, maxP);
+  const pressureIndex = normalizeLog(resolvedP, minP, maxP);
+  return clamp01(pressureIndex * ATMOSPHERE_AIRMASS_WEIGHT[atmosphere]);
+};
+
+export function computePlanetClimate(params: {
+  teqK: number;
+  atmosphere: AtmosphereType;
+  pressureBar?: number;
+}): { climateK: number; greenhouseK: number; airMassIndex: number } {
+  const greenhouseK = computeGreenhouseK({
+    atmosphere: params.atmosphere,
+    pressureBar: params.pressureBar,
+    pressureRanges: ATMOSPHERE_PRESSURE_BAR,
+    greenhouseRanges: PLANET_GREENHOUSE_K_RANGE
+  });
+  const climateK = clamp(params.teqK + greenhouseK, 30, 2000);
+  const airMassIndex = computeAirMassIndex(params.atmosphere, params.pressureBar);
+  return { climateK, greenhouseK, airMassIndex };
+}
+
+export function computeMoonClimate(params: {
+  teqK: number;
+  atmosphere: Exclude<AtmosphereType, 'H2He'>;
+  pressureBar?: number;
+  tidalBonusK?: number;
+}): { climateK: number; greenhouseK: number; airMassIndex: number } {
+  const baseK = clamp(params.teqK + (params.tidalBonusK ?? 0), 30, 2000);
+  const greenhouseK = computeGreenhouseK({
+    atmosphere: params.atmosphere,
+    pressureBar: params.pressureBar,
+    pressureRanges: MOON_ATMOSPHERE_PRESSURE_BAR,
+    greenhouseRanges: MOON_GREENHOUSE_K_RANGE
+  });
+  const climateK = clamp(baseK + greenhouseK, 30, 2000);
+  const airMassIndex = computeAirMassIndex(params.atmosphere, params.pressureBar);
+  return { climateK, greenhouseK, airMassIndex };
 }
 
 export function pickPlanetAlbedo(planetType: PlanetType): number {
@@ -584,8 +662,8 @@ export function assignPlanetAtmosphere(
   // Terrestrial
   if (!canHold) return { atmosphere: 'None' };
 
-  // Use the same simplified logic: use teq + Earth greenhouse as a proxy for surface.
-  const proxySurface = teqK + GREENHOUSE_OFFSETS_K.Earthlike;
+  // Proxy surface climate using a nominal 1 bar Earthlike greenhouse.
+  const proxySurface = computePlanetClimate({ teqK, atmosphere: 'Earthlike', pressureBar: 1 }).climateK;
 
   const inHz = proxySurface >= 240 && proxySurface <= 320;
   const orbitInHz = derived.hzInnerAu <= derived.semiMajorAxisAu && derived.semiMajorAxisAu <= derived.hzOuterAu;
@@ -612,21 +690,27 @@ export function assignPlanetAtmosphere(
   return { atmosphere: 'Thin', pressureBar };
 }
 
-export function deriveClimateTag(planetType: PlanetType, temperatureK: number, atmosphere: AtmosphereType): string | undefined {
+export function deriveClimateTag(
+  planetType: PlanetType,
+  climateK: number,
+  atmosphere: AtmosphereType,
+  airMassIndex?: number
+): string | undefined {
+  const airOk = airMassIndex === undefined || airMassIndex >= 0.45;
   if (planetType === 'Terrestrial') {
-    if (temperatureK < 180) return 'IceWorld';
-    if (temperatureK < 240) return 'Cold';
-    if (temperatureK <= 320 && atmosphere === 'Earthlike') return 'Eden';
-    if (temperatureK <= 700) return 'Desertic';
+    if (climateK < 200) return 'IceWorld';
+    if (climateK < 250) return 'Cold';
+    if (climateK >= 275 && climateK <= 305 && atmosphere === 'Earthlike' && airOk) return 'Eden';
+    if (climateK <= 700) return 'Desertic';
     return 'Volcanic';
   }
   if (planetType === 'GasGiant' || planetType === 'IceGiant') {
-    if (temperatureK > 800) return 'HotGiant';
-    if (temperatureK > 250) return 'WarmGiant';
+    if (climateK > 900) return 'HotGiant';
+    if (climateK > 300) return 'WarmGiant';
     return 'ColdGiant';
   }
   if (planetType === 'Dwarf') {
-    return temperatureK < 170 ? 'IcyDwarf' : 'RockyDwarf';
+    return climateK < 180 ? 'IcyDwarf' : 'RockyDwarf';
   }
   return undefined;
 }
@@ -719,9 +803,10 @@ export function buildPlanet(
 
   const derived: StellarDerived = { semiMajorAxisAu, hzInnerAu, hzOuterAu };
   const { atmosphere, pressureBar } = assignPlanetAtmosphere(rng, planetType, massEarth, gravityG, teqK, derived);
-  const temperatureK = computeTemperatureK(teqK, atmosphere);
+  const { climateK, greenhouseK, airMassIndex } = computePlanetClimate({ teqK, atmosphere, pressureBar });
+  const temperatureK = climateK;
 
-  const climateTag = deriveClimateTag(planetType, temperatureK, atmosphere);
+  const climateTag = deriveClimateTag(planetType, climateK, atmosphere, airMassIndex);
 
   const planet: PlanetData = {
     type: planetType,
@@ -733,6 +818,9 @@ export function buildPlanet(
     albedo,
     teqK,
     atmosphere,
+    greenhouseK,
+    climateK,
+    airMassIndex,
     temperatureK,
     moons: []
   };
@@ -963,7 +1051,13 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
     const canHold = canHoldMoonAtmosphere(massEarth, gravityG);
     const { atmosphere, finalMoonType } = assignMoonAtmosphere(rng, t0, canHold, provisionalT);
     const pressureBar = drawMoonPressureBar(rng, atmosphere, gravityG);
-    const temperatureK = clamp(provisionalT + MOON_GREENHOUSE_OFFSETS_K[atmosphere], 30, 2000);
+    const { climateK, greenhouseK, airMassIndex } = computeMoonClimate({
+      teqK,
+      atmosphere,
+      pressureBar,
+      tidalBonusK: tidal
+    });
+    const temperatureK = climateK;
 
     const moon: MoonData = {
       type: finalMoonType,
@@ -975,6 +1069,9 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
       teqK,
       tidalBonusK: tidal,
       atmosphere,
+      greenhouseK,
+      climateK,
+      airMassIndex,
       temperatureK
     };
 

@@ -305,7 +305,10 @@ export interface SurfaceParams {
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
-const atmosphereDensityFactor = (atm: AtmosphereType): number => {
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const atmosphereDensityFactor = (atm: AtmosphereType, airMassIndex?: number): number => {
+  if (isFiniteNumber(airMassIndex)) return clamp01(airMassIndex);
   switch (atm) {
     case 'None':
       return 0;
@@ -322,34 +325,68 @@ const atmosphereDensityFactor = (atm: AtmosphereType): number => {
   }
 };
 
-const pickSurfaceClass = (
-  atm: AtmosphereType,
-  pressureBar: number | undefined,
-  temperatureK: number
-): { surfaceClass: SurfaceClass; surfaceClassReason: SurfaceClassReason } => {
-  const p = typeof pressureBar === 'number' && Number.isFinite(pressureBar) ? pressureBar : undefined;
-  if (atm === 'None') return { surfaceClass: 'airless', surfaceClassReason: 'no_atmosphere' };
-  if (p !== undefined && p < 0.03) return { surfaceClass: 'airless', surfaceClassReason: 'low_pressure' };
-  if (temperatureK < 190) return { surfaceClass: 'icy', surfaceClassReason: 'cold' };
-  if (temperatureK > 380) return { surfaceClass: 'hot', surfaceClassReason: 'hot' };
-  if (atm === 'H2He') return { surfaceClass: 'dense', surfaceClassReason: 'h2he_envelope' };
-  if (p !== undefined && p > 5) return { surfaceClass: 'dense', surfaceClassReason: 'high_pressure' };
-  if (atm === 'CO2' && p !== undefined && p >= 1.5) return { surfaceClass: 'dense', surfaceClassReason: 'co2_greenhouse' };
+const resolveClimateSnapshot = (params: {
+  climateK?: number;
+  greenhouseK?: number;
+  airMassIndex?: number;
+  temperatureK: number;
+  teqK: number;
+  tidalBonusK?: number;
+  atmosphere: AtmosphereType;
+}): { climateK: number; greenhouseK: number; airMassIndex: number } => {
+  const climateK = isFiniteNumber(params.climateK) ? params.climateK : params.temperatureK;
+  const greenhouseK = isFiniteNumber(params.greenhouseK)
+    ? params.greenhouseK
+    : Math.max(0, climateK - params.teqK - (params.tidalBonusK ?? 0));
+  const airMassIndex = isFiniteNumber(params.airMassIndex)
+    ? clamp01(params.airMassIndex)
+    : atmosphereDensityFactor(params.atmosphere);
+  return { climateK, greenhouseK, airMassIndex };
+};
+
+const CLIMATE_ICY_K = 240;
+const CLIMATE_HOT_K = 335;
+const AIRLESS_AIRMASS_INDEX = 0.06;
+const DENSE_AIRMASS_INDEX = 0.6;
+
+const pickSurfaceClass = (params: {
+  climateK: number;
+  greenhouseK: number;
+  airMassIndex: number;
+  atmosphere: AtmosphereType;
+}): { surfaceClass: SurfaceClass; surfaceClassReason: SurfaceClassReason } => {
+  const { climateK, greenhouseK, airMassIndex, atmosphere } = params;
+  if (airMassIndex < AIRLESS_AIRMASS_INDEX) {
+    return {
+      surfaceClass: 'airless',
+      surfaceClassReason: atmosphere === 'None' ? 'no_atmosphere' : 'low_pressure'
+    };
+  }
+  if (climateK < CLIMATE_ICY_K) return { surfaceClass: 'icy', surfaceClassReason: 'cold' };
+  if (climateK > CLIMATE_HOT_K) return { surfaceClass: 'hot', surfaceClassReason: 'hot' };
+  if (airMassIndex >= DENSE_AIRMASS_INDEX) {
+    const reason: SurfaceClassReason = atmosphere === 'H2He'
+      ? 'h2he_envelope'
+      : atmosphere === 'CO2' && greenhouseK >= 45
+        ? 'co2_greenhouse'
+        : 'high_pressure';
+    return { surfaceClass: 'dense', surfaceClassReason: reason };
+  }
   return { surfaceClass: 'temperate', surfaceClassReason: 'temperate' };
 };
 
 const computeWaterFraction = (params: {
-  atmosphere: AtmosphereType;
   pressureBar?: number;
-  temperatureK: number;
+  climateK: number;
   albedo: number;
+  airMassIndex: number;
 }): number => {
-  const { atmosphere, pressureBar, temperatureK, albedo } = params;
+  const { pressureBar, climateK, albedo, airMassIndex } = params;
   const p = typeof pressureBar === 'number' && Number.isFinite(pressureBar) ? pressureBar : undefined;
-  if (atmosphere === 'None' || (p !== undefined && p < 0.03)) return 0.02;
+  if (airMassIndex < AIRLESS_AIRMASS_INDEX) return 0.02;
 
   // Basic habitability window heuristic; keep it smooth and deterministic.
-  const t = temperatureK;
+  const t = climateK;
   const tempScore = clamp01(1 - Math.abs(t - 288) / 140); // ~1 near 288K, fades out
   const pressureScore = p === undefined ? 0.6 : clamp01(Math.log10(Math.max(p, 0.05) + 1) / Math.log10(12));
   const albedoPenalty = clamp01((albedo - 0.25) / 0.55); // high albedo -> more ice -> less open water
@@ -370,15 +407,28 @@ const computeWaterFraction = (params: {
 };
 
 export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams => {
-  const density = atmosphereDensityFactor(planet.atmosphere);
-  const { surfaceClass, surfaceClassReason } = pickSurfaceClass(planet.atmosphere, planet.pressureBar, planet.temperatureK);
+  const { climateK, greenhouseK, airMassIndex } = resolveClimateSnapshot({
+    climateK: planet.climateK,
+    greenhouseK: planet.greenhouseK,
+    airMassIndex: planet.airMassIndex,
+    temperatureK: planet.temperatureK,
+    teqK: planet.teqK,
+    atmosphere: planet.atmosphere
+  });
+  const density = atmosphereDensityFactor(planet.atmosphere, airMassIndex);
+  const { surfaceClass, surfaceClassReason } = pickSurfaceClass({
+    climateK,
+    greenhouseK,
+    airMassIndex,
+    atmosphere: planet.atmosphere
+  });
 
   const reliefScale = 1 / Math.sqrt(Math.max(0.15, planet.gravityG));
   const waterFraction = computeWaterFraction({
-    atmosphere: planet.atmosphere,
     pressureBar: planet.pressureBar,
-    temperatureK: planet.temperatureK,
-    albedo: planet.albedo
+    climateK,
+    albedo: planet.albedo,
+    airMassIndex
   });
 
   const craterIntensity = surfaceClass === 'airless' ? 0.9 : 0.15 + 0.2 * (1 - density);
@@ -405,19 +455,29 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
 
 export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
   // Moons share similar heuristics, but allow tidal heating to drive volcanism.
-  const density = atmosphereDensityFactor(moon.atmosphere as AtmosphereType);
-  const { surfaceClass, surfaceClassReason } = pickSurfaceClass(
-    moon.atmosphere as AtmosphereType,
-    moon.pressureBar,
-    moon.temperatureK
-  );
+  const { climateK, greenhouseK, airMassIndex } = resolveClimateSnapshot({
+    climateK: moon.climateK,
+    greenhouseK: moon.greenhouseK,
+    airMassIndex: moon.airMassIndex,
+    temperatureK: moon.temperatureK,
+    teqK: moon.teqK,
+    tidalBonusK: moon.tidalBonusK,
+    atmosphere: moon.atmosphere as AtmosphereType
+  });
+  const density = atmosphereDensityFactor(moon.atmosphere as AtmosphereType, airMassIndex);
+  const { surfaceClass, surfaceClassReason } = pickSurfaceClass({
+    climateK,
+    greenhouseK,
+    airMassIndex,
+    atmosphere: moon.atmosphere as AtmosphereType
+  });
 
   const reliefScale = 1 / Math.sqrt(Math.max(0.15, moon.gravityG));
   const waterFraction = computeWaterFraction({
-    atmosphere: moon.atmosphere as AtmosphereType,
     pressureBar: moon.pressureBar,
-    temperatureK: moon.temperatureK,
-    albedo: moon.albedo
+    climateK,
+    albedo: moon.albedo,
+    airMassIndex
   });
 
   const craterIntensity = surfaceClass === 'airless' ? 0.95 : 0.25 + 0.2 * (1 - density);
@@ -426,7 +486,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
   const humidityFactor = clamp01(0.12 + 0.88 * density) * clamp01(0.25 + 0.75 * waterFraction);
   const latGradientK = 20 + 60 * (1 - density);
   const lapseRateK = density > 0.2 ? 10 * density : 0;
-  const riversEnabled = surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25 && moon.temperatureK > 250;
+  const riversEnabled = surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25 && climateK > 250;
 
   return {
     surfaceClass,
@@ -1491,7 +1551,11 @@ const generateSurfaceMapV2 = (params: {
 
   // --- Temperature field ---
   const tempC2 = new Int16Array(n);
-  const baseT0K = params.planetData?.temperatureK ?? params.moonData?.temperatureK ?? 220;
+  const baseT0K = params.planetData?.climateK
+    ?? params.planetData?.temperatureK
+    ?? params.moonData?.climateK
+    ?? params.moonData?.temperatureK
+    ?? 220;
 
   for (let r = 0; r < h; r += 1) {
     const lat = normalizedLatitude(r, h);
@@ -1724,7 +1788,11 @@ const generateSurfaceMapV3 = (params: {
 
   // --- Temperature field ---
   const tempC2 = new Int16Array(n);
-  const baseT0K = params.planetData?.temperatureK ?? params.moonData?.temperatureK ?? 220;
+  const baseT0K = params.planetData?.climateK
+    ?? params.planetData?.temperatureK
+    ?? params.moonData?.climateK
+    ?? params.moonData?.temperatureK
+    ?? 220;
 
   for (let r = 0; r < h; r += 1) {
     const lat = normalizedLatitude(r, h);

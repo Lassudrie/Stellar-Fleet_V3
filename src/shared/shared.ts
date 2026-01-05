@@ -1,4 +1,8 @@
-import type { Vec3 } from '../engine/math/vec3';
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
 
 // ============================================================
 // Shared game types (was: shared/shared.ts)
@@ -118,6 +122,9 @@ export interface MoonData {
   tidalBonusK?: number;
   atmosphere: Exclude<AtmosphereType, 'H2He'>;
   pressureBar?: number;
+  greenhouseK: number;
+  climateK: number;
+  airMassIndex: number;
   temperatureK: number;
 }
 
@@ -132,6 +139,9 @@ export interface PlanetData {
   teqK: number;
   atmosphere: AtmosphereType;
   pressureBar?: number;
+  greenhouseK: number;
+  climateK: number;
+  airMassIndex: number;
   temperatureK: number;
   climateTag?: string;
   moons: MoonData[];
@@ -701,7 +711,13 @@ const parseLogLevel = (value?: string): LogLevel | null => {
 };
 
 const defaultLevel: LogLevel = envMeta?.env?.DEV ? 'debug' : 'warn';
-let currentLevel: LogLevel = parseLogLevel(envMeta?.env?.VITE_LOG_LEVEL) ?? defaultLevel;
+
+const processEnvLogLevel =
+  typeof process !== 'undefined' && typeof process.env?.VITE_LOG_LEVEL === 'string'
+    ? process.env.VITE_LOG_LEVEL
+    : undefined;
+
+let currentLevel: LogLevel = parseLogLevel(envMeta?.env?.VITE_LOG_LEVEL ?? processEnvLogLevel) ?? defaultLevel;
 
 const shouldLog = (level: LogLevel) => LEVEL_ORDER[level] <= LEVEL_ORDER[currentLevel];
 

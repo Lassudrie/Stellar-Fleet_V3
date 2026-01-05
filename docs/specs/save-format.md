@@ -40,6 +40,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
   - `planets` : données de corps planétaires normalisées.
   - `astro` : bloc astrophysique optionnel (spectral type, étoiles, planètes). Peut être régénéré (voir § 5).
     - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`.
+    - Les planètes/lunes dans `astro` peuvent inclure `greenhouseK`, `climateK`, `airMassIndex` (recalculés si absents).
 
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
