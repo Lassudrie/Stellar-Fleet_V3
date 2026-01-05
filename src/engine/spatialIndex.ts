@@ -45,14 +45,45 @@ export class SpatialIndex<T extends PositionedEntity> {
     return `${x}:${z}`;
   }
 
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
+  /**
+   * Iterates over all cells within a square radius around the center.
+   * OPTIMIZATION: Uses a callback to avoid allocating an array of cell objects (reduces GC pressure).
+   */
+  private forEachCellInSquare(center: { x: number; z: number }, cellRadius: number, callback: (x: number, z: number) => void) {
     for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
       for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
+        callback(x, z);
       }
     }
-    return cells;
+  }
+
+  /**
+   * Iterates over only the outer ring of cells at a specific radius.
+   * OPTIMIZATION: Used for incremental search expansion. Avoids re-scanning inner cells (O(N) vs O(N^2) per step)
+   * and avoids array allocations.
+   */
+  private forEachCellInRing(center: { x: number; z: number }, cellRadius: number, callback: (x: number, z: number) => void) {
+    if (cellRadius === 0) {
+      callback(center.x, center.z);
+      return;
+    }
+
+    const minX = center.x - cellRadius;
+    const maxX = center.x + cellRadius;
+    const minZ = center.z - cellRadius;
+    const maxZ = center.z + cellRadius;
+
+    // Top and Bottom rows
+    for (let x = minX; x <= maxX; x++) {
+      callback(x, minZ);
+      callback(x, maxZ);
+    }
+
+    // Left and Right columns (excluding corners already handled)
+    for (let z = minZ + 1; z < maxZ; z++) {
+      callback(minX, z);
+      callback(maxX, z);
+    }
   }
 
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
@@ -96,15 +127,15 @@ export class SpatialIndex<T extends PositionedEntity> {
     const maxDistanceSq = maxDistance * maxDistance;
     const candidates: T[] = [];
 
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+    this.forEachCellInSquare(center, cellRadius, (cx, cz) => {
+      const bucket = this.buckets.get(this.getKey(cx, cz));
       if (!bucket) return;
 
-      bucket.forEach(item => {
-        if (distSq(item.position, position) <= maxDistanceSq) {
+      for (const item of bucket) {
+         if (distSq(item.position, position) <= maxDistanceSq) {
           candidates.push(item);
         }
-      });
+      }
     });
 
     return candidates;
@@ -128,20 +159,18 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+      this.forEachCellInRing(center, cellRadius, (cx, cz) => {
+        const bucket = this.buckets.get(this.getKey(cx, cz));
         if (!bucket) return;
 
-        bucket.forEach(item => {
-          if (predicate && !predicate(item)) return;
+        for (const item of bucket) {
+          if (predicate && !predicate(item)) continue;
           const distanceSq = distSq(item.position, position);
           if (distanceSq < bestDistanceSq) {
             bestDistanceSq = distanceSq;
             bestItem = item;
           }
-        });
+        }
       });
 
       if (bestItem) {
