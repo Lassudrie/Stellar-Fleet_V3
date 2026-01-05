@@ -3,11 +3,15 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Billboard, OrbitControls, Text } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
+  AdditiveBlending,
   Camera,
+  CanvasTexture,
+  Color,
   ConeGeometry,
   CylinderGeometry,
   Group,
   InstancedMesh,
+  LinearFilter,
   Material,
   MathUtils,
   MeshBasicMaterial,
@@ -15,6 +19,7 @@ import {
   Mesh,
   Object3D,
   RingGeometry,
+  SRGBColorSpace,
   Spherical,
   SphereGeometry,
   TorusGeometry,
@@ -43,6 +48,7 @@ import SystemStationInfoPanel from '../ui/SystemStationInfoPanel';
 import {
   getSystemFleets,
   hashStringToAngle,
+  hashStringToUnit,
   layoutTacticalRing,
   makeObjectId,
   parseObjectId,
@@ -78,6 +84,7 @@ const MIN_STAR_RADIUS = 0.5;
 const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
+const STAR_TEXTURE_SIZE = 256;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -181,6 +188,128 @@ const useDisposableMemo = <T extends { dispose: () => void }>(
 const computeOrbitPosition = (radius: number, angle: number): [number, number, number] => (
   [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
 );
+
+const createSeededRandom = (seed: number): (() => number) => {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let result = Math.imul(state ^ (state >>> 15), 1 | state);
+    result ^= result + Math.imul(result ^ (result >>> 7), 61 | result);
+    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const toRgbaString = (color: Color, alpha: number): string => {
+  const r = Math.round(MathUtils.clamp(color.r, 0, 1) * 255);
+  const g = Math.round(MathUtils.clamp(color.g, 0, 1) * 255);
+  const b = Math.round(MathUtils.clamp(color.b, 0, 1) * 255);
+  const a = MathUtils.clamp(alpha, 0, 1);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+};
+
+const createStarSurfaceTexture = (baseColor: string, seed: number): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = STAR_TEXTURE_SIZE;
+  canvas.height = STAR_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const base = new Color(baseColor);
+  const highlight = base.clone().lerp(new Color('#ffffff'), 0.35);
+  const shadow = base.clone().multiplyScalar(0.65);
+
+  context.fillStyle = base.getStyle();
+  context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
+
+  const gradient = context.createRadialGradient(
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.12,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.65
+  );
+  gradient.addColorStop(0, highlight.getStyle());
+  gradient.addColorStop(1, shadow.getStyle());
+  context.globalAlpha = 0.35;
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
+  context.globalAlpha = 1;
+
+  const rand = createSeededRandom(seed);
+  const brightBlobs = 140;
+  const darkBlobs = 180;
+
+  for (let i = 0; i < brightBlobs; i += 1) {
+    const radius = STAR_TEXTURE_SIZE * (0.04 + rand() * 0.12);
+    const x = rand() * STAR_TEXTURE_SIZE;
+    const y = rand() * STAR_TEXTURE_SIZE;
+    const tint = base.clone().lerp(new Color('#ffffff'), 0.2 + rand() * 0.5);
+    context.globalAlpha = 0.08 + rand() * 0.18;
+    context.fillStyle = tint.getStyle();
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  for (let i = 0; i < darkBlobs; i += 1) {
+    const radius = STAR_TEXTURE_SIZE * (0.02 + rand() * 0.07);
+    const x = rand() * STAR_TEXTURE_SIZE;
+    const y = rand() * STAR_TEXTURE_SIZE;
+    const shade = base.clone().multiplyScalar(0.5 + rand() * 0.3);
+    context.globalAlpha = 0.1 + rand() * 0.2;
+    context.fillStyle = shade.getStyle();
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.globalAlpha = 1;
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const createStarGlowTexture = (baseColor: string): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = STAR_TEXTURE_SIZE;
+  canvas.height = STAR_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const base = new Color(baseColor);
+  const inner = base.clone().lerp(new Color('#ffffff'), 0.5);
+  const outer = base.clone().multiplyScalar(0.5);
+  const gradient = context.createRadialGradient(
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.06,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.5,
+    STAR_TEXTURE_SIZE * 0.5
+  );
+  gradient.addColorStop(0, toRgbaString(inner, 0.95));
+  gradient.addColorStop(0.35, toRgbaString(base, 0.6));
+  gradient.addColorStop(0.7, toRgbaString(outer, 0.25));
+  gradient.addColorStop(1, toRgbaString(outer, 0));
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
+  texture.needsUpdate = true;
+  return texture;
+};
 
 const MIN_POLAR_ANGLE = 0.15;
 const MAX_POLAR_ANGLE = Math.PI / 2 - 0.05;
@@ -390,60 +519,138 @@ interface StarMeshProps {
   radius: number;
   color: string;
   geometry: SphereGeometry;
+  seedKey: string;
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
   onHover?: () => void;
   onBlur?: () => void;
   onSelect?: () => void;
 }
 
-const StarMesh: React.FC<StarMeshProps> = ({ radius, color, geometry, onDoubleClick, onHover, onBlur, onSelect }) => {
-  const material = useDisposableMemo(
-    () => new MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.85,
-      roughness: 0.4,
-      metalness: 0.12
-    }),
+const StarMesh: React.FC<StarMeshProps> = ({
+  radius,
+  color,
+  geometry,
+  seedKey,
+  onDoubleClick,
+  onHover,
+  onBlur,
+  onSelect
+}) => {
+  const seed = useMemo(
+    () => Math.max(1, Math.floor(hashStringToUnit(seedKey) * 0xffffffff)),
+    [seedKey]
+  );
+  const surfaceTexture = useDisposableMemo(
+    () => createStarSurfaceTexture(color, seed),
+    [color, seed]
+  );
+  const glowTexture = useDisposableMemo(
+    () => createStarGlowTexture(color),
     [color]
+  );
+  const coreMaterial = useDisposableMemo(
+    () => new MeshBasicMaterial({
+      color: '#ffffff',
+      map: surfaceTexture,
+      toneMapped: false
+    }),
+    [surfaceTexture]
+  );
+  const innerGlowMaterial = useDisposableMemo(
+    () => new MeshBasicMaterial({
+      color: new Color(color).lerp(new Color('#ffffff'), 0.35),
+      map: glowTexture,
+      transparent: true,
+      opacity: 0.55,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false
+    }),
+    [color, glowTexture]
+  );
+  const outerGlowMaterial = useDisposableMemo(
+    () => new MeshBasicMaterial({
+      color: new Color(color).lerp(new Color('#ffffff'), 0.15),
+      map: glowTexture,
+      transparent: true,
+      opacity: 0.25,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false
+    }),
+    [color, glowTexture]
   );
   const lastTouchRef = useRef<number>(0);
   const DOUBLE_TAP_MAX_DELAY_MS = 350;
 
   const scale = useMemo<[number, number, number]>(() => [radius, radius, radius], [radius]);
+  const innerGlowScale = useMemo<[number, number, number]>(
+    () => [radius * 1.15, radius * 1.15, radius * 1.15],
+    [radius]
+  );
+  const outerGlowScale = useMemo<[number, number, number]>(
+    () => [radius * 1.45, radius * 1.45, radius * 1.45],
+    [radius]
+  );
+  const coreRef = useRef<Mesh | null>(null);
+
+  useFrame((_, delta) => {
+    if (!coreRef.current) return;
+    coreRef.current.rotation.y += delta * 0.08;
+    coreRef.current.rotation.z += delta * 0.02;
+  });
 
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
-      scale={scale}
-      onDoubleClick={onDoubleClick}
-      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-        if (event.pointerType !== 'touch') return;
-        const now = performance.now();
-        if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-          lastTouchRef.current = 0;
+    <group>
+      <mesh
+        ref={coreRef}
+        geometry={geometry}
+        material={coreMaterial}
+        scale={scale}
+        onDoubleClick={onDoubleClick}
+        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+            lastTouchRef.current = 0;
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+            onDoubleClick?.(event);
+          } else {
+            lastTouchRef.current = now;
+          }
+        }}
+        onPointerOver={(event) => {
           event.stopPropagation();
-          event.nativeEvent.preventDefault();
-          onDoubleClick?.(event);
-        } else {
-          lastTouchRef.current = now;
-        }
-      }}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        onHover?.();
-      }}
-      onPointerOut={(event) => {
-        event.stopPropagation();
-        onBlur?.();
-      }}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect?.();
-      }}
-      frustumCulled
-    />
+          onHover?.();
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation();
+          onBlur?.();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect?.();
+        }}
+        frustumCulled
+      />
+      <mesh
+        geometry={geometry}
+        material={innerGlowMaterial}
+        scale={innerGlowScale}
+        raycast={() => null}
+        renderOrder={2}
+        frustumCulled
+      />
+      <mesh
+        geometry={geometry}
+        material={outerGlowMaterial}
+        scale={outerGlowScale}
+        raycast={() => null}
+        renderOrder={3}
+        frustumCulled
+      />
+    </group>
   );
 };
 
@@ -1892,6 +2099,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starRadius);
   }, [planets, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
+  const ambientLightIntensity = MathUtils.clamp(0.05 + clampedScale * 0.02, 0.04, 0.12);
+  const starLightDistance = Math.max(maxOrbitRadius * 4, starRadius * 20);
+  const starLightIntensity = MathUtils.clamp(1.8 + starRadius * 0.9, 1.6, 6);
+  const ambientLightColor = useMemo(
+    () => new Color(primaryColor).lerp(new Color('#0b1020'), 0.75).getStyle(),
+    [primaryColor]
+  );
+  const starLightColor = useMemo(
+    () => new Color(primaryColor).lerp(new Color('#ffffff'), 0.12).getStyle(),
+    [primaryColor]
+  );
   const cameraMinDistance = useMemo(() => {
     const anchoredRadius = bodyRadii[anchoredBodyId ?? ''];
     const effectiveRadius = typeof anchoredRadius === 'number' ? anchoredRadius : focusDistanceFloor;
@@ -2013,8 +2231,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     <div className="relative w-full h-full bg-black">
       <Canvas camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}>
         <color attach="background" args={['#000000']} />
-        <ambientLight intensity={0.6} />
-        <pointLight position={[6, 6, 4]} intensity={1.5} />
+        <ambientLight intensity={ambientLightIntensity} color={ambientLightColor} />
+        <pointLight
+          position={[0, 0, 0]}
+          intensity={starLightIntensity}
+          distance={starLightDistance}
+          decay={2}
+          color={starLightColor}
+        />
 
         <SystemCamera
           maxDistance={cameraMaxDistance}
@@ -2036,6 +2260,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             radius={starRadius}
             color={primaryColor}
             geometry={starGeometry}
+            seedKey={starSystem.id}
             onDoubleClick={(event) => {
               event.stopPropagation();
               requestFocusOnBody(starBodyId);

@@ -411,8 +411,11 @@ const App: React.FC = () => {
     const chunks: string[] = [];
     let loaded = 0;
 
-    while (true) {
-      const { done, value } = await reader.read();
+    let done = false;
+    while (!done) {
+      const result = await reader.read();
+      done = result.done;
+      const value = result.value;
       if (done) break;
       if (value) {
         loaded += value.byteLength;
