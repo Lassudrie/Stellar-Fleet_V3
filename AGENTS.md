@@ -58,6 +58,7 @@ node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs
 - `src/engine/` : moteur de simulation déterministe (tour, IA, mouvement, combat, génération, sérialisation). Dépend de `src/shared/` et `src/content/`, mais **jamais** de `src/ui/`.
 - `src/ui/` : React + React Three Fiber. Orchestration, écrans, rendu 3D, i18n, audio.
 - `docs/` : specs et architecture. Garder la doc alignée avec le code lorsqu’on modifie des règles.
+- `docs/agent-notes/` : plans, TODOs et certaines reponses d'agents conservees dans le repo.
 
 Entrées importantes :
 - Boucle de tour : `src/engine/runTurn.ts` et `src/engine/turn/phases/*`.

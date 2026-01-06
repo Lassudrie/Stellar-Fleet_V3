@@ -1,6 +1,7 @@
 
 import { GameState, StarSystem, FactionId, ArmyState, Army, PlanetBody } from '../shared/shared';
 import { sorted } from '../shared/shared';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 
 export interface GroundBattleResult {
     systemId: string;
@@ -210,20 +211,29 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
 
             const reconstructedArmies: Army[] = survivors.updates.map(update => {
                 const baseArmy = originalArmiesById.get(update.armyId);
-                return baseArmy
-                    ? { ...baseArmy, members: update.members, condition: update.condition }
-                    : {
-                        id: update.armyId,
-                        factionId,
-                        unitType: 'light_infantry',
-                        maxMembers: update.members,
-                        members: update.members,
-                        attack: 1,
-                        defense: 1,
-                        condition: update.condition,
-                        state: ArmyState.DEPLOYED,
-                        containerId: planet.id
-                      };
+                if (baseArmy) {
+                    return { ...baseArmy, members: update.members, condition: update.condition };
+                }
+
+                const stats = GROUND_UNIT_STATS.light_infantry;
+                return {
+                    id: update.armyId,
+                    factionId,
+                    unitType: 'light_infantry',
+                    posture: 'normal',
+                    maxMembers: update.members,
+                    members: update.members,
+                    attack: stats.baseAttack,
+                    defense: stats.baseDefense,
+                    condition: update.condition,
+                    morale: stats.baseMorale,
+                    fatigue: stats.baseFatigue,
+                    rangeMin: stats.rangeMin,
+                    rangeMax: stats.rangeMax,
+                    projectionRange: stats.projectionRange,
+                    state: ArmyState.DEPLOYED,
+                    containerId: planet.id
+                };
             });
 
             survivingPowers.push({ factionId, remainingPower: calculatePower(reconstructedArmies) });

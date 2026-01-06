@@ -12,6 +12,8 @@ import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/shared';
 import { getTileAt, isBuildable, isPassable, normalizeSurfacePositions } from './planetSurface';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
+import { STACKING_CAP } from './ground';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -25,6 +27,7 @@ export type GameCommand =
   | { type: 'MOVE_ARMY_ON_SURFACE'; armyId: string; to: { bodyId: string; q: number; r: number } }
   | { type: 'ORDER_GROUND_MOVE'; armyId: string; to: { bodyId: string; q: number; r: number } }
   | { type: 'ORDER_GROUND_ATTACK'; attackerId: string; targetArmyId: string }
+  | { type: 'ORDER_GROUND_LAND'; armyId: string; to: { bodyId: string; q: number; r: number } }
   | { type: 'SET_GROUND_POSTURE'; armyId: string; posture: 'normal' | 'prepared_defense' }
   | { type: 'CANCEL_GROUND_ORDER'; armyId: string }
   | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: { bodyId: string; q: number; r: number }; name?: string }
@@ -103,7 +106,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === army.id
-                    ? ({ ...a, groundOrder: { type: 'move', to: { bodyId, q, r } } })
+                    ? ({ ...a, groundOrders: { ...(a.groundOrders ?? {}), move: { type: 'move', to: { bodyId, q, r } } } })
                     : a)
             });
         }
@@ -122,7 +125,52 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === attacker.id
-                    ? ({ ...a, groundOrder: { type: 'attack', targetArmyId: defender.id } })
+                    ? ({ ...a, groundOrders: { ...(a.groundOrders ?? {}), attack: { type: 'attack', targetArmyId: defender.id } } })
+                    : a)
+            });
+        }
+
+        case 'ORDER_GROUND_LAND': {
+            const army = state.armies.find(a => a.id === command.armyId);
+            if (!army) return fail('Army not found');
+            if (army.state !== ArmyState.EMBARKED) return fail('Army is not embarked.');
+            const carrierFleet = state.fleets.find(f => f.id === army.containerId);
+            if (!carrierFleet) return fail('Carrier fleet not found.');
+
+            const bodyId = command.to.bodyId;
+            const planetMatch = getPlanetById(state.systems, bodyId);
+            if (!planetMatch || !planetMatch.planet.isSolid) return fail('Invalid landing target.');
+            if (!isFleetOrbitingSystem(carrierFleet, planetMatch.system)) return fail('Carrier fleet must be in orbit.');
+
+            const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
+            if (!descriptor) return fail('Missing surface descriptor for body.');
+
+            const q = Math.floor(command.to.q);
+            const r = Math.floor(command.to.r);
+            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+
+            const tileResult = getTileAt(state, bodyId, q, r);
+            if (!tileResult) return fail('Unable to resolve target tile.');
+
+            const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
+            if (!isPassable(tileResult.tile.biome) && !isAmphibious) return fail('Target tile is not passable.');
+
+            const deployedOnHex = state.armies.filter(a =>
+                a.state === ArmyState.DEPLOYED &&
+                a.containerId === bodyId &&
+                a.surfacePos &&
+                a.surfacePos.q === q &&
+                a.surfacePos.r === r
+            );
+            const enemyOnHex = deployedOnHex.some(a => a.factionId !== army.factionId);
+            if (enemyOnHex) return fail('Landing on enemy-occupied hex is not allowed.');
+            const friendlyCount = deployedOnHex.filter(a => a.factionId === army.factionId).length;
+            if (friendlyCount >= STACKING_CAP) return fail('Landing hex is at stacking capacity.');
+
+            return ok({
+                ...state,
+                armies: state.armies.map(a => a.id === army.id
+                    ? ({ ...a, landingOrder: { type: 'land', to: { bodyId, q, r } } })
                     : a)
             });
         }
@@ -141,7 +189,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (!army) return fail('Army not found');
             return ok({
                 ...state,
-                armies: state.armies.map(a => a.id === army.id ? ({ ...a, groundOrder: undefined }) : a)
+                armies: state.armies.map(a => a.id === army.id ? ({ ...a, groundOrders: undefined }) : a)
             });
         }
 

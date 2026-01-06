@@ -37,7 +37,24 @@ export type GroundUnitType = 'light_infantry' | 'mechanized_infantry' | 'heavy_a
 
 export type GroundPosture = 'normal' | 'prepared_defense';
 
-export type GroundOrder = { type: 'move'; to: SurfacePos } | { type: 'attack'; targetArmyId: string };
+export type GroundMoveOrder = { type: 'move'; to: SurfacePos };
+export type GroundAttackOrder = { type: 'attack'; targetArmyId: string };
+export type GroundLandOrder = { type: 'land'; to: SurfacePos };
+export type GroundOrder = GroundMoveOrder | GroundAttackOrder;
+
+export interface GroundOrders {
+  move?: GroundMoveOrder;
+  attack?: GroundAttackOrder;
+}
+
+export type GroundUnitTag =
+  | 'artillery'
+  | 'airborne'
+  | 'engineer'
+  | 'armored'
+  | 'amphibious'
+  | 'hardened'
+  | 'anti_orbital';
 
 export enum ShipType {
   CARRIER = 'carrier',
@@ -290,6 +307,13 @@ export interface Settlement {
   isCapital?: boolean;
 }
 
+export type SettlementId = string;
+
+export interface SettlementControlState {
+  factionId: FactionId | null;
+  lastCaptureTurn: number;
+}
+
 export interface PlanetSurfaceMap {
   systemId: string;
   bodyId: string; // planetId or moonId
@@ -305,7 +329,9 @@ export interface SurfacePos {
   r: number;
 }
 
-export type GroundBuildingType = 'city' | 'outpost' | 'factory' | 'mine';
+export type GroundBuildingType = 'city' | 'outpost' | 'factory' | 'mine' | 'fortification' | 'bunker';
+
+export type GroundBuildingTag = 'supply_node' | 'fortification_light' | 'bunker' | 'anti_orbital';
 
 export interface GroundBuilding {
   id: string;
@@ -313,6 +339,8 @@ export interface GroundBuilding {
   type: GroundBuildingType;
   surfacePos: SurfacePos;
   name?: string;
+  tags?: GroundBuildingTag[];
+  antiOrbital?: number;
 }
 
 // Helper to pass a few derived orbit/HZ values into planet logic
@@ -408,12 +436,18 @@ export interface Army {
   // --- Metadata (not part of combat formulas) ---
   unitType: GroundUnitType;
   posture?: GroundPosture;
-  groundOrder?: GroundOrder;
+  groundOrders?: GroundOrders;
+  landingOrder?: GroundLandOrder;
   /**
    * Turn index when the army last transitioned to DEPLOYED.
    * Used for amphibious/airborne assault penalties (first turn after landing).
    */
   lastDeployedTurn?: number;
+  /**
+   * Turn index when the army last participated in a ground engagement.
+   * Used for morale/condition recovery timing.
+   */
+  lastCombatTurn?: number;
 
   // --- Strict combat profile (used by ground resolver) ---
   maxMembers: number; // MM
@@ -421,6 +455,11 @@ export interface Army {
   attack: number; // A
   defense: number; // D
   condition: number; // C in [0..1]
+  morale: number; // [0..1]
+  fatigue: number; // [0..1]
+  rangeMin: number; // Min attack range (hex)
+  rangeMax: number; // Max attack range (hex)
+  projectionRange: number; // ZOC / projection range (hex)
 }
 
 export interface StarSystem {
@@ -607,6 +646,14 @@ export interface GameState {
    * Persisted ground buildings placed on planet surfaces.
    */
   groundBuildings?: GroundBuilding[];
+  /**
+   * Persisted settlement control state keyed by settlement id.
+   */
+  settlementControl?: Record<SettlementId, SettlementControlState>;
+  /**
+   * Hexes bombarded during the current turn, keyed by bodyId.
+   */
+  bombardedHexesByBodyId?: Record<string, HexCoord[]>;
   objectives: GameObjectives;
   rules: GameplayRules;
 }

@@ -66,29 +66,33 @@
 - **Entrée** : état après résolution spatiale.
 - **Traitement** :
   - `resolveOrbitalBombardment` applique des pertes/morale aux armées déployées selon la présence orbitale et retourne des logs textuels.
-- **Sortie** : armées patchées (force/morale), logs combat ajoutés si l’action a eu lieu.
+  - Marque les hex bombardés du tour (utilisés par la phase de débarquement) et applique la mitigation anti‑orbitale si présente.
+- **Sortie** : armées patchées (force/morale), hex bombardés du tour, logs combat ajoutés si l’action a eu lieu.
 - **Invariants** : pas d’effet si aucun bombardement; aucune suppression d’armée directe, seulement des mises à jour de stats.
 
 ### 2.6. Phase Combat terrestre & conquête (`phaseGround`)
 
 - **Entrée** : état après bombardement, incluant positions orbitale/sol.
 - **Traitement** :
-  - Exécute les ordres terrestres persistés sur les unités (`Army.groundOrder`) pour les unités `DEPLOYED` sur surface map hex.
-  - Pipeline normatif (cf. `ground-surface-combat-v1.md`) :
-    1) calcul supply (par body et faction) ; 2) snapshot ZOC pré-mouvement ;
-    3) exécution des mouvements (MP, collisions no-stacking, fatigue) ;
-    4) exécution des attaques (engagement 1v1 localisé, break/retraite/avance) ;
-    5) suppression des unités hors de combat ;
-    6) récupération des unités sans combat (selon ravitaillement) ;
-    7) nettoyage des ordres.
-  - Conquête minimale : si, sur un body, il ne reste qu’une seule faction au sol, `ownerFactionId` du body passe à cette faction.
+  - Exécute les ordres terrestres persistés sur les unités pour les unités `DEPLOYED` sur surface map hex.
+  - Pipeline normatif (cf. `ground-surface-combat-v2.md`) :
+    1) exécution des ordres de débarquement (pertes de débarquement, placement des survivants) ;
+    2) calcul supply (BFS par body et faction depuis settlements contrôlés et buildings) ;
+    3) calcul ZOC (projectionRange) ;
+    4) exécution des mouvements (MPeff, cout terrain, passage allié x2, stacking cap) ;
+    5) exécution des combats (multi‑attaquants vs défenseur, portée/LoS, RNG par engagement) ;
+    6) capture des settlements (contrôle persistant) ;
+    7) conditions de victoire au sol + normalisation post‑battle (morale cap + fatigue add) ;
+    8) nettoyage des ordres invalides uniquement.
+  - Conquête : la victoire locale met à jour le contrôle des settlements et l’ownership du body/système selon les règles de capture.
   - Génère logs combat et messages synthétiques (conquête et pertes) via `canonicalizeMessages`.
   - Met à jour `aiStates` (hold) pour les factions IA gagnant le contrôle d’un body/système.
-- **Sortie** : systèmes recolorés et réassignés, armées filtrées/ajustées, logs/messages enrichis, IA mise à jour.
+- **Sortie** : systèmes recolorés et réassignés, armées filtrées/ajustées, contrôle des settlements mis à jour, logs/messages enrichis, IA mise à jour.
 - **Invariants** :
   - Les engagements sont déterministes et utilisent une RNG isolée par engagement.
-  - No-stacking : aucun hex ne peut contenir plus d’une unité après la phase.
-  - Les unités hors de combat sont retirées selon le seuil de `condition`/`members` (et non via un seuil legacy de “strength”).
+  - Stacking autorisé avec cap et pénalité (les excédentaires subissent un malus).
+  - Les unités hors de combat sont retirées si `members <= 0` (pas de seuil legacy “strength”).
+  - Les ordres persistent tant qu’ils restent valides (pas de clear global systématique).
 
 ### 2.7. Phase Objectifs (`phaseObjectives`)
 

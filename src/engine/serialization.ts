@@ -30,10 +30,17 @@ import {
   SettlementGenerationConfig,
   GroundBuilding,
   GroundBuildingType,
+  GroundBuildingTag,
   SurfacePos,
+  GroundAttackOrder,
+  GroundLandOrder,
+  GroundMoveOrder,
   GroundOrder,
+  GroundOrders,
   GroundPosture,
   GroundUnitType,
+  HexCoord,
+  SettlementControlState,
   VictoryType,
   PlanetData,
   MoonData,
@@ -64,7 +71,7 @@ import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './plan
 // Save format + DTOs (was: engine/saveFormat.ts)
 // ============================================================
 
-export const SAVE_VERSION = 4 as const;
+export const SAVE_VERSION = 5 as const;
 export type SaveVersion = typeof SAVE_VERSION;
 
 // --- DTOs (Data Transfer Objects) ---
@@ -146,10 +153,17 @@ export interface ArmyDTO {
   attack?: number;
   defense?: number;
   condition?: number;
+  fatigue?: number;
+  rangeMin?: number;
+  rangeMax?: number;
+  projectionRange?: number;
 
   posture?: 'normal' | 'prepared_defense';
   groundOrder?: any;
+  groundOrders?: any;
+  landingOrder?: any;
   lastDeployedTurn?: number;
+  lastCombatTurn?: number;
   state: ArmyState;
   containerId: string;
   surfacePos?: SurfacePos;
@@ -277,6 +291,8 @@ export interface GameStateDTO {
   aiStates?: Record<string, AIStateDTO>;
   planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
   groundBuildings?: GroundBuildingDTO[];
+  settlementControl?: Record<string, SettlementControlState>;
+  bombardedHexesByBodyId?: Record<string, HexCoord[]>;
 }
 
 export interface SaveFileV2 {
@@ -297,7 +313,13 @@ export interface SaveFileV4 {
   state: GameStateDTO;
 }
 
-export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4;
+export interface SaveFileV5 {
+  version: 5;
+  createdAt: string;
+  state: GameStateDTO;
+}
+
+export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4 | SaveFileV5;
 
 export type DeserializeProgressDetail = { current: number; total: number };
 export type DeserializeProgressUpdate = {
@@ -794,7 +816,58 @@ const sanitizeOwnerRecord = (
   }, {});
 };
 
-const GROUND_BUILDING_TYPES = new Set<GroundBuildingType>(['city', 'outpost', 'factory', 'mine']);
+const sanitizeSettlementControl = (
+  value: unknown,
+  validFactionIds: Set<FactionId>
+): Record<string, SettlementControlState> | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') {
+    throw new Error("Field 'settlementControl' must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const out: Record<string, SettlementControlState> = {};
+  Object.entries(record).forEach(([key, entry]) => {
+    if (!entry || typeof entry !== 'object') return;
+    const raw: any = entry;
+    const factionId =
+      raw.factionId === null
+        ? null
+        : (typeof raw.factionId === 'string' && validFactionIds.has(raw.factionId) ? raw.factionId : null);
+    const lastCaptureTurn = isFiniteNumber(raw.lastCaptureTurn) ? Math.max(0, Math.floor(raw.lastCaptureTurn)) : 0;
+    out[key] = { factionId, lastCaptureTurn };
+  });
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
+const GROUND_BUILDING_TYPES = new Set<GroundBuildingType>(['city', 'outpost', 'factory', 'mine', 'fortification', 'bunker']);
+const GROUND_BUILDING_TAGS = new Set<GroundBuildingTag>(['supply_node', 'fortification_light', 'bunker', 'anti_orbital']);
+
+const sanitizeBombardedHexesByBodyId = (
+  value: unknown,
+  validBodyIds: Set<string>
+): Record<string, HexCoord[]> | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') {
+    throw new Error("Field 'bombardedHexesByBodyId' must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const out: Record<string, HexCoord[]> = {};
+  Object.entries(record).forEach(([bodyId, entry]) => {
+    if (!validBodyIds.has(bodyId)) return;
+    if (!Array.isArray(entry)) return;
+    const coords: HexCoord[] = [];
+    entry.forEach(raw => {
+      if (!raw || typeof raw !== 'object') return;
+      const p: any = raw;
+      if (!isFiniteNumber(p.q) || !isFiniteNumber(p.r)) return;
+      coords.push({ q: Math.floor(p.q), r: Math.floor(p.r) });
+    });
+    if (coords.length > 0) {
+      out[bodyId] = coords;
+    }
+  });
+  return Object.keys(out).length > 0 ? out : undefined;
+};
 
 const sanitizeSurfacePos = (value: unknown, validBodyIds: Set<string>): SurfacePos | null => {
   if (!value || typeof value !== 'object') return null;
@@ -813,6 +886,48 @@ const GROUND_UNIT_TYPES = new Set<GroundUnitType>([
 
 const GROUND_POSTURES = new Set<GroundPosture>(['normal', 'prepared_defense']);
 
+const sanitizeGroundMoveOrder = (
+  value: unknown,
+  validBodyIds: Set<string>
+): GroundMoveOrder | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const o: any = value;
+  const to = sanitizeSurfacePos(o.to, validBodyIds);
+  if (!to) return undefined;
+  return { type: 'move', to };
+};
+
+const sanitizeGroundAttackOrder = (value: unknown): GroundAttackOrder | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const o: any = value;
+  if (typeof o.targetArmyId !== 'string' || o.targetArmyId.length === 0) return undefined;
+  return { type: 'attack', targetArmyId: o.targetArmyId };
+};
+
+const sanitizeGroundLandOrder = (
+  value: unknown,
+  validBodyIds: Set<string>
+): GroundLandOrder | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const o: any = value;
+  const to = sanitizeSurfacePos(o.to, validBodyIds);
+  if (!to) return undefined;
+  return { type: 'land', to };
+};
+
+const sanitizeGroundOrders = (
+  value: unknown,
+  validBodyIds: Set<string>
+): GroundOrders | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') return undefined;
+  const raw: any = value;
+  const move = sanitizeGroundMoveOrder(raw.move, validBodyIds);
+  const attack = sanitizeGroundAttackOrder(raw.attack);
+  if (!move && !attack) return undefined;
+  return { ...(move ? { move } : {}), ...(attack ? { attack } : {}) };
+};
+
 const sanitizeGroundOrder = (
   value: unknown,
   validBodyIds: Set<string>
@@ -821,15 +936,17 @@ const sanitizeGroundOrder = (
   if (!value || typeof value !== 'object') return undefined;
   const o: any = value;
   if (o.type === 'move') {
-    const to = sanitizeSurfacePos(o.to, validBodyIds);
-    if (!to) return undefined;
-    return { type: 'move', to };
+    return sanitizeGroundMoveOrder(o, validBodyIds);
   }
   if (o.type === 'attack') {
-    if (typeof o.targetArmyId !== 'string' || o.targetArmyId.length === 0) return undefined;
-    return { type: 'attack', targetArmyId: o.targetArmyId };
+    return sanitizeGroundAttackOrder(o);
   }
   return undefined;
+};
+
+const toGroundOrders = (order: GroundOrder | undefined): GroundOrders | undefined => {
+  if (!order) return undefined;
+  return order.type === 'move' ? { move: order } : { attack: order };
 };
 
 const sanitizeGroundBuildings = (
@@ -851,13 +968,19 @@ const sanitizeGroundBuildings = (
     if (!GROUND_BUILDING_TYPES.has(entry.type)) return;
     const surfacePos = sanitizeSurfacePos(entry.surfacePos, validBodyIds);
     if (!surfacePos) return;
+    const tags = Array.isArray(entry.tags)
+      ? entry.tags.filter((tag: unknown): tag is GroundBuildingTag => typeof tag === 'string' && GROUND_BUILDING_TAGS.has(tag as GroundBuildingTag))
+      : undefined;
+    const antiOrbital = isFiniteNumber(entry.antiOrbital) ? Math.max(0, entry.antiOrbital) : undefined;
 
     out.push({
       id: entry.id,
       factionId: entry.factionId,
       type: entry.type,
       surfacePos,
-      name: typeof entry.name === 'string' ? entry.name : undefined
+      name: typeof entry.name === 'string' ? entry.name : undefined,
+      ...(tags && tags.length > 0 ? { tags } : {}),
+      ...(antiOrbital !== undefined ? { antiOrbital } : {})
     });
   });
   return out.length > 0 ? out : undefined;
@@ -1154,13 +1277,20 @@ export const serializeGameState = (state: GameState): string => {
       factionId: a.factionId,
       unitType: a.unitType,
       posture: a.posture ?? 'normal',
-      groundOrder: a.groundOrder,
+      groundOrders: a.groundOrders,
+      landingOrder: a.landingOrder,
       maxMembers: a.maxMembers,
       members: a.members,
       attack: a.attack,
       defense: a.defense,
       condition: a.condition,
+      morale: a.morale,
+      fatigue: a.fatigue,
+      rangeMin: a.rangeMin,
+      rangeMax: a.rangeMax,
+      projectionRange: a.projectionRange,
       lastDeployedTurn: Number.isFinite(a.lastDeployedTurn) ? a.lastDeployedTurn : undefined,
+      lastCombatTurn: Number.isFinite(a.lastCombatTurn) ? a.lastCombatTurn : undefined,
       state: a.state,
       containerId: a.containerId,
       surfacePos: a.surfacePos
@@ -1188,6 +1318,8 @@ export const serializeGameState = (state: GameState): string => {
     aiStates: aiStatesDto,
     planetSurfaceDescriptorsByBodyId: state.planetSurfaceDescriptorsByBodyId,
     groundBuildings: state.groundBuildings,
+    settlementControl: state.settlementControl,
+    bombardedHexesByBodyId: state.bombardedHexesByBodyId,
     objectives: state.objectives,
     rules: state.rules
   };
@@ -1223,19 +1355,17 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     ? Number(raw.version)
     : undefined;
 
-  if (saveVersion !== undefined) {
-    if (!isFiniteNumber(raw.version)) {
-      throw new Error('Save file version must be a number.');
-    }
-    if (raw.version > SAVE_VERSION) {
-      throw new Error(`Save file version ${raw.version} is newer than supported version ${SAVE_VERSION}.`);
-    }
-    if (!raw.state) {
-      throw new Error('Save file is missing the state payload.');
-    }
-    if (raw.version < 2) {
-      console.warn(`[Serialization] Save version ${raw.version} is legacy; attempting best-effort migration.`);
-    }
+  if (saveVersion === undefined) {
+    throw new Error('Save file is missing the version field.');
+  }
+  if (!isFiniteNumber(raw.version)) {
+    throw new Error('Save file version must be a number.');
+  }
+  if (raw.version !== SAVE_VERSION) {
+    throw new Error(`Save file version ${raw.version} is not supported (expected ${SAVE_VERSION}).`);
+  }
+  if (!raw.state) {
+    throw new Error('Save file is missing the state payload.');
   }
 
   let dto: any = raw.state || raw; // Handle wrapped or raw DTO
@@ -1453,6 +1583,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       planetIds
     );
     const groundBuildings = sanitizeGroundBuildings(dto.groundBuildings, planetIds, validFactionIds);
+    const settlementControl = sanitizeSettlementControl(dto.settlementControl, validFactionIds);
+    const bombardedHexesByBodyId = sanitizeBombardedHexesByBodyId(dto.bombardedHexesByBodyId, planetIds);
 
     const stationsDto: unknown[] = Array.isArray(dto.stations) ? dto.stations : [];
     if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
@@ -1538,6 +1670,12 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         const attack = isFiniteNumber(a.attack) ? a.attack : defaults.baseAttack;
         const defense = isFiniteNumber(a.defense) ? a.defense : defaults.baseDefense;
         const condition = isFiniteNumber(a.condition) ? Math.max(0, Math.min(1, a.condition)) : legacyMorale;
+        const morale = isFiniteNumber(a.morale) ? Math.max(0, Math.min(1, a.morale)) : defaults.baseMorale;
+        const fatigue = isFiniteNumber(a.fatigue) ? Math.max(0, Math.min(1, a.fatigue)) : defaults.baseFatigue;
+        const rangeMin = isFiniteNumber(a.rangeMin) ? Math.max(0, Math.floor(a.rangeMin)) : defaults.rangeMin;
+        const rangeMaxRaw = isFiniteNumber(a.rangeMax) ? Math.max(0, Math.floor(a.rangeMax)) : defaults.rangeMax;
+        const rangeMax = Math.max(rangeMin, rangeMaxRaw);
+        const projectionRange = isFiniteNumber(a.projectionRange) ? Math.max(0, Math.floor(a.projectionRange)) : defaults.projectionRange;
 
         const posture: GroundPosture | undefined =
           typeof a.posture === 'string' && GROUND_POSTURES.has(a.posture as GroundPosture)
@@ -1556,24 +1694,34 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
             ? surfacePos
             : undefined;
 
-        const groundOrder = sanitizeGroundOrder(a.groundOrder, planetIds);
+        const legacyGroundOrder = sanitizeGroundOrder(a.groundOrder, planetIds);
+        const groundOrders = sanitizeGroundOrders(a.groundOrders, planetIds) ?? toGroundOrders(legacyGroundOrder);
+        const landingOrder = sanitizeGroundLandOrder(a.landingOrder, planetIds);
         const lastDeployedTurn = isFiniteNumber(a.lastDeployedTurn) ? Math.max(0, Math.floor(a.lastDeployedTurn)) : undefined;
+        const lastCombatTurn = isFiniteNumber(a.lastCombatTurn) ? Math.max(0, Math.floor(a.lastCombatTurn)) : undefined;
 
         const baseArmy: Army = {
           id: a.id,
           factionId,
           unitType,
           posture,
-          groundOrder,
+          groundOrders,
+          landingOrder,
           maxMembers,
           members,
           attack,
           defense,
           condition,
+          morale,
+          fatigue,
+          rangeMin,
+          rangeMax,
+          projectionRange,
           state: a.state,
           containerId: a.containerId,
           ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {}),
-          ...(lastDeployedTurn !== undefined ? { lastDeployedTurn } : {})
+          ...(lastDeployedTurn !== undefined ? { lastDeployedTurn } : {}),
+          ...(lastCombatTurn !== undefined ? { lastCombatTurn } : {})
         };
 
         return baseArmy;
@@ -1814,6 +1962,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       aiState: primaryAiState,
       planetSurfaceDescriptorsByBodyId,
       groundBuildings,
+      settlementControl,
+      bombardedHexesByBodyId,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };

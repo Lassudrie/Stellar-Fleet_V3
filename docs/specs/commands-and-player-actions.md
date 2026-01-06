@@ -79,7 +79,7 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 
 ## Commandes terrestres (Surface Map)
 
-Ces commandes posent des **ordres** exécutés plus tard par `phaseGround`. Elles ne déplacent ni ne résolvent de combat immédiatement.
+Ces commandes posent des **ordres** exécutés plus tard par `phaseGround` (débarquement, mouvement, combat). Elles ne déplacent ni ne résolvent de combat immédiatement. Les ordres persistent tant qu’ils restent valides et sont supprimés s’ils deviennent invalides ou après exécution.
 
 ### ORDER_GROUND_MOVE
 - **Entrée** : `armyId`, `to` (`{ bodyId, q, r }`).
@@ -89,15 +89,28 @@ Ces commandes posent des **ordres** exécutés plus tard par `phaseGround`. Elle
   - `to.bodyId` doit correspondre au `containerId` de l’armée (même body).
   - Les coordonnées doivent être dans les bornes de la surface map et viser un hex passable.
   - En cas d’échec, la commande retourne une erreur explicite (`Army not found`, `Army is not deployed...`, etc.).
-- **Effets** : assigne `army.groundOrder = { type:'move', to }`.
+- **Effets** : assigne `army.groundOrders.move = { type:'move', to }`. L’ordre peut coexister avec un ordre d’attaque.
 
 ### ORDER_GROUND_ATTACK
 - **Entrée** : `attackerId`, `targetArmyId`.
 - **Préconditions/erreurs** :
   - Les deux armées doivent exister et être `DEPLOYED`.
   - Elles doivent être sur le même `bodyId`.
-  - Le moteur ne valide pas ici l’adjacence (elle est validée en `phaseGround`), mais peut refuser si `targetArmyId === attackerId`.
-- **Effets** : assigne `attacker.groundOrder = { type:'attack', targetArmyId }`.
+  - Le moteur ne valide pas ici la portée/LoS (elle est validée en `phaseGround`), mais peut refuser si `targetArmyId === attackerId`.
+- **Effets** : assigne `attacker.groundOrders.attack = { type:'attack', targetArmyId }`.
+
+### ORDER_GROUND_LAND
+- **Entrée** : `armyId`, `to` (`{ bodyId, q, r }`).
+- **Préconditions/erreurs** :
+  - L’armée doit exister.
+  - L’armée doit être `ArmyState.EMBARKED`.
+  - La flotte porteuse doit être en orbite du système cible.
+  - `to.bodyId` doit désigner un corps solide dans le système cible.
+  - Les coordonnées doivent être dans les bornes de la surface map.
+  - L’hex doit être passable (sauf unités `amphibious`).
+  - L’hex ne doit pas être occupé par un ennemi (débarquement interdit sur hex ennemi).
+  - En cas d’échec, la commande retourne une erreur explicite.
+- **Effets** : assigne `army.landingOrder = { type:'land', to }` pour exécution lors de la phase de débarquement.
 
 ### SET_GROUND_POSTURE
 - **Entrée** : `armyId`, `posture` (`'normal'|'prepared_defense'`).
@@ -107,7 +120,7 @@ Ces commandes posent des **ordres** exécutés plus tard par `phaseGround`. Elle
 ### CANCEL_GROUND_ORDER
 - **Entrée** : `armyId`.
 - **Préconditions/erreurs** : l’armée doit exister.
-- **Effets** : `army.groundOrder = undefined`.
+- **Effets** : supprime `army.groundOrders.move` et `army.groundOrders.attack` si présents.
 
 ## Actions joueur hors `GameCommand`
 

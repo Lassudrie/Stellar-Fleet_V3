@@ -1334,6 +1334,7 @@ useEffect(() => {
               body={surfaceBody}
               armies={surfaceArmies}
               buildings={surfaceBuildings}
+              settlementControl={viewGameState.settlementControl}
               factions={viewGameState.factions}
               playerFactionId={viewGameState.playerFactionId}
               onBackToGalaxy={() => handleLeaveSurfaceView('GAME')}

@@ -10,6 +10,7 @@ import {
   PlanetBody,
   PlanetSurfaceMap,
   Settlement,
+  SettlementControlState,
   SettlementType,
   StarSystem
 } from '../../../shared/shared';
@@ -18,22 +19,25 @@ import type { GameCommand } from '../../../engine/commands';
 import {
   computeEffectiveMP,
   computeReachable,
+  computeStackingFactors,
   computeSupplyDistanceMapFromSurfaceMap,
   computeZocSnapshotFromArmies,
   deriveTerrainTypeFromSurfaceMap,
   findPathWithCost,
+  hasLineOfSight,
+  hexDistance,
   hexKey as engineHexKey,
   isInEnemyZoc,
   isSupplied,
   MOVE_COST,
   previewEngagement,
+  STACKING_CAP,
   SUPPLY_RADIUS
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
-import { isPassable, neighborsAxial } from '../../../engine/planetSurface';
+import { isPassable } from '../../../engine/planetSurface';
 import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
 import {
-  approxRngRange,
   CENTER_SLOP_PX,
   CLICK_DRAG_THRESHOLD_SQ,
   clamp,
@@ -64,6 +68,7 @@ interface SurfaceViewProps {
   body: PlanetBody | null;
   armies: Army[];
   buildings: GroundBuilding[];
+  settlementControl?: Record<string, SettlementControlState>;
   factions: FactionState[];
   playerFactionId: FactionId;
   onBackToGalaxy: () => void;
@@ -211,6 +216,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   body,
   armies,
   buildings,
+  settlementControl,
   factions,
   playerFactionId,
   onBackToGalaxy,
@@ -551,12 +557,28 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     }));
   }, [activeMapConfig, map]);
 
-  const occupancy = useMemo(() => {
-    if (!map) return new Set<string>();
-    const set = new Set<string>();
-    normalizedArmies.forEach(m => set.add(engineHexKey(m.coord)));
-    return set;
+  const occupancyByHex = useMemo(() => {
+    if (!map) return new Map<string, Army[]>();
+    const next = new Map<string, Army[]>();
+    normalizedArmies.forEach(entry => {
+      const key = engineHexKey(entry.coord);
+      const list = next.get(key) ?? [];
+      list.push(entry.army);
+      next.set(key, list);
+    });
+    return next;
   }, [map, normalizedArmies]);
+
+  const stackingFactors = useMemo(() => {
+    const occupancy = new Map<string, string[]>();
+    occupancyByHex.forEach((armiesOnHex, key) => {
+      occupancy.set(
+        key,
+        armiesOnHex.map(army => army.id)
+      );
+    });
+    return computeStackingFactors(occupancy);
+  }, [occupancyByHex]);
 
   const pickCoord = useCallback((clientX: number, clientY: number, rectOverride?: DOMRect): HexCoord | null => {
     if (!map) return null;
@@ -785,10 +807,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const mapByFaction = new Map<FactionId, Uint16Array>();
     const factionIds = Array.from(new Set(normalizedArmies.map(m => m.army.factionId)));
     factionIds.forEach(fid => {
-      mapByFaction.set(fid, computeSupplyDistanceMapFromSurfaceMap(map, buildings, fid));
+      mapByFaction.set(fid, computeSupplyDistanceMapFromSurfaceMap(map, buildings, settlementControl, fid));
     });
     return mapByFaction;
-  }, [buildings, map, normalizedArmies]);
+  }, [buildings, map, normalizedArmies, settlementControl]);
 
   const isArmySupplied = useCallback((army: Army, coord: HexCoord | null): boolean => {
     if (!map || !coord) return false;
@@ -804,32 +826,35 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   }, [map, normalizedArmies]);
 
   const movementStepCostCenti = useCallback((from: HexCoord, to: HexCoord, army: Army): number => {
-    if (!map || !zocSnapshot) return 0;
+    if (!map) return 0;
     const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, to);
     const baseCost = MOVE_COST[terrain];
     const affinity = clampAffinity(GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain]);
-    let cost = Math.round(baseCost * affinity * 100);
+    let cost = Math.max(1, Math.round(baseCost * affinity * 100));
 
-    const curEnemy = isInEnemyZoc(zocSnapshot, from, army.factionId);
-    const nextEnemy = isInEnemyZoc(zocSnapshot, to, army.factionId);
-    if (!curEnemy && nextEnemy) cost += 100;
-    if (curEnemy && !nextEnemy) cost += 100;
+    const key = engineHexKey(to);
+    const occupants = occupancyByHex.get(key) ?? [];
+    const friendlyCount = occupants.filter(occupant => occupant.factionId === army.factionId && occupant.id !== army.id).length;
+    if (friendlyCount > 0) cost *= 2;
 
     return cost;
-  }, [buildings, map, zocSnapshot]);
+  }, [buildings, map, occupancyByHex]);
 
   const movePreview = useMemo(() => {
     if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
     if (orderMode !== 'move') return null;
-    if (!zocSnapshot) return null;
 
     const supplied = isArmySupplied(selectedArmy, selectedArmyCoord);
     const mpEff = computeEffectiveMP(selectedArmy, supplied);
     const mpCenti = mpEff * 100;
 
     const blocked = (c: HexCoord): boolean => {
-      if (c.q === selectedArmyCoord.q && c.r === selectedArmyCoord.r) return false;
-      return occupancy.has(engineHexKey(c));
+      const key = engineHexKey(c);
+      const occupants = occupancyByHex.get(key) ?? [];
+      const enemyOnHex = occupants.some(occupant => occupant.factionId !== selectedArmy.factionId);
+      if (enemyOnHex) return true;
+      const friendlyCount = occupants.filter(occupant => occupant.factionId === selectedArmy.factionId).length;
+      return friendlyCount >= STACKING_CAP;
     };
 
     const res = findPathWithCost({
@@ -843,18 +868,45 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     });
 
     if (!res) return { path: null, costCenti: null, mpEff, mpCenti, supplied };
-    return { path: res.path, costCenti: res.costCenti, mpEff, mpCenti, supplied };
-  }, [hovered, isArmySupplied, map, movementStepCostCenti, occupancy, orderMode, selectedArmy, selectedArmyCoord, zocSnapshot]);
+
+    let mpUsedCenti = 0;
+    const previewPath: HexCoord[] = [res.path[0]];
+    let pos = res.path[0];
+    for (let i = 1; i < res.path.length; i += 1) {
+      const next = res.path[i];
+      const cost = movementStepCostCenti(pos, next, selectedArmy);
+      if (mpUsedCenti + cost > mpCenti) break;
+      mpUsedCenti += cost;
+      previewPath.push(next);
+      pos = next;
+      if (zocSnapshot && isInEnemyZoc(zocSnapshot, next, selectedArmy.factionId)) break;
+    }
+
+    return { path: previewPath, costCenti: mpUsedCenti, mpEff, mpCenti, supplied };
+  }, [
+    hovered,
+    isArmySupplied,
+    map,
+    movementStepCostCenti,
+    occupancyByHex,
+    orderMode,
+    selectedArmy,
+    selectedArmyCoord,
+    zocSnapshot
+  ]);
 
   const reachableCosts = useMemo(() => {
     if (!map || !selectedArmy || !selectedArmyCoord) return null;
-    if (!zocSnapshot) return null;
     const supplied = isArmySupplied(selectedArmy, selectedArmyCoord);
     const mpEff = computeEffectiveMP(selectedArmy, supplied);
     const mpCenti = mpEff * 100;
     const blocked = (c: HexCoord): boolean => {
-      if (c.q === selectedArmyCoord.q && c.r === selectedArmyCoord.r) return false;
-      return occupancy.has(engineHexKey(c));
+      const key = engineHexKey(c);
+      const occupants = occupancyByHex.get(key) ?? [];
+      const enemyOnHex = occupants.some(occupant => occupant.factionId !== selectedArmy.factionId);
+      if (enemyOnHex) return true;
+      const friendlyCount = occupants.filter(occupant => occupant.factionId === selectedArmy.factionId).length;
+      return friendlyCount >= STACKING_CAP;
     };
     return computeReachable({
       from: selectedArmyCoord,
@@ -863,9 +915,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       wrapX: map.descriptor.config.wrapX,
       isBlocked: blocked,
       stepCostCenti: (a, b) => movementStepCostCenti(a, b, selectedArmy),
-      maxCostCenti: mpCenti
+      maxCostCenti: mpCenti,
+      canExpand: coord => {
+        if (!zocSnapshot) return true;
+        if (coord.q === selectedArmyCoord.q && coord.r === selectedArmyCoord.r) return true;
+        return !isInEnemyZoc(zocSnapshot, coord, selectedArmy.factionId);
+      }
     });
-  }, [isArmySupplied, map, movementStepCostCenti, occupancy, selectedArmy, selectedArmyCoord, zocSnapshot]);
+  }, [isArmySupplied, map, movementStepCostCenti, occupancyByHex, selectedArmy, selectedArmyCoord, zocSnapshot]);
 
   const combatPreview = useMemo(() => {
     if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
@@ -877,30 +934,48 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!enemy) return null;
     if (!enemy.surfacePos) return null;
 
-    const adjacent = neighborsAxial(selectedArmyCoord, map.descriptor.config.w, map.descriptor.config.h, map.descriptor.config.wrapX)
-      .some(n => n.q === hovered.q && n.r === hovered.r);
-    if (!adjacent) return null;
+    const dist = hexDistance(
+      selectedArmyCoord,
+      hovered,
+      map.descriptor.config.w,
+      map.descriptor.config.wrapX
+    );
+    if (dist < selectedArmy.rangeMin || dist > selectedArmy.rangeMax) return null;
+    if (!hasLineOfSight({ map, buildings, from: selectedArmyCoord, to: hovered })) return null;
 
     const terrainType = deriveTerrainTypeFromSurfaceMap(map, buildings, hovered);
     const suppliedAtt = isArmySupplied(selectedArmy, selectedArmyCoord);
     const suppliedDef = isArmySupplied(enemy, hovered);
-    const encircled = zocSnapshot
-      ? neighborsAxial(hovered, map.descriptor.config.w, map.descriptor.config.h, map.descriptor.config.wrapX)
-          .filter(coord => isInEnemyZoc(zocSnapshot, coord, enemy.factionId)).length >= 3
-      : false;
 
-    const preview = previewEngagement(selectedArmy, enemy, {
-      turn: 0,
-      terrainType,
-      attackerSituation: { encirclement: encircled },
-      defenderSituation: { preparedDefense: enemy.posture === 'prepared_defense' },
-      attackerStatus: { outOfSupply: !suppliedAtt, fatigueExtreme: selectedArmy.condition < 0.3 },
-      defenderStatus: { outOfSupply: !suppliedDef, fatigueExtreme: enemy.condition < 0.3 }
+    const preview = previewEngagement({
+      map,
+      buildings,
+      attackers: [
+        {
+          army: selectedArmy,
+          supplied: suppliedAtt,
+          stackingFactor: stackingFactors.get(selectedArmy.id) ?? 1
+        }
+      ],
+      defender: {
+        army: enemy,
+        supplied: suppliedDef,
+        stackingFactor: stackingFactors.get(enemy.id) ?? 1
+      }
     });
 
-    const rRange = approxRngRange(preview.r, 0.08);
-    return { enemy, terrainType, preview, rRange };
-  }, [buildings, hovered, isArmySupplied, map, normalizedArmies, playerFactionId, selectedArmy, selectedArmyCoord, zocSnapshot]);
+    return { enemy, terrainType, preview, range: dist };
+  }, [
+    buildings,
+    hovered,
+    isArmySupplied,
+    map,
+    normalizedArmies,
+    playerFactionId,
+    selectedArmy,
+    selectedArmyCoord,
+    stackingFactors
+  ]);
 
   const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
 
@@ -1420,48 +1495,33 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
               <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combat preview</div>
-                  <div className="text-[10px] text-slate-500">{combatPreview.terrainType}</div>
+                  <div className="text-[10px] text-slate-500">
+                    {combatPreview.terrainType} · R{combatPreview.range}
+                  </div>
                 </div>
                 <div className="text-[11px] text-slate-200">
                   Target: <span className="font-mono">{combatPreview.enemy.id}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">R (mean)</div>
-                    <div className="font-mono text-slate-100">{combatPreview.preview.r.toFixed(2)}</div>
-                    <div className="text-slate-500 font-mono">
-                      [{combatPreview.rRange.min.toFixed(2)}..{combatPreview.rRange.max.toFixed(2)}]
-                    </div>
+                    <div className="text-slate-400">Attack power</div>
+                    <div className="font-mono text-slate-100">{combatPreview.preview.attackPower.toFixed(1)}</div>
                   </div>
                   <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">BreakChance</div>
-                    <div className="font-mono text-slate-100">{(combatPreview.preview.breakChance * 100).toFixed(1)}%</div>
-                    <div className="text-slate-500">defender</div>
+                    <div className="text-slate-400">Defense power</div>
+                    <div className="font-mono text-slate-100">{combatPreview.preview.defensePower.toFixed(1)}</div>
+                  </div>
+                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
+                    <div className="text-slate-400">Loss rates</div>
+                    <div className="font-mono text-slate-100">A {(combatPreview.preview.lossRateAtk * 100).toFixed(1)}%</div>
+                    <div className="font-mono text-slate-100">D {(combatPreview.preview.lossRateDef * 100).toFixed(1)}%</div>
                   </div>
                   <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
                     <div className="text-slate-400">Losses (est.)</div>
-                    <div className="font-mono text-slate-100">A {combatPreview.preview.lossesAtt}</div>
+                    <div className="font-mono text-slate-100">A {combatPreview.preview.lossesAtkTotal}</div>
                     <div className="font-mono text-slate-100">D {combatPreview.preview.lossesDef}</div>
                   </div>
-                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">K</div>
-                    <div className="font-mono text-slate-100">A {combatPreview.preview.kAtt.kFinal.toFixed(2)}</div>
-                    <div className="font-mono text-slate-100">D {combatPreview.preview.kDef.kFinal.toFixed(2)}</div>
-                  </div>
                 </div>
-                <details className="text-[11px] text-slate-300">
-                  <summary className="cursor-pointer text-slate-400">K breakdown</summary>
-                  <div className="mt-2 space-y-1">
-                    <div className="font-semibold text-slate-200">Attacker</div>
-                    <div className="font-mono text-slate-300">
-                      terrainBase={combatPreview.preview.kAtt.kTerrainBase.toFixed(2)} affinity={combatPreview.preview.kAtt.kAffinity.toFixed(2)} situation={combatPreview.preview.kAtt.kSituationClamped.toFixed(2)} status={combatPreview.preview.kAtt.kStatusClamped.toFixed(2)} final={combatPreview.preview.kAtt.kFinal.toFixed(2)}
-                    </div>
-                    <div className="font-semibold text-slate-200 mt-2">Defender</div>
-                    <div className="font-mono text-slate-300">
-                      terrainBase={combatPreview.preview.kDef.kTerrainBase.toFixed(2)} affinity={combatPreview.preview.kDef.kAffinity.toFixed(2)} situation={combatPreview.preview.kDef.kSituationClamped.toFixed(2)} status={combatPreview.preview.kDef.kStatusClamped.toFixed(2)} final={combatPreview.preview.kDef.kFinal.toFixed(2)}
-                    </div>
-                  </div>
-                </details>
               </div>
             )}
 

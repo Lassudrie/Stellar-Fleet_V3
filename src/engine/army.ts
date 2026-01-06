@@ -8,6 +8,8 @@ import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 
 export const MIN_ARMY_CREATION_MEMBERS = 600;
 
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
 /**
  * Creates a new Army entity.
  * Enforces the rule: Minimum 600 members.
@@ -53,6 +55,11 @@ export const createArmy = (
     attack: defaults.baseAttack,
     defense: defaults.baseDefense,
     condition: 1,
+    morale: clamp01(defaults.baseMorale),
+    fatigue: clamp01(defaults.baseFatigue),
+    rangeMin: Math.max(0, Math.floor(defaults.rangeMin)),
+    rangeMax: Math.max(0, Math.floor(defaults.rangeMax)),
+    projectionRange: Math.max(0, Math.floor(defaults.projectionRange)),
     state: initialState,
     containerId
   };
@@ -72,6 +79,11 @@ export const validateArmyState = (army: Army, state: GameState): boolean => {
   if (army.members > army.maxMembers) return false;
   if (!Number.isFinite(army.attack) || !Number.isFinite(army.defense)) return false;
   if (!Number.isFinite(army.condition) || army.condition < 0 || army.condition > 1) return false;
+  if (!Number.isFinite(army.morale) || army.morale < 0 || army.morale > 1) return false;
+  if (!Number.isFinite(army.fatigue) || army.fatigue < 0 || army.fatigue > 1) return false;
+  if (!Number.isFinite(army.rangeMin) || army.rangeMin < 0) return false;
+  if (!Number.isFinite(army.rangeMax) || army.rangeMax < army.rangeMin) return false;
+  if (!Number.isFinite(army.projectionRange) || army.projectionRange < 0) return false;
 
   // 2. Location Integrity
   if (army.state === ArmyState.DEPLOYED) {
@@ -196,7 +208,7 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
         }
 
         if (isValid) {
-            const outOfCombat = army.members === 0 || army.condition < 0.20;
+            const outOfCombat = army.members <= 0;
             if (outOfCombat) {
                 logs.push(`Army ${army.id} removed as out of combat (members=${army.members}, condition=${army.condition.toFixed(2)}).`);
                 isValid = false;

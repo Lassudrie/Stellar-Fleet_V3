@@ -1,4 +1,17 @@
-import type { Army, Battle, Fleet, GameMessage, GameState, GroundBuilding, LaserShot, LogEntry, StarSystem, Station } from '../shared/shared';
+import type {
+  Army,
+  Battle,
+  Fleet,
+  GameMessage,
+  GameState,
+  GroundBuilding,
+  HexCoord,
+  LaserShot,
+  LogEntry,
+  SettlementControlState,
+  StarSystem,
+  Station
+} from '../shared/shared';
 import { sorted } from '../shared/shared';
 
 // ============================================================
@@ -74,6 +87,8 @@ export const canonicalizeState = (state: GameState): GameState => {
     armies: canonicalizeArmies(state.armies),
     lasers: canonicalizeLasers(state.lasers),
     groundBuildings: canonicalizeGroundBuildings(state.groundBuildings ?? []),
+    settlementControl: canonicalizeSettlementControl(state.settlementControl),
+    bombardedHexesByBodyId: canonicalizeBombardedHexesByBodyId(state.bombardedHexesByBodyId),
     battles: canonicalizeBattles(state.battles),
     logs: canonicalizeLogs(state.logs),
     messages: canonicalizeMessages(state.messages)
@@ -112,6 +127,36 @@ export const canonicalizeLasers = (lasers: LaserShot[]): LaserShot[] => {
 
 export const canonicalizeGroundBuildings = (buildings: GroundBuilding[]): GroundBuilding[] => {
   return sorted(buildings, (a, b) => compareIds(a.id, b.id));
+};
+
+export const canonicalizeSettlementControl = (
+  control?: Record<string, SettlementControlState>
+): Record<string, SettlementControlState> | undefined => {
+  if (!control) return control;
+  const keys = Object.keys(control);
+  if (keys.length <= 1 && (keys.length === 0 || keys[0] in control)) return control;
+  const ordered = sorted(keys, (a, b) => compareIds(a, b));
+  const next: Record<string, SettlementControlState> = {};
+  ordered.forEach(key => {
+    next[key] = control[key];
+  });
+  return next;
+};
+
+export const canonicalizeBombardedHexesByBodyId = (
+  value?: Record<string, HexCoord[]>
+): Record<string, HexCoord[]> | undefined => {
+  if (!value) return value;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return value;
+  const orderedKeys = sorted(keys, (a, b) => compareIds(a, b));
+  const next: Record<string, HexCoord[]> = {};
+  orderedKeys.forEach(bodyId => {
+    const coords = value[bodyId] ?? [];
+    const orderedCoords = sorted(coords, (a, b) => (a.r !== b.r ? a.r - b.r : a.q - b.q));
+    next[bodyId] = orderedCoords.map(coord => ({ q: coord.q, r: coord.r }));
+  });
+  return next;
 };
 
 export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
@@ -179,6 +224,36 @@ export const isCanonical = (state: GameState): boolean => {
   for (let i = 1; i < groundBuildings.length; i++) {
     if (compareIds(groundBuildings[i].id, groundBuildings[i - 1].id) < 0) {
       return false;
+    }
+  }
+
+  const settlementControl = state.settlementControl;
+  if (settlementControl) {
+    const keys = Object.keys(settlementControl);
+    for (let i = 1; i < keys.length; i++) {
+      if (compareIds(keys[i - 1], keys[i]) > 0) {
+        return false;
+      }
+    }
+  }
+
+  const bombardedHexesByBodyId = state.bombardedHexesByBodyId;
+  if (bombardedHexesByBodyId) {
+    const keys = Object.keys(bombardedHexesByBodyId);
+    for (let i = 1; i < keys.length; i++) {
+      if (compareIds(keys[i - 1], keys[i]) > 0) {
+        return false;
+      }
+    }
+    for (const key of keys) {
+      const coords = bombardedHexesByBodyId[key] ?? [];
+      for (let i = 1; i < coords.length; i++) {
+        const prev = coords[i - 1];
+        const cur = coords[i];
+        if (cur.r < prev.r || (cur.r === prev.r && cur.q < prev.q)) {
+          return false;
+        }
+      }
     }
   }
 

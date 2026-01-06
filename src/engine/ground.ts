@@ -7,8 +7,10 @@ import type {
   GroundBuilding,
   GroundUnitType,
   HexCoord,
-  PlanetSurfaceMap
+  PlanetSurfaceMap,
+  SettlementControlState
 } from '../shared/shared';
+import { sorted } from '../shared/shared';
 import { RNG } from './rng';
 import { generateSurfaceMapForState, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
 
@@ -37,6 +39,92 @@ const normalizeCoord = (coord: HexCoord, w: number, h: number, wrapX: boolean): 
   const q = wrapX ? mod(coord.q, w) : coord.q;
   if (q < 0 || q >= w) return null;
   return { q, r };
+};
+
+const axialToCube = (coord: HexCoord): { x: number; y: number; z: number } => {
+  const x = coord.q;
+  const z = coord.r;
+  const y = -x - z;
+  return { x, y, z };
+};
+
+const cubeToAxial = (cube: { x: number; y: number; z: number }): HexCoord => ({ q: cube.x, r: cube.z });
+
+const cubeRound = (cube: { x: number; y: number; z: number }): { x: number; y: number; z: number } => {
+  let rx = Math.round(cube.x);
+  let ry = Math.round(cube.y);
+  let rz = Math.round(cube.z);
+
+  const dx = Math.abs(rx - cube.x);
+  const dy = Math.abs(ry - cube.y);
+  const dz = Math.abs(rz - cube.z);
+
+  if (dx > dy && dx > dz) {
+    rx = -ry - rz;
+  } else if (dy > dz) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
+  }
+
+  return { x: rx, y: ry, z: rz };
+};
+
+const cubeLerp = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, t: number) => ({
+  x: a.x + (b.x - a.x) * t,
+  y: a.y + (b.y - a.y) * t,
+  z: a.z + (b.z - a.z) * t
+});
+
+export const hexDistance = (a: HexCoord, b: HexCoord, w: number, wrapX: boolean): number => {
+  const dqRaw = b.q - a.q;
+  const dq = wrapX && w > 0
+    ? (() => {
+        const modded = mod(dqRaw, w);
+        const alt = modded > w / 2 ? modded - w : modded;
+        return alt;
+      })()
+    : dqRaw;
+  const dr = b.r - a.r;
+  const ds = -dq - dr;
+  return Math.floor((Math.abs(dq) + Math.abs(dr) + Math.abs(ds)) / 2);
+};
+
+const adjustTargetForWrap = (from: HexCoord, to: HexCoord, w: number, wrapX: boolean): HexCoord => {
+  if (!wrapX || w <= 0) return to;
+  const dqRaw = to.q - from.q;
+  const modded = mod(dqRaw, w);
+  const alt = modded > w / 2 ? modded - w : modded;
+  return { q: from.q + alt, r: to.r };
+};
+
+export const lineOfSight = (params: {
+  from: HexCoord;
+  to: HexCoord;
+  map: PlanetSurfaceMap;
+  isBlocked: (coord: HexCoord) => boolean;
+}): boolean => {
+  const { from, to, map, isBlocked } = params;
+  const { w, h, wrapX } = map.descriptor.config;
+  const fromNorm = normalizeCoord(from, w, h, wrapX);
+  const toAdj = adjustTargetForWrap(from, to, w, wrapX);
+  const toNorm = normalizeCoord(toAdj, w, h, wrapX);
+  if (!fromNorm || !toNorm) return false;
+
+  const a = axialToCube(fromNorm);
+  const b = axialToCube(toNorm);
+  const dist = hexDistance(fromNorm, toNorm, w, wrapX);
+  if (dist <= 1) return true;
+
+  for (let i = 1; i < dist; i += 1) {
+    const t = dist === 0 ? 0 : i / dist;
+    const cube = cubeRound(cubeLerp(a, b, t));
+    const axial = cubeToAxial(cube);
+    const norm = normalizeCoord(axial, w, h, wrapX);
+    if (!norm) return false;
+    if (isBlocked(norm)) return false;
+  }
+  return true;
 };
 
 // -----------------------------
@@ -80,6 +168,68 @@ export const MOVE_COST: Record<TerrainType, number> = {
   Swamp: 3,
   Desert: 2,
   Coastal: 2
+};
+
+// -------------------------
+// Ground V2 constants
+// -------------------------
+
+export const STACKING_PENALTY_PER_EXTRA = 0.10;
+export const STACKING_FREE_SLOTS = 2;
+export const STACKING_CAP = 10;
+export const MAX_UNITS_PER_SIDE = 100;
+
+export const SUPPLY_RADIUS = 6;
+export const SUPPLY_FACTOR_SUPPLIED = 1.0;
+export const SUPPLY_FACTOR_UNSUPPLIED = 0.7;
+export const SUPPLY_PENALTY_ATK = 0.20;
+export const SUPPLY_PENALTY_DEF = 0.20;
+
+export const RNG_EPSILON = 0.08;
+export const ENGAGEMENT_LETHALITY = 0.35;
+export const ENGAGEMENT_LOSS_CAP = 0.35;
+export const CONDITION_LOSS_COEFF = 0.60;
+export const MORALE_LOSS_COEFF = 0.60;
+export const BREAK_THRESHOLD = 0.25;
+export const RALLY_THRESHOLD = 0.40;
+export const ROUTED_ATK_MULT = 0.70;
+export const ROUTED_DEF_MULT = 0.70;
+export const ROUTED_MP_MULT = 0.50;
+export const FRONT_ASSAULT_MULT = 0.85;
+export const FATIGUE_MOVE_PER_HEX = 0.02;
+export const FATIGUE_COMBAT_ADD = 0.10;
+export const FATIGUE_RECOVERY = 0.15;
+export const FATIGUE_FACTOR_MIN = 0.50;
+export const MORALE_RECOVERY = 0.20;
+export const CONDITION_RECOVERY = 0.05;
+export const POST_BATTLE_MORALE_CAP = 0.35;
+export const POST_BATTLE_FATIGUE_ADD = 0.15;
+export const LANDING_BASE = 0.10;
+export const LANDING_VAR = 0.15;
+export const LANDING_MAX = 0.60;
+export const ORBIT_CONTESTED_LANDING_PENALTY = 0.10;
+export const BOMBARD_LANDING_PENALTY = 0.05;
+export const AO_COEFF = 0.15;
+export const AO_LANDING_COEFF = 0.05;
+export const AO_LANDING_MAX = 0.15;
+
+export const isRouted = (army: Army): boolean => army.morale < BREAK_THRESHOLD;
+
+export const computeStackingFactor = (index: number): number => {
+  if (index < STACKING_FREE_SLOTS) return 1;
+  const penalty = STACKING_PENALTY_PER_EXTRA * (index - (STACKING_FREE_SLOTS - 1));
+  return Math.max(0, 1 - penalty);
+};
+
+export const computeStackingFactors = (occupancy: Map<string, string[]>): Map<string, number> => {
+  const factors = new Map<string, number>();
+  occupancy.forEach(ids => {
+    const ordered = sorted(ids, (a, b) => a.localeCompare(b));
+    ordered.forEach((id, index) => {
+      factors.set(id, computeStackingFactor(index));
+    });
+  });
+  return factors;
 };
 
 export const biomeToTerrainType = (biome: Biome): TerrainType => {
@@ -149,6 +299,61 @@ export const deriveTerrainType = (state: GameState, bodyId: string, coord: HexCo
   return hasBuilding ? 'Urban' : 'Open';
 };
 
+export const isUrbanHex = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): boolean => {
+  const { w, h, wrapX } = map.descriptor.config;
+  const norm = normalizeCoord(coord, w, h, wrapX);
+  if (!norm) return false;
+  const { q, r } = norm;
+  if (buildings.some(b => b.surfacePos.bodyId === map.bodyId && b.surfacePos.q === q && b.surfacePos.r === r)) return true;
+  return map.settlements.some(s => s.coord.q === q && s.coord.r === r);
+};
+
+export const coverFactorForBiome = (biome: Biome): number => {
+  switch (biome) {
+    case 'desert':
+    case 'ash_desert':
+    case 'vitrified':
+    case 'oxidized':
+    case 'fossil_basin':
+    case 'rocky':
+    case 'cratered':
+      return 1.0;
+    case 'grassland':
+    case 'coast':
+    case 'lake':
+    case 'dusty_ice':
+    case 'compressed_plateau':
+      return 1.05;
+    case 'tundra':
+    case 'taiga':
+    case 'fractured_ice':
+    case 'thermal_polygons':
+    case 'chemical_erosion':
+      return 1.1;
+    case 'forest':
+      return 1.15;
+    case 'rainforest':
+      return 1.2;
+    case 'mountain':
+    case 'volcanic':
+    case 'lava_flats':
+      return 1.25;
+    default:
+      return 1.05;
+  }
+};
+
+export const isLosBlockingBiome = (biome: Biome): boolean => {
+  switch (biome) {
+    case 'mountain':
+    case 'volcanic':
+    case 'lava_flats':
+      return true;
+    default:
+      return false;
+  }
+};
+
 // -----------------------
 // ZOC (was: ground/zoc.ts)
 // -----------------------
@@ -160,6 +365,26 @@ export interface ZocSnapshot {
   wrapX: boolean;
   zocByFactionId: Map<FactionId, Uint8Array>;
 }
+
+const forEachCoordInRange = (
+  center: HexCoord,
+  range: number,
+  w: number,
+  h: number,
+  wrapX: boolean,
+  cb: (coord: HexCoord) => void
+) => {
+  if (range <= 0) return;
+  for (let dq = -range; dq <= range; dq += 1) {
+    const rMin = Math.max(-range, -dq - range);
+    const rMax = Math.min(range, -dq + range);
+    for (let dr = rMin; dr <= rMax; dr += 1) {
+      const coord = normalizeCoord({ q: center.q + dq, r: center.r + dr }, w, h, wrapX);
+      if (!coord) continue;
+      cb(coord);
+    }
+  }
+};
 
 export const computeZocSnapshotFromArmies = (params: {
   bodyId: string;
@@ -185,15 +410,13 @@ export const computeZocSnapshotFromArmies = (params: {
     if (army.containerId !== bodyId) continue;
     if (!army.surfacePos) continue;
     if (army.members <= 0) continue;
-    if (army.condition < 0.3) continue;
+    if (isRouted(army)) continue;
     const norm = normalizeCoord({ q: army.surfacePos.q, r: army.surfacePos.r }, w, h, wrapX);
     if (!norm) continue;
-    const { q, r } = norm;
     const arr = getArr(army.factionId);
-    const ns = neighborsAxial({ q, r }, w, h, wrapX);
-    for (const n of ns) {
-      arr[n.r * w + n.q] = 1;
-    }
+    forEachCoordInRange(norm, Math.max(0, Math.floor(army.projectionRange)), w, h, wrapX, coord => {
+      arr[coord.r * w + coord.q] = 1;
+    });
   }
 
   return { bodyId, w, h, wrapX, zocByFactionId };
@@ -289,17 +512,20 @@ export const applyOverrunPenalty = (army: Army): Army => {
 // Supply (was: ground/supply.ts)
 // ---------------------------
 
-export const SUPPLY_RADIUS = 6;
-
 const INF = 0xffff;
 
 export const computeSupplyDistanceMapForBody = (state: GameState, bodyId: string, factionId: FactionId): Uint16Array | null => {
   const map = generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
-  return computeSupplyDistanceMapFromSurfaceMap(map, state.groundBuildings ?? [], factionId);
+  return computeSupplyDistanceMapFromSurfaceMap(map, state.groundBuildings ?? [], state.settlementControl, factionId);
 };
 
-export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, buildings: GroundBuilding[], factionId: FactionId): Uint16Array => {
+export const computeSupplyDistanceMapFromSurfaceMap = (
+  map: PlanetSurfaceMap,
+  buildings: GroundBuilding[],
+  settlementControl: Record<string, SettlementControlState> | undefined,
+  factionId: FactionId
+): Uint16Array => {
   const { w, h, wrapX } = map.descriptor.config;
   const size = w * h;
   const dist = new Uint16Array(size);
@@ -322,7 +548,9 @@ export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, bu
 
   // Supply sources: settlements controlled by faction + ground buildings controlled by faction
   for (const s of map.settlements) {
-    if (s.factionId !== factionId) continue;
+    const control = settlementControl?.[s.id];
+    const controller = control?.factionId ?? s.factionId ?? null;
+    if (controller !== factionId) continue;
     const norm = normalizeCoord(s.coord, w, h, wrapX);
     if (!norm) continue;
     enqueue(norm, 0);
@@ -331,6 +559,7 @@ export const computeSupplyDistanceMapFromSurfaceMap = (map: PlanetSurfaceMap, bu
   for (const b of buildings) {
     if (b.factionId !== factionId) continue;
     if (b.surfacePos.bodyId !== map.bodyId) continue;
+    if (b.tags && !b.tags.includes('supply_node')) continue;
     const norm = normalizeCoord({ q: b.surfacePos.q, r: b.surfacePos.r }, w, h, wrapX);
     if (!norm) continue;
     enqueue(norm, 0);
@@ -457,10 +686,11 @@ export interface ReachableParams {
   isBlocked: (coord: HexCoord) => boolean;
   stepCostCenti: (from: HexCoord, to: HexCoord) => number;
   maxCostCenti: number;
+  canExpand?: (coord: HexCoord) => boolean;
 }
 
 export const computeReachable = (params: ReachableParams): Map<string, number> => {
-  const { from, w, h, wrapX, isBlocked, stepCostCenti, maxCostCenti } = params;
+  const { from, w, h, wrapX, isBlocked, stepCostCenti, maxCostCenti, canExpand } = params;
   const startKey = hexKey(from);
   const dist = new Map<string, number>();
   dist.set(startKey, 0);
@@ -475,6 +705,8 @@ export const computeReachable = (params: ReachableParams): Map<string, number> =
     const best = dist.get(curKey);
     if (best === undefined || cur.cost !== best) continue;
     if (cur.cost > maxCostCenti) continue;
+
+    if (canExpand && !canExpand(curCoord)) continue;
 
     const ns = neighborsAxial(curCoord, w, h, wrapX);
     for (const n of ns) {
@@ -642,18 +874,17 @@ export const computeKBreakdown = (params: {
 // Movement (was: ground/movement.ts)
 // -----------------------------------
 
-export const SUPPLY_FACTOR_SUPPLIED = 1.0;
-export const SUPPLY_FACTOR_UNSUPPLIED = 0.7;
-
 export const computeEffectiveMP = (army: Army, supplied: boolean): number => {
   const base = GROUND_UNIT_STATS[army.unitType].baseMP;
   const supplyFactor = supplied ? SUPPLY_FACTOR_SUPPLIED : SUPPLY_FACTOR_UNSUPPLIED;
-  const mp = Math.floor(base * army.condition * supplyFactor);
+  const fatigueFactor = clamp(1 - army.fatigue, FATIGUE_FACTOR_MIN, 1);
+  const routedFactor = isRouted(army) ? ROUTED_MP_MULT : 1;
+  const mp = Math.floor(base * army.condition * supplyFactor * fatigueFactor * routedFactor);
   if (army.members > 0 && army.condition > 0) return Math.max(1, mp);
   return Math.max(0, mp);
 };
 
-const clampAffinity = (v: number | undefined): number => clamp(v ?? 1, 0.7, 1.3);
+export const clampAffinity = (v: number | undefined): number => clamp(v ?? 1, 0.7, 1.3);
 
 export interface MoveExecutionResult {
   moved: boolean;
@@ -662,9 +893,8 @@ export interface MoveExecutionResult {
   steps: number;
   mpEff: number;
   mpUsedCenti: number;
-  used75pct: boolean;
+  enteredEnemyZoc: boolean;
   fatigueDelta: number;
-  touchedCost3: boolean;
   updatedArmy: Army;
 }
 
@@ -674,9 +904,11 @@ export const executeMoveOrder = (params: {
   to: HexCoord;
   supplied: boolean;
   zocSnapshot: ZocSnapshot | null;
-  isOccupied: (coord: HexCoord) => boolean;
+  getOccupants: (coord: HexCoord) => Army[];
+  stackingCap?: number;
 }): MoveExecutionResult => {
-  const { state, army, to, supplied, zocSnapshot, isOccupied } = params;
+  const { state, army, to, supplied, zocSnapshot, getOccupants } = params;
+  const stackingCap = params.stackingCap ?? STACKING_CAP;
   const map = generateSurfaceMapForState(state, army.containerId);
   const mpEff = computeEffectiveMP(army, supplied);
 
@@ -690,9 +922,8 @@ export const executeMoveOrder = (params: {
       steps: 0,
       mpEff: 0,
       mpUsedCenti: 0,
-      used75pct: false,
+      enteredEnemyZoc: false,
       fatigueDelta: 0,
-      touchedCost3: false,
       updatedArmy: army
     };
   }
@@ -707,9 +938,8 @@ export const executeMoveOrder = (params: {
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
-      used75pct: false,
+      enteredEnemyZoc: false,
       fatigueDelta: 0,
-      touchedCost3: false,
       updatedArmy: army
     };
   }
@@ -723,9 +953,8 @@ export const executeMoveOrder = (params: {
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
-      used75pct: false,
+      enteredEnemyZoc: false,
       fatigueDelta: 0,
-      touchedCost3: false,
       updatedArmy: army
     };
   }
@@ -735,7 +964,10 @@ export const executeMoveOrder = (params: {
   const mpCenti = mpEff * 100;
 
   const tile = map.tiles[target.r * w + target.q];
-  if (!tile || !isPassable(tile.biome)) {
+  const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
+  const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+  const isPassableForArmy = (biome: Biome): boolean => isPassable(biome) || (isAmphibious && isWaterBiome(biome));
+  if (!tile || !isPassableForArmy(tile.biome)) {
     return {
       moved: false,
       from,
@@ -743,17 +975,19 @@ export const executeMoveOrder = (params: {
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
-      used75pct: false,
+      enteredEnemyZoc: false,
       fatigueDelta: 0,
-      touchedCost3: false,
       updatedArmy: army
     };
   }
 
   const isPassableAt = (c: HexCoord): boolean => {
     const tileAt = map.tiles[c.r * w + c.q];
-    return !!tileAt && isPassable(tileAt.biome);
+    return !!tileAt && isPassableForArmy(tileAt.biome);
   };
+
+  const isEnemyOccupied = (coord: HexCoord): boolean => getOccupants(coord).some(o => o.factionId !== army.factionId);
+  const friendlyCount = (coord: HexCoord): number => getOccupants(coord).filter(o => o.factionId === army.factionId).length;
 
   const size = w * h;
   const urbanMask = new Uint8Array(size);
@@ -804,11 +1038,7 @@ export const executeMoveOrder = (params: {
 
   const stepCostCenti = (a: HexCoord, b: HexCoord): number => {
     let cost = getBaseMoveCostCenti(b);
-    if (zocSnapshot) {
-      const curEnemy = isInEnemyZoc(zocSnapshot, a, army.factionId);
-      const nextEnemy = isInEnemyZoc(zocSnapshot, b, army.factionId);
-      if (curEnemy !== nextEnemy) cost += 100;
-    }
+    if (friendlyCount(b) > 0) cost *= 2;
     return cost;
   };
 
@@ -818,7 +1048,7 @@ export const executeMoveOrder = (params: {
     w,
     h,
     wrapX,
-    isBlocked: c => !isPassableAt(c) || isOccupied(c),
+    isBlocked: c => !isPassableAt(c) || isEnemyOccupied(c),
     stepCostCenti
   });
 
@@ -830,9 +1060,8 @@ export const executeMoveOrder = (params: {
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
-      used75pct: false,
+      enteredEnemyZoc: false,
       fatigueDelta: 0,
-      touchedCost3: false,
       updatedArmy: army
     };
   }
@@ -841,38 +1070,34 @@ export const executeMoveOrder = (params: {
   let mpUsedCenti = 0;
   let steps = 0;
   let pos = from;
-  let touchedCost3 = false;
+  let enteredEnemyZoc = false;
 
   for (let i = 1; i < pathResult.path.length; i += 1) {
     const next = pathResult.path[i];
-    // Collision/no-stacking guard: if the next hex is occupied at execution time, stop immediately
-    // on the previous hex (do not spend MP for the blocked step).
+    const isTarget = i === pathResult.path.length - 1;
+    const nextFriendlyCount = friendlyCount(next);
     if (!isPassableAt(next)) break;
-    if (isOccupied(next)) break;
+    if (isEnemyOccupied(next)) break;
+    if (isTarget && nextFriendlyCount >= stackingCap) break;
     const cost = stepCostCenti(pos, next);
     if (mpUsedCenti + cost > mpCenti) break;
     mpUsedCenti += cost;
     steps += 1;
-    const terrain = getTerrainTypeAt(next);
-    if (MOVE_COST[terrain] >= 3) touchedCost3 = true;
     pos = next;
+    if (zocSnapshot && isInEnemyZoc(zocSnapshot, next, army.factionId)) {
+      enteredEnemyZoc = true;
+      break;
+    }
   }
 
   const moved = steps > 0;
-  const mpUsedRatio = mpCenti > 0 ? mpUsedCenti / mpCenti : 0;
-  const used75pct = mpUsedRatio >= 0.75;
-
-  // Fatigue
-  let fatigue = 0.02 * steps;
-  if (touchedCost3) fatigue *= 1.5;
-  if (!supplied) fatigue *= 1.5;
-  fatigue = clamp(fatigue, 0, 1);
+  const fatigue = steps === 0 ? 0 : Math.min(FATIGUE_MOVE_PER_HEX * steps, 0.4);
 
   const updatedArmy: Army = moved
     ? {
         ...army,
         surfacePos: { bodyId: army.containerId, q: pos.q, r: pos.r },
-        condition: clamp(army.condition - fatigue, 0, 1)
+        fatigue: clamp(army.fatigue + fatigue, 0, 1)
       }
     : army;
 
@@ -883,238 +1108,346 @@ export const executeMoveOrder = (params: {
     steps,
     mpEff,
     mpUsedCenti,
-    used75pct,
+    enteredEnemyZoc,
     fatigueDelta: fatigue,
-    touchedCost3,
     updatedArmy
   };
 };
 
 // ------------------------------
-// Combat (was: ground/combat.ts)
+// Combat (Ground V2)
 // ------------------------------
 
-export interface EngagementContext {
-  turn: number;
-  terrainType: TerrainType; // terrain of defender hex
-  attackerSituation?: SituationFlags;
-  defenderSituation?: SituationFlags;
-  attackerStatus?: StatusFlags;
-  defenderStatus?: StatusFlags;
+export interface EngagementParticipant {
+  army: Army;
+  supplied: boolean;
+  stackingFactor: number;
+  frontAssault?: boolean;
 }
 
-export interface EngagementResult {
-  attackerId: string;
+export interface EngagementPreview {
+  attackerIds: string[];
   defenderId: string;
-  attackerFactionId: FactionId;
-  defenderFactionId: FactionId;
-  terrainType: TerrainType;
-
-  // Core metrics
-  srAtt: number;
-  srDef: number;
-  kAtt: KBreakdown;
-  kDef: KBreakdown;
-  ra: number;
-  rd: number;
-  attackEff: number;
-  defenseEff: number;
-  r: number;
-
-  // Losses
-  pDef: number;
-  pAtt: number;
+  rngAtk: number;
+  rngDef: number;
+  attackPower: number;
+  defensePower: number;
+  lossRateDef: number;
+  lossRateAtk: number;
   lossesDef: number;
-  lossesAtt: number;
+  lossesAtkTotal: number;
+  lossesByAttackerId: Record<string, number>;
+}
 
-  // Condition deltas
-  dCDef: number;
-  dCAtt: number;
-
-  // Break
-  breakScore: number;
-  advantage: number;
-  breakChance: number;
-  breakRoll: number;
-  defenderBroke: boolean;
-
-  // Updated units
-  attackerAfter: Army;
+export interface EngagementResult extends EngagementPreview {
+  attackersAfter: Army[];
   defenderAfter: Army;
 }
 
-export type EngagementPreview = Omit<EngagementResult, 'breakRoll' | 'defenderBroke' | 'attackerAfter' | 'defenderAfter'>;
-
-const computeSR = (army: Army): number => {
-  if (army.maxMembers <= 0) return 0;
-  return clamp(army.members / army.maxMembers, 0, 1);
+export const computeCoverFactorAtCoord = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): number => {
+  if (isUrbanHex(map, buildings, coord)) return 1.25;
+  const { w, h, wrapX } = map.descriptor.config;
+  const norm = normalizeCoord(coord, w, h, wrapX);
+  if (!norm) return 1.05;
+  const tile = map.tiles[norm.r * w + norm.q];
+  if (!tile) return 1.05;
+  return coverFactorForBiome(tile.biome);
 };
 
-const computeLosses = (members: number, p: number): number => {
-  if (members <= 0) return 0;
-  if (p <= 0) return 0;
-  const raw = Math.floor(members * p);
-  return Math.max(1, raw);
+export const computeFortifFactorAtCoord = (buildings: GroundBuilding[], bodyId: string, coord: HexCoord): number => {
+  let factor = 1;
+  for (const b of buildings) {
+    if (b.surfacePos.bodyId !== bodyId) continue;
+    if (b.surfacePos.q !== coord.q || b.surfacePos.r !== coord.r) continue;
+    if (b.tags?.includes('bunker') || b.type === 'bunker') {
+      factor = Math.max(factor, 1.25);
+      continue;
+    }
+    if (b.tags?.includes('fortification_light') || b.type === 'fortification') {
+      factor = Math.max(factor, 1.10);
+    }
+  }
+  return factor;
 };
 
-export const previewEngagement = (attacker: Army, defender: Army, ctx: EngagementContext): EngagementPreview => {
-  const srAtt = computeSR(attacker);
-  const srDef = computeSR(defender);
-  const kAtt = computeKBreakdown({
-    unitType: attacker.unitType,
-    terrainType: ctx.terrainType,
-    situation: ctx.attackerSituation,
-    status: ctx.attackerStatus
+export const hasLineOfSight = (params: {
+  map: PlanetSurfaceMap;
+  buildings: GroundBuilding[];
+  from: HexCoord;
+  to: HexCoord;
+}): boolean => {
+  const { map, buildings, from, to } = params;
+  return lineOfSight({
+    from,
+    to,
+    map,
+    isBlocked: coord => {
+      if (isUrbanHex(map, buildings, coord)) return true;
+      const { w, h, wrapX } = map.descriptor.config;
+      const norm = normalizeCoord(coord, w, h, wrapX);
+      if (!norm) return true;
+      const tile = map.tiles[norm.r * w + norm.q];
+      if (!tile) return true;
+      return isLosBlockingBiome(tile.biome);
+    }
   });
-  const kDef = computeKBreakdown({
-    unitType: defender.unitType,
-    terrainType: ctx.terrainType,
-    situation: ctx.defenderSituation,
-    status: ctx.defenderStatus
+};
+
+const combatAffinity = (unitType: GroundUnitType, terrain: TerrainType): number => {
+  const raw = GROUND_UNIT_STATS[unitType].terrainCombatAffinity[terrain];
+  return clamp(raw ?? 1, 0.7, 1.3);
+};
+
+const moraleFactor = (army: Army): number => clamp(army.morale, 0, 1);
+const fatigueFactor = (army: Army): number => clamp(1 - army.fatigue, FATIGUE_FACTOR_MIN, 1);
+const supplyAtkFactor = (supplied: boolean): number => supplied ? 1 : (1 - SUPPLY_PENALTY_ATK);
+const supplyDefFactor = (supplied: boolean): number => supplied ? 1 : (1 - SUPPLY_PENALTY_DEF);
+
+const computeAttackPowerBase = (params: {
+  army: Army;
+  terrainType: TerrainType;
+  supplied: boolean;
+  stackingFactor: number;
+  frontAssault?: boolean;
+}): number => {
+  const { army, terrainType, supplied, stackingFactor, frontAssault } = params;
+  if (army.members <= 0) return 0;
+  const terrainFactor = combatAffinity(army.unitType, terrainType);
+  const base =
+    army.members *
+    army.attack *
+    clamp(army.condition, 0, 1) *
+    moraleFactor(army) *
+    terrainFactor *
+    supplyAtkFactor(supplied) *
+    fatigueFactor(army) *
+    clamp(stackingFactor, 0, 1);
+  const routedMult = isRouted(army) ? ROUTED_ATK_MULT : 1;
+  const assaultMult = frontAssault ? FRONT_ASSAULT_MULT : 1;
+  return base * routedMult * assaultMult;
+};
+
+const computeDefensePowerBase = (params: {
+  army: Army;
+  terrainType: TerrainType;
+  supplied: boolean;
+  stackingFactor: number;
+}): number => {
+  const { army, terrainType, supplied, stackingFactor } = params;
+  if (army.members <= 0) return 0;
+  const terrainFactor = combatAffinity(army.unitType, terrainType);
+  const base =
+    army.members *
+    army.defense *
+    clamp(army.condition, 0, 1) *
+    moraleFactor(army) *
+    terrainFactor *
+    supplyDefFactor(supplied) *
+    fatigueFactor(army) *
+    clamp(stackingFactor, 0, 1);
+  const routedMult = isRouted(army) ? ROUTED_DEF_MULT : 1;
+  return base * routedMult;
+};
+
+const distributeLosses = (
+  totalLoss: number,
+  entries: Array<{ id: string; weight: number; max: number }>
+): Record<string, number> => {
+  const losses: Record<string, number> = {};
+  if (totalLoss <= 0) {
+    entries.forEach(entry => {
+      losses[entry.id] = 0;
+    });
+    return losses;
+  }
+  const valid = entries.filter(entry => entry.weight > 0 && entry.max > 0);
+  if (valid.length === 0) {
+    entries.forEach(entry => {
+      losses[entry.id] = 0;
+    });
+    return losses;
+  }
+  const totalWeight = valid.reduce((sum, entry) => sum + entry.weight, 0);
+  if (totalWeight <= 0) {
+    entries.forEach(entry => {
+      losses[entry.id] = 0;
+    });
+    return losses;
+  }
+
+  let allocated = 0;
+  const fractional: Array<{ id: string; frac: number; capacity: number }> = [];
+
+  valid.forEach(entry => {
+    const raw = (totalLoss * entry.weight) / totalWeight;
+    let baseLoss = Math.floor(raw);
+    baseLoss = Math.min(baseLoss, entry.max);
+    losses[entry.id] = baseLoss;
+    allocated += baseLoss;
+    fractional.push({ id: entry.id, frac: raw - Math.floor(raw), capacity: entry.max - baseLoss });
   });
 
-  const ra = 1;
-  const rd = 1;
-  const attackEff = attacker.attack * srAtt * attacker.condition * kAtt.kFinal * ra;
-  const defenseEff = defender.defense * srDef * defender.condition * kDef.kFinal * rd;
-  const r = defenseEff > 0 ? attackEff / defenseEff : Infinity;
+  entries.forEach(entry => {
+    if (losses[entry.id] === undefined) losses[entry.id] = 0;
+  });
 
-  const pDef = clamp(0.05 * r, 0.02, 0.3);
-  const pAtt = clamp(0.04 / r, 0.01, 0.25);
+  let remaining = totalLoss - allocated;
+  if (remaining <= 0) return losses;
 
-  const lossesDef = computeLosses(defender.members, pDef);
-  const lossesAtt = computeLosses(attacker.members, pAtt);
+  const sortedFractional = sorted(fractional, (a, b) => {
+    if (a.frac !== b.frac) return b.frac - a.frac;
+    return a.id.localeCompare(b.id);
+  });
 
-  const defenderMembersAfter = Math.max(0, defender.members - lossesDef);
+  let idx = 0;
+  while (remaining > 0 && sortedFractional.some(entry => entry.capacity > 0)) {
+    const entry = sortedFractional[idx % sortedFractional.length];
+    idx += 1;
+    if (entry.capacity <= 0) continue;
+    losses[entry.id] += 1;
+    entry.capacity -= 1;
+    remaining -= 1;
+  }
 
-  const dCDef = clamp(0.1 * r, 0.03, 0.25);
-  const dCAtt = clamp(0.08 / r, 0.02, 0.2);
+  return losses;
+};
 
-  const defenderConditionAfter = clamp(defender.condition - dCDef, 0, 1);
-  // Preview break evaluation uses updated defender SR/condition (mirrors resolver sans RNG).
-  const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
-  const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
-  const advantage = clamp(r >= 2.5 ? 1.0 : r - 1.1, 0.0, 1.0);
-  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
-
+const applyCombatLosses = (army: Army, losses: number, turn: number): Army => {
+  const membersBefore = Math.max(0, army.members);
+  const clampedLosses = Math.min(membersBefore, Math.max(0, losses));
+  const membersAfter = Math.max(0, membersBefore - clampedLosses);
+  const lossRatio = membersBefore > 0 ? clampedLosses / membersBefore : 0;
+  const conditionAfter = clamp(army.condition - CONDITION_LOSS_COEFF * lossRatio, 0, 1);
+  const moraleAfter = clamp(army.morale - MORALE_LOSS_COEFF * lossRatio, 0, 1);
+  const fatigueAfter = clamp(army.fatigue + FATIGUE_COMBAT_ADD, 0, 1);
   return {
-    attackerId: attacker.id,
-    defenderId: defender.id,
-    attackerFactionId: attacker.factionId,
-    defenderFactionId: defender.factionId,
-    terrainType: ctx.terrainType,
-    srAtt,
-    srDef,
-    kAtt,
-    kDef,
-    ra,
-    rd,
-    attackEff,
-    defenseEff,
-    r,
-    pDef,
-    pAtt,
-    lossesDef,
-    lossesAtt,
-    dCDef,
-    dCAtt,
-    breakScore,
-    advantage,
-    breakChance
+    ...army,
+    members: membersAfter,
+    condition: conditionAfter,
+    morale: moraleAfter,
+    fatigue: fatigueAfter,
+    lastCombatTurn: turn
   };
 };
 
-export const resolveEngagement = (attacker: Army, defender: Army, ctx: EngagementContext): EngagementResult => {
-  const seed = hashJoin32(ctx.turn, attacker.id, defender.id, 'ground');
+const computeEngagementMetrics = (params: {
+  rngAtk: number;
+  rngDef: number;
+  map: PlanetSurfaceMap;
+  buildings: GroundBuilding[];
+  attackers: EngagementParticipant[];
+  defender: EngagementParticipant;
+}): EngagementPreview => {
+  const { rngAtk, rngDef, map, buildings, attackers, defender } = params;
+  const defenderArmy = defender.army;
+  const defenderPos = defenderArmy.surfacePos ? { q: defenderArmy.surfacePos.q, r: defenderArmy.surfacePos.r } : { q: 0, r: 0 };
+  const defenderTerrain = deriveTerrainTypeFromSurfaceMap(map, buildings, defenderPos);
+  const coverFactor = computeCoverFactorAtCoord(map, buildings, defenderPos);
+  const fortifFactor = computeFortifFactorAtCoord(buildings, map.bodyId, defenderPos);
+
+  const attackerEntries = attackers.map(attacker => {
+    const pos = attacker.army.surfacePos ? { q: attacker.army.surfacePos.q, r: attacker.army.surfacePos.r } : { q: 0, r: 0 };
+    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, pos);
+    const basePower = computeAttackPowerBase({
+      army: attacker.army,
+      terrainType: terrain,
+      supplied: attacker.supplied,
+      stackingFactor: attacker.stackingFactor,
+      frontAssault: attacker.frontAssault
+    });
+    return { id: attacker.army.id, members: attacker.army.members, basePower };
+  });
+
+  const totalBaseAttack = attackerEntries.reduce((sum, entry) => sum + entry.basePower, 0);
+  const attackPower = totalBaseAttack * rngAtk;
+
+  const defenseBase = computeDefensePowerBase({
+    army: defenderArmy,
+    terrainType: defenderTerrain,
+    supplied: defender.supplied,
+    stackingFactor: defender.stackingFactor
+  });
+  const defensePower = defenseBase * coverFactor * fortifFactor * rngDef;
+
+  const totalPower = attackPower + defensePower;
+  const lossRateDef = totalPower > 0 ? clamp(ENGAGEMENT_LETHALITY * (attackPower / totalPower), 0, ENGAGEMENT_LOSS_CAP) : 0;
+  const lossRateAtk = totalPower > 0 ? clamp(ENGAGEMENT_LETHALITY * (defensePower / totalPower), 0, ENGAGEMENT_LOSS_CAP) : 0;
+
+  const lossesDef = Math.min(defenderArmy.members, Math.round(defenderArmy.members * lossRateDef));
+  const totalAttackerMembers = attackerEntries.reduce((sum, entry) => sum + entry.members, 0);
+  const lossesAtkTotal = Math.min(totalAttackerMembers, Math.round(totalAttackerMembers * lossRateAtk));
+
+  const distributionWeights =
+    totalBaseAttack > 0
+      ? attackerEntries.map(entry => ({ id: entry.id, weight: entry.basePower, max: entry.members }))
+      : attackerEntries.map(entry => ({ id: entry.id, weight: entry.members, max: entry.members }));
+  const lossesByAttackerId = distributeLosses(lossesAtkTotal, distributionWeights);
+
+  return {
+    attackerIds: attackerEntries.map(entry => entry.id),
+    defenderId: defenderArmy.id,
+    rngAtk,
+    rngDef,
+    attackPower,
+    defensePower,
+    lossRateDef,
+    lossRateAtk,
+    lossesDef,
+    lossesAtkTotal,
+    lossesByAttackerId
+  };
+};
+
+export const previewEngagement = (params: {
+  map: PlanetSurfaceMap;
+  buildings: GroundBuilding[];
+  attackers: EngagementParticipant[];
+  defender: EngagementParticipant;
+}): EngagementPreview => {
+  return computeEngagementMetrics({
+    rngAtk: 1,
+    rngDef: 1,
+    map: params.map,
+    buildings: params.buildings,
+    attackers: params.attackers,
+    defender: params.defender
+  });
+};
+
+export const resolveEngagement = (params: {
+  turn: number;
+  map: PlanetSurfaceMap;
+  buildings: GroundBuilding[];
+  attackers: EngagementParticipant[];
+  defender: EngagementParticipant;
+}): EngagementResult => {
+  const attackerIds = sorted(
+    params.attackers.map(attacker => attacker.army.id),
+    (a, b) => a.localeCompare(b)
+  );
+  const seed = hashJoin32(params.turn, params.defender.army.id, ...attackerIds, 'ground');
   const rng = new RNG(seed);
+  const rngAtk = rollTriangularCentered(rng, RNG_EPSILON);
+  const rngDef = rollTriangularCentered(rng, RNG_EPSILON);
 
-  const srAtt = computeSR(attacker);
-  const srDef = computeSR(defender);
-
-  const kAtt = computeKBreakdown({
-    unitType: attacker.unitType,
-    terrainType: ctx.terrainType,
-    situation: ctx.attackerSituation,
-    status: ctx.attackerStatus
-  });
-  const kDef = computeKBreakdown({
-    unitType: defender.unitType,
-    terrainType: ctx.terrainType,
-    situation: ctx.defenderSituation,
-    status: ctx.defenderStatus
+  const metrics = computeEngagementMetrics({
+    rngAtk,
+    rngDef,
+    map: params.map,
+    buildings: params.buildings,
+    attackers: params.attackers,
+    defender: params.defender
   });
 
-  const epsilon = 0.08;
-  const ra = rollTriangularCentered(rng, epsilon);
-  const rd = rollTriangularCentered(rng, epsilon);
-
-  const attackEff = attacker.attack * srAtt * attacker.condition * kAtt.kFinal * ra;
-  const defenseEff = defender.defense * srDef * defender.condition * kDef.kFinal * rd;
-  const r = defenseEff > 0 ? attackEff / defenseEff : Infinity;
-
-  const pDef = clamp(0.05 * r, 0.02, 0.3);
-  const pAtt = clamp(0.04 / r, 0.01, 0.25);
-
-  const lossesDef = computeLosses(defender.members, pDef);
-  const lossesAtt = computeLosses(attacker.members, pAtt);
-
-  const defenderMembersAfter = Math.max(0, defender.members - lossesDef);
-  const attackerMembersAfter = Math.max(0, attacker.members - lossesAtt);
-
-  const dCDef = clamp(0.1 * r, 0.03, 0.25);
-  const dCAtt = clamp(0.08 / r, 0.02, 0.2);
-
-  const defenderConditionAfter = clamp(defender.condition - dCDef, 0, 1);
-  const attackerConditionAfter = clamp(attacker.condition - dCAtt, 0, 1);
-
-  // Break evaluation uses updated defender SR/condition per spec intent.
-  const srDefAfter = defender.maxMembers > 0 ? clamp(defenderMembersAfter / defender.maxMembers, 0, 1) : 0;
-  const breakScore = (1 - srDefAfter) * 0.6 + (1 - defenderConditionAfter) * 0.4;
-  const advantage = clamp(r >= 2.5 ? 1.0 : r - 1.1, 0.0, 1.0);
-  const breakChance = clamp(breakScore * advantage, 0.0, 0.85);
-
-  const forcedBreak = defenderConditionAfter <= 0.2 || srDefAfter <= 0.15;
-  const breakRoll = rng.next();
-  const defenderBroke = forcedBreak || breakRoll < breakChance;
-
-  const attackerAfter: Army = {
-    ...attacker,
-    members: attackerMembersAfter,
-    condition: attackerConditionAfter
-  };
-  const defenderAfter: Army = {
-    ...defender,
-    members: defenderMembersAfter,
-    condition: defenderConditionAfter
-  };
+  const attackersAfter = params.attackers.map(attacker => {
+    const losses = metrics.lossesByAttackerId[attacker.army.id] ?? 0;
+    return applyCombatLosses(attacker.army, losses, params.turn);
+  });
+  const defenderAfter = applyCombatLosses(params.defender.army, metrics.lossesDef, params.turn);
 
   return {
-    attackerId: attacker.id,
-    defenderId: defender.id,
-    attackerFactionId: attacker.factionId,
-    defenderFactionId: defender.factionId,
-    terrainType: ctx.terrainType,
-    srAtt,
-    srDef,
-    kAtt,
-    kDef,
-    ra,
-    rd,
-    attackEff,
-    defenseEff,
-    r,
-    pDef,
-    pAtt,
-    lossesDef,
-    lossesAtt,
-    dCDef,
-    dCAtt,
-    breakScore,
-    advantage,
-    breakChance,
-    breakRoll,
-    defenderBroke,
-    attackerAfter,
+    ...metrics,
+    attackersAfter,
     defenderAfter
   };
 };

@@ -1,4 +1,4 @@
-import type { GroundUnitType } from '../../shared/shared';
+import type { GroundUnitTag, GroundUnitType } from '../../shared/shared';
 import type { TerrainType } from '../../engine/ground';
 
 export interface GroundUnitStats {
@@ -6,9 +6,16 @@ export interface GroundUnitStats {
   defaultMaxMembers: number;
   baseAttack: number;
   baseDefense: number;
+  rangeMin: number;
+  rangeMax: number;
+  projectionRange: number;
+  baseMorale: number;
+  baseFatigue: number;
+  landingResistance: number;
+  antiOrbital: number;
   terrainCombatAffinity: Partial<Record<TerrainType, number>>;
   terrainMoveAffinity: Partial<Record<TerrainType, number>>;
-  tags?: Array<'artillery'>;
+  tags?: GroundUnitTag[];
 }
 
 // NOTE: These values are intentionally conservative defaults.
@@ -19,6 +26,13 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     defaultMaxMembers: 1000,
     baseAttack: 1.0,
     baseDefense: 1.0,
+    rangeMin: 1,
+    rangeMax: 1,
+    projectionRange: 1,
+    baseMorale: 1.0,
+    baseFatigue: 0.0,
+    landingResistance: 1.0,
+    antiOrbital: 0,
     terrainCombatAffinity: {
       Forest: 1.1,
       Hills: 1.05,
@@ -41,6 +55,13 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     defaultMaxMembers: 1000,
     baseAttack: 1.1,
     baseDefense: 1.0,
+    rangeMin: 1,
+    rangeMax: 1,
+    projectionRange: 1,
+    baseMorale: 1.0,
+    baseFatigue: 0.0,
+    landingResistance: 1.0,
+    antiOrbital: 0,
     terrainCombatAffinity: {
       Open: 1.05,
       Forest: 0.95,
@@ -63,6 +84,13 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     defaultMaxMembers: 800,
     baseAttack: 1.25,
     baseDefense: 1.15,
+    rangeMin: 1,
+    rangeMax: 1,
+    projectionRange: 1,
+    baseMorale: 1.0,
+    baseFatigue: 0.0,
+    landingResistance: 1.0,
+    antiOrbital: 0,
     terrainCombatAffinity: {
       Open: 1.1,
       Forest: 0.9,
@@ -86,6 +114,13 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
     defaultMaxMembers: 600,
     baseAttack: 1.2,
     baseDefense: 0.9,
+    rangeMin: 1,
+    rangeMax: 3,
+    projectionRange: 2,
+    baseMorale: 1.0,
+    baseFatigue: 0.0,
+    landingResistance: 1.0,
+    antiOrbital: 0,
     terrainCombatAffinity: {
       Open: 1.05,
       Urban: 1.05,

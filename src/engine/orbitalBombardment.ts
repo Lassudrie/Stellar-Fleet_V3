@@ -1,4 +1,4 @@
-import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, ShipType, StarSystem } from '../shared/shared';
+import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, GroundBuilding, HexCoord, ShipType, StarSystem } from '../shared/shared';
 import {
   ORBITAL_BOMBARDMENT_POWER_PER_SHIP,
   ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
@@ -8,8 +8,10 @@ import {
   ORBITAL_BOMBARDMENT_MIN_MORALE,
   ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER
 } from '../content/data/static';
+import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { sorted } from '../shared/shared';
+import { AO_COEFF } from './ground';
 
 export interface OrbitalBombardmentTarget {
   systemId: string;
@@ -22,9 +24,10 @@ export interface OrbitalBombardmentTarget {
 }
 
 export interface OrbitalBombardmentResult {
-  updates: Map<string, { members: number; condition: number }>;
+  updates: Map<string, { members: number; morale: number }>;
   logs: string[];
   bombardedPlanetIds: Set<string>;
+  bombardedHexesByBodyId: Record<string, HexCoord[]>;
 }
 
 const getFactionLabel = (state: GameState, factionId: FactionId): string => {
@@ -112,15 +115,49 @@ export const getBombardedPlanetIdsForSystem = (
   return new Set(targets.map(target => target.planetId));
 };
 
+const DEFAULT_BUNKER_ANTI_ORBITAL = 1;
+
+const getArmyAntiOrbital = (army: Army): number => {
+  const stats = GROUND_UNIT_STATS[army.unitType];
+  const rating = stats?.antiOrbital ?? 0;
+  if (rating <= 0) return 0;
+  const ratio = army.maxMembers > 0 ? army.members / army.maxMembers : 0;
+  return Math.max(0, rating * ratio);
+};
+
+const getBuildingAntiOrbital = (building: GroundBuilding): number => {
+  if (Number.isFinite(building.antiOrbital)) return Math.max(0, building.antiOrbital ?? 0);
+  if (building.tags?.includes('anti_orbital')) return DEFAULT_BUNKER_ANTI_ORBITAL;
+  if (building.type === 'bunker') return DEFAULT_BUNKER_ANTI_ORBITAL;
+  return 0;
+};
+
+const computeAntiOrbitalProjection = (
+  bodyId: string,
+  armies: Army[],
+  buildings: GroundBuilding[]
+): number => {
+  let total = 0;
+  armies.forEach(army => {
+    total += getArmyAntiOrbital(army);
+  });
+  buildings.forEach(building => {
+    if (building.surfacePos.bodyId !== bodyId) return;
+    total += getBuildingAntiOrbital(building);
+  });
+  return total;
+};
+
 const applyBombardment = (
-  target: OrbitalBombardmentTarget
-): { updates: { armyId: string; members: number; condition: number }[]; membersLost: number; conditionLossFraction: number } => {
+  target: OrbitalBombardmentTarget,
+  mitigation: number
+): { updates: { armyId: string; members: number; morale: number }[]; membersLost: number; moraleLossFraction: number } => {
   const strengthLossFraction = clampFraction(
-    target.bombardmentPower * ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
+    target.bombardmentPower * ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER * mitigation,
     ORBITAL_BOMBARDMENT_MAX_STRENGTH_LOSS_FRACTION
   );
   const moraleLossFraction = clampFraction(
-    target.bombardmentPower * ORBITAL_BOMBARDMENT_MORALE_LOSS_PER_POWER,
+    target.bombardmentPower * ORBITAL_BOMBARDMENT_MORALE_LOSS_PER_POWER * mitigation,
     ORBITAL_BOMBARDMENT_MAX_MORALE_LOSS_FRACTION
   );
 
@@ -130,7 +167,7 @@ const applyBombardment = (
 
   let remainingLoss = totalMembersLoss;
   let appliedLoss = 0;
-  const updates: { armyId: string; members: number; condition: number }[] = [];
+  const updates: { armyId: string; members: number; morale: number }[] = [];
 
   sortedArmies.forEach((army, index) => {
     // Legacy buffer retained as a safety margin to avoid erasing tiny remnants too easily.
@@ -148,37 +185,61 @@ const applyBombardment = (
     remainingLoss -= loss;
     appliedLoss += loss;
 
-    const newCondition = Math.max(ORBITAL_BOMBARDMENT_MIN_MORALE, army.condition * (1 - moraleLossFraction));
-    updates.push({ armyId: army.id, members: newMembers, condition: newCondition });
+    const newMorale = Math.max(ORBITAL_BOMBARDMENT_MIN_MORALE, army.morale * (1 - moraleLossFraction));
+    updates.push({ armyId: army.id, members: newMembers, morale: newMorale });
   });
 
-  return { updates, membersLost: appliedLoss, conditionLossFraction: moraleLossFraction };
+  return { updates, membersLost: appliedLoss, moraleLossFraction };
 };
 
 export const resolveOrbitalBombardment = (state: GameState): OrbitalBombardmentResult => {
-  const updates = new Map<string, { members: number; condition: number }>();
+  const updates = new Map<string, { members: number; morale: number }>();
   const logs: string[] = [];
   const bombardedPlanetIds = new Set<string>();
+  const bombardedHexesByBodyId = new Map<string, Map<string, HexCoord>>();
+  const buildings = state.groundBuildings ?? [];
+
+  const markBombardedHex = (bodyId: string, coord: HexCoord) => {
+    const byBody = bombardedHexesByBodyId.get(bodyId) ?? new Map<string, HexCoord>();
+    const key = `${coord.q}|${coord.r}`;
+    if (!byBody.has(key)) {
+      byBody.set(key, coord);
+      bombardedHexesByBodyId.set(bodyId, byBody);
+    }
+  };
 
   state.systems.forEach(system => {
     const targets = getOrbitalBombardmentTargets(system, state.armies, state.fleets);
     if (targets.length === 0) return;
 
     targets.forEach(target => {
-      const { updates: localUpdates, membersLost, conditionLossFraction } = applyBombardment(target);
+      const antiOrbitalProjection = computeAntiOrbitalProjection(target.planetId, target.targetArmies, buildings);
+      const mitigation = 1 / (1 + AO_COEFF * antiOrbitalProjection);
+      const { updates: localUpdates, membersLost, moraleLossFraction } = applyBombardment(target, mitigation);
       localUpdates.forEach(update => {
-        updates.set(update.armyId, { members: update.members, condition: update.condition });
+        updates.set(update.armyId, { members: update.members, morale: update.morale });
       });
 
       bombardedPlanetIds.add(target.planetId);
 
       const attackerLabel = getFactionLabel(state, target.attackerFactionId);
-      const conditionLossPercent = (conditionLossFraction * 100).toFixed(1);
+      const moraleLossPercent = (moraleLossFraction * 100).toFixed(1);
       logs.push(
-        `Orbital bombardment at ${target.planetName} (${target.systemName}) by ${attackerLabel}: -${membersLost} members, -${conditionLossPercent}% condition.`
+        `Orbital bombardment at ${target.planetName} (${target.systemName}) by ${attackerLabel}: -${membersLost} members, -${moraleLossPercent}% morale.`
       );
+
+      target.targetArmies.forEach(army => {
+        if (!army.surfacePos) return;
+        markBombardedHex(target.planetId, { q: army.surfacePos.q, r: army.surfacePos.r });
+      });
     });
   });
 
-  return { updates, logs, bombardedPlanetIds };
+  const bombardedHexes: Record<string, HexCoord[]> = {};
+  bombardedHexesByBodyId.forEach((coords, bodyId) => {
+    const list = sorted(Array.from(coords.values()), (a, b) => (a.r !== b.r ? a.r - b.r : a.q - b.q));
+    bombardedHexes[bodyId] = list;
+  });
+
+  return { updates, logs, bombardedPlanetIds, bombardedHexesByBodyId: bombardedHexes };
 };

@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { resolveGroundConflict } from '../conquest';
 import { sanitizeArmies } from '../army';
 import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER, ORBIT_PROXIMITY_RANGE_SQ } from '../../content/data/static';
+import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
 import { detectNewBattles, resolveBattle } from '../battle';
 import { SHIP_STATS } from '../../content/data/static';
 import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
@@ -13,6 +14,7 @@ import {
   Army,
   ArmyState,
   Battle,
+  FactionId,
   FactionState,
   Fleet,
   FleetState,
@@ -22,6 +24,7 @@ import {
   FeatureBits,
   PlanetBody,
   PlanetData,
+  PlanetSurfaceMap,
   AIState,
   ShipEntity,
   ShipType,
@@ -122,6 +125,7 @@ const createArmy = (
   containerId: string
 ): Army => {
   const scaledMembers = scaleMembers(members);
+  const stats = GROUND_UNIT_STATS.mechanized_infantry;
   return {
     id,
     factionId,
@@ -132,8 +136,28 @@ const createArmy = (
     attack: 1,
     defense: 1,
     condition: 1,
+    morale: stats.baseMorale,
+    fatigue: stats.baseFatigue,
+    rangeMin: stats.rangeMin,
+    rangeMax: stats.rangeMax,
+    projectionRange: stats.projectionRange,
     state,
     containerId
+  };
+};
+
+type GroundDefaultsInput = Omit<Army, 'morale' | 'fatigue' | 'rangeMin' | 'rangeMax' | 'projectionRange'> &
+  Partial<Pick<Army, 'morale' | 'fatigue' | 'rangeMin' | 'rangeMax' | 'projectionRange'>>;
+
+const withGroundDefaults = (army: GroundDefaultsInput): Army => {
+  const stats = GROUND_UNIT_STATS[army.unitType];
+  return {
+    ...army,
+    morale: army.morale ?? stats.baseMorale,
+    fatigue: army.fatigue ?? stats.baseFatigue,
+    rangeMin: army.rangeMin ?? stats.rangeMin,
+    rangeMax: army.rangeMax ?? stats.rangeMax,
+    projectionRange: army.projectionRange ?? stats.projectionRange
   };
 };
 
@@ -173,6 +197,88 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     rules,
     ...restOverrides
   };
+};
+
+const getFactionColor = (factionId: FactionId | null): string =>
+  factions.find(faction => faction.id === factionId)?.color ?? COLORS.star;
+
+const findSystemWithSolidBodies = (params: {
+  systemId: string;
+  seed: number;
+  minSolids: number;
+  ownerFactionId: FactionId | null;
+  resourceType?: StarSystem['resourceType'];
+  settlementConfig?: Parameters<typeof createPlanetSurfaceDescriptor>[0]['settlementConfig'];
+}): {
+  worldSeed: number;
+  system: StarSystem;
+  solidBodies: PlanetBody[];
+  descriptors: Record<string, ReturnType<typeof createPlanetSurfaceDescriptor>>;
+} => {
+  for (let offset = 0; offset < 25; offset += 1) {
+    const worldSeed = params.seed + offset;
+    const astro = generateStellarSystem({ worldSeed, systemId: params.systemId });
+    const system: StarSystem = {
+      id: params.systemId,
+      name: params.systemId,
+      position: baseVec,
+      color: getFactionColor(params.ownerFactionId),
+      size: 1,
+      ownerFactionId: params.ownerFactionId,
+      resourceType: params.resourceType ?? 'none',
+      isHomeworld: false,
+      astro,
+      planets: []
+    };
+    system.planets = buildPlanetBodies({ id: system.id, name: system.name, ownerFactionId: system.ownerFactionId }, astro, []);
+    const solidBodies = system.planets.filter(body => body.isSolid);
+    if (solidBodies.length < params.minSolids) continue;
+
+    const descriptors: Record<string, ReturnType<typeof createPlanetSurfaceDescriptor>> = {};
+    solidBodies.forEach(body => {
+      descriptors[body.id] = createPlanetSurfaceDescriptor({
+        gameSeed: worldSeed,
+        systemId: params.systemId,
+        body,
+        settlementConfig: params.settlementConfig
+      });
+    });
+
+    return { worldSeed, system, solidBodies, descriptors };
+  }
+
+  throw new Error(`Unable to find system with ${params.minSolids} solid bodies for ${params.systemId}`);
+};
+
+const getSurfaceMapOrThrow = (state: GameState, bodyId: string): PlanetSurfaceMap => {
+  const map = generateSurfaceMapForState(state, bodyId);
+  assert.ok(map, `Expected surface map for ${bodyId}`);
+  return map;
+};
+
+const createArmiesOnSettlements = (params: {
+  map: PlanetSurfaceMap;
+  factionId: FactionId;
+  baseId: string;
+  members: number;
+}): Army[] => {
+  assert.ok(params.map.settlements.length > 0, `Expected settlements on ${params.map.bodyId}`);
+  return params.map.settlements.map((settlement, index) =>
+    withGroundDefaults({
+      id: `${params.baseId}-${index}`,
+      factionId: params.factionId,
+      unitType: 'mechanized_infantry',
+      posture: 'normal',
+      maxMembers: scaleMembers(params.members),
+      members: scaleMembers(params.members),
+      attack: 1,
+      defense: 1,
+      condition: 1,
+      state: ArmyState.DEPLOYED,
+      containerId: params.map.bodyId,
+      surfacePos: { bodyId: params.map.bodyId, q: settlement.coord.q, r: settlement.coord.r }
+    })
+  );
 };
 
 const tests: TestCase[] = [
@@ -786,8 +892,8 @@ const tests: TestCase[] = [
 
       assert.ok(updatedA && updatedA.members < redArmyA.members, 'Bombardment should reduce members on planet 1');
       assert.ok(updatedB && updatedB.members < redArmyB.members, 'Bombardment should reduce members on planet 2');
-      assert.ok(updatedA && updatedA.condition < redArmyA.condition, 'Bombardment should reduce condition on planet 1');
-      assert.ok(updatedB && updatedB.condition < redArmyB.condition, 'Bombardment should reduce condition on planet 2');
+      assert.ok(updatedA && updatedA.morale < redArmyA.morale, 'Bombardment should reduce morale on planet 1');
+      assert.ok(updatedB && updatedB.morale < redArmyB.morale, 'Bombardment should reduce morale on planet 2');
       assert.ok(
         nextState.logs.some(log => log.text.includes('Orbital bombardment')),
         'Bombardment should log results'
@@ -819,7 +925,7 @@ const tests: TestCase[] = [
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
       assert.strictEqual(updated?.members, redArmy.members, 'Contested orbit should prevent bombardment losses');
-      assert.strictEqual(updated?.condition, redArmy.condition, 'Contested orbit should prevent condition loss');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should prevent morale loss');
     }
   },
   {
@@ -847,7 +953,7 @@ const tests: TestCase[] = [
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
       assert.strictEqual(updated?.members, redArmy.members, 'Contested orbit should skip bombardment resolution');
-      assert.strictEqual(updated?.condition, redArmy.condition, 'Contested orbit should leave condition unchanged');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Contested orbit should leave morale unchanged');
       assert.strictEqual(
         nextState.logs.length,
         state.logs.length,
@@ -876,7 +982,7 @@ const tests: TestCase[] = [
       const updated = nextState.armies.find(army => army.id === redArmy.id);
 
       assert.strictEqual(updated?.members, redArmy.members, 'Transport-only fleets should not bombard');
-      assert.strictEqual(updated?.condition, redArmy.condition, 'Transport-only fleets should not affect condition');
+      assert.strictEqual(updated?.morale, redArmy.morale, 'Transport-only fleets should not affect morale');
     }
   },
   {
@@ -888,7 +994,7 @@ const tests: TestCase[] = [
       ]);
 
       const minMembers = ORBITAL_BOMBARDMENT_MIN_STRENGTH_BUFFER;
-      const redArmy: Army = {
+      const redArmy = withGroundDefaults({
         id: 'army-red-floor',
         factionId: 'red',
         unitType: 'mechanized_infantry',
@@ -900,7 +1006,7 @@ const tests: TestCase[] = [
         condition: 1,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
-      };
+      });
 
       const state = createBaseState({
         systems: [system],
@@ -943,7 +1049,7 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-5', 'blue');
       const blueArmy = createArmy('army-blue-hold', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
-      const redArmy: Army = {
+      const redArmy = withGroundDefaults({
         id: 'army-red-broken',
         factionId: 'red',
         unitType: 'mechanized_infantry',
@@ -955,7 +1061,7 @@ const tests: TestCase[] = [
         condition: 0.19,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
-      };
+      });
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
@@ -1675,7 +1781,7 @@ const tests: TestCase[] = [
     run: () => {
       const system = createSystem('sys-loop-1', 'blue');
       const blueArmy = createArmy('army-blue-loop', 'blue', 18000, ArmyState.DEPLOYED, system.planets[0].id);
-      const redArmy: Army = {
+      const redArmy = withGroundDefaults({
         id: 'army-red-loop',
         factionId: 'red',
         unitType: 'mechanized_infantry',
@@ -1687,7 +1793,7 @@ const tests: TestCase[] = [
         condition: 0.8,
         state: ArmyState.DEPLOYED,
         containerId: system.planets[0].id
-      };
+      });
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
@@ -2098,10 +2204,23 @@ const tests: TestCase[] = [
   {
     name: 'Phase ground conquest uses faction color and AI hold updates for any winner',
     run: () => {
-      const system = createSystem('sys-green-capture', 'red');
-      const greenArmy = createArmy('army-green', 'green', 8000, ArmyState.DEPLOYED, system.planets[0].id);
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-green-capture',
+        seed: 120,
+        minSolids: 1,
+        ownerFactionId: 'red'
+      });
+      const body = solidBodies[0];
+      const systemWithBody = { ...system, planets: [body] };
+      const stateBase = createBaseState({
+        systems: [systemWithBody],
+        planetSurfaceDescriptorsByBodyId: { [body.id]: descriptors[body.id] },
+        aiStates: {}
+      });
+      const map = getSurfaceMapOrThrow(stateBase, body.id);
+      const greenArmies = createArmiesOnSettlements({ map, factionId: 'green', baseId: 'army-green', members: 8000 });
 
-      const state = createBaseState({ systems: [system], armies: [greenArmy], aiStates: {} });
+      const state = { ...stateBase, armies: greenArmies };
       const ctx = { rng: new RNG(21), turn: state.day + 1 };
 
       const nextState = phaseGround(state, ctx);
@@ -2120,145 +2239,150 @@ const tests: TestCase[] = [
   {
     name: 'Systems fall when only one faction keeps ground armies',
     run: () => {
-      const planet = createPlanet('sys-shared', 'red', 1);
-      const moon: PlanetBody = { ...createPlanet('sys-shared', 'red', 2), bodyType: 'moon' };
-
-      const system: StarSystem = {
-        id: 'sys-shared',
-        name: 'sys-shared',
-        position: baseVec,
-        color: COLORS.red,
-        size: 1,
-        ownerFactionId: 'red',
-        resourceType: 'none',
-        isHomeworld: false,
-        planets: [planet, moon]
-      };
-
-      const blueArmy = createArmy('army-blue-shared', 'blue', 6000, ArmyState.DEPLOYED, planet.id);
-      const state = createBaseState({ systems: [system], armies: [blueArmy] });
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-shared',
+        seed: 160,
+        minSolids: 2,
+        ownerFactionId: 'red'
+      });
+      const [bodyA, bodyB] = solidBodies;
+      const systemWithBodies = { ...system, planets: [bodyA, bodyB] };
+      const stateBase = createBaseState({
+        systems: [systemWithBodies],
+        planetSurfaceDescriptorsByBodyId: { [bodyA.id]: descriptors[bodyA.id], [bodyB.id]: descriptors[bodyB.id] }
+      });
+      const mapA = getSurfaceMapOrThrow(stateBase, bodyA.id);
+      const mapB = getSurfaceMapOrThrow(stateBase, bodyB.id);
+      const blueArmies = [
+        ...createArmiesOnSettlements({ map: mapA, factionId: 'blue', baseId: 'army-blue-a', members: 6000 }),
+        ...createArmiesOnSettlements({ map: mapB, factionId: 'blue', baseId: 'army-blue-b', members: 6000 })
+      ];
+      const state = { ...stateBase, armies: blueArmies };
       const ctx = { rng: new RNG(42), turn: state.day + 1 };
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
-      const moonAfter = updatedSystem?.planets.find(body => body.id === moon.id);
+      const bodyBAfter = updatedSystem?.planets.find(body => body.id === bodyB.id);
 
-      assert.strictEqual(updatedSystem?.ownerFactionId, 'blue', 'System should be captured once only one faction remains on the ground');
-      assert.strictEqual(moonAfter?.ownerFactionId, 'blue', 'System conquest grants ownership of all solid bodies once no enemy ground armies remain');
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'blue', 'System should be captured once all solid bodies are controlled');
+      assert.strictEqual(bodyBAfter?.ownerFactionId, 'blue', 'System conquest grants ownership of all solid bodies once captured');
     }
   },
   {
     name: 'System ownership logs reflect cleared ground resistance',
     run: () => {
-      const planet = createPlanet('sys-unified', 'red', 1);
-      const moon: PlanetBody = { ...createPlanet('sys-unified', 'red', 2), bodyType: 'moon' };
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-unified',
+        seed: 190,
+        minSolids: 2,
+        ownerFactionId: 'red'
+      });
+      const [bodyA, bodyB] = solidBodies;
+      const systemWithBodies = { ...system, planets: [bodyA, bodyB] };
+      const stateBase = createBaseState({
+        systems: [systemWithBodies],
+        planetSurfaceDescriptorsByBodyId: { [bodyA.id]: descriptors[bodyA.id], [bodyB.id]: descriptors[bodyB.id] }
+      });
+      const mapA = getSurfaceMapOrThrow(stateBase, bodyA.id);
+      const mapB = getSurfaceMapOrThrow(stateBase, bodyB.id);
+      const greenArmies = [
+        ...createArmiesOnSettlements({ map: mapA, factionId: 'green', baseId: 'army-green-a', members: 4000 }),
+        ...createArmiesOnSettlements({ map: mapB, factionId: 'green', baseId: 'army-green-b', members: 4000 })
+      ];
 
-      const system: StarSystem = {
-        id: 'sys-unified',
-        name: 'sys-unified',
-        position: baseVec,
-        color: COLORS.red,
-        size: 1,
-        ownerFactionId: 'red',
-        resourceType: 'none',
-        isHomeworld: false,
-        planets: [planet, moon]
-      };
-
-      const greenPlanetArmy = createArmy('army-green-planet', 'green', 4000, ArmyState.DEPLOYED, planet.id);
-      const greenMoonArmy = createArmy('army-green-moon', 'green', 4000, ArmyState.DEPLOYED, moon.id);
-
-      const state = createBaseState({ systems: [system], armies: [greenPlanetArmy, greenMoonArmy] });
+      const state = { ...stateBase, armies: greenArmies };
       const ctx = { rng: new RNG(17), turn: state.day + 1 };
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
       const lastLog = nextState.logs[nextState.logs.length - 1]?.text ?? '';
 
-      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when a single faction controls the ground');
-      assert.match(lastLog, /ground presence was cleared/i, 'System capture log should mention cleared enemy ground forces');
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'green', 'System ownership should flip when all solid bodies are captured');
+      assert.match(lastLog, /System .* control set/i, 'System capture log should mention ground conquest');
     }
   },
   {
-    name: 'Neutral systems fall after capturing a single defended planet',
+    name: 'Neutral systems fall after capturing all solid bodies',
     run: () => {
-      const planetA = createPlanet('sys-neutral', null, 1);
-      const planetB = createPlanet('sys-neutral', null, 2);
-
-      const system: StarSystem = {
-        id: 'sys-neutral',
-        name: 'sys-neutral',
-        position: baseVec,
-        color: COLORS.star,
-        size: 1,
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-neutral',
+        seed: 210,
+        minSolids: 2,
         ownerFactionId: null,
-        resourceType: 'none',
-        isHomeworld: false,
-        planets: [planetA, planetB]
-      };
+        settlementConfig: { neutralOutpostChance: 1 }
+      });
+      const [bodyA, bodyB] = solidBodies;
+      const systemWithBodies = { ...system, planets: [bodyA, bodyB], color: COLORS.star, ownerFactionId: null };
+      const stateBase = createBaseState({
+        systems: [systemWithBodies],
+        planetSurfaceDescriptorsByBodyId: { [bodyA.id]: descriptors[bodyA.id], [bodyB.id]: descriptors[bodyB.id] }
+      });
+      const mapA = getSurfaceMapOrThrow(stateBase, bodyA.id);
+      const mapB = getSurfaceMapOrThrow(stateBase, bodyB.id);
+      const redArmies = [
+        ...createArmiesOnSettlements({ map: mapA, factionId: 'red', baseId: 'army-red-a', members: 6000 }),
+        ...createArmiesOnSettlements({ map: mapB, factionId: 'red', baseId: 'army-red-b', members: 6000 })
+      ];
 
-      const redArmy = createArmy('army-red-neutral', 'red', 6000, ArmyState.DEPLOYED, planetA.id);
-
-      const state = createBaseState({ systems: [system], armies: [redArmy] });
+      const state = { ...stateBase, armies: redArmies };
       const ctx = { rng: new RNG(13), turn: state.day + 1 };
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
-      const planetBAfter = updatedSystem?.planets.find(planet => planet.id === planetB.id);
+      const bodyBAfter = updatedSystem?.planets.find(planet => planet.id === bodyB.id);
 
-      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Neutral systems should be captured when one faction holds the only ground forces');
-      assert.strictEqual(planetBAfter?.ownerFactionId, 'red', 'System conquest claims all solid bodies even if only one was initially occupied');
+      assert.strictEqual(updatedSystem?.ownerFactionId, 'red', 'Neutral systems should be captured when all solid bodies are held');
+      assert.strictEqual(bodyBAfter?.ownerFactionId, 'red', 'System conquest claims all solid bodies once captured');
     }
   },
   {
     name: 'Multi-planet systems change owner only after every solid world falls',
     run: () => {
-      const planetA = createPlanet('sys-multi-solid', 'red', 1);
-      const planetB = createPlanet('sys-multi-solid', 'red', 2);
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-multi-solid',
+        seed: 240,
+        minSolids: 2,
+        ownerFactionId: 'red',
+        resourceType: 'gas'
+      });
+      const [bodyA, bodyB] = solidBodies;
       const gasGiant: PlanetBody = {
-        ...createPlanet('sys-multi-solid', 'red', 3),
+        ...createPlanet(system.id, system.ownerFactionId ?? null, 3),
         class: 'gas_giant',
         isSolid: false
       };
 
-      const system: StarSystem = {
-        id: 'sys-multi-solid',
-        name: 'sys-multi-solid',
-        position: baseVec,
-        color: COLORS.red,
-        size: 1,
-        ownerFactionId: 'red',
-        resourceType: 'gas',
-        isHomeworld: false,
-        planets: [planetA, planetB, gasGiant]
-      };
-
-      const blueAssaultA = createArmy('army-blue-assault-a', 'blue', 20000, ArmyState.DEPLOYED, planetA.id);
-      const redGarrisonB = createArmy('army-red-hold-b', 'red', 8000, ArmyState.DEPLOYED, planetB.id);
-
-      const initialState = createBaseState({
-        systems: [system],
-        armies: [blueAssaultA, redGarrisonB]
+      const systemWithBodies = { ...system, planets: [bodyA, bodyB, gasGiant] };
+      const stateBase = createBaseState({
+        systems: [systemWithBodies],
+        planetSurfaceDescriptorsByBodyId: { [bodyA.id]: descriptors[bodyA.id], [bodyB.id]: descriptors[bodyB.id] }
       });
+      const mapA = getSurfaceMapOrThrow(stateBase, bodyA.id);
+      const mapB = getSurfaceMapOrThrow(stateBase, bodyB.id);
+
+      const blueAssaultA = createArmiesOnSettlements({ map: mapA, factionId: 'blue', baseId: 'army-blue-a', members: 20000 });
+      const redGarrisonB = createArmiesOnSettlements({ map: mapB, factionId: 'red', baseId: 'army-red-b', members: 8000 });
+
+      const initialState = { ...stateBase, armies: [...blueAssaultA, ...redGarrisonB] };
       const ctxFirst = { rng: new RNG(25), turn: initialState.day + 1 };
 
       const afterFirst = phaseGround(initialState, ctxFirst);
       const systemAfterFirst = afterFirst.systems.find(sys => sys.id === system.id);
-      const planetAAfter = systemAfterFirst?.planets.find(planet => planet.id === planetA.id);
-      const planetBAfter = systemAfterFirst?.planets.find(planet => planet.id === planetB.id);
+      const bodyAAfter = systemAfterFirst?.planets.find(planet => planet.id === bodyA.id);
+      const bodyBAfter = systemAfterFirst?.planets.find(planet => planet.id === bodyB.id);
 
-      assert.strictEqual(planetAAfter?.ownerFactionId, 'blue', 'First conquered planet should switch to the attacker');
-      assert.strictEqual(planetBAfter?.ownerFactionId, 'red', 'Remaining defended planet should stay with the original owner');
+      assert.strictEqual(bodyAAfter?.ownerFactionId, 'blue', 'First conquered planet should switch to the attacker');
+      assert.strictEqual(bodyBAfter?.ownerFactionId, 'red', 'Remaining defended planet should stay with the original owner');
       assert.strictEqual(
         systemAfterFirst?.ownerFactionId,
         'red',
         'System owner should remain unchanged while a solid planet is still defended'
       );
 
-      const blueAssaultB = createArmy('army-blue-assault-b', 'blue', 15000, ArmyState.DEPLOYED, planetB.id);
+      const blueAssaultB = createArmiesOnSettlements({ map: mapB, factionId: 'blue', baseId: 'army-blue-b', members: 15000 });
       const reinforcedState: GameState = {
         ...afterFirst,
-        armies: [...afterFirst.armies.filter(army => army.id !== redGarrisonB.id), blueAssaultB]
+        armies: [...afterFirst.armies.filter(army => !army.id.startsWith('army-red-b')), ...blueAssaultB]
       };
       const ctxSecond = { rng: new RNG(27), turn: ctxFirst.turn + 1 };
 
@@ -3518,9 +3642,9 @@ const engine_ps_createArmy = (params: {
   state: ArmyState;
   containerId: string;
   surfacePos?: { bodyId: string; q: number; r: number };
-}): any => {
+}): Army => {
   const scaledMembers = scaleMembers(params.members);
-  return {
+  return withGroundDefaults({
     id: params.id,
     factionId: params.factionId,
     unitType: 'mechanized_infantry',
@@ -3533,7 +3657,7 @@ const engine_ps_createArmy = (params: {
     state: params.state,
     containerId: params.containerId,
     ...(params.surfacePos ? { surfacePos: params.surfacePos } : {})
-  };
+  });
 };
 
 const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string): { state: GameState; body: PlanetBody } => {
@@ -4419,7 +4543,7 @@ tests.push(
       const base = engine_sr_createBaseState();
       const save = JSON.parse(serializeGameState(base));
       save.version = 999;
-      assert.throws(() => deserializeGameState(JSON.stringify(save)), /newer than supported/);
+      assert.throws(() => deserializeGameState(JSON.stringify(save)), /not supported/);
     }
   },
   {
@@ -4598,6 +4722,48 @@ tests.push({
 
 // --- groundCombat.spec.ts ---
 
+const groundCombatMap: PlanetSurfaceMap = {
+  systemId: 'sys-ground-combat',
+  bodyId: 'body-1',
+  descriptor: {
+    seed: 1,
+    config: { w: 3, h: 3, wrapX: false, generatorVersion: 1 },
+    astroRef: { planetIndex: 0 }
+  },
+  seaLevelElev: 0,
+  tiles: Array.from({ length: 9 }, () => ({
+    elev: 0,
+    tempC2: 0,
+    moist: 0,
+    biome: 'grassland',
+    featureBits: 0
+  })),
+  settlements: []
+};
+
+const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
+  const base: Army = {
+    id: overrides.id,
+    factionId: overrides.factionId,
+    state: ArmyState.DEPLOYED,
+    containerId: groundCombatMap.bodyId,
+    surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 },
+    unitType: 'mechanized_infantry',
+    posture: 'normal',
+    maxMembers: scaleMembers(10000),
+    members: scaleMembers(10000),
+    attack: 1,
+    defense: 1,
+    condition: 1,
+    morale: 1,
+    fatigue: 0,
+    rangeMin: 1,
+    rangeMax: 1,
+    projectionRange: 1
+  };
+  return withGroundDefaults({ ...base, ...overrides });
+};
+
 tests.push(
   {
     name: 'triangular RNG is bounded by epsilon',
@@ -4613,29 +4779,33 @@ tests.push(
   {
     name: 'engagement RNG is deterministic per (turn, attackerId, defenderId)',
     run: () => {
-      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
-        const base: Army = {
-          id: overrides.id,
-          factionId: overrides.factionId,
-          state: ArmyState.DEPLOYED,
-          containerId: 'body-1',
-          surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
-          unitType: 'mechanized_infantry',
-          posture: 'normal',
-          maxMembers: scaleMembers(10000),
-          members: scaleMembers(10000),
-          attack: 1,
-          defense: 1,
-          condition: 1
-        };
-        return { ...base, ...overrides };
-      };
+      const attacker = groundCombatMkArmy({
+        id: 'a',
+        factionId: 'blue',
+        attack: 1.1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 }
+      });
+      const defender = groundCombatMkArmy({
+        id: 'd',
+        factionId: 'red',
+        defense: 1.1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 1, r: 0 }
+      });
 
-      const attacker = mkArmy({ id: 'a', factionId: 'blue', attack: 1.1 });
-      const defender = mkArmy({ id: 'd', factionId: 'red', defense: 1.1 });
-
-      const a = resolveEngagement(attacker, defender, { turn: 7, terrainType: 'Open' });
-      const b = resolveEngagement(attacker, defender, { turn: 7, terrainType: 'Open' });
+      const a = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+      const b = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
       assert.deepStrictEqual(a, b);
     }
   },
@@ -4664,32 +4834,39 @@ tests.push(
     }
   },
   {
-    name: 'break chance follows BreakScore * Advantage clamp',
+    name: 'loss distribution sums to total attacker losses',
     run: () => {
-      const mkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
-        const { id, factionId, ...rest } = overrides;
-        return {
-          id,
-          factionId,
-          state: ArmyState.DEPLOYED,
-          containerId: 'body-1',
-          surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
-          unitType: 'mechanized_infantry',
-          posture: 'normal',
-          maxMembers: scaleMembers(10000),
-          members: scaleMembers(10000),
-          attack: 1,
-          defense: 1,
-          condition: 1,
-          ...rest
-        };
-      };
+      const attackerA = groundCombatMkArmy({
+        id: 'a1',
+        factionId: 'blue',
+        attack: 1.4,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 }
+      });
+      const attackerB = groundCombatMkArmy({
+        id: 'a2',
+        factionId: 'blue',
+        attack: 1.0,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 1 }
+      });
+      const defender = groundCombatMkArmy({
+        id: 'd1',
+        factionId: 'red',
+        defense: 1.2,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 1, r: 0 }
+      });
 
-      const attacker = mkArmy({ id: 'a-break', factionId: 'blue', attack: 2 });
-      const defender = mkArmy({ id: 'd-break', factionId: 'red', defense: 1.2 });
-      const preview = previewEngagement(attacker, defender, { turn: 0, terrainType: 'Open' });
-      const expected = Math.min(0.85, Math.max(0, preview.breakScore * preview.advantage));
-      assert.ok(Math.abs(preview.breakChance - expected) < 1e-12, `Expected ${preview.breakChance} ~= ${expected}`);
+      const preview = previewEngagement({
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [
+          { army: attackerA, supplied: true, stackingFactor: 1 },
+          { army: attackerB, supplied: true, stackingFactor: 1 }
+        ],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+
+      const distributed = Object.values(preview.lossesByAttackerId).reduce((sum, value) => sum + value, 0);
+      assert.strictEqual(distributed, preview.lossesAtkTotal);
     }
   }
 );
