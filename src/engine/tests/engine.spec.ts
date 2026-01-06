@@ -3003,6 +3003,12 @@ tests.push(
           assert.ok(planet.semiMajorAxisAu >= lastA);
           lastA = planet.semiMajorAxisAu;
 
+          assert.ok(engine_isFiniteNumber(planet.eccentricity));
+          assert.ok(planet.eccentricity >= 0 && planet.eccentricity <= 0.95);
+          assert.ok(engine_isFiniteNumber(planet.orbitInclinationDeg));
+          assert.ok(planet.orbitInclinationDeg >= 0 && planet.orbitInclinationDeg <= 60);
+          assert.ok(engine_isFiniteNumber(planet.orbitAscendingNodeDeg));
+
           assert.ok(engine_isFiniteNumber(planet.massEarth) && planet.massEarth > 0);
           assert.ok(engine_isFiniteNumber(planet.radiusEarth) && planet.radiusEarth > 0);
           assert.ok(engine_isFiniteNumber(planet.gravityG) && planet.gravityG > 0);

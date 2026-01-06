@@ -4,6 +4,9 @@ import type {
   AtmosphereType,
   MoonData,
   MoonType,
+  OrbitEccentricityModel,
+  OrbitReferencePlane,
+  OrbitRegime,
   PlanetData,
   PlanetType,
   PlanetTypePlan,
@@ -35,7 +38,19 @@ export const DEFAULT_STELLAR_SYSTEM_GEN_PARAMS: StellarSystemGenParams = {
   snowLineMatchRange: [0.8, 1.3],
   spacingLogMean: Math.log(1.7),
   spacingLogStd: 0.25,
-  firstOrbitLogRange: [0.05, 0.35]
+  firstOrbitLogRange: [0.05, 0.35],
+  orbit: {
+    regime: 'A_froid',
+    referencePlane: 'invariant',
+    tidalCircularization: {
+      enabled: true,
+      aTideAu: 0.12
+    },
+    stabilityFilter: {
+      enabled: true,
+      margin: 1.1
+    }
+  }
 };
 
 export const SPECTRAL_WEIGHTS: WeightedSpectralType[] = [
@@ -253,6 +268,42 @@ export function normal(rng: RNG, mean = 0, std = 1): number {
 export function expNormalNoise(rng: RNG, std: number): number {
   return Math.exp(normal(rng, 0, std));
 }
+
+const drawRayleigh = (rng: RNG, sigma: number): number => {
+  const u = Math.max(1e-12, rng.next());
+  return Math.max(0, sigma) * Math.sqrt(-2 * Math.log(u));
+};
+
+const MAX_GAMMA_ATTEMPTS = 1024;
+
+const drawGamma = (rng: RNG, shape: number): number => {
+  const k = Math.max(shape, 1e-6);
+  if (k < 1) {
+    const u = Math.max(1e-12, rng.next());
+    return drawGamma(rng, k + 1) * Math.pow(u, 1 / k);
+  }
+  const d = k - 1 / 3;
+  const c = 1 / Math.sqrt(9 * d);
+  for (let attempt = 0; attempt < MAX_GAMMA_ATTEMPTS; attempt++) {
+    const x = rng.gaussian();
+    const v = 1 + c * x;
+    if (v <= 0) continue;
+    const v3 = v * v * v;
+    const u = rng.next();
+    if (u < 1 - 0.0331 * x * x * x * x) return d * v3;
+    if (Math.log(u) < 0.5 * x * x + d * (1 - v3 + Math.log(v3))) return d * v3;
+  }
+  return d;
+};
+
+const drawBeta = (rng: RNG, a: number, b: number): number => {
+  const aa = Math.max(a, 1e-6);
+  const bb = Math.max(b, 1e-6);
+  const x = drawGamma(rng, aa);
+  const y = drawGamma(rng, bb);
+  if (x <= 0 && y <= 0) return 0;
+  return x / (x + y);
+};
 
 export function weightedPick<T extends string>(rng: RNG, items: Array<{ key: T; weight: number }>): T {
   const total = items.reduce((sum, it) => sum + Math.max(0, it.weight), 0);
@@ -500,28 +551,165 @@ export function snapOrbitToType(
   return { aAu: a, planetType: t };
 }
 
-export function drawEccentricity(rng: RNG, planetType: PlanetType): number {
-  const minE = planetType === 'Terrestrial' || planetType === 'SubNeptune' ? 0.003 : 0.005;
-  if (planetType === 'Terrestrial' || planetType === 'SubNeptune') {
-    return clamp(Math.abs(normal(rng, 0.04, 0.05)), minE, 0.25);
-  }
-  return clamp(Math.abs(normal(rng, 0.08, 0.08)), minE, 0.35);
-}
+const ORBIT_ECCENTRICITY_KIPPING = { a: 0.867, b: 3.03 };
+const ORBIT_ECCENTRICITY_TAIL_RANGE: [number, number] = [0.3, 0.8];
+const ORBIT_INCLINATION_TAIL_RANGE_DEG: [number, number] = [10, 40];
 
-const PLANET_ORBIT_INCLINATION_STD: Record<PlanetType, number> = {
-  Terrestrial: 2.4,
-  SubNeptune: 3.0,
-  IceGiant: 3.4,
-  GasGiant: 3.6,
-  Dwarf: 2.8
+type OrbitRegimeDefaults = {
+  sigmaIMutDeg: number;
+  iMutClampDeg: number;
+  sigmaISysDeg: number;
+  iAbsClampDeg: number;
+  eccScale: number;
+  eccClamp: number;
+  eccTailWeight: number;
+  iTailWeight: number;
 };
 
-const PLANET_ORBIT_INCLINATION_MAX: Record<PlanetType, number> = {
-  Terrestrial: 10,
-  SubNeptune: 12,
-  IceGiant: 14,
-  GasGiant: 14,
-  Dwarf: 12
+type OrbitResolvedConfig = {
+  regime: OrbitRegime;
+  referencePlane: OrbitReferencePlane;
+  sigmaIMutDeg: number;
+  iMutClampDeg: number;
+  sigmaISysDeg: number;
+  iAbsClampDeg: number;
+  eccScale: number;
+  eccClamp: number;
+  eccModel: OrbitEccentricityModel;
+  eccBaseParams: { a: number; b: number };
+  eccTailWeight: number;
+  eccTailBetaParams?: { a: number; b: number };
+  eccTailUniformRange?: [number, number];
+  iTailWeight: number;
+  iTailRangeDeg: [number, number];
+  tide: { enabled: boolean; aMinAu: number; aTideAu: number };
+  stability: { enabled: boolean; margin: number };
+};
+
+const ORBIT_REGIME_DEFAULTS: Record<OrbitRegime, OrbitRegimeDefaults> = {
+  A_froid: {
+    sigmaIMutDeg: 1.5,
+    iMutClampDeg: 7,
+    sigmaISysDeg: 0.5,
+    iAbsClampDeg: 10,
+    eccScale: 0.6,
+    eccClamp: 0.6,
+    eccTailWeight: 0,
+    iTailWeight: 0
+  },
+  B_tiede: {
+    sigmaIMutDeg: 5,
+    iMutClampDeg: 15,
+    sigmaISysDeg: 1.5,
+    iAbsClampDeg: 20,
+    eccScale: 1,
+    eccClamp: 0.6,
+    eccTailWeight: 0,
+    iTailWeight: 0
+  },
+  C_excite: {
+    sigmaIMutDeg: 10,
+    iMutClampDeg: 60,
+    sigmaISysDeg: 5,
+    iAbsClampDeg: 60,
+    eccScale: 1,
+    eccClamp: 0.95,
+    eccTailWeight: 0.3,
+    iTailWeight: 0.2
+  }
+};
+
+const blendOrbitDefaults = (a: OrbitRegimeDefaults, b: OrbitRegimeDefaults, t: number): OrbitRegimeDefaults => ({
+  sigmaIMutDeg: lerp(a.sigmaIMutDeg, b.sigmaIMutDeg, t),
+  iMutClampDeg: lerp(a.iMutClampDeg, b.iMutClampDeg, t),
+  sigmaISysDeg: lerp(a.sigmaISysDeg, b.sigmaISysDeg, t),
+  iAbsClampDeg: lerp(a.iAbsClampDeg, b.iAbsClampDeg, t),
+  eccScale: lerp(a.eccScale, b.eccScale, t),
+  eccClamp: lerp(a.eccClamp, b.eccClamp, t),
+  eccTailWeight: lerp(a.eccTailWeight, b.eccTailWeight, t),
+  iTailWeight: lerp(a.iTailWeight, b.iTailWeight, t)
+});
+
+const resolveOrbitConfig = (params: StellarSystemGenParams): OrbitResolvedConfig => {
+  const orbit = params.orbit ?? {};
+  const excitation = Number.isFinite(orbit.excitation) ? clamp01(orbit.excitation as number) : undefined;
+  let regime: OrbitRegime = orbit.regime ?? 'A_froid';
+  let defaults = ORBIT_REGIME_DEFAULTS[regime];
+
+  if (excitation !== undefined) {
+    if (excitation <= 0.5) {
+      defaults = blendOrbitDefaults(ORBIT_REGIME_DEFAULTS.A_froid, ORBIT_REGIME_DEFAULTS.B_tiede, excitation / 0.5);
+      regime = excitation < 0.34 ? 'A_froid' : 'B_tiede';
+    } else {
+      defaults = blendOrbitDefaults(
+        ORBIT_REGIME_DEFAULTS.B_tiede,
+        ORBIT_REGIME_DEFAULTS.C_excite,
+        (excitation - 0.5) / 0.5
+      );
+      regime = excitation < 0.67 ? 'B_tiede' : 'C_excite';
+    }
+  }
+
+  const referencePlane = orbit.referencePlane ?? 'invariant';
+  const eccBaseParams = orbit.eBetaParams ?? ORBIT_ECCENTRICITY_KIPPING;
+  const eccTailRangeRaw = orbit.eTailUniformRange ?? ORBIT_ECCENTRICITY_TAIL_RANGE;
+  const eccTailUniformRange: [number, number] =
+    eccTailRangeRaw[0] <= eccTailRangeRaw[1] ? eccTailRangeRaw : [eccTailRangeRaw[1], eccTailRangeRaw[0]];
+  const iTailRangeRaw = orbit.iTailRangeDeg ?? ORBIT_INCLINATION_TAIL_RANGE_DEG;
+  const iTailRangeDeg: [number, number] =
+    iTailRangeRaw[0] <= iTailRangeRaw[1] ? iTailRangeRaw : [iTailRangeRaw[1], iTailRangeRaw[0]];
+
+  let eccTailWeight = clamp01(orbit.eTailWeight ?? defaults.eccTailWeight);
+  const iTailWeight = clamp01(orbit.iTailWeight ?? defaults.iTailWeight);
+  let eccModel: OrbitEccentricityModel =
+    orbit.eModel ?? (eccTailWeight > 0 ? 'mixture_beta' : 'beta_kipping_2013');
+  if (eccModel === 'beta_kipping_2013') {
+    eccTailWeight = 0;
+  }
+
+  const maxE = orbit.clamps?.maxE ?? defaults.eccClamp;
+  const maxIAbsDeg = orbit.clamps?.maxIAbsDeg ?? defaults.iAbsClampDeg;
+  const iAbsClampDeg = clamp(maxIAbsDeg, 0.1, 90);
+  const eccClamp = clamp(maxE, 0, 0.99);
+
+  const sigmaIMutDeg = orbit.sigmaIMutDeg ?? defaults.sigmaIMutDeg;
+  const sigmaISysDeg = orbit.sigmaISysDeg ?? defaults.sigmaISysDeg;
+  const iMutClampDeg = Math.min(defaults.iMutClampDeg, iAbsClampDeg);
+
+  const tideEnabled = orbit.tidalCircularization?.enabled ?? true;
+  const tideMin = Math.max(0.01, orbit.tidalCircularization?.aMinAu ?? params.minSemiMajorAxisAu);
+  const fallbackTide = DEFAULT_STELLAR_SYSTEM_GEN_PARAMS.orbit?.tidalCircularization?.aTideAu ?? 0.12;
+  const tideMax = Math.max(tideMin, orbit.tidalCircularization?.aTideAu ?? fallbackTide);
+
+  const stabilityEnabled = orbit.stabilityFilter?.enabled ?? true;
+  const stabilityMargin = clamp(orbit.stabilityFilter?.margin ?? 1.1, 1.0, 1.5);
+
+  return {
+    regime,
+    referencePlane,
+    sigmaIMutDeg,
+    iMutClampDeg,
+    sigmaISysDeg,
+    iAbsClampDeg,
+    eccScale: defaults.eccScale,
+    eccClamp,
+    eccModel,
+    eccBaseParams,
+    eccTailWeight,
+    eccTailBetaParams: orbit.eTailBetaParams,
+    eccTailUniformRange,
+    iTailWeight,
+    iTailRangeDeg,
+    tide: {
+      enabled: tideEnabled,
+      aMinAu: tideMin,
+      aTideAu: tideMax
+    },
+    stability: {
+      enabled: stabilityEnabled,
+      margin: stabilityMargin
+    }
+  };
 };
 
 const PLANET_AXIAL_TILT_STD: Record<PlanetType, number> = {
@@ -544,20 +732,189 @@ const drawInclinationDeg = (rng: RNG, std: number, min: number, max: number): nu
   clamp(Math.abs(normal(rng, 0, std)), min, max)
 );
 
-export const drawPlanetOrbitParams = (
-  rng: RNG,
-  planetType: PlanetType
-): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
-  const inclinationStd = PLANET_ORBIT_INCLINATION_STD[planetType] ?? 2.5;
-  const inclinationMax = PLANET_ORBIT_INCLINATION_MAX[planetType] ?? 12;
-  const orbitInclinationDeg = drawInclinationDeg(rng, inclinationStd, 0.15, inclinationMax);
-  const orbitAscendingNodeDeg = rng.range(0, 360);
+const drawAxialTiltDeg = (rng: RNG, planetType: PlanetType, orbitInclinationDeg: number): number => {
   const axialStd = PLANET_AXIAL_TILT_STD[planetType] ?? 9;
   const axialMax = PLANET_AXIAL_TILT_MAX[planetType] ?? 70;
   const axialBase = drawInclinationDeg(rng, axialStd, 0.2, axialMax);
   const correlated = orbitInclinationDeg * rng.range(0.2, 0.8);
-  const axialTiltDeg = clamp(Math.max(axialBase + correlated, axialBase), 0.2, axialMax);
-  return { orbitInclinationDeg, orbitAscendingNodeDeg, axialTiltDeg };
+  return clamp(Math.max(axialBase + correlated, axialBase), 0.2, axialMax);
+};
+
+type OrbitNormal = { x: number; y: number; z: number };
+
+const toRad = (deg: number): number => (deg * Math.PI) / 180;
+const toDeg = (rad: number): number => (rad * 180) / Math.PI;
+
+const normalizeOrbitNormal = (v: OrbitNormal): OrbitNormal => {
+  const m = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (!Number.isFinite(m) || m <= 0) return { x: 0, y: 0, z: 1 };
+  return { x: v.x / m, y: v.y / m, z: v.z / m };
+};
+
+const rotateX = (v: OrbitNormal, rad: number): OrbitNormal => ({
+  x: v.x,
+  y: v.y * Math.cos(rad) - v.z * Math.sin(rad),
+  z: v.y * Math.sin(rad) + v.z * Math.cos(rad)
+});
+
+const rotateZ = (v: OrbitNormal, rad: number): OrbitNormal => ({
+  x: v.x * Math.cos(rad) - v.y * Math.sin(rad),
+  y: v.x * Math.sin(rad) + v.y * Math.cos(rad),
+  z: v.z
+});
+
+const orbitNormalFromAngles = (inclinationDeg: number, ascendingNodeDeg: number): OrbitNormal => {
+  const i = toRad(inclinationDeg);
+  const o = toRad(ascendingNodeDeg);
+  const sinI = Math.sin(i);
+  return normalizeOrbitNormal({
+    x: sinI * Math.sin(o),
+    y: -sinI * Math.cos(o),
+    z: Math.cos(i)
+  });
+};
+
+const orbitAnglesFromNormal = (normal: OrbitNormal): { inclinationDeg: number; ascendingNodeDeg: number } => {
+  const n = normalizeOrbitNormal(normal);
+  const inclinationRad = Math.acos(clamp(n.z, -1, 1));
+  const nodeX = -n.y;
+  const nodeY = n.x;
+  const nodeRad = Math.abs(nodeX) + Math.abs(nodeY) < 1e-8 ? 0 : Math.atan2(nodeY, nodeX);
+  const ascendingNodeDeg = (toDeg(nodeRad) + 360) % 360;
+  return { inclinationDeg: toDeg(inclinationRad), ascendingNodeDeg };
+};
+
+const drawMutualInclinationDeg = (rng: RNG, config: OrbitResolvedConfig): number => {
+  if (config.sigmaIMutDeg <= 0 && config.iTailWeight <= 0) return 0;
+  const useTail = config.iTailWeight > 0 && rng.next() < config.iTailWeight;
+  const base = useTail
+    ? rng.range(config.iTailRangeDeg[0], config.iTailRangeDeg[1])
+    : drawRayleigh(rng, config.sigmaIMutDeg);
+  return clamp(base, 0, config.iMutClampDeg);
+};
+
+const drawSystemTiltDeg = (rng: RNG, config: OrbitResolvedConfig): number => {
+  if (config.sigmaISysDeg <= 0) return 0;
+  return clamp(drawRayleigh(rng, config.sigmaISysDeg), 0, config.iAbsClampDeg);
+};
+
+const drawOrbitEccentricity = (rng: RNG, config: OrbitResolvedConfig): number => {
+  const base = drawBeta(rng, config.eccBaseParams.a, config.eccBaseParams.b);
+  if (
+    (config.eccModel === 'mixture_beta' || config.eccModel === 'custom')
+    && config.eccTailWeight > 0
+    && rng.next() < config.eccTailWeight
+  ) {
+    if (config.eccTailBetaParams) {
+      return drawBeta(rng, config.eccTailBetaParams.a, config.eccTailBetaParams.b);
+    }
+    const range = config.eccTailUniformRange ?? ORBIT_ECCENTRICITY_TAIL_RANGE;
+    return rng.range(range[0], range[1]);
+  }
+  return base;
+};
+
+const applyTidalCircularization = (
+  eccentricity: number,
+  semiMajorAxisAu: number,
+  config: OrbitResolvedConfig
+): number => {
+  if (!config.tide.enabled) return eccentricity;
+  const min = config.tide.aMinAu;
+  const max = config.tide.aTideAu;
+  if (semiMajorAxisAu <= min) return 0;
+  if (semiMajorAxisAu >= max) return eccentricity;
+  const t = clamp01((semiMajorAxisAu - min) / Math.max(1e-6, max - min));
+  return eccentricity * t;
+};
+
+const drawPlanetEccentricity = (rng: RNG, semiMajorAxisAu: number, config: OrbitResolvedConfig): number => {
+  const raw = drawOrbitEccentricity(rng, config) * config.eccScale;
+  const cooled = applyTidalCircularization(raw, semiMajorAxisAu, config);
+  return clamp(cooled, 0, config.eccClamp);
+};
+
+export function drawEccentricity(rng: RNG, _planetType: PlanetType): number {
+  const config = resolveOrbitConfig(DEFAULT_STELLAR_SYSTEM_GEN_PARAMS);
+  return clamp(drawOrbitEccentricity(rng, config) * config.eccScale, 0, config.eccClamp);
+}
+
+type OrbitCandidate = { index: number; semiMajorAxisAu: number; eccentricity: number };
+
+const applyOrbitStabilityFilter = (orbits: OrbitCandidate[], margin: number): number[] => {
+  if (orbits.length === 0) return [];
+  const ordered = sorted(
+    orbits.map(orbit => ({ ...orbit })),
+    (a, b) => a.semiMajorAxisAu - b.semiMajorAxisAu
+  );
+
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const inner = ordered[i];
+    const outer = ordered[i + 1];
+    const innerApo = inner.semiMajorAxisAu * (1 + inner.eccentricity);
+    const minOuterPeri = innerApo * margin;
+    const outerPeri = outer.semiMajorAxisAu * (1 - outer.eccentricity);
+
+    if (outerPeri <= minOuterPeri) {
+      const maxOuterE = 1 - minOuterPeri / outer.semiMajorAxisAu;
+      outer.eccentricity = Math.max(0, Math.min(outer.eccentricity, maxOuterE));
+      const adjustedOuterPeri = outer.semiMajorAxisAu * (1 - outer.eccentricity);
+      if (adjustedOuterPeri <= minOuterPeri) {
+        const maxInnerE = adjustedOuterPeri / margin / inner.semiMajorAxisAu - 1;
+        inner.eccentricity = Math.max(0, Math.min(inner.eccentricity, maxInnerE));
+      }
+    }
+  }
+
+  const byIndex = Array.from({ length: orbits.length }, () => 0);
+  ordered.forEach(orbit => {
+    byIndex[orbit.index] = orbit.eccentricity;
+  });
+  return byIndex;
+};
+
+const drawPlanetOrbitParamsForContext = (
+  rng: RNG,
+  planetType: PlanetType,
+  config: OrbitResolvedConfig,
+  systemTiltDeg: number,
+  systemNodeDeg: number
+): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
+  const deltaInclination = drawMutualInclinationDeg(rng, config);
+  const relNodeDeg = rng.range(0, 360);
+  const relNormal = orbitNormalFromAngles(deltaInclination, relNodeDeg);
+  const tiltedNormal = rotateZ(rotateX(relNormal, toRad(systemTiltDeg)), toRad(systemNodeDeg));
+  const { inclinationDeg, ascendingNodeDeg } = orbitAnglesFromNormal(tiltedNormal);
+  const orbitInclinationDeg = clamp(inclinationDeg, 0, config.iAbsClampDeg);
+  const axialTiltDeg = drawAxialTiltDeg(rng, planetType, orbitInclinationDeg);
+  return { orbitInclinationDeg, orbitAscendingNodeDeg: ascendingNodeDeg, axialTiltDeg };
+};
+
+export const drawPlanetOrbitParams = (
+  rng: RNG,
+  planetType: PlanetType
+): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
+  const config = resolveOrbitConfig(DEFAULT_STELLAR_SYSTEM_GEN_PARAMS);
+  const systemTiltDeg = drawSystemTiltDeg(rng, config);
+  const systemNodeDeg = rng.range(0, 360);
+  return drawPlanetOrbitParamsForContext(rng, planetType, config, systemTiltDeg, systemNodeDeg);
+};
+
+export const generatePlanetOrbitParams = (
+  seed: number,
+  planetTypes: PlanetType[],
+  params: StellarSystemGenParams = DEFAULT_STELLAR_SYSTEM_GEN_PARAMS
+): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number }[] => {
+  if (planetTypes.length === 0) return [];
+  const config = resolveOrbitConfig(params);
+  const orbitContextRng = new RNG(deriveSeed32(seed, 'orbit_context'));
+  const systemTiltDeg = drawSystemTiltDeg(orbitContextRng, config);
+  const systemNodeDeg = orbitContextRng.range(0, 360);
+
+  return planetTypes.map((planetType, index) => {
+    const orbitRng = new RNG(deriveSeed32(seed, 'planet_orbits', index));
+    return drawPlanetOrbitParamsForContext(orbitRng, planetType, config, systemTiltDeg, systemNodeDeg);
+  });
 };
 
 export const drawMoonOrbitParams = (
@@ -1458,9 +1815,27 @@ export interface GenerateStellarSystemInput {
 }
 
 function mergeParams(p?: Partial<StellarSystemGenParams>): StellarSystemGenParams {
+  const baseOrbit = DEFAULT_STELLAR_SYSTEM_GEN_PARAMS.orbit ?? {};
+  const overrideOrbit = p?.orbit ?? {};
   return {
     ...DEFAULT_STELLAR_SYSTEM_GEN_PARAMS,
-    ...(p || {})
+    ...(p || {}),
+    orbit: {
+      ...baseOrbit,
+      ...overrideOrbit,
+      tidalCircularization: {
+        ...baseOrbit.tidalCircularization,
+        ...overrideOrbit.tidalCircularization
+      },
+      stabilityFilter: {
+        ...baseOrbit.stabilityFilter,
+        ...overrideOrbit.stabilityFilter
+      },
+      clamps: {
+        ...baseOrbit.clamps,
+        ...overrideOrbit.clamps
+      }
+    }
   };
 }
 
@@ -1522,34 +1897,56 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
   let semiMajorAxes = scaleOrbitsToSnowLine(rng, relativeR, planetCount, params, snowLineAu);
   semiMajorAxes = enforceOrbitCaps(semiMajorAxes, params);
 
-  const planets: PlanetData[] = [];
+  const orbitConfig = resolveOrbitConfig(params);
+  const planetSlots: Array<{ index: number; planetType: PlanetType; semiMajorAxisAu: number }> = [];
   for (let i = 0; i < planetCount; i++) {
     const originalType = planetTypes[i] as PlanetType;
     const rawA = semiMajorAxes[i];
     const snapped = snapOrbitToType(rng, rawA, originalType, snowLineAu, params);
+    planetSlots.push({ index: i, planetType: snapped.planetType, semiMajorAxisAu: snapped.aAu });
+  }
 
-    const e = drawEccentricity(rng, snapped.planetType);
-    const planetOrbitRng = new RNG(deriveSeed32(seed, 'planet_orbits', i));
-    const { orbitInclinationDeg, orbitAscendingNodeDeg, axialTiltDeg } = drawPlanetOrbitParams(
-      planetOrbitRng,
-      snapped.planetType
-    );
+  const orbitParamsByIndex = generatePlanetOrbitParams(
+    seed,
+    planetSlots.map(slot => slot.planetType),
+    params
+  );
+
+  const eccentricities = planetSlots.map(slot => {
+    const eccRng = new RNG(deriveSeed32(seed, 'planet_ecc', slot.index));
+    return drawPlanetEccentricity(eccRng, slot.semiMajorAxisAu, orbitConfig);
+  });
+  const stabilizedEccentricities = orbitConfig.stability.enabled
+    ? applyOrbitStabilityFilter(
+        planetSlots.map((slot, idx) => ({
+          index: slot.index,
+          semiMajorAxisAu: slot.semiMajorAxisAu,
+          eccentricity: eccentricities[idx]
+        })),
+        orbitConfig.stability.margin
+      )
+    : eccentricities;
+
+  const planets: PlanetData[] = [];
+  for (const slot of planetSlots) {
+    const orbitParams = orbitParamsByIndex[slot.index];
+    const eccentricity = stabilizedEccentricities[slot.index] ?? eccentricities[slot.index] ?? 0;
 
     const planet = buildPlanet(
       rng,
-      snapped.planetType,
-      snapped.aAu,
-      e,
-      orbitInclinationDeg,
-      orbitAscendingNodeDeg,
-      axialTiltDeg,
+      slot.planetType,
+      slot.semiMajorAxisAu,
+      eccentricity,
+      orbitParams?.orbitInclinationDeg ?? 0,
+      orbitParams?.orbitAscendingNodeDeg ?? 0,
+      orbitParams?.axialTiltDeg ?? 0,
       luminosityTotalLSun,
       hzInnerAu,
       hzOuterAu
     );
 
-    const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', i));
-    planet.moons = refineMoons(rng, moonOrbitRng, planet, snapped.planetType, moonsPlan[i] || [], luminosityTotalLSun);
+    const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', slot.index));
+    planet.moons = refineMoons(rng, moonOrbitRng, planet, slot.planetType, moonsPlan[slot.index] || [], luminosityTotalLSun);
     planets.push(planet);
   }
 

@@ -49,11 +49,11 @@ import {
   drawCompanionOrbits,
   deriveSeed32,
   generateStellarSystem,
+  generatePlanetOrbitParams,
   computePlanetClimate,
   computeMoonClimate,
   computePlanetSeasonalDeltaK,
   computeMoonSeasonalDeltaK,
-  drawPlanetOrbitParams,
   drawMoonOrbitParams
 } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
@@ -427,10 +427,13 @@ const needsPlanetOrbitNormalization = (planet: PlanetData): boolean => (
   || (Array.isArray(planet.moons) && planet.moons.some(needsMoonOrbitNormalization))
 );
 
-const normalizePlanetOrbitParams = (planet: PlanetData, planetIndex: number, seed: number): PlanetData => {
+const normalizePlanetOrbitParams = (
+  planet: PlanetData,
+  planetIndex: number,
+  seed: number,
+  defaults: { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number }
+): PlanetData => {
   if (!needsPlanetOrbitNormalization(planet)) return planet;
-  const orbitRng = new RNG(deriveSeed32(seed, 'planet_orbits', planetIndex));
-  const defaults = drawPlanetOrbitParams(orbitRng, planet.type);
   const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', planetIndex));
   const moonsSource = Array.isArray(planet.moons) ? planet.moons : [];
   const moons = moonsSource.map(moon => normalizeMoonOrbitParams(moon, moonOrbitRng));
@@ -626,8 +629,12 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
     const orbit = companionOrbits[index - 1];
     return orbit ? { ...star, orbit } : star;
   });
+  const orbitDefaults = needsPlanetOrbit
+    ? generatePlanetOrbitParams(astro.seed, astro.planets.map(planet => planet.type))
+    : [];
   const normalizedPlanets = astro.planets.map((planet, index) => {
-    const withOrbits = needsPlanetOrbit ? normalizePlanetOrbitParams(planet, index, astro.seed) : planet;
+    const defaults = orbitDefaults[index] ?? { orbitInclinationDeg: 0, orbitAscendingNodeDeg: 0, axialTiltDeg: 0 };
+    const withOrbits = needsPlanetOrbit ? normalizePlanetOrbitParams(planet, index, astro.seed, defaults) : planet;
     const withClimate = needsPlanetClimateNormalization(withOrbits)
       ? normalizePlanetClimate(withOrbits)
       : withOrbits;

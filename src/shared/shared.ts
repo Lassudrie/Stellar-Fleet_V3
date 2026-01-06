@@ -65,6 +65,9 @@ export type StellarAgeClass = 'young' | 'mid' | 'old';
 export type PlanetType = 'Terrestrial' | 'SubNeptune' | 'IceGiant' | 'GasGiant' | 'Dwarf';
 export type MoonType = 'Regular' | 'Icy' | 'Volcanic' | 'Eden' | 'Irregular';
 export type AtmosphereType = 'None' | 'Thin' | 'Earthlike' | 'CO2' | 'H2He';
+export type OrbitRegime = 'A_froid' | 'B_tiede' | 'C_excite';
+export type OrbitReferencePlane = 'invariant' | 'ecliptic_simulated' | 'central_equator';
+export type OrbitEccentricityModel = 'beta_kipping_2013' | 'mixture_beta' | 'custom';
 
 export interface WeightedSpectralType {
   type: SpectralType;
@@ -78,6 +81,34 @@ export interface StellarClassBounds {
 
 export type StellarMultiplicityByPrimaryType = Record<SpectralType, number>;
 
+export interface OrbitGenerationParams {
+  regime?: OrbitRegime;
+  excitation?: number;
+  referencePlane?: OrbitReferencePlane;
+  sigmaIMutDeg?: number;
+  sigmaISysDeg?: number;
+  iTailWeight?: number;
+  iTailRangeDeg?: [number, number];
+  eModel?: OrbitEccentricityModel;
+  eBetaParams?: { a: number; b: number };
+  eTailWeight?: number;
+  eTailBetaParams?: { a: number; b: number };
+  eTailUniformRange?: [number, number];
+  tidalCircularization?: {
+    enabled?: boolean;
+    aMinAu?: number;
+    aTideAu?: number;
+  };
+  stabilityFilter?: {
+    enabled?: boolean;
+    margin?: number;
+  };
+  clamps?: {
+    maxE?: number;
+    maxIAbsDeg?: number;
+  };
+}
+
 export interface StellarSystemGenParams {
   maxPlanets: number;
   maxSemiMajorAxisAu: number;
@@ -88,6 +119,7 @@ export interface StellarSystemGenParams {
   spacingLogMean: number;
   spacingLogStd: number;
   firstOrbitLogRange: [number, number];
+  orbit?: OrbitGenerationParams;
 }
 
 export type PlanetTypePlan = PlanetType[];

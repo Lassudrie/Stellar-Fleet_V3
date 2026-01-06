@@ -56,6 +56,14 @@ Le payload est structuré selon `src/shared/types.ts` et suit les règles suivan
 - Les masses proches de la Terre (`>= 0.7 M⊕`) peuvent atteindre Earthlike si la planète est dans la zone habitable et si l’érosion reste modérée.
 - Les lunes subissent une pénalité d’érosion additionnelle ; un chauffage de marée élevé augmente le dégazage (favorise CO2).
 
+### 3.3 Orbites (excentricités et inclinaisons)
+- Les orbites planétaires sont générées via un régime dynamique configurable (`StellarSystemGenParams.orbit`) : `A_froid`, `B_tiede`, `C_excite` ou une excitation continue `[0..1]` interpolée entre ces régimes.
+- **Excentricité (e)** : base Beta Kipping (2013) `Beta(0.867, 3.03)` ; régime A applique un refroidissement (`scale` = 0.6) ; régime C mélange une queue uniforme 0.3–0.8 (poids 0.3). Clamps par défaut : 0.6 (A/B), 0.95 (C).
+- **Inclinaison mutuelle (i_mut)** : Rayleigh avec `sigma` 1.5° (A), 5° (B), 10° (C), avec clamp 7°/15°/60°. En C, 20% tirés uniformément 10–40°.
+- **Inclinaisons absolues (i_abs)** : tirage d’un tilt système `i_sys` (Rayleigh, σ ≈ 0.5°/1.5°/5° selon régime) et nœuds ascendants uniformes ; conversion par vecteurs de moment cinétique pour obtenir `orbitInclinationDeg` et `orbitAscendingNodeDeg` dans le plan de référence (`referencePlane`: `invariant`, `ecliptic_simulated`, `central_equator`, par défaut `invariant`).
+- **Circularisation par marées** : si `a < a_tide`, l’excentricité est multipliée par un facteur linéaire entre `a_min` et `a_tide` (par défaut `a_tide = 0.12 AU`, `a_min = minSemiMajorAxisAu`).
+- **Filtre de stabilité** : pour les planètes adjacentes, impose `q_ext > Q_int * margin` (par défaut `margin = 1.1`) ; ajuste `e` à la baisse si nécessaire.
+
 ## 4. Invariants de sérialisation
 - Lors de la désérialisation, `sanitizeStarSystemAstro` impose la présence des champs obligatoires : `seed`, `primarySpectralType`, `starCount`, `metallicityFeH`, bloc `derived` complet, ainsi que les tableaux `stars` et `planets`.
 - Si un champ obligatoire est manquant, non numérique ou mal typé, le payload est considéré invalide et n’est pas réutilisé tel quel.
