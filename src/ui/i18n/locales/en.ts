@@ -39,6 +39,7 @@ export const en = {
   'screen.return': 'Return',
   'options.title': 'System Options',
   'load.title': 'Load Game',
+  'load.instructions': 'Select a .json save file to continue your campaign.',
 
   // UI TopBar
   'ui.year': 'Year',
@@ -47,6 +48,11 @@ export const en = {
   'ui.report': 'Report',
   'ui.combat': 'Combat',
   'ui.comlink': 'Com-Link',
+  'ui.openMenu': 'Open menu',
+  'ui.nextTurn': 'Execute next turn',
+  'ui.debugBattle': 'Debug: force battle UI',
+  'ui.back': 'Back',
+  'ui.closeMenu': 'Close menu',
 
   // UI SideMenu
   'sidemenu.command': 'Command',
@@ -61,6 +67,14 @@ export const en = {
   'sidemenu.export': 'Export Save',
   'sidemenu.import': 'Import Save',
   'sidemenu.restart': 'Restart Simulation',
+  'sidemenu.exportLogs': 'Export logs',
+  'sidemenu.clearLogs': 'Clear logs',
+  'sidemenu.restartConfirmTitle': 'Restart simulation?',
+  'sidemenu.restartConfirmBody': 'This will end the current run and return to the main menu.',
+  'sidemenu.restartConfirmHint': 'Export a save first if you want to keep this run.',
+  'sidemenu.restartConfirmSave': 'Export save + restart',
+  'sidemenu.restartConfirmRestart': 'Restart without saving',
+  'sidemenu.restartConfirmCancel': 'Cancel',
   'sidemenu.warning': 'WARNING',
   'sidemenu.warningText': 'These settings are local to your browser session and will reset on reload. They do not affect game logic or determinism.',
   'sidemenu.noEvents': 'No events recorded.',
@@ -103,6 +117,9 @@ export const en = {
   'ctx.systemDetails': 'System Details',
   'ctx.viewSystem': 'View system',
   'ctx.viewSurface': 'Surface view',
+  'ctx.section.overview': 'Overview',
+  'ctx.section.actions': 'Actions',
+  'ctx.section.operations': 'Operations',
 
   // System View
   'systemView.currentSystem': 'System view',
@@ -217,13 +234,19 @@ export const en = {
   'planet.label.atmosphere': 'Atmosphere',
   'planet.label.pressure': 'Pressure',
   'planet.label.eccentricity': 'Eccentricity',
+  'planet.label.inclination': 'Orbit inclination',
   'planet.label.semiMajorAxis': 'Semi-major axis',
+  'planet.label.axialTilt': 'Axial tilt',
   'planet.label.albedo': 'Albedo',
+  'planet.label.seasonalDelta': 'Seasonal delta',
   'planet.label.climate': 'Climate',
   'moon.section.title': 'Moons',
   'moon.none': 'No moons detected.',
   'moon.name': 'Moon {{index}}',
   'moon.label.orbit': 'Orbit',
+  'moon.label.eccentricity': 'Eccentricity',
+  'moon.label.inclination': 'Orbit inclination',
+  'moon.label.seasonalDelta': 'Seasonal delta',
 
   // Fleet Picker
   'picker.title': 'Select Fleet',

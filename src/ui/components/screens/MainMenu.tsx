@@ -23,7 +23,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
           <h1 className="text-7xl md:text-9xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-500 uppercase drop-shadow-2xl">
             {t('menu.title')}
           </h1>
-          <h2 className="text-blue-500 text-3xl md:text-4xl tracking-[0.5em] font-bold uppercase ml-4">
+          <h2 className="text-blue-400 text-3xl md:text-4xl tracking-[0.35em] font-bold uppercase">
             {t('menu.subtitle')}
           </h2>
         </div>
@@ -55,7 +55,7 @@ const MenuButton: React.FC<{ onClick: () => void; label: string; primary?: boole
     `}
   >
     <div className={`absolute left-0 top-0 bottom-0 w-1 bg-blue-500 transition-all duration-300 ${primary ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
-    <span className="relative z-10 font-bold tracking-widest uppercase text-sm group-hover:tracking-[0.2em] transition-all">
+    <span className="relative z-10 font-bold tracking-[0.18em] uppercase text-sm group-hover:tracking-[0.28em] transition-all">
       {label}
     </span>
   </button>

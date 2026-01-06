@@ -501,11 +501,85 @@ export function snapOrbitToType(
 }
 
 export function drawEccentricity(rng: RNG, planetType: PlanetType): number {
+  const minE = planetType === 'Terrestrial' || planetType === 'SubNeptune' ? 0.003 : 0.005;
   if (planetType === 'Terrestrial' || planetType === 'SubNeptune') {
-    return clamp(Math.abs(normal(rng, 0.04, 0.05)), 0, 0.25);
+    return clamp(Math.abs(normal(rng, 0.04, 0.05)), minE, 0.25);
   }
-  return clamp(Math.abs(normal(rng, 0.08, 0.08)), 0, 0.35);
+  return clamp(Math.abs(normal(rng, 0.08, 0.08)), minE, 0.35);
 }
+
+const PLANET_ORBIT_INCLINATION_STD: Record<PlanetType, number> = {
+  Terrestrial: 2.4,
+  SubNeptune: 3.0,
+  IceGiant: 3.4,
+  GasGiant: 3.6,
+  Dwarf: 2.8
+};
+
+const PLANET_ORBIT_INCLINATION_MAX: Record<PlanetType, number> = {
+  Terrestrial: 10,
+  SubNeptune: 12,
+  IceGiant: 14,
+  GasGiant: 14,
+  Dwarf: 12
+};
+
+const PLANET_AXIAL_TILT_STD: Record<PlanetType, number> = {
+  Terrestrial: 10,
+  SubNeptune: 8,
+  IceGiant: 7,
+  GasGiant: 6,
+  Dwarf: 12
+};
+
+const PLANET_AXIAL_TILT_MAX: Record<PlanetType, number> = {
+  Terrestrial: 80,
+  SubNeptune: 55,
+  IceGiant: 50,
+  GasGiant: 45,
+  Dwarf: 75
+};
+
+const drawInclinationDeg = (rng: RNG, std: number, min: number, max: number): number => (
+  clamp(Math.abs(normal(rng, 0, std)), min, max)
+);
+
+export const drawPlanetOrbitParams = (
+  rng: RNG,
+  planetType: PlanetType
+): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
+  const inclinationStd = PLANET_ORBIT_INCLINATION_STD[planetType] ?? 2.5;
+  const inclinationMax = PLANET_ORBIT_INCLINATION_MAX[planetType] ?? 12;
+  const orbitInclinationDeg = drawInclinationDeg(rng, inclinationStd, 0.15, inclinationMax);
+  const orbitAscendingNodeDeg = rng.range(0, 360);
+  const axialStd = PLANET_AXIAL_TILT_STD[planetType] ?? 9;
+  const axialMax = PLANET_AXIAL_TILT_MAX[planetType] ?? 70;
+  const axialBase = drawInclinationDeg(rng, axialStd, 0.2, axialMax);
+  const correlated = orbitInclinationDeg * rng.range(0.2, 0.8);
+  const axialTiltDeg = clamp(Math.max(axialBase + correlated, axialBase), 0.2, axialMax);
+  return { orbitInclinationDeg, orbitAscendingNodeDeg, axialTiltDeg };
+};
+
+export const drawMoonOrbitParams = (
+  rng: RNG,
+  moonType: MoonType,
+  orbitDistanceRp: number
+): { orbitEccentricity: number; orbitInclinationDeg: number; orbitAscendingNodeDeg: number } => {
+  const distanceScale = clamp01((orbitDistanceRp - 10) / 120);
+  const isIrregular = moonType === 'Irregular';
+  const eccBase = isIrregular
+    ? Math.abs(normal(rng, 0.22, 0.18))
+    : Math.abs(normal(rng, 0.02, 0.03));
+  const ecc = isIrregular
+    ? clamp(eccBase + distanceScale * 0.12, 0.05, 0.75)
+    : clamp(eccBase + distanceScale * 0.04, 0.001, 0.2);
+  const incStd = isIrregular ? 14 : 2.2;
+  const incMin = isIrregular ? 4 : 0.1;
+  const incMax = isIrregular ? 60 : 12;
+  const orbitInclinationDeg = drawInclinationDeg(rng, incStd, incMin, incMax);
+  const orbitAscendingNodeDeg = rng.range(0, 360);
+  return { orbitEccentricity: ecc, orbitInclinationDeg, orbitAscendingNodeDeg };
+};
 
 export function samplePlanetMassEarth(rng: RNG, planetType: PlanetType): number {
   const [minM, maxM] = PLANET_MASS_EARTH_RANGE[planetType];
@@ -545,8 +619,20 @@ export function computeGravityG(massEarth: number, radiusEarth: number): number 
   return massEarth / (radiusEarth * radiusEarth);
 }
 
-export function computeFluxEarth(L_total: number, aAu: number): number {
-  return L_total / (aAu * aAu);
+const clampEccentricity = (eccentricity: number, max = 0.95): number => (
+  clamp(Math.abs(eccentricity), 0, max)
+);
+
+const computeFluxAtDistance = (L_total: number, distanceAu: number): number => {
+  const safeDistance = Math.max(distanceAu, 0.01);
+  return L_total / (safeDistance * safeDistance);
+};
+
+export function computeFluxEarth(L_total: number, aAu: number, eccentricity = 0): number {
+  const safeA = Math.max(aAu, 0.01);
+  const e = clampEccentricity(eccentricity);
+  const meanFactor = e > 0 ? 1 / Math.sqrt(1 - e * e) : 1;
+  return L_total / (safeA * safeA) * meanFactor;
 }
 
 export function computeTeqK(fluxEarth: number, albedo: number): number {
@@ -554,6 +640,85 @@ export function computeTeqK(fluxEarth: number, albedo: number): number {
   const a = clamp(albedo, 0, 0.98);
   return 278.5 * Math.pow(f, 0.25) * Math.pow((1 - a) / 0.7, 0.25);
 }
+
+const computeOrbitalDeltaK = (
+  L_total: number,
+  aAu: number,
+  eccentricity: number,
+  albedo: number
+): number => {
+  if (!Number.isFinite(L_total) || !Number.isFinite(aAu) || !Number.isFinite(albedo)) return 0;
+  const e = Number.isFinite(eccentricity) ? clampEccentricity(eccentricity) : 0;
+  if (e <= 0) return 0;
+  const peri = Math.max(aAu * (1 - e), 0.01);
+  const apo = Math.max(aAu * (1 + e), 0.01);
+  const teqPeri = computeTeqK(computeFluxAtDistance(L_total, peri), albedo);
+  const teqApo = computeTeqK(computeFluxAtDistance(L_total, apo), albedo);
+  return Math.max(0, teqPeri - teqApo) * 0.5;
+};
+
+const degToRad = (deg: number): number => (deg * Math.PI) / 180;
+
+export const computePlanetSeasonalDeltaK = (params: {
+  luminosityTotalLSun: number;
+  semiMajorAxisAu: number;
+  eccentricity: number;
+  albedo: number;
+  teqK: number;
+  axialTiltDeg: number;
+  airMassIndex?: number;
+}): number => {
+  if (
+    !Number.isFinite(params.luminosityTotalLSun)
+    || !Number.isFinite(params.semiMajorAxisAu)
+    || !Number.isFinite(params.teqK)
+  ) {
+    return 0;
+  }
+  const orbitalDeltaK = computeOrbitalDeltaK(
+    params.luminosityTotalLSun,
+    params.semiMajorAxisAu,
+    params.eccentricity,
+    params.albedo
+  );
+  const tiltRad = degToRad(params.axialTiltDeg);
+  const axialDeltaK = Math.max(0, params.teqK * 0.12 * Math.sin(tiltRad));
+  const inertia = 0.65 + 0.35 * (1 - clamp01(params.airMassIndex ?? 0));
+  return (orbitalDeltaK + axialDeltaK) * inertia;
+};
+
+export const computeMoonSeasonalDeltaK = (params: {
+  luminosityTotalLSun: number;
+  hostSemiMajorAxisAu: number;
+  hostEccentricity: number;
+  orbitEccentricity: number;
+  orbitDistanceRp: number;
+  albedo: number;
+  teqK: number;
+  tidalBonusK?: number;
+  airMassIndex?: number;
+}): number => {
+  if (
+    !Number.isFinite(params.luminosityTotalLSun)
+    || !Number.isFinite(params.hostSemiMajorAxisAu)
+    || !Number.isFinite(params.teqK)
+  ) {
+    return 0;
+  }
+  const stellarDeltaK = computeOrbitalDeltaK(
+    params.luminosityTotalLSun,
+    params.hostSemiMajorAxisAu,
+    params.hostEccentricity,
+    params.albedo
+  );
+  const ecc = Number.isFinite(params.orbitEccentricity) ? clampEccentricity(params.orbitEccentricity, 0.85) : 0;
+  const distanceRp = Number.isFinite(params.orbitDistanceRp) ? params.orbitDistanceRp : 12;
+  const distanceFactor = clamp(1 / Math.pow(Math.max(distanceRp, 4) / 12, 1.2), 0.25, 2.2);
+  const tidalBase = params.tidalBonusK ?? 0;
+  const tidalDeltaK = tidalBase * distanceFactor * (0.2 + 0.9 * ecc);
+  const inertia = 0.7 + 0.3 * (1 - clamp01(params.airMassIndex ?? 0));
+  return (stellarDeltaK + tidalDeltaK) * inertia;
+};
 
 const resolvePressureBar = (pressureBar: number | undefined, minP: number, maxP: number): number => {
   if (typeof pressureBar === 'number' && Number.isFinite(pressureBar)) {
@@ -878,6 +1043,9 @@ export function buildPlanet(
   planetType: PlanetType,
   semiMajorAxisAu: number,
   eccentricity: number,
+  orbitInclinationDeg: number,
+  orbitAscendingNodeDeg: number,
+  axialTiltDeg: number,
   L_total: number,
   hzInnerAu: number,
   hzOuterAu: number
@@ -887,13 +1055,22 @@ export function buildPlanet(
   const gravityG = computeGravityG(massEarth, radiusEarth);
 
   const albedo = pickPlanetAlbedo(planetType);
-  const flux = computeFluxEarth(L_total, semiMajorAxisAu);
+  const flux = computeFluxEarth(L_total, semiMajorAxisAu, eccentricity);
   const teqK = computeTeqK(flux, albedo);
 
   const derived: StellarDerived = { semiMajorAxisAu, hzInnerAu, hzOuterAu };
   const { atmosphere, pressureBar } = assignPlanetAtmosphere(rng, planetType, massEarth, gravityG, teqK, flux, derived);
   const { climateK, greenhouseK, airMassIndex } = computePlanetClimate({ teqK, atmosphere, pressureBar });
   const temperatureK = climateK;
+  const seasonalDeltaK = computePlanetSeasonalDeltaK({
+    luminosityTotalLSun: L_total,
+    semiMajorAxisAu,
+    eccentricity,
+    albedo,
+    teqK,
+    axialTiltDeg,
+    airMassIndex
+  });
 
   const climateTag = deriveClimateTag(planetType, climateK, atmosphere, airMassIndex);
 
@@ -901,6 +1078,9 @@ export function buildPlanet(
     type: planetType,
     semiMajorAxisAu,
     eccentricity,
+    orbitInclinationDeg,
+    orbitAscendingNodeDeg,
+    axialTiltDeg,
     massEarth,
     radiusEarth,
     gravityG,
@@ -911,6 +1091,7 @@ export function buildPlanet(
     climateK,
     airMassIndex,
     temperatureK,
+    seasonalDeltaK,
     moons: []
   };
 
@@ -1138,15 +1319,33 @@ export function assignMoonAtmosphere(
   return { atmosphere: 'None', finalMoonType: 'Regular' };
 }
 
-export function tidalBonusK(rng: RNG, planetType: PlanetType, moonRank: number): number {
+export function tidalBonusK(
+  rng: RNG,
+  planetType: PlanetType,
+  moonRank: number,
+  orbitDistanceRp: number,
+  orbitEccentricity: number
+): number {
   if (planetType !== 'GasGiant' && planetType !== 'IceGiant') return 0;
 
-  if (moonRank === 1) return rng.range(0, 120);
-  if (moonRank === 2) return rng.range(0, 60);
-  return rng.range(0, 20);
+  const base = moonRank === 1
+    ? rng.range(0, 120)
+    : moonRank === 2
+      ? rng.range(0, 60)
+      : rng.range(0, 20);
+  const distanceFactor = clamp(1 / Math.pow(Math.max(orbitDistanceRp, 4) / 12, 1.4), 0.3, 2.4);
+  const eccFactor = 0.35 + 2.1 * clampEccentricity(orbitEccentricity, 0.85);
+  return base * distanceFactor * eccFactor;
 }
 
-export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType, moonTypes: MoonType[], L_total: number): MoonData[] {
+export function refineMoons(
+  rng: RNG,
+  orbitRng: RNG,
+  planet: PlanetData,
+  planetType: PlanetType,
+  moonTypes: MoonType[],
+  L_total: number
+): MoonData[] {
   if (moonTypes.length === 0) return [];
 
   const regular = moonTypes.filter(t => t !== 'Irregular');
@@ -1157,13 +1356,14 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
 
   const out: MoonData[] = [];
 
-  const flux = computeFluxEarth(L_total, planet.semiMajorAxisAu);
+  const flux = computeFluxEarth(L_total, planet.semiMajorAxisAu, planet.eccentricity);
 
   // Regulars first, then irregulars.
   let regularIndex = 0;
   for (let i = 0; i < moonTypes.length; i++) {
     const t0 = moonTypes[i];
     const orbitDistanceRp = orbitDistances[i] ?? rng.range(10, 80);
+    const orbitParams = drawMoonOrbitParams(orbitRng, t0, orbitDistanceRp);
 
     const isRegular = t0 !== 'Irregular';
     const rank = isRegular ? Math.max(1, i + 1) : 0;
@@ -1183,7 +1383,9 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
     const albedo = MOON_ALBEDO[t0];
     const teqK = computeTeqK(flux, albedo);
 
-    const tidal = isRegular ? tidalBonusK(rng, planetType, rank) : 0;
+    const tidal = isRegular
+      ? tidalBonusK(rng, planetType, rank, orbitDistanceRp, orbitParams.orbitEccentricity)
+      : 0;
 
     const { atmosphere, finalMoonType, pressureBar } = assignMoonAtmosphere(rng, {
       moonType: t0,
@@ -1200,10 +1402,24 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
       tidalBonusK: tidal
     });
     const temperatureK = climateK;
+    const seasonalDeltaK = computeMoonSeasonalDeltaK({
+      luminosityTotalLSun: L_total,
+      hostSemiMajorAxisAu: planet.semiMajorAxisAu,
+      hostEccentricity: planet.eccentricity,
+      orbitEccentricity: orbitParams.orbitEccentricity,
+      orbitDistanceRp,
+      albedo,
+      teqK,
+      tidalBonusK: tidal,
+      airMassIndex
+    });
 
     const moon: MoonData = {
       type: finalMoonType,
       orbitDistanceRp,
+      orbitEccentricity: orbitParams.orbitEccentricity,
+      orbitInclinationDeg: orbitParams.orbitInclinationDeg,
+      orbitAscendingNodeDeg: orbitParams.orbitAscendingNodeDeg,
       massEarth,
       radiusEarth,
       gravityG,
@@ -1214,7 +1430,8 @@ export function refineMoons(rng: RNG, planet: PlanetData, planetType: PlanetType
       greenhouseK,
       climateK,
       airMassIndex,
-      temperatureK
+      temperatureK,
+      seasonalDeltaK
     };
 
     if (pressureBar !== undefined) {
@@ -1312,10 +1529,27 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
     const snapped = snapOrbitToType(rng, rawA, originalType, snowLineAu, params);
 
     const e = drawEccentricity(rng, snapped.planetType);
+    const planetOrbitRng = new RNG(deriveSeed32(seed, 'planet_orbits', i));
+    const { orbitInclinationDeg, orbitAscendingNodeDeg, axialTiltDeg } = drawPlanetOrbitParams(
+      planetOrbitRng,
+      snapped.planetType
+    );
 
-    const planet = buildPlanet(rng, snapped.planetType, snapped.aAu, e, luminosityTotalLSun, hzInnerAu, hzOuterAu);
+    const planet = buildPlanet(
+      rng,
+      snapped.planetType,
+      snapped.aAu,
+      e,
+      orbitInclinationDeg,
+      orbitAscendingNodeDeg,
+      axialTiltDeg,
+      luminosityTotalLSun,
+      hzInnerAu,
+      hzOuterAu
+    );
 
-    planet.moons = refineMoons(rng, planet, snapped.planetType, moonsPlan[i] || [], luminosityTotalLSun);
+    const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', i));
+    planet.moons = refineMoons(rng, moonOrbitRng, planet, snapped.planetType, moonsPlan[i] || [], luminosityTotalLSun);
     planets.push(planet);
   }
 

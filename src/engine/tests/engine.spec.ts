@@ -3250,6 +3250,9 @@ tests.push(
         type: 'Terrestrial',
         semiMajorAxisAu: 0.7,
         eccentricity: 0,
+        orbitInclinationDeg: 0,
+        orbitAscendingNodeDeg: 0,
+        axialTiltDeg: 0,
         massEarth: 0.45,
         radiusEarth: 0.72,
         gravityG: 0.85,
@@ -3260,6 +3263,7 @@ tests.push(
         climateK: 265,
         airMassIndex: 0,
         temperatureK: 265,
+        seasonalDeltaK: 0,
         moons: []
       };
 
@@ -3290,6 +3294,9 @@ tests.push(
         type: 'Terrestrial',
         semiMajorAxisAu: 1.8,
         eccentricity: 0,
+        orbitInclinationDeg: 0,
+        orbitAscendingNodeDeg: 0,
+        axialTiltDeg: 0,
         massEarth: 1,
         radiusEarth: 1,
         gravityG: 1,
@@ -3301,6 +3308,7 @@ tests.push(
         climateK: 245,
         airMassIndex: 0.6,
         temperatureK: 245,
+        seasonalDeltaK: 0,
         moons: []
       };
 

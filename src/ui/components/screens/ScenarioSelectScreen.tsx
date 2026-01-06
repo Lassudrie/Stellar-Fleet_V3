@@ -1,8 +1,34 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SCENARIO_TEMPLATES, buildScenario, ScenarioTemplate } from '../../../content/scenarios';
 import { GameScenario } from '../../../content/scenarios';
 import { useI18n } from '../../i18n';
+
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
+const getFocusableElements = (container: HTMLElement | null): HTMLElement[] => {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter(element => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+};
+
+const trapFocus = (event: React.KeyboardEvent, container: HTMLElement | null): void => {
+  if (event.key !== 'Tab') return;
+  const focusable = getFocusableElements(container);
+  if (focusable.length === 0) return;
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement as HTMLElement | null;
+
+  if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+};
 
 interface ScenarioSelectScreenProps {
   onBack: () => void;
@@ -14,6 +40,11 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id);
   const [customSeed, setCustomSeed] = useState<string>('');
   const [unlimitedFuel, setUnlimitedFuel] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const selectedTemplateRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  const titleId = 'scenario-select-title';
+  const descriptionId = 'scenario-select-description';
 
   const selectedTemplate = SCENARIO_TEMPLATES.find(t => t.id === selectedTemplateId) as ScenarioTemplate;
 
@@ -29,6 +60,32 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
   const getScenarioTitle = (template: ScenarioTemplate) => t(`scenario.${template.id}.title`, { defaultValue: template.meta.title });
   const getScenarioDesc = (template: ScenarioTemplate) => t(`scenario.${template.id}.desc`, { defaultValue: template.meta.description });
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    lastFocusedRef.current = document.activeElement as HTMLElement | null;
+    const timer = setTimeout(() => {
+      (selectedTemplateRef.current ?? dialogRef.current)?.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      lastFocusedRef.current?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTemplateRef.current) return;
+    selectedTemplateRef.current.focus();
+  }, [selectedTemplateId]);
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      onBack();
+      return;
+    }
+    trapFocus(event, dialogRef.current);
+  };
+
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950 select-none animate-in fade-in duration-300">
       
@@ -38,13 +95,22 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
          <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-purple-900/10 blur-[100px] rounded-full"></div>
       </div>
 
-      <div className="relative z-10 w-full max-w-5xl h-[85vh] flex flex-col md:flex-row bg-slate-900/80 border border-slate-800 rounded-xl shadow-2xl overflow-hidden backdrop-blur-sm">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative z-10 w-full max-w-5xl h-[85vh] flex flex-col md:flex-row bg-slate-900/80 border border-slate-800 rounded-xl shadow-2xl overflow-hidden backdrop-blur-sm"
+      >
         
         {/* LEFT COLUMN: LIST */}
         <div className="w-full md:w-1/3 border-r border-slate-800 flex flex-col bg-slate-950/50 shrink-0">
           <div className="p-4 md:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
             <div>
-              <h2 className="text-lg md:text-xl font-bold text-white tracking-wider uppercase">{t('scenario.title')}</h2>
+              <h2 id={titleId} className="text-lg md:text-xl font-bold text-white tracking-wider uppercase">{t('scenario.title')}</h2>
               <p className="text-[10px] md:text-xs text-slate-500 mt-1">{t('scenario.select')}</p>
             </div>
             
@@ -65,6 +131,7 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
               <button
                 key={template.id}
                 onClick={() => setSelectedTemplateId(template.id)}
+                ref={selectedTemplateId === template.id ? selectedTemplateRef : null}
                 className={`w-full text-left p-4 rounded-lg transition-all duration-200 border ${
                   selectedTemplateId === template.id 
                     ? 'bg-blue-900/20 border-blue-500/50 shadow-[inset_0_0_20px_rgba(59,130,246,0.1)]' 
@@ -108,7 +175,7 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
                    <span className="px-2 py-1 bg-slate-800 text-slate-300 text-[10px] font-bold uppercase rounded border border-slate-700">{t('scenario.ai')}</span>
                  )}
               </div>
-              <p className="text-slate-400 leading-relaxed text-sm max-w-lg border-l-2 border-blue-500/30 pl-4">
+              <p id={descriptionId} className="text-slate-400 leading-relaxed text-sm max-w-lg border-l-2 border-blue-500/30 pl-4">
                 {getScenarioDesc(selectedTemplate)}
               </p>
            </div>
@@ -143,6 +210,7 @@ const ScenarioSelectScreen: React.FC<ScenarioSelectScreenProps> = ({ onBack, onL
                     onClick={() => setCustomSeed(Math.floor(Math.random() * 999999).toString())}
                     className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 rounded transition-colors"
                     title={t('scenario.random')}
+                    aria-label={t('scenario.random')}
                   >
                     🎲
                   </button>

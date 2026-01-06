@@ -39,7 +39,8 @@ const TopBar: React.FC<TopBarProps> = ({
           <button 
               onClick={onToggleMenu}
               className="bg-slate-900/80 hover:bg-slate-800 text-white h-[50px] w-[50px] flex items-center justify-center rounded-lg border border-slate-700 shadow-lg active:scale-95 transition-all group"
-              title="Open Menu"
+              title={t('ui.openMenu')}
+              aria-label={t('ui.openMenu')}
           >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-400 group-hover:text-white transition-colors">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -91,7 +92,8 @@ const TopBar: React.FC<TopBarProps> = ({
              <button 
                 onClick={onDebugBattle}
                 className="ml-4 bg-slate-800/80 hover:bg-blue-900/80 border border-blue-500/30 text-blue-200 h-[50px] px-3 rounded-lg shadow-lg flex flex-col items-center justify-center transition-colors"
-                title="Debug: Force Battle UI"
+                title={t('ui.debugBattle')}
+                aria-label={t('ui.debugBattle')}
              >
                 <span className="text-[9px] uppercase font-bold">{t('ui.comlink')}</span>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -104,7 +106,8 @@ const TopBar: React.FC<TopBarProps> = ({
       {/* RIGHT: Next Turn - Compact Icon Only (50x50) */}
       <button 
         onClick={onNextTurn}
-        title="Execute Next Turn"
+        title={t('ui.nextTurn')}
+        aria-label={t('ui.nextTurn')}
         className="
             group flex items-center justify-center w-[50px] h-[50px]
             bg-slate-900/90 backdrop-blur-md 

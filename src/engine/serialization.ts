@@ -50,7 +50,11 @@ import {
   deriveSeed32,
   generateStellarSystem,
   computePlanetClimate,
-  computeMoonClimate
+  computeMoonClimate,
+  computePlanetSeasonalDeltaK,
+  computeMoonSeasonalDeltaK,
+  drawPlanetOrbitParams,
+  drawMoonOrbitParams
 } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
@@ -398,6 +402,104 @@ const isStarOrbit = (orbit: unknown): orbit is StarOrbit => {
     && isFiniteNumber(o.ascendingNodeDeg);
 };
 
+const needsMoonOrbitNormalization = (moon: MoonData): boolean => (
+  !isFiniteNumber(moon.orbitEccentricity)
+  || !isFiniteNumber(moon.orbitInclinationDeg)
+  || !isFiniteNumber(moon.orbitAscendingNodeDeg)
+);
+
+const normalizeMoonOrbitParams = (moon: MoonData, rng: RNG): MoonData => {
+  if (!needsMoonOrbitNormalization(moon)) return moon;
+  const orbitDistanceRp = isFiniteNumber(moon.orbitDistanceRp) ? moon.orbitDistanceRp : 20;
+  const defaults = drawMoonOrbitParams(rng, moon.type, orbitDistanceRp);
+  return {
+    ...moon,
+    orbitEccentricity: isFiniteNumber(moon.orbitEccentricity) ? moon.orbitEccentricity : defaults.orbitEccentricity,
+    orbitInclinationDeg: isFiniteNumber(moon.orbitInclinationDeg) ? moon.orbitInclinationDeg : defaults.orbitInclinationDeg,
+    orbitAscendingNodeDeg: isFiniteNumber(moon.orbitAscendingNodeDeg) ? moon.orbitAscendingNodeDeg : defaults.orbitAscendingNodeDeg
+  };
+};
+
+const needsPlanetOrbitNormalization = (planet: PlanetData): boolean => (
+  !isFiniteNumber(planet.orbitInclinationDeg)
+  || !isFiniteNumber(planet.orbitAscendingNodeDeg)
+  || !isFiniteNumber(planet.axialTiltDeg)
+  || (Array.isArray(planet.moons) && planet.moons.some(needsMoonOrbitNormalization))
+);
+
+const normalizePlanetOrbitParams = (planet: PlanetData, planetIndex: number, seed: number): PlanetData => {
+  if (!needsPlanetOrbitNormalization(planet)) return planet;
+  const orbitRng = new RNG(deriveSeed32(seed, 'planet_orbits', planetIndex));
+  const defaults = drawPlanetOrbitParams(orbitRng, planet.type);
+  const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', planetIndex));
+  const moonsSource = Array.isArray(planet.moons) ? planet.moons : [];
+  const moons = moonsSource.map(moon => normalizeMoonOrbitParams(moon, moonOrbitRng));
+
+  return {
+    ...planet,
+    orbitInclinationDeg: isFiniteNumber(planet.orbitInclinationDeg) ? planet.orbitInclinationDeg : defaults.orbitInclinationDeg,
+    orbitAscendingNodeDeg: isFiniteNumber(planet.orbitAscendingNodeDeg) ? planet.orbitAscendingNodeDeg : defaults.orbitAscendingNodeDeg,
+    axialTiltDeg: isFiniteNumber(planet.axialTiltDeg) ? planet.axialTiltDeg : defaults.axialTiltDeg,
+    moons
+  };
+};
+
+const needsMoonSeasonalNormalization = (moon: MoonData): boolean => !isFiniteNumber(moon.seasonalDeltaK);
+
+const normalizeMoonSeasonalDelta = (
+  moon: MoonData,
+  planet: PlanetData,
+  luminosityTotalLSun: number
+): MoonData => {
+  if (!needsMoonSeasonalNormalization(moon)) return moon;
+  const seasonalDeltaK = computeMoonSeasonalDeltaK({
+    luminosityTotalLSun,
+    hostSemiMajorAxisAu: planet.semiMajorAxisAu,
+    hostEccentricity: planet.eccentricity,
+    orbitEccentricity: isFiniteNumber(moon.orbitEccentricity) ? moon.orbitEccentricity : 0,
+    orbitDistanceRp: moon.orbitDistanceRp,
+    albedo: moon.albedo,
+    teqK: moon.teqK,
+    tidalBonusK: moon.tidalBonusK,
+    airMassIndex: moon.airMassIndex
+  });
+  return {
+    ...moon,
+    seasonalDeltaK
+  };
+};
+
+const needsPlanetSeasonalNormalization = (planet: PlanetData): boolean => (
+  !isFiniteNumber(planet.seasonalDeltaK)
+  || (Array.isArray(planet.moons) && planet.moons.some(needsMoonSeasonalNormalization))
+);
+
+const normalizePlanetSeasonalDelta = (
+  planet: PlanetData,
+  luminosityTotalLSun: number
+): PlanetData => {
+  if (!needsPlanetSeasonalNormalization(planet)) return planet;
+  const seasonalDeltaK = isFiniteNumber(planet.seasonalDeltaK)
+    ? planet.seasonalDeltaK
+    : computePlanetSeasonalDeltaK({
+        luminosityTotalLSun,
+        semiMajorAxisAu: planet.semiMajorAxisAu,
+        eccentricity: planet.eccentricity,
+        albedo: planet.albedo,
+        teqK: planet.teqK,
+        axialTiltDeg: isFiniteNumber(planet.axialTiltDeg) ? planet.axialTiltDeg : 0,
+        airMassIndex: planet.airMassIndex
+      });
+  const moonsSource = Array.isArray(planet.moons) ? planet.moons : [];
+  const moons = moonsSource.map(moon => normalizeMoonSeasonalDelta(moon, planet, luminosityTotalLSun));
+
+  return {
+    ...planet,
+    seasonalDeltaK,
+    moons
+  };
+};
+
 const needsMoonClimateNormalization = (moon: MoonData): boolean => (
   !isFiniteNumber(moon.climateK)
   || !isFiniteNumber(moon.greenhouseK)
@@ -510,8 +612,10 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
   const primaryMassSun = isFiniteNumber(astro.stars[0]?.massSun) ? astro.stars[0].massSun : 1;
   const companionStars = astro.stars.slice(1);
   const needsOrbit = companionStars.some(star => !isStarOrbit(star?.orbit));
+  const needsPlanetOrbit = astro.planets.some(needsPlanetOrbitNormalization);
   const needsPlanetClimate = astro.planets.some(needsPlanetClimateNormalization);
-  if (!needsOrbit && !needsPlanetClimate) return astro;
+  const needsPlanetSeasonal = astro.planets.some(needsPlanetSeasonalNormalization);
+  if (!needsOrbit && !needsPlanetOrbit && !needsPlanetClimate && !needsPlanetSeasonal) return astro;
 
   const orbitRng = new RNG(deriveSeed32(astro.seed, 'star_orbits'));
   const companionMasses = companionStars.map(star => (isFiniteNumber(star?.massSun) ? star.massSun : 1));
@@ -522,9 +626,15 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
     const orbit = companionOrbits[index - 1];
     return orbit ? { ...star, orbit } : star;
   });
-  const normalizedPlanets = needsPlanetClimate
-    ? astro.planets.map(planet => (needsPlanetClimateNormalization(planet) ? normalizePlanetClimate(planet) : planet))
-    : astro.planets;
+  const normalizedPlanets = astro.planets.map((planet, index) => {
+    const withOrbits = needsPlanetOrbit ? normalizePlanetOrbitParams(planet, index, astro.seed) : planet;
+    const withClimate = needsPlanetClimateNormalization(withOrbits)
+      ? normalizePlanetClimate(withOrbits)
+      : withOrbits;
+    return needsPlanetSeasonalNormalization(withClimate)
+      ? normalizePlanetSeasonalDelta(withClimate, astro.derived.luminosityTotalLSun)
+      : withClimate;
+  });
 
   return {
     ...astro,

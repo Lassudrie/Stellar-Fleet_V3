@@ -114,6 +114,9 @@ export interface StarData {
 export interface MoonData {
   type: MoonType;
   orbitDistanceRp: number;
+  orbitEccentricity: number;
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
   massEarth: number;
   radiusEarth: number;
   gravityG: number;
@@ -126,12 +129,16 @@ export interface MoonData {
   climateK: number;
   airMassIndex: number;
   temperatureK: number;
+  seasonalDeltaK: number;
 }
 
 export interface PlanetData {
   type: PlanetType;
   semiMajorAxisAu: number;
   eccentricity: number;
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
+  axialTiltDeg: number;
   massEarth: number;
   radiusEarth: number;
   gravityG: number;
@@ -143,6 +150,7 @@ export interface PlanetData {
   climateK: number;
   airMassIndex: number;
   temperatureK: number;
+  seasonalDeltaK: number;
   climateTag?: string;
   moons: MoonData[];
 }

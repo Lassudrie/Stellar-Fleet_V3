@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FleetState, LogEntry, Fleet, StarSystem, GameMessage, ShipType, ShipConsumables, ShipEntity } from '../../../shared/shared';
 import { useFleetName } from '../../context/FleetNames';
 import { getFleetSpeed } from '../../../engine/movement';
@@ -39,6 +39,31 @@ interface SideMenuProps {
 type MenuView = 'MAIN' | 'LOGS' | 'FLEETS' | 'SYSTEMS' | 'SETTINGS' | 'MESSAGES';
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
+const getFocusableElements = (container: HTMLElement | null): HTMLElement[] => {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter(element => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+};
+
+const trapFocus = (event: React.KeyboardEvent, container: HTMLElement | null): void => {
+  if (event.key !== 'Tab') return;
+  const focusable = getFocusableElements(container);
+  if (focusable.length === 0) return;
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement as HTMLElement | null;
+
+  if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+};
 
 const getAmmoFromConsumables = (
   ship: ShipEntity,
@@ -373,13 +398,43 @@ const SideMenu: React.FC<SideMenuProps> = ({
   
   const [aiDebug, setAiDebug] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>('ALL');
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restartDialogRef = useRef<HTMLDivElement | null>(null);
+  const restartCancelRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  const menuTitleId = 'side-menu-title';
+  const restartTitleId = 'side-menu-restart-title';
+  const restartBodyId = 'side-menu-restart-body';
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isOpen) {
+        setShowRestartConfirm(false);
         const timer = setTimeout(() => setView('MAIN'), 200);
         return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    lastFocusedRef.current = document.activeElement as HTMLElement | null;
+    const timer = setTimeout(() => {
+      (closeButtonRef.current ?? menuRef.current)?.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      lastFocusedRef.current?.focus();
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!showRestartConfirm) return;
+    const timer = setTimeout(() => {
+      restartCancelRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [showRestartConfirm]);
 
   const mySystems = useMemo(() => systems.filter(s => s.ownerFactionId === playerFactionId), [systems, playerFactionId]);
   const unreadMessages = useMemo(() => messages.filter(msg => !msg.read && !msg.dismissed).length, [messages]);
@@ -390,18 +445,50 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   if (!isOpen) return null;
 
+  const handleRequestClose = () => {
+    if (showRestartConfirm) {
+      setShowRestartConfirm(false);
+      return;
+    }
+    onClose();
+  };
+
+  const handleRestartConfirm = () => {
+    setShowRestartConfirm(false);
+    onClose();
+    onRestart();
+  };
+
+  const handleSaveAndRestart = () => {
+    onSave();
+    handleRestartConfirm();
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      handleRequestClose();
+      return;
+    }
+    trapFocus(event, showRestartConfirm ? restartDialogRef.current : menuRef.current);
+  };
+
   const renderHeader = () => (
     <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
         <div className="flex items-center gap-2 text-white">
             {view !== 'MAIN' && (
-                <button onClick={() => setView('MAIN')} className="mr-2 text-slate-400 hover:text-white">
+                <button
+                  onClick={() => setView('MAIN')}
+                  className="mr-2 text-slate-400 hover:text-white"
+                  aria-label={t('ui.back')}
+                >
                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                     </svg>
                 </button>
             )}
             <div className={`w-2 h-6 ${view === 'MAIN' ? 'bg-blue-500' : view === 'SETTINGS' ? 'bg-purple-500' : 'bg-slate-600'} rounded-sm`}></div>
-            <h2 className="text-lg font-bold tracking-wider uppercase">
+            <h2 id={menuTitleId} className="text-base font-semibold tracking-[0.2em] uppercase">
                 {view === 'MAIN' && t('sidemenu.command')}
                 {view === 'LOGS' && t('sidemenu.com_logs')}
                 {view === 'FLEETS' && t('sidemenu.registry')}
@@ -410,7 +497,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 {view === 'MESSAGES' && t('sidemenu.messaging')}
             </h2>
         </div>
-        <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
+        <button
+          ref={closeButtonRef}
+          onClick={handleRequestClose}
+          className="text-slate-500 hover:text-white transition-colors"
+          aria-label={t('ui.closeMenu')}
+        >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -422,7 +514,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     <div className="p-4 space-y-3">
         <button onClick={() => setView('LOGS')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
-                 <span className="text-white font-bold tracking-wider uppercase">{t('sidemenu.com_logs')}</span>
+                 <span className="text-sm text-white font-semibold tracking-[0.16em] uppercase">{t('sidemenu.com_logs')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.recentEvents', { count: logs.length })}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
@@ -432,7 +524,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
         <button onClick={() => setView('MESSAGES')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
-                 <span className="text-amber-200 font-bold tracking-wider uppercase">{t('sidemenu.messaging')}</span>
+                 <span className="text-sm text-amber-200 font-semibold tracking-[0.16em] uppercase">{t('sidemenu.messaging')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.unread')}: {unreadMessages}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
@@ -442,7 +534,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
         <button onClick={onOpenFleetRegistry} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
-                 <span className="text-blue-200 font-bold tracking-wider uppercase">{t('sidemenu.registry')}</span>
+                 <span className="text-sm text-blue-200 font-semibold tracking-[0.16em] uppercase">{t('sidemenu.registry')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.activeUnits', { count: blueFleets.length })}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
@@ -452,7 +544,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
         <button onClick={() => setView('SYSTEMS')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
-                 <span className="text-blue-200 font-bold tracking-wider uppercase">{t('sidemenu.territory')}</span>
+                 <span className="text-sm text-blue-200 font-semibold tracking-[0.16em] uppercase">{t('sidemenu.territory')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.controlledSectors', { count: mySystems.length })}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
@@ -462,7 +554,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
         <button onClick={() => setView('SETTINGS')} className="w-full text-left bg-slate-800/50 hover:bg-slate-700/50 p-4 rounded-lg border border-slate-700 flex justify-between items-center group transition-all">
              <div className="flex flex-col">
-                 <span className="text-purple-300 font-bold tracking-wider uppercase">{t('sidemenu.settings')}</span>
+                 <span className="text-sm text-purple-300 font-semibold tracking-[0.16em] uppercase">{t('sidemenu.settings')}</span>
                  <span className="text-xs text-slate-500">{t('sidemenu.systemPreferences')}</span>
              </div>
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-500 group-hover:translate-x-1 transition-transform">
@@ -483,10 +575,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
         </button>
 
         <button 
-            onClick={() => {
-                onClose();
-                onRestart();
-            }} 
+            onClick={() => setShowRestartConfirm(true)}
             className="w-full text-left px-4 py-3 rounded-lg bg-red-900/10 text-red-400 hover:bg-red-900/30 border border-red-900/20 text-sm font-bold transition-all flex items-center justify-between group uppercase"
         >
             <span>{t('sidemenu.restart')}</span>
@@ -630,7 +719,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                          </svg>
-                         Export Logs
+                         {t('sidemenu.exportLogs')}
                       </button>
                       <button
                         onClick={onClearAiLogs}
@@ -642,7 +731,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                          </svg>
-                         Clear Logs
+                         {t('sidemenu.clearLogs')}
                       </button>
                   </div>
               )}
@@ -683,6 +772,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                         className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs"
                         value={messageTypeFilter}
                         onChange={(e) => setMessageTypeFilter(e.target.value)}
+                        aria-label={t('sidemenu.filterByType')}
                     >
                         <option value="ALL">{t('sidemenu.typeAll')}</option>
                         <option value="BATTLE">{t('sidemenu.typeBattle')}</option>
@@ -749,9 +839,17 @@ const SideMenu: React.FC<SideMenuProps> = ({
     <>
         <div 
             className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40 pointer-events-auto transition-opacity"
-            onClick={onClose}
+            onClick={handleRequestClose}
         />
-        <div className="absolute top-0 left-0 bottom-0 w-80 bg-slate-900/95 border-r border-slate-700/50 shadow-2xl z-50 pointer-events-auto flex flex-col animate-in slide-in-from-left duration-200">
+        <div
+            ref={menuRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={menuTitleId}
+            tabIndex={-1}
+            onKeyDown={handleMenuKeyDown}
+            className="absolute top-0 left-0 bottom-0 w-80 bg-slate-900/95 border-r border-slate-700/50 shadow-2xl z-50 pointer-events-auto flex flex-col animate-in slide-in-from-left duration-200"
+        >
             {renderHeader()}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {view === 'MAIN' && renderMainView()}
@@ -764,6 +862,58 @@ const SideMenu: React.FC<SideMenuProps> = ({
             <div className="p-4 border-t border-slate-800 text-center bg-slate-950/30">
                 <p className="text-[10px] text-slate-600 uppercase tracking-widest">{t('sidemenu.footerVersion')}</p>
             </div>
+
+            {showRestartConfirm && (
+                <div
+                    className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+                    onClick={() => setShowRestartConfirm(false)}
+                >
+                    <div
+                        ref={restartDialogRef}
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby={restartTitleId}
+                        aria-describedby={restartBodyId}
+                        tabIndex={-1}
+                        className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-950/95 p-5 shadow-2xl"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <h3 id={restartTitleId} className="text-base font-bold text-white uppercase tracking-wider">
+                            {t('sidemenu.restartConfirmTitle')}
+                        </h3>
+                        <p id={restartBodyId} className="mt-2 text-sm text-slate-300">
+                            {t('sidemenu.restartConfirmBody')}
+                        </p>
+                        <p className="mt-2 text-xs text-slate-500">
+                            {t('sidemenu.restartConfirmHint')}
+                        </p>
+                        <div className="mt-4 flex flex-col gap-2">
+                            <button
+                                type="button"
+                                onClick={handleSaveAndRestart}
+                                className="w-full rounded-lg border border-blue-500/40 bg-blue-600/20 px-3 py-2 text-xs font-bold uppercase tracking-widest text-blue-100 hover:bg-blue-600/40"
+                            >
+                                {t('sidemenu.restartConfirmSave')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRestartConfirm}
+                                className="w-full rounded-lg border border-red-500/40 bg-red-900/30 px-3 py-2 text-xs font-bold uppercase tracking-widest text-red-100 hover:bg-red-900/50"
+                            >
+                                {t('sidemenu.restartConfirmRestart')}
+                            </button>
+                            <button
+                                ref={restartCancelRef}
+                                type="button"
+                                onClick={() => setShowRestartConfirm(false)}
+                                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs font-bold uppercase tracking-widest text-slate-300 hover:bg-slate-800"
+                            >
+                                {t('sidemenu.restartConfirmCancel')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     </>
   );

@@ -90,6 +90,10 @@ const STAR_TEXTURE_SIZE = 256;
 const STAR_TINT_STRENGTH = 0.18;
 const STAR_FALLBACK_TINT_STRENGTH = 0.08;
 const DAYS_PER_YEAR = 365.25;
+const MIN_PLANET_ORBIT_INCLINATION_DEG = 0.35;
+const MAX_PLANET_ORBIT_INCLINATION_DEG = 10;
+const MIN_MOON_ORBIT_INCLINATION_DEG = 0.25;
+const MAX_MOON_ORBIT_INCLINATION_DEG = 14;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -112,6 +116,8 @@ type OrbitingMoon = {
   radius: number;
   orbitRadius: number;
   orbitAngle: number;
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
   type: MoonType;
   isSolid?: boolean;
 };
@@ -121,6 +127,8 @@ type OrbitingPlanet = {
   radius: number;
   orbitRadius: number;
   orbitAngle: number;
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
   type: PlanetType;
   moons: OrbitingMoon[];
 };
@@ -150,6 +158,9 @@ type PlanetSource = (PlanetData & {
   moons?: MoonData[];
   radiusKm?: number;
   semiMajorAxisKm?: number;
+  orbitInclinationDeg?: number;
+  orbitAscendingNodeDeg?: number;
+  axialTiltDeg?: number;
   planetType?: PlanetType;
   name?: string;
   habitabilityScore?: number;
@@ -200,10 +211,6 @@ const useDisposableMemo = <T extends { dispose: () => void }>(
   }, [resource]);
   return resource;
 };
-
-const computeOrbitPosition = (radius: number, angle: number): [number, number, number] => (
-  [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
-);
 
 const computeOrbitalPeriodDays = (semiMajorAxisAu: number, massSun: number): number => {
   const safeA = Math.max(semiMajorAxisAu, 0.01);
@@ -432,6 +439,24 @@ const getSemiMajorAxisKm = (planet: PlanetSource, index: number): number => {
   return DEFAULT_ORBIT_INNER_KM + index * DEFAULT_ORBIT_STEP_KM;
 };
 
+const getPlanetOrbitInclinationDeg = (planetId: string): number => {
+  const seed = hashStringToUnit(`${planetId}-inclination`);
+  const eased = Math.pow(seed, 1.35);
+  return MathUtils.lerp(MIN_PLANET_ORBIT_INCLINATION_DEG, MAX_PLANET_ORBIT_INCLINATION_DEG, eased);
+};
+
+const getPlanetOrbitAscendingNodeDeg = (planetId: string): number =>
+  hashStringToUnit(`${planetId}-node`) * 360;
+
+const getMoonOrbitInclinationDeg = (moonId: string): number => {
+  const seed = hashStringToUnit(`${moonId}-inclination`);
+  const eased = Math.pow(seed, 1.25);
+  return MathUtils.lerp(MIN_MOON_ORBIT_INCLINATION_DEG, MAX_MOON_ORBIT_INCLINATION_DEG, eased);
+};
+
+const getMoonOrbitAscendingNodeDeg = (moonId: string): number =>
+  hashStringToUnit(`${moonId}-node`) * 360;
+
 const getMoonRadiusKm = (moon: MoonSource): number => {
   if (typeof moon.radiusKm === 'number') {
     return Math.max(moon.radiusKm, 0.01);
@@ -501,6 +526,12 @@ const buildPlanetModel = (
   const baseAngle = hashStringToAngle(planetId);
   const orbitPeriodDays = computeOrbitalPeriodDays(semiMajorAxisKm / KM_PER_AU, orbitMassSun);
   const orbitAngle = computeOrbitAngle(baseAngle, orbitPeriodDays, day);
+  const orbitInclinationDeg = typeof planet.orbitInclinationDeg === 'number'
+    ? planet.orbitInclinationDeg
+    : getPlanetOrbitInclinationDeg(planetId);
+  const orbitAscendingNodeDeg = typeof planet.orbitAscendingNodeDeg === 'number'
+    ? planet.orbitAscendingNodeDeg
+    : getPlanetOrbitAscendingNodeDeg(planetId);
   const orbitRadius = semiMajorAxisKm * sceneScale;
   const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
   const planetType = getPlanetType(planet);
@@ -511,17 +542,34 @@ const buildPlanetModel = (
     const moonOrbitRadius = moonOrbitKm * sceneScale;
     const moonAngle = (moonIndex / Math.max(planet.moons?.length ?? 1, 1)) * Math.PI * 2 + Math.PI / 4;
     const moonId = (moon as MoonSource).id ?? `${planetId}-moon-${moonIndex + 1}`;
+    const moonInclinationDeg = typeof (moon as MoonSource).orbitInclinationDeg === 'number'
+      ? (moon as MoonSource).orbitInclinationDeg
+      : getMoonOrbitInclinationDeg(moonId);
+    const moonAscendingNodeDeg = typeof (moon as MoonSource).orbitAscendingNodeDeg === 'number'
+      ? (moon as MoonSource).orbitAscendingNodeDeg
+      : getMoonOrbitAscendingNodeDeg(moonId);
     return {
       id: moonId,
       radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
       orbitRadius: moonOrbitRadius,
       orbitAngle: moonAngle,
+      orbitInclinationDeg: moonInclinationDeg,
+      orbitAscendingNodeDeg: moonAscendingNodeDeg,
       type: getMoonType(moon as MoonSource),
       isSolid: (moon as MoonSource).isSolid
     };
   });
 
-  return { id: planetId, radius, orbitRadius, orbitAngle, type: planetType, moons };
+  return {
+    id: planetId,
+    radius,
+    orbitRadius,
+    orbitAngle,
+    orbitInclinationDeg,
+    orbitAscendingNodeDeg,
+    type: planetType,
+    moons
+  };
 };
 
 const applyPlanetOrbitSpacing = (
@@ -777,10 +825,19 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     () => new RingGeometry(Math.max(moon.orbitRadius - orbitThickness, 0.0025), moon.orbitRadius + orbitThickness, 96),
     [moon.orbitRadius, orbitThickness]
   );
-  const orbitRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
+  const orbitRotation = useMemo<[number, number, number]>(() => {
+    const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
+    const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
+    return [-Math.PI / 2 + inclination, ascendingNode, 0];
+  }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
-    () => computeOrbitPosition(moon.orbitRadius, moon.orbitAngle),
-    [moon.orbitAngle, moon.orbitRadius]
+    () => computeInclinedOrbitPosition(
+      moon.orbitRadius,
+      moon.orbitAngle,
+      moon.orbitInclinationDeg,
+      moon.orbitAscendingNodeDeg
+    ),
+    [moon.orbitAngle, moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg, moon.orbitRadius]
   );
   const moonHitboxScale = useMemo<[number, number, number]>(
     () => [moon.radius * 2, moon.radius * 2, moon.radius * 2],
@@ -903,10 +960,19 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     () => new RingGeometry(Math.max(planet.orbitRadius - orbitThickness, 0.01), planet.orbitRadius + orbitThickness, 128),
     [orbitThickness, planet.orbitRadius]
   );
-  const orbitRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
+  const orbitRotation = useMemo<[number, number, number]>(() => {
+    const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
+    const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
+    return [-Math.PI / 2 + inclination, ascendingNode, 0];
+  }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
-    () => computeOrbitPosition(planet.orbitRadius, planet.orbitAngle),
-    [planet.orbitAngle, planet.orbitRadius]
+    () => computeInclinedOrbitPosition(
+      planet.orbitRadius,
+      planet.orbitAngle,
+      planet.orbitInclinationDeg,
+      planet.orbitAscendingNodeDeg
+    ),
+    [planet.orbitAngle, planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg, planet.orbitRadius]
   );
   const planetScale = useMemo<[number, number, number]>(
     () => [planet.radius, planet.radius, planet.radius],
@@ -2069,11 +2135,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     });
 
     planets.forEach((planet) => {
-      const planetPosition = computeOrbitPosition(planet.orbitRadius, planet.orbitAngle);
+      const planetPosition = computeInclinedOrbitPosition(
+        planet.orbitRadius,
+        planet.orbitAngle,
+        planet.orbitInclinationDeg,
+        planet.orbitAscendingNodeDeg
+      );
       positions[planet.id] = planetPosition;
 
       planet.moons.forEach((moon) => {
-        const moonOffset = computeOrbitPosition(moon.orbitRadius, moon.orbitAngle);
+        const moonOffset = computeInclinedOrbitPosition(
+          moon.orbitRadius,
+          moon.orbitAngle,
+          moon.orbitInclinationDeg,
+          moon.orbitAscendingNodeDeg
+        );
         positions[moon.id] = [
           planetPosition[0] + moonOffset[0],
           planetPosition[1] + moonOffset[1],

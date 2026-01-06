@@ -92,6 +92,7 @@ export interface StarSystemAstro {
 ```
 
 Les types `SpectralType`, `PlanetType`, `MoonType` et `AtmosphereType` sont des littéraux de chaînes décrits dans `src/shared/types.ts`. Les champs numériques sont directement sérialisables pour les sauvegardes.
+Les planètes/lunes incluent aussi des paramètres orbitaux et saisonniers (`orbitInclinationDeg`, `orbitAscendingNodeDeg`, `axialTiltDeg`, `orbitEccentricity`, `seasonalDeltaK`) décrits dans `docs/specs/stellar-astro-generation.md`.
 
 ## Flottes et vaisseaux
 

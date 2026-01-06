@@ -17,10 +17,14 @@ const formatRadius = (radius: number | undefined, fallback: string) =>
   typeof radius === 'number' && Number.isFinite(radius) ? `${radius.toFixed(2)} R⊕` : fallback;
 const formatEccentricity = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(3) : fallback;
+const formatDegrees = (value: number | undefined, fallback: string) =>
+  typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}°` : fallback;
 const formatPressure = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)} bar` : fallback;
 const formatAlbedo = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : fallback;
+const formatDeltaK = (value: number | undefined, fallback: string) =>
+  typeof value === 'number' && Number.isFinite(value) ? `+/-${Math.round(value)} K` : fallback;
 const formatOrbitRp = (value: number | undefined, fallback: string) =>
   typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)} Rp` : fallback;
 const formatLuminosity = (value: number | undefined, fallback: string) =>
@@ -132,8 +136,20 @@ const MoonEntry: React.FC<{
         <div className="font-semibold text-slate-100">{formatOrbitRp(moon.orbitDistanceRp, unknown)}</div>
       </div>
       <div>
+        <div className="text-slate-400">{t('moon.label.eccentricity')}</div>
+        <div className="font-semibold text-slate-100">{formatEccentricity(moon.orbitEccentricity, unknown)}</div>
+      </div>
+      <div>
+        <div className="text-slate-400">{t('moon.label.inclination')}</div>
+        <div className="font-semibold text-slate-100">{formatDegrees(moon.orbitInclinationDeg, unknown)}</div>
+      </div>
+      <div>
         <div className="text-slate-400">{t('planet.label.atmosphere')}</div>
         <div className="font-semibold text-slate-100">{moon.atmosphere || unknown}</div>
+      </div>
+      <div>
+        <div className="text-slate-400">{t('moon.label.seasonalDelta')}</div>
+        <div className="font-semibold text-slate-100">{formatDeltaK(moon.seasonalDeltaK, unknown)}</div>
       </div>
     </div>
   </li>
@@ -184,12 +200,24 @@ const PlanetEntry: React.FC<{
           <div className="font-semibold">{formatEccentricity(planet.eccentricity, unknown)}</div>
         </div>
         <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('planet.label.inclination')}</div>
+          <div className="font-semibold">{formatDegrees(planet.orbitInclinationDeg, unknown)}</div>
+        </div>
+        <div>
           <div className="text-slate-400 text-xs uppercase tracking-wide">{t('planet.label.semiMajorAxis')}</div>
           <div className="font-semibold">{formatAu(planet.semiMajorAxisAu, unknown)}</div>
         </div>
         <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('planet.label.axialTilt')}</div>
+          <div className="font-semibold">{formatDegrees(planet.axialTiltDeg, unknown)}</div>
+        </div>
+        <div>
           <div className="text-slate-400 text-xs uppercase tracking-wide">{t('planet.label.albedo')}</div>
           <div className="font-semibold">{formatAlbedo(planet.albedo, unknown)}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 text-xs uppercase tracking-wide">{t('planet.label.seasonalDelta')}</div>
+          <div className="font-semibold">{formatDeltaK(planet.seasonalDeltaK, unknown)}</div>
         </div>
         {planet.climateTag && (
           <div>
