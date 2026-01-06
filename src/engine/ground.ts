@@ -85,6 +85,10 @@ export const MOVE_COST: Record<TerrainType, number> = {
 export const biomeToTerrainType = (biome: Biome): TerrainType => {
   switch (biome) {
     case 'desert':
+    case 'ash_desert':
+    case 'vitrified':
+    case 'oxidized':
+    case 'fossil_basin':
       return 'Desert';
     case 'coast':
       return 'Coastal';
@@ -94,13 +98,20 @@ export const biomeToTerrainType = (biome: Biome): TerrainType => {
       return 'Forest';
     case 'mountain':
     case 'volcanic':
+    case 'lava_flats':
       return 'Mountains';
     case 'rocky':
     case 'cratered':
+    case 'fractured_ice':
+    case 'cryovolcanic':
+    case 'thermal_polygons':
+    case 'chemical_erosion':
       return 'Hills';
     case 'grassland':
     case 'tundra':
     case 'ice':
+    case 'dusty_ice':
+    case 'compressed_plateau':
       return 'Open';
     case 'lake':
       return 'Coastal';

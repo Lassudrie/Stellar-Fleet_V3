@@ -85,17 +85,97 @@ const INTERACTION_COOLDOWN_MS = 140;
 const MAX_DPR_MOBILE = 1.25;
 const MAX_DPR_DESKTOP = 1.75;
 
+const OTAN_SYMBOL_COLOR = '#0f172a';
+
+const hexToRgba = (hex: string, alpha: number): string => {
+  const raw = hex.trim();
+  if (!raw.startsWith('#')) return `rgba(15, 23, 42, ${alpha})`;
+  const value = raw.slice(1);
+  if (value.length === 3) {
+    const r = parseInt(value[0] + value[0], 16);
+    const g = parseInt(value[1] + value[1], 16);
+    const b = parseInt(value[2] + value[2], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (value.length === 6) {
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return `rgba(15, 23, 42, ${alpha})`;
+};
+
+const drawOtanInfantry = (
+  ctx: CanvasRenderingContext2D,
+  center: { x: number; y: number },
+  hexSize: number,
+  frameColor: string,
+  showSymbol: boolean,
+  showEchelon: boolean
+) => {
+  const frameW = clamp(hexSize * 1.25, 10, 22);
+  const frameH = frameW * 0.68;
+  const left = center.x - frameW / 2;
+  const top = center.y - frameH / 2;
+  const right = center.x + frameW / 2;
+  const bottom = center.y + frameH / 2;
+  const lineWidth = clamp(frameW * 0.08, 1, 2.5);
+
+  ctx.fillStyle = hexToRgba(frameColor, 0.16);
+  ctx.strokeStyle = frameColor;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  ctx.rect(left, top, frameW, frameH);
+  ctx.fill();
+  ctx.stroke();
+
+  if (showSymbol) {
+    const inset = frameW * 0.18;
+    ctx.strokeStyle = OTAN_SYMBOL_COLOR;
+    ctx.lineWidth = clamp(frameW * 0.07, 1, 2.2);
+    ctx.beginPath();
+    ctx.moveTo(left + inset, top + inset);
+    ctx.lineTo(right - inset, bottom - inset);
+    ctx.moveTo(left + inset, bottom - inset);
+    ctx.lineTo(right - inset, top + inset);
+    ctx.stroke();
+  }
+
+  if (showEchelon) {
+    const barGap = Math.max(2, frameH * 0.12);
+    const barHeight = Math.max(4, frameH * 0.45);
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = clamp(frameW * 0.08, 1, 2.2);
+    ctx.beginPath();
+    ctx.moveTo(center.x, top - barGap);
+    ctx.lineTo(center.x, top - barGap - barHeight);
+    ctx.stroke();
+  }
+};
+
 const biomeColors: Record<Biome, string> = {
   ocean: '#0a75c2',        // deep ocean blue
   coast: '#2bb9a8',        // bright teal shallows
   lake: '#4f9dfd',         // clear lake blue
   ice: '#f2f7fb',          // icy white-blue
+  fractured_ice: '#d7e6f6', // fractured ice
+  dusty_ice: '#c9d2c8',     // dusty ice
+  cryovolcanic: '#9aaec7',  // cryovolcanic plains
   tundra: '#ced4a4',       // pale sage tundra
   taiga: '#1b6b4b',        // pine green
   grassland: '#8ccb4a',    // fresh prairie green
   forest: '#1e7c2f',       // dense forest green
   rainforest: '#22a95f',   // lush rainforest jade
   desert: '#e3b04c',       // warm sand
+  ash_desert: '#a88463',    // mineral ash
+  thermal_polygons: '#b6a46d', // thermal polygon terrain
+  lava_flats: '#b3402c',    // cooled lava
+  vitrified: '#6b7c8a',     // glassy plains
+  oxidized: '#b35a3a',      // oxidized metal
+  compressed_plateau: '#7c7f75', // compressed plateau
+  chemical_erosion: '#7aa081', // chemical alteration
+  fossil_basin: '#c1a07a',  // fossil basin
   rocky: '#9b8974',        // stone brown
   mountain: '#565f6b',     // slate mountain
   volcanic: '#e05b3c',     // lava orange
@@ -999,20 +1079,18 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       ctx.stroke();
     });
 
+    const iconWidth = clamp(hexSize * 1.25, 10, 22);
+    const showSymbol = iconWidth >= 12;
+    const showEchelon = iconWidth >= 15;
+
     normalizedArmies.forEach(marker => {
       const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
       const center = {
         x: x * camera.zoom + camera.offset.x,
         y: y * camera.zoom + camera.offset.y
       };
-      const radius = Math.max(3.5, hexSize * 0.22);
-      ctx.beginPath();
-      ctx.fillStyle = marker.faction?.color ?? '#93c5fd';
-      ctx.strokeStyle = marker.army.factionId === playerFactionId ? '#bfdbfe' : '#0f172a';
-      ctx.lineWidth = 1.2;
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      const frameColor = marker.faction?.color ?? '#93c5fd';
+      drawOtanInfantry(ctx, center, hexSize, frameColor, showSymbol, showEchelon);
     });
 
     const drawHighlight = (coord: HexCoord, color: string) => {

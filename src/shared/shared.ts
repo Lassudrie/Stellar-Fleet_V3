@@ -169,12 +169,23 @@ export type Biome =
   | 'coast'
   | 'lake'
   | 'ice'
+  | 'fractured_ice'
+  | 'dusty_ice'
+  | 'cryovolcanic'
   | 'tundra'
   | 'taiga'
   | 'grassland'
   | 'forest'
   | 'rainforest'
   | 'desert'
+  | 'ash_desert'
+  | 'thermal_polygons'
+  | 'lava_flats'
+  | 'vitrified'
+  | 'oxidized'
+  | 'compressed_plateau'
+  | 'chemical_erosion'
+  | 'fossil_basin'
   | 'rocky'
   | 'mountain'
   | 'volcanic'
@@ -564,7 +575,7 @@ export interface GameState {
 // Worldgen audit log (debug only, JSON serializable)
 // ============================================================
 
-export type WorldgenAuditMode = 'summary' | 'climate';
+export type WorldgenAuditMode = 'summary' | 'climate' | 'surface';
 
 export interface WorldgenAuditEvent {
   seq: number;

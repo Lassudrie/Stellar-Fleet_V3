@@ -66,10 +66,13 @@ Choix pragmatique (4X) : projection 2D cylindrique.
 ```ts
 export type Biome =
   | 'ocean' | 'coast' | 'lake'
-  | 'ice' | 'tundra' | 'taiga'
+  | 'ice' | 'fractured_ice' | 'dusty_ice' | 'cryovolcanic'
+  | 'tundra' | 'taiga'
   | 'grassland' | 'forest' | 'rainforest'
-  | 'desert' | 'rocky' | 'mountain'
-  | 'volcanic' | 'cratered';
+  | 'desert' | 'ash_desert' | 'thermal_polygons'
+  | 'lava_flats' | 'vitrified' | 'oxidized'
+  | 'compressed_plateau' | 'chemical_erosion' | 'fossil_basin'
+  | 'rocky' | 'mountain' | 'volcanic' | 'cratered';
 
 export interface HexCoord { q: number; r: number; }
 
@@ -180,6 +183,11 @@ Le pipeline standard produit trois champs continus puis discrétise :
 - Température locale (tempC2) → gradient latitude/altitude + contraintes atmosphère/albédo
 - Humidité (moist) → distance à l’eau + facteur atmosphère/pression + option “rain shadow”
 
+Validation hydrologie/climat (avant biomes et rivières) :
+- Pas d’hydrosphère liquide si atmosphère absente ou pression < seuil (≈ 0.08 bar) → aucune eau de surface, pas de rivières.
+- Si la température moyenne est sous le point de congélation effectif (fonction de la pression), l’eau de surface est figée → biomes d’eau gelés, rivières désactivées.
+- Le relief est modulé par la gravité (amplitude), l’activité tectonique (structures majeures) et l’érosion (atmosphère/hydrosphère/glaces).
+
 Puis : classification biomes + rivières + features (villes).
 
 #### Classification de surface (climat)
@@ -188,6 +196,20 @@ Puis : classification biomes + rivières + features (villes).
 - `hot` si `climateK > 335`
 - `dense` si `airMassIndex >= 0.6` (CO2 + `greenhouseK >= 45` ⇒ `co2_greenhouse`)
 - sinon `temperate`
+
+#### Biomes (règles de distribution)
+- `airless` ou hydrologie `none` : biomes inertes (rocky/cratered/mountain/volcanic), aucune hydrologie.
+- `icy` ou hydrologie `frozen` : glace dominante + toundra/taïga, déserts froids rocheux, pas de rivières.
+- `hot` : déserts/rocky/volcanic majoritaires, forêts rares et seulement en zones très humides.
+- `dense` : humidité renforcée, biomes plus humides (forest/rainforest) sauf atmosphères hostiles (H2He/CO2) qui favorisent des biomes minéraux.
+- `temperate` : diversité classique (océans/littoraux/forêts/plaines/déserts/montagnes) gouvernée par latitude, altitude, humidité.
+- Biomes extrêmes non-biologiques (conditions sévères) :
+  - Froid extrême : `fractured_ice`, `dusty_ice`, `cryovolcanic`.
+  - Amplitudes thermiques : `thermal_polygons`.
+  - Aridité volcanique : `ash_desert`, `lava_flats`.
+  - Surfaces vitrifiées/oxydées : `vitrified`, `oxidized`.
+  - Forte gravité / atmosphère corrosive : `compressed_plateau`, `chemical_erosion`.
+  - Bassins fossiles hyperarides : `fossil_basin`.
 
 ## 6. Stockage, sauvegarde, caches
 

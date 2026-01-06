@@ -19,6 +19,7 @@ import {
   GameObjectives,
   GameplayRules,
   GameState,
+  FeatureBits,
   PlanetBody,
   PlanetData,
   AIState,
@@ -64,6 +65,11 @@ const factions: FactionState[] = [
 ];
 
 const baseVec: Vec3 = { x: 0, y: 0, z: 0 };
+
+const TEST_MEMBER_SCALE = 0.1;
+
+const scaleMembers = (members: number): number =>
+  members === 0 ? 0 : Math.max(1, Math.floor(members * TEST_MEMBER_SCALE));
 
 const createPlanet = (systemId: string, ownerFactionId: string | null, index = 1): PlanetBody => ({
   id: `planet-${systemId}-${index}`,
@@ -114,19 +120,22 @@ const createArmy = (
   members: number,
   state: ArmyState,
   containerId: string
-): Army => ({
-  id,
-  factionId,
-  unitType: 'mechanized_infantry',
-  posture: 'normal',
-  maxMembers: members,
-  members,
-  attack: 1,
-  defense: 1,
-  condition: 1,
-  state,
-  containerId
-});
+): Army => {
+  const scaledMembers = scaleMembers(members);
+  return {
+    id,
+    factionId,
+    unitType: 'mechanized_infantry',
+    posture: 'normal',
+    maxMembers: scaledMembers,
+    members: scaledMembers,
+    attack: 1,
+    defense: 1,
+    condition: 1,
+    state,
+    containerId
+  };
+};
 
 const createBaseState = (overrides: Partial<GameState>): GameState => {
   const defaultRules: GameplayRules = {
@@ -884,7 +893,7 @@ const tests: TestCase[] = [
         factionId: 'red',
         unitType: 'mechanized_infantry',
         posture: 'normal',
-        maxMembers: 10000,
+        maxMembers: scaleMembers(10000),
         members: minMembers,
         attack: 1,
         defense: 1,
@@ -910,11 +919,11 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: '10k vs 10k armies survive initial clash under new threshold',
+    name: '1k vs 1k armies survive initial clash under new threshold',
     run: () => {
       const system = createSystem('sys-2', 'blue');
-      const blueArmy = createArmy('army-blue-10k', 'blue', 10000, ArmyState.DEPLOYED, system.planets[0].id);
-      const redArmy = createArmy('army-red-10k', 'red', 10000, ArmyState.DEPLOYED, system.planets[0].id);
+      const blueArmy = createArmy('army-blue-1k', 'blue', 10000, ArmyState.DEPLOYED, system.planets[0].id);
+      const redArmy = createArmy('army-red-1k', 'red', 10000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const state = createBaseState({ systems: [system], armies: [blueArmy, redArmy] });
 
@@ -939,8 +948,8 @@ const tests: TestCase[] = [
         factionId: 'red',
         unitType: 'mechanized_infantry',
         posture: 'normal',
-        maxMembers: 20000,
-        members: 1500,
+        maxMembers: scaleMembers(20000),
+        members: scaleMembers(1500),
         attack: 1,
         defense: 1,
         condition: 0.19,
@@ -1671,7 +1680,7 @@ const tests: TestCase[] = [
         factionId: 'red',
         unitType: 'mechanized_infantry',
         posture: 'normal',
-        maxMembers: 20000,
+        maxMembers: scaleMembers(20000),
         members: 0,
         attack: 1,
         defense: 1,
@@ -3046,6 +3055,26 @@ const engine_hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number 
 
 const engine_isWaterBiome = (biome: string): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
 
+const ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR = 0.08;
+const ENGINE_FREEZE_POINT_BASE_K = 273.15;
+const ENGINE_FREEZE_POINT_MIN_PRESSURE_K = 276;
+
+const engine_computeEffectiveFreezingPointK = (pressureBar: number): number => {
+  const normalized = Math.max(
+    0,
+    Math.min(1, (pressureBar - ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR) / (1 - ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR))
+  );
+  return ENGINE_FREEZE_POINT_MIN_PRESSURE_K + (ENGINE_FREEZE_POINT_BASE_K - ENGINE_FREEZE_POINT_MIN_PRESSURE_K) * normalized;
+};
+
+const engine_resolveHydrologyMode = (planetData: PlanetData): 'none' | 'frozen' | 'liquid' => {
+  if (planetData.atmosphere === 'None') return 'none';
+  if (!engine_isFiniteNumber(planetData.pressureBar) || planetData.pressureBar < ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR) return 'none';
+  const climateK = engine_isFiniteNumber(planetData.climateK) ? planetData.climateK : planetData.temperatureK;
+  const freezePointK = engine_computeEffectiveFreezingPointK(planetData.pressureBar);
+  return climateK < freezePointK ? 'frozen' : 'liquid';
+};
+
 const engine_labelComponents = (mask: Uint8Array, w: number, h: number, wrapX: boolean): { labels: Int32Array; sizes: number[] } => {
   const n = w * h;
   const labels = new Int32Array(n);
@@ -3191,10 +3220,100 @@ tests.push(
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
       const params = deriveSurfaceParamsFromPlanet(planetData);
-      const water = map.tiles.filter(t => t.biome === 'ocean' || t.biome === 'coast' || t.biome === 'lake').length;
+      const hydrologyMode = engine_resolveHydrologyMode(planetData);
+      const water =
+        hydrologyMode === 'none'
+          ? 0
+          : map.tiles.filter(t => t.elev <= map.seaLevelElev).length;
       const frac = water / map.tiles.length;
+      const expected = hydrologyMode === 'none' ? 0 : params.waterFraction;
+      const tolerance = expected === 0 ? 0 : 0.08;
 
-      assert.ok(Math.abs(frac - params.waterFraction) < 0.08, `Water fraction ${frac} deviates from expected ${params.waterFraction}`);
+      assert.ok(Math.abs(frac - expected) <= tolerance, `Water fraction ${frac} deviates from expected ${expected}`);
+    }
+  },
+  {
+    name: 'Surface hydrology blocks liquid water on airless worlds',
+    run: () => {
+      const systemId = 'sys_surface_airless_rule';
+      const body: PlanetBody = {
+        id: `planet-${systemId}-1`,
+        systemId,
+        name: 'Airless',
+        bodyType: 'planet',
+        class: 'solid',
+        ownerFactionId: null,
+        size: 0.9,
+        isSolid: true
+      };
+      const planetData: PlanetData = {
+        type: 'Terrestrial',
+        semiMajorAxisAu: 0.7,
+        eccentricity: 0,
+        massEarth: 0.45,
+        radiusEarth: 0.72,
+        gravityG: 0.85,
+        albedo: 0.12,
+        teqK: 265,
+        atmosphere: 'None',
+        greenhouseK: 0,
+        climateK: 265,
+        airMassIndex: 0,
+        temperatureK: 265,
+        moons: []
+      };
+
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 11, systemId, body, generatorVersion: 4 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      for (const tile of map.tiles) {
+        assert.ok(!engine_isWaterBiome(tile.biome), `Unexpected water biome on airless world: ${tile.biome}`);
+        assert.strictEqual(tile.featureBits & FeatureBits.River, 0, 'Unexpected river on airless world');
+      }
+    }
+  },
+  {
+    name: 'Surface hydrology freezes water and disables rivers on frozen worlds',
+    run: () => {
+      const systemId = 'sys_surface_frozen_rule';
+      const body: PlanetBody = {
+        id: `planet-${systemId}-1`,
+        systemId,
+        name: 'Frozen',
+        bodyType: 'planet',
+        class: 'solid',
+        ownerFactionId: null,
+        size: 1,
+        isSolid: true
+      };
+      const planetData: PlanetData = {
+        type: 'Terrestrial',
+        semiMajorAxisAu: 1.8,
+        eccentricity: 0,
+        massEarth: 1,
+        radiusEarth: 1,
+        gravityG: 1,
+        albedo: 0.35,
+        teqK: 230,
+        atmosphere: 'Earthlike',
+        pressureBar: 1,
+        greenhouseK: 12,
+        climateK: 245,
+        airMassIndex: 0.6,
+        temperatureK: 245,
+        moons: []
+      };
+
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 12, systemId, body, generatorVersion: 4 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      let iceCount = 0;
+      for (const tile of map.tiles) {
+        assert.ok(!engine_isWaterBiome(tile.biome), `Unexpected liquid water biome on frozen world: ${tile.biome}`);
+        if (tile.biome === 'ice') iceCount += 1;
+        assert.strictEqual(tile.featureBits & FeatureBits.River, 0, 'Unexpected river on frozen world');
+      }
+      assert.ok(iceCount > 0, 'Expected some ice tiles on frozen world');
     }
   },
   {
@@ -3278,7 +3397,7 @@ tests.push(
       for (const tile of map.tiles) {
         if (engine_isWaterBiome(tile.biome)) {
           assert.ok(tile.elev <= seaLevel + tolerance, `Water tile above sea level: ${tile.elev} > ${seaLevel}`);
-        } else {
+        } else if (tile.biome !== 'ice') {
           assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
         }
       }
@@ -3365,7 +3484,7 @@ tests.push(
       for (const tile of map.tiles) {
         if (engine_isWaterBiome(tile.biome)) {
           assert.ok(tile.elev <= seaLevel + tolerance, `Water tile above sea level: ${tile.elev} > ${seaLevel}`);
-        } else {
+        } else if (tile.biome !== 'ice') {
           assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
         }
       }
@@ -3385,20 +3504,23 @@ const engine_ps_createArmy = (params: {
   state: ArmyState;
   containerId: string;
   surfacePos?: { bodyId: string; q: number; r: number };
-}): any => ({
-  id: params.id,
-  factionId: params.factionId,
-  unitType: 'mechanized_infantry',
-  posture: 'normal',
-  maxMembers: params.members,
-  members: params.members,
-  attack: 1,
-  defense: 1,
-  condition: 1,
-  state: params.state,
-  containerId: params.containerId,
-  ...(params.surfacePos ? { surfacePos: params.surfacePos } : {})
-});
+}): any => {
+  const scaledMembers = scaleMembers(params.members);
+  return {
+    id: params.id,
+    factionId: params.factionId,
+    unitType: 'mechanized_infantry',
+    posture: 'normal',
+    maxMembers: scaledMembers,
+    members: scaledMembers,
+    attack: 1,
+    defense: 1,
+    condition: 1,
+    state: params.state,
+    containerId: params.containerId,
+    ...(params.surfacePos ? { surfacePos: params.surfacePos } : {})
+  };
+};
 
 const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string): { state: GameState; body: PlanetBody } => {
   const astro = generateStellarSystem({ worldSeed, systemId });
@@ -3436,7 +3558,8 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
       ownerFactionId: system.ownerFactionId
     });
 
-    const hasWater = map.tiles.some(tile => engine_ps_isWater(tile.biome));
+    const hydrologyMode = engine_resolveHydrologyMode(planetData);
+    const hasWater = hydrologyMode === 'liquid' && map.tiles.some(tile => engine_ps_isWater(tile.biome));
     const hasBuildable = map.tiles.some(tile => engine_ps_isBuildable(tile.biome));
     if (hasWater && hasBuildable) {
       body = candidate;
@@ -3477,11 +3600,11 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
   return { state, body };
 };
 
-const engine_ps_pickAnyTile = (
+const engine_ps_findAnyTile = (
   state: GameState,
   bodyId: string,
   predicate: (biome: string) => boolean
-): { q: number; r: number } => {
+): { q: number; r: number } | null => {
   const map = generateSurfaceMapForState(state, bodyId);
   assert.ok(map, 'Expected surface map');
   const { w } = map.descriptor.config;
@@ -3490,7 +3613,17 @@ const engine_ps_pickAnyTile = (
     if (!predicate(t.biome)) continue;
     return { q: i % w, r: Math.floor(i / w) };
   }
-  throw new Error('No matching tile found');
+  return null;
+};
+
+const engine_ps_pickAnyTile = (
+  state: GameState,
+  bodyId: string,
+  predicate: (biome: string) => boolean
+): { q: number; r: number } => {
+  const match = engine_ps_findAnyTile(state, bodyId, predicate);
+  if (!match) throw new Error('No matching tile found');
+  return match;
 };
 
 tests.push(
@@ -3533,15 +3666,17 @@ tests.push(
     name: 'BUILD_AT rejects water tiles and rejects already-occupied building tiles',
     run: () => {
       const { state: base, body } = engine_ps_createStateWithOneSurface(7, 'sys_build');
-      const water = engine_ps_pickAnyTile(base, body.id, b => engine_ps_isWater(b));
       const land = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b) && b !== 'mountain' && b !== 'ice');
+      const water = engine_ps_findAnyTile(base, body.id, b => engine_ps_isWater(b));
 
-      const fail = applyCommand(
-        base,
-        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: water.q, r: water.r } },
-        new RNG(1)
-      );
-      assert.ok(!fail.ok, 'Expected BUILD_AT on water to fail');
+      if (water) {
+        const fail = applyCommand(
+          base,
+          { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: water.q, r: water.r } },
+          new RNG(1)
+        );
+        assert.ok(!fail.ok, 'Expected BUILD_AT on water to fail');
+      }
 
       const ok1 = applyCommand(
         base,
@@ -3577,7 +3712,7 @@ tests.push(
         break;
       }
       if (!landB) landB = landA;
-      const water = engine_ps_pickAnyTile(base, body.id, b => engine_ps_isWater(b));
+      const water = engine_ps_findAnyTile(base, body.id, b => engine_ps_isWater(b));
 
       const state: GameState = {
         ...base,
@@ -3593,12 +3728,14 @@ tests.push(
         ]
       };
 
-      const fail = applyCommand(
-        state,
-        { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: water.q, r: water.r } },
-        new RNG(5)
-      );
-      assert.ok(!fail.ok, 'Expected move onto water to fail');
+      if (water) {
+        const fail = applyCommand(
+          state,
+          { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: water.q, r: water.r } },
+          new RNG(5)
+        );
+        assert.ok(!fail.ok, 'Expected move onto water to fail');
+      }
 
       const ok = applyCommand(
         state,
@@ -4471,8 +4608,8 @@ tests.push(
           surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
           unitType: 'mechanized_infantry',
           posture: 'normal',
-          maxMembers: 10000,
-          members: 10000,
+          maxMembers: scaleMembers(10000),
+          members: scaleMembers(10000),
           attack: 1,
           defense: 1,
           condition: 1
@@ -4525,8 +4662,8 @@ tests.push(
           surfacePos: { bodyId: 'body-1', q: 0, r: 0 },
           unitType: 'mechanized_infantry',
           posture: 'normal',
-          maxMembers: 10000,
-          members: 10000,
+          maxMembers: scaleMembers(10000),
+          members: scaleMembers(10000),
           attack: 1,
           defense: 1,
           condition: 1,

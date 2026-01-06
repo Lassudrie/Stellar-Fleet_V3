@@ -74,12 +74,12 @@ Règles (première règle gagnante) :
    - un `Settlement` (`PlanetSurfaceMap.settlements`), ou
    - un `GroundBuilding` (`GameState.groundBuildings`).
 2. Mapping `Biome` :
-   - `desert → Desert`
+   - `desert | ash_desert | vitrified | oxidized | fossil_basin → Desert`
    - `coast → Coastal`
    - `forest | rainforest | taiga → Forest`
-   - `mountain | volcanic → Mountains`
-   - `rocky | cratered → Hills`
-   - `grassland | tundra | ice → Open`
+   - `mountain | volcanic | lava_flats → Mountains`
+   - `rocky | cratered | fractured_ice | cryovolcanic | thermal_polygons | chemical_erosion → Hills`
+   - `grassland | tundra | ice | dusty_ice | compressed_plateau → Open`
    - `ocean` est **impassable** (voir mouvement)
    - `lake` : par défaut `Coastal` (peut évoluer vers `Swamp` selon humidité si spécifié).
 

@@ -87,6 +87,18 @@ export const normalizedLatitude = (r: number, h: number): number => {
   return (r / (h - 1)) * 2 - 1;
 };
 
+const LATITUDE_EXPONENT = 1.45;
+
+const computeLatTermOffset = (h: number, latGradientK: number): number => {
+  if (h <= 1 || latGradientK === 0) return 0;
+  let sum = 0;
+  for (let r = 0; r < h; r += 1) {
+    const lat = normalizedLatitude(r, h);
+    sum += -latGradientK * Math.pow(Math.abs(lat), LATITUDE_EXPONENT);
+  }
+  return sum / h;
+};
+
 // ==========================================
 // Noise (was: planetSurface/noise.ts)
 // ==========================================
@@ -513,6 +525,8 @@ export interface SurfaceParams {
   surfaceClassReason: SurfaceClassReason;
   waterFraction: number; // 0..1
   reliefScale: number; // >0
+  tectonicsIndex: number; // 0..1
+  erosionIndex: number; // 0..1
   humidityFactor: number; // 0..1
   latGradientK: number; // >0
   lapseRateK: number; // K per "elev unit" above sea level
@@ -522,6 +536,7 @@ export interface SurfaceParams {
 }
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+const clampRange = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, x));
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -593,6 +608,59 @@ const pickSurfaceClass = (params: {
   return { surfaceClass: 'temperate', surfaceClassReason: 'temperate' };
 };
 
+const MIN_LIQUID_WATER_PRESSURE_BAR = 0.08;
+const FREEZE_POINT_BASE_K = 273.15;
+const FREEZE_POINT_MIN_PRESSURE_K = 276;
+
+const computeEffectiveFreezingPointK = (pressureBar: number): number => {
+  const normalized = clamp01((pressureBar - MIN_LIQUID_WATER_PRESSURE_BAR) / (1 - MIN_LIQUID_WATER_PRESSURE_BAR));
+  return FREEZE_POINT_MIN_PRESSURE_K + (FREEZE_POINT_BASE_K - FREEZE_POINT_MIN_PRESSURE_K) * normalized;
+};
+
+const computeLiquidWaterPotential = (pressureBar: number | undefined, climateK: number): number => {
+  if (!isFiniteNumber(pressureBar) || pressureBar < MIN_LIQUID_WATER_PRESSURE_BAR) return 0;
+  const freezePointK = computeEffectiveFreezingPointK(pressureBar);
+  return clamp01((climateK - freezePointK + 12) / 28);
+};
+
+const computeMassHeatIndex = (massEarth: number): number => {
+  const safeMass = Math.max(0, massEarth);
+  return clamp01(Math.log10(safeMass + 1) / Math.log10(6));
+};
+
+const computeTectonicsIndex = (params: {
+  massEarth: number;
+  waterFraction: number;
+  tidalBonusK?: number;
+  typeBias?: number;
+}): number => {
+  const massScore = computeMassHeatIndex(params.massEarth);
+  const waterScore = clamp01(params.waterFraction);
+  const tidalScore = isFiniteNumber(params.tidalBonusK) ? clamp01(params.tidalBonusK / 220) : 0;
+  const bias = params.typeBias ?? 0;
+  return clamp01(0.12 + 0.58 * massScore + 0.16 * waterScore + 0.35 * tidalScore + bias);
+};
+
+const computeErosionIndex = (params: {
+  airMassIndex: number;
+  waterFraction: number;
+  climateK: number;
+  pressureBar?: number;
+}): number => {
+  const airMass = clamp01(params.airMassIndex);
+  if (airMass < AIRLESS_AIRMASS_INDEX) return clamp01(0.02 + 0.15 * params.waterFraction);
+  const pressure = isFiniteNumber(params.pressureBar) ? params.pressureBar : 0;
+  const freezePointK =
+    pressure >= MIN_LIQUID_WATER_PRESSURE_BAR ? computeEffectiveFreezingPointK(pressure) : FREEZE_POINT_BASE_K;
+  const liquidPotential = computeLiquidWaterPotential(pressure, params.climateK);
+  const icePotential = clamp01((freezePointK - params.climateK + 8) / 28);
+  const windErosion = airMass * (params.climateK > 305 ? 1 : 0.7);
+  const waterErosion = clamp01(params.waterFraction) * (0.2 + 0.8 * liquidPotential);
+  const iceErosion = clamp01(params.waterFraction) * icePotential * 0.4;
+  const base = 0.04;
+  return clamp01(base + 0.5 * windErosion + 0.45 * waterErosion + 0.25 * iceErosion);
+};
+
 const computeWaterFraction = (params: {
   pressureBar?: number;
   climateK: number;
@@ -641,7 +709,6 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
     atmosphere: planet.atmosphere
   });
 
-  const reliefScale = 1 / Math.sqrt(Math.max(0.15, planet.gravityG));
   const waterFraction = computeWaterFraction({
     pressureBar: planet.pressureBar,
     climateK,
@@ -649,19 +716,49 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
     airMassIndex
   });
 
-  const craterIntensity = surfaceClass === 'airless' ? 0.9 : 0.15 + 0.2 * (1 - density);
-  const volcanismIndex = 0.1 + 0.15 * (1 - reliefScale); // weak baseline; moons may override
-  const humidityFactor = clamp01(0.15 + 0.85 * density) * clamp01(0.25 + 0.75 * waterFraction);
-  const latGradientK = 20 + 60 * (1 - density); // dense atmos => smaller gradient
-  const lapseRateK = density > 0.2 ? 10 * density : 0; // per elev-unit above sea (scaled later)
+  const typeBias = planet.type === 'Terrestrial'
+    ? 0.05
+    : planet.type === 'Dwarf'
+      ? -0.18
+      : planet.type === 'SubNeptune'
+        ? -0.08
+        : -0.2;
+  const tectonicsIndex = computeTectonicsIndex({
+    massEarth: planet.massEarth,
+    waterFraction,
+    typeBias
+  });
+  const erosionIndex = computeErosionIndex({
+    airMassIndex,
+    waterFraction,
+    climateK,
+    pressureBar: planet.pressureBar
+  });
+  const reliefBase = 1 / Math.sqrt(Math.max(0.15, planet.gravityG));
+  const reliefScale = clampRange(reliefBase * (0.75 + 0.6 * tectonicsIndex) * (1 - 0.35 * erosionIndex), 0.4, 2.4);
+  const craterBase = surfaceClass === 'airless' ? 0.9 : 0.18 + 0.25 * (1 - density);
+  const craterIntensity = clamp01(craterBase * (1 - 0.55 * erosionIndex));
+  const heatBoost = clamp01((climateK - 300) / 120);
+  const volcanismIndex = clamp01(0.08 + 0.55 * tectonicsIndex + 0.2 * heatBoost);
+  const liquidPotential = computeLiquidWaterPotential(planet.pressureBar, climateK);
+  const humidityFactor =
+    clamp01(0.12 + 0.88 * density) *
+    clamp01(0.2 + 0.8 * waterFraction) *
+    (0.2 + 0.8 * liquidPotential);
+  const heatTransport = clamp01(0.35 + 0.65 * density) * (0.6 + 0.4 * liquidPotential);
+  const latGradientK = 22 + 58 * (1 - heatTransport);
+  const lapseRateK = density > 0.2 ? (7 + 3 * (1 - humidityFactor)) * density : 0;
 
-  const riversEnabled = surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25;
+  const riversEnabled =
+    surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25 && liquidPotential > 0.4;
 
   return {
     surfaceClass,
     surfaceClassReason,
     waterFraction,
     reliefScale,
+    tectonicsIndex,
+    erosionIndex,
     humidityFactor,
     latGradientK,
     lapseRateK,
@@ -690,7 +787,6 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     atmosphere: moon.atmosphere as AtmosphereType
   });
 
-  const reliefScale = 1 / Math.sqrt(Math.max(0.15, moon.gravityG));
   const waterFraction = computeWaterFraction({
     pressureBar: moon.pressureBar,
     climateK,
@@ -698,19 +794,52 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     airMassIndex
   });
 
-  const craterIntensity = surfaceClass === 'airless' ? 0.95 : 0.25 + 0.2 * (1 - density);
   const tidal = typeof moon.tidalBonusK === 'number' && Number.isFinite(moon.tidalBonusK) ? moon.tidalBonusK : 0;
-  const volcanismIndex = clamp01(0.12 + Math.min(0.85, tidal / 250));
-  const humidityFactor = clamp01(0.12 + 0.88 * density) * clamp01(0.25 + 0.75 * waterFraction);
-  const latGradientK = 20 + 60 * (1 - density);
-  const lapseRateK = density > 0.2 ? 10 * density : 0;
-  const riversEnabled = surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25 && climateK > 250;
+  const typeBias = moon.type === 'Volcanic'
+    ? 0.2
+    : moon.type === 'Eden'
+      ? 0.08
+      : moon.type === 'Icy'
+        ? -0.08
+        : moon.type === 'Irregular'
+          ? -0.18
+          : 0;
+  const tectonicsIndex = computeTectonicsIndex({
+    massEarth: moon.massEarth,
+    waterFraction,
+    tidalBonusK: tidal,
+    typeBias
+  });
+  const erosionIndex = computeErosionIndex({
+    airMassIndex,
+    waterFraction,
+    climateK,
+    pressureBar: moon.pressureBar
+  });
+  const reliefBase = 1 / Math.sqrt(Math.max(0.15, moon.gravityG));
+  const reliefScale = clampRange(reliefBase * (0.72 + 0.58 * tectonicsIndex) * (1 - 0.35 * erosionIndex), 0.45, 2.6);
+  const craterBase = surfaceClass === 'airless' ? 0.95 : 0.25 + 0.22 * (1 - density);
+  const craterIntensity = clamp01(craterBase * (1 - 0.55 * erosionIndex));
+  const tidalBoost = clamp01(tidal / 250);
+  const volcanismIndex = clamp01(0.06 + 0.4 * tectonicsIndex + 0.5 * tidalBoost);
+  const liquidPotential = computeLiquidWaterPotential(moon.pressureBar, climateK);
+  const humidityFactor =
+    clamp01(0.1 + 0.9 * density) *
+    clamp01(0.2 + 0.8 * waterFraction) *
+    (0.2 + 0.8 * liquidPotential);
+  const heatTransport = clamp01(0.3 + 0.7 * density) * (0.55 + 0.45 * liquidPotential);
+  const latGradientK = 22 + 58 * (1 - heatTransport);
+  const lapseRateK = density > 0.2 ? (7 + 3 * (1 - humidityFactor)) * density : 0;
+  const riversEnabled =
+    surfaceClass !== 'airless' && waterFraction > 0.08 && density >= 0.25 && liquidPotential > 0.4;
 
   return {
     surfaceClass,
     surfaceClassReason,
     waterFraction,
     reliefScale,
+    tectonicsIndex,
+    erosionIndex,
     humidityFactor,
     latGradientK,
     lapseRateK,
@@ -718,6 +847,164 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     volcanismIndex,
     riversEnabled
   };
+};
+
+const FALLBACK_SURFACE_PARAMS: SurfaceParams = {
+  surfaceClass: 'airless',
+  surfaceClassReason: 'no_atmosphere',
+  waterFraction: 0.02,
+  reliefScale: 1,
+  tectonicsIndex: 0.1,
+  erosionIndex: 0.02,
+  humidityFactor: 0.05,
+  latGradientK: 65,
+  lapseRateK: 0,
+  craterIntensity: 0.9,
+  volcanismIndex: 0.1,
+  riversEnabled: false
+};
+
+type HydrologyMode = 'none' | 'frozen' | 'liquid';
+
+const resolveHydrologyMode = (params: {
+  atmosphere?: AtmosphereType;
+  pressureBar?: number;
+  baseT0K: number;
+}): HydrologyMode => {
+  if (!params.atmosphere || params.atmosphere === 'None') return 'none';
+  if (!isFiniteNumber(params.pressureBar) || params.pressureBar < MIN_LIQUID_WATER_PRESSURE_BAR) return 'none';
+  const freezePointK = computeEffectiveFreezingPointK(params.pressureBar);
+  return params.baseT0K < freezePointK ? 'frozen' : 'liquid';
+};
+
+const freezeWaterBiomes = (tiles: PlanetSurfaceTile[]): void => {
+  tiles.forEach(tile => {
+    if (isWaterBiome(tile.biome)) tile.biome = 'ice';
+  });
+};
+
+const resolveSurfaceInputs = (params: {
+  descriptor: PlanetSurfaceDescriptor;
+  planetData?: PlanetData;
+  moonData?: MoonData;
+}): { env: SurfaceParams; baseT0K: number; albedo?: number; atmosphere?: AtmosphereType; pressureBar?: number } => {
+  const isMoon = params.descriptor.astroRef.moonIndex !== undefined;
+  const preferredMoon = isMoon ? params.moonData : undefined;
+  const preferredPlanet = !isMoon ? params.planetData : undefined;
+  const fallbackMoon = preferredMoon ?? params.moonData;
+  const fallbackPlanet = preferredPlanet ?? params.planetData;
+  const climateSource = preferredMoon ?? preferredPlanet ?? fallbackMoon ?? fallbackPlanet;
+
+  const env: SurfaceParams = preferredMoon
+    ? deriveSurfaceParamsFromMoon(preferredMoon)
+    : preferredPlanet
+    ? deriveSurfaceParamsFromPlanet(preferredPlanet)
+    : fallbackMoon
+    ? deriveSurfaceParamsFromMoon(fallbackMoon)
+    : fallbackPlanet
+    ? deriveSurfaceParamsFromPlanet(fallbackPlanet)
+    : FALLBACK_SURFACE_PARAMS;
+  const baseT0K = climateSource?.climateK ?? climateSource?.temperatureK ?? 220;
+  const albedo = climateSource?.albedo;
+  const atmosphere = climateSource?.atmosphere as AtmosphereType | undefined;
+  const pressureBar = climateSource?.pressureBar;
+
+  return { env, baseT0K, albedo, atmosphere, pressureBar };
+};
+
+const classifyLandBiome = (params: {
+  env: SurfaceParams;
+  hydrologyMode: HydrologyMode;
+  elevRel: number;
+  tempC: number;
+  moist: number;
+  atmosphere?: AtmosphereType;
+}): Biome => {
+  const { env, hydrologyMode, elevRel, tempC, atmosphere } = params;
+  const m = clampRange(params.moist, 0, 255);
+  const vacuum = env.surfaceClass === 'airless';
+  const noLiquidWater = hydrologyMode === 'none';
+  const frozen = env.surfaceClass === 'icy' || hydrologyMode === 'frozen';
+  const hot = env.surfaceClass === 'hot';
+  const dense = env.surfaceClass === 'dense';
+  const harshDense = env.surfaceClassReason === 'h2he_envelope' || env.surfaceClassReason === 'co2_greenhouse';
+  const mountainThreshold = env.surfaceClass === 'airless' ? 0.9 : 0.85;
+  const isMountain = elevRel > mountainThreshold;
+  const lowland = elevRel < 0.2;
+  const veryDry = m < 50;
+  const dry = m < 90;
+  const humid = m > 160;
+  const veryHumid = m > 210;
+  const highVolcanism = env.volcanismIndex > 0.62;
+  const mildVolcanism = env.volcanismIndex > 0.48;
+  const highGravity = env.reliefScale < 0.75;
+  const oxidizingAtmosphere = atmosphere === 'CO2' || atmosphere === 'Thin' || atmosphere === 'Earthlike';
+  const chemicallyActive = harshDense && env.erosionIndex > 0.55 && tempC > -5;
+
+  if (vacuum) {
+    if (isMountain) return 'mountain';
+    if (tempC < -45) return veryDry ? 'dusty_ice' : 'fractured_ice';
+    if (highVolcanism && tempC < -10 && elevRel < 0.45) return 'cryovolcanic';
+    if (highGravity && lowland) return 'compressed_plateau';
+    if (highVolcanism && tempC > 40) return 'lava_flats';
+    if (tempC > 32 && veryDry) return 'vitrified';
+    if (tempC > -5 && tempC < 35 && env.erosionIndex < 0.2) return 'thermal_polygons';
+    if (lowland && env.craterIntensity > 0.6) return 'cratered';
+    return 'rocky';
+  }
+
+  if (noLiquidWater) {
+    if (isMountain) return 'mountain';
+    if (tempC < -40) return veryDry ? 'dusty_ice' : 'fractured_ice';
+    if (highVolcanism && tempC < -8 && elevRel < 0.5) return 'cryovolcanic';
+    if (highGravity && lowland) return 'compressed_plateau';
+    if (highVolcanism && tempC > 38) return 'lava_flats';
+    if (tempC > 30 && veryDry) return 'vitrified';
+    if (tempC > 24 && veryDry) return 'ash_desert';
+    if (dry && lowland) return 'fossil_basin';
+    if (tempC > -4 && tempC < 30 && env.erosionIndex < 0.18) return 'thermal_polygons';
+    if (lowland && env.craterIntensity > 0.5) return 'cratered';
+    return 'rocky';
+  }
+
+  if (frozen) {
+    if (isMountain && tempC > -30) return 'mountain';
+    if (highVolcanism && tempC < -10 && elevRel < 0.45) return 'cryovolcanic';
+    if (tempC < -45) return veryDry ? 'dusty_ice' : 'fractured_ice';
+    if (tempC < -30) return 'ice';
+    if (tempC < -10) return m > 140 ? 'taiga' : 'tundra';
+    if (veryDry && lowland) return 'fossil_basin';
+    if (m < 80) return 'rocky';
+    return 'tundra';
+  }
+
+  if (hot) {
+    if (isMountain) return 'mountain';
+    if (highVolcanism && tempC > 40) return 'lava_flats';
+    if (mildVolcanism && veryDry) return 'ash_desert';
+    if (tempC > 42 && veryDry) return 'vitrified';
+    if (tempC > 30 && dry && oxidizingAtmosphere) return 'oxidized';
+    if (tempC > 34 && m < 130) return 'desert';
+    if (m < 95) return 'desert';
+    if (m < 130) return 'rocky';
+    if (veryHumid && tempC < 32) return 'rainforest';
+    if (humid) return 'forest';
+    return 'grassland';
+  }
+
+  const moistAdj = dense ? clampRange(m + (harshDense ? -35 : 20), 0, 255) : m;
+  const tempAdj = harshDense ? tempC + 2 : tempC;
+
+  if (chemicallyActive && lowland) return 'chemical_erosion';
+  if (dense && highGravity && lowland) return 'compressed_plateau';
+  if (tempAdj < -15) return 'ice';
+  if (tempAdj < -6) return moistAdj > 120 ? 'taiga' : 'tundra';
+  if (isMountain) return 'mountain';
+  if (tempAdj > 30 && moistAdj < 90) return oxidizingAtmosphere && dry ? 'oxidized' : 'desert';
+  if (tempAdj > 24 && moistAdj > 200) return 'rainforest';
+  if (moistAdj > 150) return 'forest';
+  if (moistAdj < 90) return 'desert';
+  return 'grassland';
 };
 
 // ==========================================
@@ -1723,23 +2010,20 @@ const generateSurfaceMapV2 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const env: SurfaceParams = params.planetData
-    ? deriveSurfaceParamsFromPlanet(params.planetData)
-    : params.moonData
-      ? deriveSurfaceParamsFromMoon(params.moonData)
-      : // Fallback: treat as airless small body.
-        {
-          surfaceClass: 'airless',
-          surfaceClassReason: 'no_atmosphere',
-          waterFraction: 0.02,
-          reliefScale: 1,
-          humidityFactor: 0.05,
-          latGradientK: 65,
-          lapseRateK: 0,
-          craterIntensity: 0.9,
-          volcanismIndex: 0.1,
+  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const envHydrology: SurfaceParams =
+    hydrologyMode === 'liquid'
+      ? env
+      : {
+          ...env,
+          waterFraction: hydrologyMode === 'none' ? 0 : env.waterFraction,
           riversEnabled: false
         };
+  const allowRivers = hydrologyMode === 'liquid' && envHydrology.riversEnabled;
+  const albedoOffset =
+    typeof albedo === 'number' ? -18 * clamp((albedo - 0.25) / 0.6, 0, 1) : 0;
+  const latTermOffset = computeLatTermOffset(h, env.latGradientK);
 
   // --- Elevation field ---
   const elev = new Float32Array(n);
@@ -1765,35 +2049,28 @@ const generateSurfaceMapV2 = (params: {
     }
   }
 
-  const seaLevelElev = quantile(elev, env.waterFraction);
+  const seaLevelElev = quantile(elev, envHydrology.waterFraction);
 
   // --- Water mask & water types (ocean vs lake) ---
   const waterMask = new Uint8Array(n);
-  for (let i = 0; i < n; i += 1) waterMask[i] = elev[i] <= seaLevelElev ? 1 : 0;
-  const oceanConnected = computeOceanConnectedMask(waterMask, w, h, wrapX);
+  for (let i = 0; i < n; i += 1) {
+    waterMask[i] = hydrologyMode === 'none' ? 0 : elev[i] <= seaLevelElev ? 1 : 0;
+  }
+  const oceanConnected =
+    hydrologyMode === 'none' ? new Uint8Array(n) : computeOceanConnectedMask(waterMask, w, h, wrapX);
 
   // --- Temperature field ---
   const tempC2 = new Int16Array(n);
-  const baseT0K = params.planetData?.climateK
-    ?? params.planetData?.temperatureK
-    ?? params.moonData?.climateK
-    ?? params.moonData?.temperatureK
-    ?? 220;
 
   for (let r = 0; r < h; r += 1) {
     const lat = normalizedLatitude(r, h);
-    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), 1.45);
+    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), LATITUDE_EXPONENT) - latTermOffset;
     for (let q = 0; q < w; q += 1) {
       const i = r * w + q;
       const aboveSea = Math.max(0, elev[i] - seaLevelElev);
       const altTerm = -env.lapseRateK * aboveSea;
-      const albedoTerm = params.planetData
-        ? -18 * clamp((params.planetData.albedo - 0.25) / 0.6, 0, 1)
-        : params.moonData
-          ? -18 * clamp((params.moonData.albedo - 0.25) / 0.6, 0, 1)
-          : 0;
 
-      const localK = baseT0K + latTerm + altTerm + albedoTerm;
+      const localK = baseT0K + latTerm + altTerm + albedoOffset;
       const c = localK - 273.15;
       tempC2[i] = Math.round(c * 2);
     }
@@ -1843,38 +2120,7 @@ const generateSurfaceMapV2 = (params: {
     const elevRel = elev[i] - seaLevelElev;
     const t = tiles[i].tempC2 / 2;
     const m = tiles[i].moist;
-
-    if (env.surfaceClass === 'airless') {
-      tiles[i].biome = elevRel > 0.6 ? 'rocky' : 'cratered';
-      continue;
-    }
-
-    if (t < -18) {
-      tiles[i].biome = 'ice';
-      continue;
-    }
-    if (t < -6) {
-      tiles[i].biome = m > 110 ? 'taiga' : 'tundra';
-      continue;
-    }
-    if (elevRel > 0.85) {
-      tiles[i].biome = 'mountain';
-      continue;
-    }
-
-    if (t > 28 && m < 70) {
-      tiles[i].biome = 'desert';
-      continue;
-    }
-    if (t > 22 && m > 200) {
-      tiles[i].biome = 'rainforest';
-      continue;
-    }
-    if (m > 150) {
-      tiles[i].biome = 'forest';
-      continue;
-    }
-    tiles[i].biome = 'grassland';
+    tiles[i].biome = classifyLandBiome({ env, hydrologyMode, elevRel, tempC: t, moist: m, atmosphere });
   }
 
   // Volcanic hotspots (optional)
@@ -1894,7 +2140,7 @@ const generateSurfaceMapV2 = (params: {
   }
 
   // Rivers
-  if (env.riversEnabled) {
+  if (allowRivers) {
     addRivers({ tiles, elev, seaLevelElev, w, h, wrapX });
   }
 
@@ -1906,8 +2152,12 @@ const generateSurfaceMapV2 = (params: {
     h,
     wrapX,
     ownerFactionId: params.ownerFactionId,
-    env
+    env: envHydrology
   });
+
+  if (hydrologyMode === 'frozen') {
+    freezeWaterBiomes(tiles);
+  }
 
   return {
     systemId: params.systemId,
@@ -1931,22 +2181,20 @@ const generateSurfaceMapV3 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const env: SurfaceParams = params.planetData
-    ? deriveSurfaceParamsFromPlanet(params.planetData)
-    : params.moonData
-      ? deriveSurfaceParamsFromMoon(params.moonData)
+  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const envHydrology: SurfaceParams =
+    hydrologyMode === 'liquid'
+      ? env
       : {
-          surfaceClass: 'airless',
-          surfaceClassReason: 'no_atmosphere',
-          waterFraction: 0.02,
-          reliefScale: 1,
-          humidityFactor: 0.05,
-          latGradientK: 65,
-          lapseRateK: 0,
-          craterIntensity: 0.9,
-          volcanismIndex: 0.1,
+          ...env,
+          waterFraction: hydrologyMode === 'none' ? 0 : env.waterFraction,
           riversEnabled: false
         };
+  const allowRivers = hydrologyMode === 'liquid' && envHydrology.riversEnabled;
+  const albedoOffset =
+    typeof albedo === 'number' ? -18 * clamp((albedo - 0.25) / 0.6, 0, 1) : 0;
+  const latTermOffset = computeLatTermOffset(h, env.latGradientK);
 
   const baseSeed = descriptor.seed;
   const warp2D = wrapX
@@ -1988,49 +2236,45 @@ const generateSurfaceMapV3 = (params: {
     }
   }
 
-  const seaLevelElev = quantile(elev, env.waterFraction);
+  const seaLevelElev = quantile(elev, envHydrology.waterFraction);
 
   // --- Water mask with cleanup ---
+  const forceDry = hydrologyMode === 'none';
   const initialWaterMask = new Uint8Array(n);
-  for (let i = 0; i < n; i += 1) initialWaterMask[i] = elev[i] <= seaLevelElev ? 1 : 0;
-
-  const cleanedWaterMask = applyMicroCleanup(initialWaterMask, w, h, wrapX, 3, 3);
-  // Keep elevation consistent with cleanup flips (avoids land below sea level and water above it).
-  const seaLevelEps = 0.001;
-  for (let i = 0; i < n; i += 1) {
-    if (cleanedWaterMask[i] === initialWaterMask[i]) continue;
-    if (cleanedWaterMask[i] === 1) {
-      if (elev[i] > seaLevelElev - seaLevelEps) elev[i] = seaLevelElev - seaLevelEps;
-    } else {
-      if (elev[i] < seaLevelElev + seaLevelEps) elev[i] = seaLevelElev + seaLevelEps;
-    }
+  if (!forceDry) {
+    for (let i = 0; i < n; i += 1) initialWaterMask[i] = elev[i] <= seaLevelElev ? 1 : 0;
   }
-  const waterMask = cleanedWaterMask;
 
-  const { oceanMask } = classifyWaterComponents(waterMask, w, h, wrapX);
+  let waterMask = initialWaterMask;
+  let oceanMask = new Uint8Array(n);
+  if (!forceDry) {
+    const cleanedWaterMask = applyMicroCleanup(initialWaterMask, w, h, wrapX, 3, 3);
+    // Keep elevation consistent with cleanup flips (avoids land below sea level and water above it).
+    const seaLevelEps = 0.001;
+    for (let i = 0; i < n; i += 1) {
+      if (cleanedWaterMask[i] === initialWaterMask[i]) continue;
+      if (cleanedWaterMask[i] === 1) {
+        if (elev[i] > seaLevelElev - seaLevelEps) elev[i] = seaLevelElev - seaLevelEps;
+      } else {
+        if (elev[i] < seaLevelElev + seaLevelEps) elev[i] = seaLevelElev + seaLevelEps;
+      }
+    }
+    waterMask = cleanedWaterMask;
+    oceanMask = classifyWaterComponents(waterMask, w, h, wrapX).oceanMask;
+  }
 
   // --- Temperature field ---
   const tempC2 = new Int16Array(n);
-  const baseT0K = params.planetData?.climateK
-    ?? params.planetData?.temperatureK
-    ?? params.moonData?.climateK
-    ?? params.moonData?.temperatureK
-    ?? 220;
 
   for (let r = 0; r < h; r += 1) {
     const lat = normalizedLatitude(r, h);
-    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), 1.45);
+    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), LATITUDE_EXPONENT) - latTermOffset;
     for (let q = 0; q < w; q += 1) {
       const i = r * w + q;
       const aboveSea = Math.max(0, elev[i] - seaLevelElev);
       const altTerm = -env.lapseRateK * aboveSea;
-      const albedoTerm = params.planetData
-        ? -18 * clamp((params.planetData.albedo - 0.25) / 0.6, 0, 1)
-        : params.moonData
-          ? -18 * clamp((params.moonData.albedo - 0.25) / 0.6, 0, 1)
-          : 0;
 
-      const localK = baseT0K + latTerm + altTerm + albedoTerm;
+      const localK = baseT0K + latTerm + altTerm + albedoOffset;
       const c = localK - 273.15;
       tempC2[i] = Math.round(c * 2);
     }
@@ -2079,38 +2323,7 @@ const generateSurfaceMapV3 = (params: {
     const elevRel = elev[i] - seaLevelElev;
     const t = tiles[i].tempC2 / 2;
     const m = tiles[i].moist;
-
-    if (env.surfaceClass === 'airless') {
-      tiles[i].biome = elevRel > 0.6 ? 'rocky' : 'cratered';
-      continue;
-    }
-
-    if (t < -18) {
-      tiles[i].biome = 'ice';
-      continue;
-    }
-    if (t < -6) {
-      tiles[i].biome = m > 110 ? 'taiga' : 'tundra';
-      continue;
-    }
-    if (elevRel > 0.85) {
-      tiles[i].biome = 'mountain';
-      continue;
-    }
-
-    if (t > 28 && m < 70) {
-      tiles[i].biome = 'desert';
-      continue;
-    }
-    if (t > 22 && m > 200) {
-      tiles[i].biome = 'rainforest';
-      continue;
-    }
-    if (m > 150) {
-      tiles[i].biome = 'forest';
-      continue;
-    }
-    tiles[i].biome = 'grassland';
+    tiles[i].biome = classifyLandBiome({ env, hydrologyMode, elevRel, tempC: t, moist: m, atmosphere });
   }
 
   // Volcanic hotspots
@@ -2130,7 +2343,7 @@ const generateSurfaceMapV3 = (params: {
   }
 
   // Rivers
-  if (env.riversEnabled) {
+  if (allowRivers) {
     addRivers({ tiles, elev, seaLevelElev, w, h, wrapX });
   }
 
@@ -2141,8 +2354,12 @@ const generateSurfaceMapV3 = (params: {
     h,
     wrapX,
     ownerFactionId: params.ownerFactionId,
-    env
+    env: envHydrology
   });
+
+  if (hydrologyMode === 'frozen') {
+    freezeWaterBiomes(tiles);
+  }
 
   return {
     systemId: params.systemId,
@@ -2166,22 +2383,20 @@ const generateSurfaceMapV4 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const env: SurfaceParams = params.planetData
-    ? deriveSurfaceParamsFromPlanet(params.planetData)
-    : params.moonData
-      ? deriveSurfaceParamsFromMoon(params.moonData)
+  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const envHydrology: SurfaceParams =
+    hydrologyMode === 'liquid'
+      ? env
       : {
-          surfaceClass: 'airless',
-          surfaceClassReason: 'no_atmosphere',
-          waterFraction: 0.02,
-          reliefScale: 1,
-          humidityFactor: 0.05,
-          latGradientK: 65,
-          lapseRateK: 0,
-          craterIntensity: 0.9,
-          volcanismIndex: 0.1,
+          ...env,
+          waterFraction: hydrologyMode === 'none' ? 0 : env.waterFraction,
           riversEnabled: false
         };
+  const allowRivers = hydrologyMode === 'liquid' && envHydrology.riversEnabled;
+  const albedoOffset =
+    typeof albedo === 'number' ? -18 * clamp((albedo - 0.25) / 0.6, 0, 1) : 0;
+  const latTermOffset = computeLatTermOffset(h, env.latGradientK);
 
   const baseSeed = descriptor.seed;
 
@@ -2209,14 +2424,16 @@ const generateSurfaceMapV4 = (params: {
   const detailShiftY = unitFromHash(baseSeed, 'detail-shift-y');
 
   const coreRng = new RNG(baseSeed ^ 0x6f0f3b1d);
-  const coreCount = coreRng.int(1, 3);
+  const coreCount = coreRng.int(1, 2 + Math.round(env.tectonicsIndex * 2));
+  const coreRadiusScale = 1.1 - 0.25 * env.tectonicsIndex;
+  const coreStrengthScale = 0.85 + 0.35 * env.tectonicsIndex;
   const cores: Array<{ x: number; y: number; radius: number; strength: number }> = [];
   for (let i = 0; i < coreCount; i += 1) {
     cores.push({
       x: coreRng.next(),
       y: coreRng.next(),
-      radius: coreRng.range(0.18, 0.34),
-      strength: coreRng.range(0.65, 1.1)
+      radius: coreRng.range(0.18, 0.34) * coreRadiusScale,
+      strength: coreRng.range(0.65, 1.1) * coreStrengthScale
     });
   }
 
@@ -2289,15 +2506,20 @@ const generateSurfaceMapV4 = (params: {
   }
 
   const seaLevelElev = 0;
-  const seaLevelMacro = quantile(macroAdjusted, env.waterFraction);
+  const seaLevelMacro = quantile(macroAdjusted, envHydrology.waterFraction);
   const initialWaterMask = new Uint8Array(n);
-  for (let i = 0; i < n; i += 1) {
-    initialWaterMask[i] = macroAdjusted[i] > seaLevelMacro ? 0 : 1;
+  const forceDry = hydrologyMode === 'none';
+  if (!forceDry) {
+    for (let i = 0; i < n; i += 1) {
+      initialWaterMask[i] = macroAdjusted[i] > seaLevelMacro ? 0 : 1;
+    }
   }
 
   const microSize = Math.max(3, Math.floor(n / 1400));
-  const waterMask = applyMicroCleanup(initialWaterMask, w, h, wrapX, microSize, microSize);
-  const { oceanMask } = classifyWaterComponents(waterMask, w, h, wrapX);
+  const waterMask = forceDry
+    ? initialWaterMask
+    : applyMicroCleanup(initialWaterMask, w, h, wrapX, microSize, microSize);
+  const oceanMask = forceDry ? new Uint8Array(n) : classifyWaterComponents(waterMask, w, h, wrapX).oceanMask;
 
   const elev = new Float32Array(n);
   const landSpan = Math.max(0.0001, adjustedMax - seaLevelMacro);
@@ -2360,26 +2582,16 @@ const generateSurfaceMapV4 = (params: {
 
   // --- Temperature field ---
   const tempC2 = new Int16Array(n);
-  const baseT0K = params.planetData?.climateK
-    ?? params.planetData?.temperatureK
-    ?? params.moonData?.climateK
-    ?? params.moonData?.temperatureK
-    ?? 220;
 
   for (let r = 0; r < h; r += 1) {
     const lat = normalizedLatitude(r, h);
-    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), 1.45);
+    const latTerm = -env.latGradientK * Math.pow(Math.abs(lat), LATITUDE_EXPONENT) - latTermOffset;
     for (let q = 0; q < w; q += 1) {
       const i = r * w + q;
       const aboveSea = Math.max(0, elev[i] - seaLevelElev);
       const altTerm = -env.lapseRateK * aboveSea;
-      const albedoTerm = params.planetData
-        ? -18 * clamp((params.planetData.albedo - 0.25) / 0.6, 0, 1)
-        : params.moonData
-          ? -18 * clamp((params.moonData.albedo - 0.25) / 0.6, 0, 1)
-          : 0;
 
-      const localK = baseT0K + latTerm + altTerm + albedoTerm;
+      const localK = baseT0K + latTerm + altTerm + albedoOffset;
       const c = localK - 273.15;
       tempC2[i] = Math.round(c * 2);
     }
@@ -2426,10 +2638,6 @@ const generateSurfaceMapV4 = (params: {
   for (let i = 0; i < n; i += 1) {
     if (isWaterBiome(tiles[i].biome)) continue;
     const elevRel = elev[i] - seaLevelElev;
-    if (env.surfaceClass === 'airless') {
-      tiles[i].biome = elevRel > 0.6 ? 'rocky' : 'cratered';
-      continue;
-    }
 
     const r = Math.floor(i / w);
     const q = i - r * w;
@@ -2442,32 +2650,7 @@ const generateSurfaceMapV4 = (params: {
     const t = tiles[i].tempC2 / 2 + tempJitter * 1.6;
     const m = clamp(tiles[i].moist + moistJitter * 12, 0, 255);
 
-    if (t < -18) {
-      tiles[i].biome = 'ice';
-      continue;
-    }
-    if (t < -6) {
-      tiles[i].biome = m > 110 ? 'taiga' : 'tundra';
-      continue;
-    }
-    if (elevRel > 0.85) {
-      tiles[i].biome = 'mountain';
-      continue;
-    }
-
-    if (t > 28 && m < 70) {
-      tiles[i].biome = 'desert';
-      continue;
-    }
-    if (t > 22 && m > 200) {
-      tiles[i].biome = 'rainforest';
-      continue;
-    }
-    if (m > 150) {
-      tiles[i].biome = 'forest';
-      continue;
-    }
-    tiles[i].biome = 'grassland';
+    tiles[i].biome = classifyLandBiome({ env, hydrologyMode, elevRel, tempC: t, moist: m, atmosphere });
   }
 
   // Volcanic hotspots
@@ -2487,7 +2670,7 @@ const generateSurfaceMapV4 = (params: {
   }
 
   // Rivers
-  if (env.riversEnabled) {
+  if (allowRivers) {
     addRivers({ tiles, elev, seaLevelElev, w, h, wrapX });
   }
 
@@ -2498,8 +2681,12 @@ const generateSurfaceMapV4 = (params: {
     h,
     wrapX,
     ownerFactionId: params.ownerFactionId,
-    env
+    env: envHydrology
   });
+
+  if (hydrologyMode === 'frozen') {
+    freezeWaterBiomes(tiles);
+  }
 
   return {
     systemId: params.systemId,
@@ -2566,12 +2753,23 @@ const BIOME_ORDER: Biome[] = [
   'coast',
   'lake',
   'ice',
+  'fractured_ice',
+  'dusty_ice',
+  'cryovolcanic',
   'tundra',
   'taiga',
   'grassland',
   'forest',
   'rainforest',
   'desert',
+  'ash_desert',
+  'thermal_polygons',
+  'lava_flats',
+  'vitrified',
+  'oxidized',
+  'compressed_plateau',
+  'chemical_erosion',
+  'fossil_basin',
   'rocky',
   'mountain',
   'volcanic',
