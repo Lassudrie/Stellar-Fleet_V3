@@ -166,7 +166,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       <MapControls
         ref={controlsRef}
         target={targetArray}
-        enableRotate
+        enableRotate={false}
         enablePan={true}
         enableZoom={true}
         minDistance={distanceConfig.minDistance}
