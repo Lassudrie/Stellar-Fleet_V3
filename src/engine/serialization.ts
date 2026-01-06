@@ -1400,7 +1400,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         const unitType: GroundUnitType =
           typeof a.unitType === 'string' && GROUND_UNIT_TYPES.has(a.unitType as GroundUnitType)
             ? (a.unitType as GroundUnitType)
-            : 'mechanized_infantry';
+            : 'light_infantry';
         const defaults = GROUND_UNIT_STATS[unitType];
 
         const legacyMaxStrength = isFiniteNumber(a.maxStrength)

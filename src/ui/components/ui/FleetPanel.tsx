@@ -109,6 +109,14 @@ const ShipIcon: React.FC<{ type: string; className?: string }> = ({ type, classN
   }
 };
 
+const OtanInfantryBadge: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} viewBox="0 0 32 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="2" y="6" width="28" height="16" rx="1.5" stroke="currentColor" strokeWidth="2" fill="currentColor" fillOpacity="0.16" />
+    <path d="M9 10L23 20M9 20L23 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <path d="M16 2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
 const FleetPanel: React.FC<FleetPanelProps> = ({ 
     fleet, otherFleetsInSystem, currentSystem, availableArmies,
     onSplit, onMerge, onDeploy, onEmbark, playerFactionId 
@@ -310,7 +318,12 @@ const FleetPanel: React.FC<FleetPanelProps> = ({
                                                     {shortId(ship.id)}
                                                 </span>
                                                 {hasArmy && (
-                                                    <span title={t('fleet.armyLoaded')} className="text-[8px] bg-green-900 text-green-300 px-1 rounded font-bold">ARM</span>
+                                                    <span
+                                                        title={t('fleet.armyLoaded')}
+                                                        className={`inline-flex items-center justify-center rounded border border-slate-700 bg-slate-950/40 px-1 py-0.5 ${isPlayer ? 'text-blue-300' : 'text-red-300'}`}
+                                                    >
+                                                        <OtanInfantryBadge className="w-4 h-3" />
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>

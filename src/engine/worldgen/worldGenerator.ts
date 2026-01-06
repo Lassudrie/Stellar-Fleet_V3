@@ -17,11 +17,12 @@ import {
 } from '../../shared/shared';
 import { RNG } from '../rng';
 import { GameScenario } from '../../content/scenarios';
-import { createArmy, MIN_ARMY_CREATION_MEMBERS } from '../army';
+import { createArmy } from '../army';
 import { createShip } from '../world';
 import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
 import { SHIP_STATS } from '../../content/data/static';
+import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
 import { generateStellarSystem } from './stellarSystem';
 import { buildPlanetBodies, getSolidPlanets, PlanetBodySeed } from '../planets';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions, DEFAULT_PLANET_SURFACE_GENERATOR_VERSION } from '../planetSurface';
@@ -1115,8 +1116,8 @@ export const generateWorld = (
               if (ship.type === ShipType.TRANSPORTER) {
                   const army = createArmy(
                       factionId,
-                      'mechanized_infantry',
-                      MIN_ARMY_CREATION_MEMBERS,
+                      'light_infantry',
+                      GROUND_UNIT_STATS.light_infantry.defaultMaxMembers,
                       fleet.id,
                       ArmyState.EMBARKED,
                       rng
@@ -1156,8 +1157,8 @@ export const generateWorld = (
               const targetPlanet = occupiablePlanets[i % occupiablePlanets.length];
               const army = createArmy(
                   sys.ownerFactionId,
-                  'mechanized_infantry',
-                  MIN_ARMY_CREATION_MEMBERS,
+                  'light_infantry',
+                  GROUND_UNIT_STATS.light_infantry.defaultMaxMembers,
                   targetPlanet.id,
                   ArmyState.DEPLOYED,
                   rng

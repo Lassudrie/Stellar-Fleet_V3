@@ -16,7 +16,7 @@ export interface GroundUnitStats {
 export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
   light_infantry: {
     baseMP: 4,
-    defaultMaxMembers: 10000,
+    defaultMaxMembers: 1000,
     baseAttack: 1.0,
     baseDefense: 1.0,
     terrainCombatAffinity: {
@@ -38,7 +38,7 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
   },
   mechanized_infantry: {
     baseMP: 5,
-    defaultMaxMembers: 10000,
+    defaultMaxMembers: 1000,
     baseAttack: 1.1,
     baseDefense: 1.0,
     terrainCombatAffinity: {
@@ -60,7 +60,7 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
   },
   heavy_armor: {
     baseMP: 5,
-    defaultMaxMembers: 8000,
+    defaultMaxMembers: 800,
     baseAttack: 1.25,
     baseDefense: 1.15,
     terrainCombatAffinity: {
@@ -83,7 +83,7 @@ export const GROUND_UNIT_STATS: Record<GroundUnitType, GroundUnitStats> = {
   },
   artillery: {
     baseMP: 3,
-    defaultMaxMembers: 6000,
+    defaultMaxMembers: 600,
     baseAttack: 1.2,
     baseDefense: 0.9,
     terrainCombatAffinity: {

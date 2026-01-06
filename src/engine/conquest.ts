@@ -215,7 +215,7 @@ export const resolveGroundConflict = (planet: PlanetBody, system: StarSystem, st
                     : {
                         id: update.armyId,
                         factionId,
-                        unitType: 'mechanized_infantry',
+                        unitType: 'light_infantry',
                         maxMembers: update.members,
                         members: update.members,
                         attack: 1,

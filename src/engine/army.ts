@@ -6,11 +6,11 @@ import { getPlanetById } from './planets';
 import { sorted } from '../shared/shared';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 
-export const MIN_ARMY_CREATION_MEMBERS = 10000;
+export const MIN_ARMY_CREATION_MEMBERS = 600;
 
 /**
  * Creates a new Army entity.
- * Enforces the rule: Minimum 10,000 members.
+ * Enforces the rule: Minimum 600 members.
  * 
  * @param factionId The faction owning the army.
  * @param unitType Unit archetype (drives default stats).
