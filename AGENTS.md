@@ -208,8 +208,9 @@ Dans la description/summary, mentionner explicitement :
 ## Garde-fou architectural TypeScript (non-prolifération et organisation)
 
 - Interdit : créer un nouveau fichier `.ts` par défaut.
-- Autorisé uniquement si l’un des cas suivants est démontré et documenté dans la PR :
-  - **Dépassement d’un seuil raisonnable** : le fichier existant dépasse une taille exploitable (ex. ~500 lignes) malgré un regroupement logique cohérent.
+- Autorisé uniquement si l’un des cas suivants est vrai (et documenté dans la PR) :
+  - **Demande explicite** : la création d’un nouveau fichier est demandée explicitement par le demandeur.
+  - **Fichier trop dense / long** : le fichier existant devient trop dense et long pour assurer une maintenance efficace (ordre de grandeur : >~500 lignes) malgré un regroupement logique cohérent.
   - **Implémentation interchangeable obligatoire** : plusieurs implémentations d’une même API doivent coexister et être sélectionnables sans couplage (ex. stratégie de génération de monde hot-swappable).
   - **Mutualisation multi-domaines** : une logique transversale doit être partagée entre plusieurs domaines fonctionnels sans dépendance circulaire.
 - Si aucune de ces conditions n’est remplie, la modification doit être réalisée dans un fichier existant cohérent, quitte à refactorer ce fichier pour en améliorer la lisibilité.
@@ -250,4 +251,4 @@ Dans la description/summary, mentionner explicitement :
     - `resolveMelee.ts`, `resolveRanged.ts`, `computeDamage.ts`, `applyBuff.ts`, `unitTypes.ts`, `damageTypes.ts`, `index.ts` : chaque action dans son fichier, imports croisés internes, logique éclatée et difficile à maintenir.
 
 ### Règle de conformité des agents
-- Tout agent qui crée des fichiers `.ts` inutiles, contourne les barrels (`index.ts`), ou fragmente excessivement la logique est non conforme. Sa contribution doit être rejetée ou retravaillée avant fusion.
+- Tout agent qui crée des fichiers `.ts` inutiles (hors demande explicite ou justification claire), contourne les barrels (`index.ts`), ou fragmente excessivement la logique est non conforme. Sa contribution doit être rejetée ou retravaillée avant fusion.
