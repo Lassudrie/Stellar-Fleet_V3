@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Color, InstancedMesh, MeshBasicMaterial, Object3D, OrthographicCamera, Path, Shape, ShapeGeometry } from 'three';
+import {
+  Color,
+  Float32BufferAttribute,
+  InstancedMesh,
+  MeshBasicMaterial,
+  Object3D,
+  OrthographicCamera,
+  Path,
+  Shape,
+  ShapeGeometry
+} from 'three';
 import {
   Army,
   ArmyState,
@@ -301,7 +311,14 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
     return outer;
   }, [innerScale]);
 
-  const fillGeometry = useDisposableMemo(() => new ShapeGeometry(fillShape), [fillShape]);
+  const fillGeometry = useDisposableMemo(() => {
+    const geometry = new ShapeGeometry(fillShape);
+    const vertexCount = geometry.attributes.position.count;
+    const colors = new Float32Array(vertexCount * 3);
+    colors.fill(1);
+    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    return geometry;
+  }, [fillShape]);
   const borderGeometry = useDisposableMemo(() => new ShapeGeometry(borderShape), [borderShape]);
   const fillMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
@@ -954,7 +971,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return computeZocSnapshotFromArmies({ bodyId: map.bodyId, w, h, wrapX, armies: armiesOnBody });
   }, [map, normalizedArmies]);
 
-  const movementStepCostCenti = useCallback((from: HexCoord, to: HexCoord, army: Army): number => {
+  const movementStepCostCenti = useCallback((_from: HexCoord, to: HexCoord, army: Army): number => {
     if (!map) return 0;
     const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, to);
     const baseCost = MOVE_COST[terrain];
