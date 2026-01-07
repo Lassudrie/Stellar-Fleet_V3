@@ -78,6 +78,8 @@ Champs ajoutes:
 
 Notes:
 - routed = morale < BREAK_THRESHOLD (pas de champ dedie).
+- Dans l'implementation, `posture` et `postureSetTurn` sont des champs de `Army` (pas dans `groundOrders`).
+- `prepared_defense` : defensePower *= PREPARED_DEFENSE_MULT, actif si turn > postureSetTurn; annule si l'unite bouge ou attaque.
 
 ### 4.2 Stats unite (GROUND_UNIT_STATS)
 
@@ -345,6 +347,7 @@ TotalLossRate = clamp(BaseLoss + VariableLoss + OrbitPenalty + BombardedPenalty 
 
 - Bombardement orbital a chaque tour, avant debarquement.
 - Bombardement tagge les hex bombardes du tour via `bombardedHexesByBodyId` (state).
+- Combat au sol: une unite sur un hex bombarde ce tour subit un malus (BOMBARD_COMBAT_MULT) et une perte de condition (BOMBARD_COMBAT_CONDITION_LOSS) lors d'un engagement.
 - Orbite contestee augmente les pertes de debarquement.
 - Anti-orbital:
   - AntiOrbitalProjection = somme des antiOrbital des unites/buildings dans projectionRange
