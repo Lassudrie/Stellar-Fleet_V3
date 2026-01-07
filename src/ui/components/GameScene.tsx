@@ -143,14 +143,13 @@ const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boo
     arr[0] = start.x; arr[1] = start.y; arr[2] = start.z;
     arr[3] = end.x;   arr[4] = end.y;   arr[5] = end.z;
     posAttribute.needsUpdate = true;
-    geometry.computeBoundingSphere();
     if (dashed && lineRef.current) {
         lineRef.current.computeLineDistances();
     }
-  }); 
+  }, [dashed, end.x, end.y, end.z, geometry, start.x, start.y, start.z]); 
 
   return (
-    <lineSegments ref={lineRef} geometry={geometry}>
+    <lineSegments ref={lineRef} geometry={geometry} frustumCulled={false}>
       {dashed ? (
           <lineDashedMaterial color={color} dashSize={1.5} gapSize={1.0} transparent opacity={0.6} />
       ) : (
@@ -303,8 +302,6 @@ const GameScene: React.FC<GameSceneProps> = ({
       return new Set(gameState.fleets.map(f => f.id));
   }, [gameState.fleets]);
 
-  const lastTapRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
-  const DOUBLE_TAP_THRESHOLD_MS = 500;
   const hasCoarsePointer = () => typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(pointer: coarse)').matches;
@@ -317,27 +314,16 @@ const GameScene: React.FC<GameSceneProps> = ({
     const isDouble = options?.isDouble ?? false;
     const pointerType = options?.pointerType;
     const isTouchPointer = pointerType === 'touch' || hasCoarsePointer();
-    const now = performance.now();
 
     if (isDouble) {
-      lastTapRef.current = { id: null, time: 0 };
       onFleetInspect(fleetId);
       return;
     }
 
     if (isTouchPointer) {
-      lastTapRef.current = { id: null, time: 0 };
       onFleetInspect(fleetId);
       return;
     }
-
-    if (lastTapRef.current.id === fleetId && now - lastTapRef.current.time < DOUBLE_TAP_THRESHOLD_MS) {
-      lastTapRef.current = { id: null, time: 0 };
-      onFleetInspect(fleetId);
-      return;
-    }
-
-    lastTapRef.current = { id: fleetId, time: now };
     onFleetSelect(fleetId);
   };
 

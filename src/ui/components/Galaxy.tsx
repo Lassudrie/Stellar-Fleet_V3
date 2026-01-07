@@ -1,7 +1,7 @@
 
 import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, DoubleSide, Vector3 } from 'three';
+import { BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem, sorted } from '../../shared/shared';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
@@ -48,16 +48,16 @@ const GroundIndicator: React.FC<{ indicator: GroundIndicatorInfo }> = ({ indicat
                     <group key={`ground-square-${square.planetId}`} position={square.position}>
                         <mesh>
                             <planeGeometry args={[0.7, 0.7]} />
-                            <meshBasicMaterial color="#0f172a" transparent opacity={0.65} />
+                            <meshBasicMaterial color="#0f172a" transparent opacity={0.65} depthWrite={false} />
                         </mesh>
                         <mesh position={[0, 0, 0.01]}>
                             <planeGeometry args={[0.5, 0.5]} />
-                            <meshBasicMaterial color={square.color} transparent opacity={0.95} />
+                            <meshBasicMaterial color={square.color} transparent opacity={0.95} depthWrite={false} />
                         </mesh>
                         {square.contested && (
                             <mesh position={[0, 0, 0.02]}>
                                 <ringGeometry args={[0.35, 0.42, 20]} />
-                                <meshBasicMaterial color="#fbbf24" transparent opacity={0.9} side={DoubleSide} />
+                                <meshBasicMaterial color="#fbbf24" transparent opacity={0.9} side={DoubleSide} depthWrite={false} />
                             </mesh>
                         )}
                     </group>
@@ -94,7 +94,10 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor
     }, [armyInfo]);
 
     useFrame(({ camera }) => {
-        const dist = camera.position.distanceTo(new Vector3(system.position.x, system.position.y, system.position.z));
+        const dx = camera.position.x - system.position.x;
+        const dy = camera.position.y - system.position.y;
+        const dz = camera.position.z - system.position.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         const maxDist = isOwned ? 135 : 90;
         const fadeRange = 30;
         const fadeStart = maxDist - fadeRange;
@@ -357,7 +360,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
   return (
     <group>
         <lineSegments geometry={lineGeometry}>
-            <lineBasicMaterial color="#ffffff" transparent opacity={0.1} linewidth={1} />
+            <lineBasicMaterial color="#ffffff" transparent opacity={0.1} linewidth={1} depthWrite={false} />
         </lineSegments>
 
         <Instances range={systems.length}>
@@ -377,7 +380,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
         {battleSystems.length > 0 && (
           <Instances range={battleSystems.length}>
             <torusGeometry args={[CAPTURE_RANGE * 0.8, 0.1, 8, 32]} />
-            <meshBasicMaterial color="#ef4444" transparent opacity={0.6} side={DoubleSide} />
+            <meshBasicMaterial color="#ef4444" transparent opacity={0.6} side={DoubleSide} depthWrite={false} />
             {battleSystems.map((sys) => (
                <Instance
                   key={`battle-${sys.id}`}

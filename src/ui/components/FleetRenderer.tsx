@@ -1,7 +1,7 @@
 
 import React, { useRef, useMemo, useLayoutEffect, useEffect } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { Mesh, Group, Vector3, Shape, AdditiveBlending, PointLight, Color, Euler, Quaternion } from 'three';
+import { Mesh, Group, Vector3, Shape, AdditiveBlending, Color, Euler, Quaternion } from 'three';
 import { Fleet, FleetState } from '../../shared/shared';
 import { ORBIT_RADIUS, ORBIT_SPEED } from '../../content/data/static';
 import { Text, Billboard } from '@react-three/drei';
@@ -70,10 +70,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   const meshRef = useRef<Mesh>(null);
   const lastLookQuaternionRef = useRef<Quaternion>(new Quaternion());
   const previousPositionRef = useRef<Vector3 | null>(null);
-
-  // Double interaction detection (touch)
-  const lastTouchRef = useRef<number>(0);
-  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   const resolvePointerType = (event: any) => {
       return event?.pointerType || event?.nativeEvent?.pointerType || '';
   };
@@ -86,7 +82,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   
   // Flash Effect Refs
   const flashMeshRef = useRef<Mesh>(null);
-  const flashLightRef = useRef<PointLight>(null);
   const previousState = useRef<FleetState>(fleet.state);
   const flashProgress = useRef(0); // 0 (inactive) -> 1 (start of flash) -> 0 (end)
 
@@ -147,7 +142,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         flashProgress.current -= delta * 3.5;
         if (flashProgress.current < 0) flashProgress.current = 0;
 
-        if (flashMeshRef.current && flashLightRef.current) {
+        if (flashMeshRef.current) {
             // Expansion: Starts small, explodes outward
             const invertedProgress = 1.0 - flashProgress.current;
             const scale = 1 + invertedProgress * 10; 
@@ -159,12 +154,10 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                 // @ts-ignore
                 flashMeshRef.current.material.opacity = flashProgress.current;
             }
-            flashLightRef.current.intensity = flashProgress.current * 50; 
         }
     } else {
         // Ensure hidden when inactive
         if (flashMeshRef.current) flashMeshRef.current.scale.setScalar(0);
-        if (flashLightRef.current) flashLightRef.current.intensity = 0;
     }
 
     // --- MOVEMENT LOGIC ---
@@ -232,6 +225,8 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         {/* HITBOX: Large invisible sphere for easier selection on mobile/desktop */}
         <mesh 
             onClick={(e) => {
+                const clickCount = (e.nativeEvent as MouseEvent | PointerEvent).detail ?? 0;
+                if (clickCount > 1) return;
                 e.stopPropagation();
                 onSelect(e, false, resolvePointerType(e));
             }}
@@ -239,19 +234,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
                 e.stopPropagation();
                 e.nativeEvent.preventDefault();
                 onSelect(e, true, resolvePointerType(e));
-            }}
-            onPointerDown={(e: ThreeEvent<PointerEvent>) => {
-                if (e.pointerType !== 'touch') return;
-
-                const now = performance.now();
-                if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-                    lastTouchRef.current = 0;
-                    e.stopPropagation();
-                    e.nativeEvent.preventDefault();
-                    onSelect(e, true, resolvePointerType(e));
-                } else {
-                    lastTouchRef.current = now;
-                }
             }}
             onPointerOver={() => document.body.style.cursor = 'pointer'}
             onPointerOut={() => document.body.style.cursor = 'auto'}
@@ -265,7 +247,6 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
             <sphereGeometry args={[1, 16, 16]} />
             <meshBasicMaterial color="#cceeff" transparent opacity={0} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
-        <pointLight ref={flashLightRef} color="#cceeff" distance={20} decay={2} intensity={0} />
 
         {/* SHIP MODEL (No Trail) */}
         <mesh 
@@ -286,7 +267,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         {isSelected && (
             <mesh position={[0, -0.2, 0]} rotation={[-Math.PI/2, 0, 0]}>
                 <ringGeometry args={[1, 1.2, 32]} />
-                <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} />
+                <meshBasicMaterial color={highlightPalette.light} transparent opacity={0.6} depthWrite={false} />
             </mesh>
         )}
 

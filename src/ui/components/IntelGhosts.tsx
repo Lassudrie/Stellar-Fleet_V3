@@ -53,6 +53,7 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
                     color={getFactionColor(sighting.factionId)}
                     transparent
                     opacity={opacity}
+                    depthWrite={false}
                     wireframe={true} // Wireframe looks more "tech/holographic"
                 />
             </mesh>

@@ -2533,9 +2533,19 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     cameraInitialSpherical.theta
   ]);
 
+  const prefersTouchFallback = typeof window !== 'undefined' && (
+    (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+    || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+  );
+  const maxDpr = prefersTouchFallback ? 1.25 : 1.75;
+
   return (
     <div className="relative w-full h-full bg-black">
-      <Canvas camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}>
+      <Canvas
+        camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
+        gl={{ antialias: false, powerPreference: 'high-performance' }}
+        dpr={[1, maxDpr]}
+      >
         <color attach="background" args={['#000000']} />
         <ambientLight intensity={ambientLightIntensity} color={ambientLightColor} />
         <hemisphereLight
