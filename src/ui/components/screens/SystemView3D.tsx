@@ -94,6 +94,8 @@ const MIN_PLANET_ORBIT_INCLINATION_DEG = 0.35;
 const MAX_PLANET_ORBIT_INCLINATION_DEG = 10;
 const MIN_MOON_ORBIT_INCLINATION_DEG = 0.25;
 const MAX_MOON_ORBIT_INCLINATION_DEG = 14;
+const MAX_DPR_MOBILE = 1.25;
+const MAX_DPR_DESKTOP = 2;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -2423,8 +2425,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [anchoredBodyId, bodyRadii, focusDistanceFloor]);
   const rotateSpeed = MathUtils.clamp(1 / clampedScale, 0.35, 2.5);
   const zoomSpeed = MathUtils.clamp(1 / clampedScale, 0.4, 3);
-  const cameraNear = Math.max(cameraMaxDistance / 500, focusDistanceFloor * 0.1, 0.05);
-  const cameraFar = cameraMaxDistance * 10;
+  const cameraFar = cameraMaxDistance + maxOrbitRadius * 2.5;
+  const cameraNear = Math.max(0.05, Math.min(cameraMinDistance * 0.25, cameraFar / 2000));
   const focusRequestRef = useRef<FocusRequest | null>(null);
   const anchoredTarget = useMemo<[number, number, number]>(() => {
     return bodyWorldPositions[anchoredBodyId ?? ''] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
@@ -2537,13 +2539,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
-  const maxDpr = prefersTouchFallback ? 1.25 : 1.75;
+  const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
 
   return (
     <div className="relative w-full h-full bg-black">
       <Canvas
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
-        gl={{ antialias: false, powerPreference: 'high-performance' }}
+        gl={{ antialias: true, powerPreference: 'high-performance' }}
         dpr={[1, maxDpr]}
       >
         <color attach="background" args={['#000000']} />
