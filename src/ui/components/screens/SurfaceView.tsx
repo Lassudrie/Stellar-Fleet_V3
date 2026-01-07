@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import {
+  BufferGeometry,
   Color,
   Float32BufferAttribute,
   InstancedMesh,
+  LineBasicMaterial,
   MeshBasicMaterial,
   Object3D,
   OrthographicCamera,
-  Path,
   Shape,
   ShapeGeometry
 } from 'three';
@@ -95,8 +96,9 @@ type PointerSnapshot = {
 };
 
 const INTERACTION_COOLDOWN_MS = 140;
-const MAX_DPR_MOBILE = 1.25;
-const MAX_DPR_DESKTOP = 1.75;
+// Surface view is a 2D tactical map: favor crispness over aggressive DPR caps (especially on mobile).
+const MAX_DPR_MOBILE = 2.5;
+const MAX_DPR_DESKTOP = 2.5;
 
 const OTAN_SYMBOL_COLOR = '#0f172a';
 
@@ -242,19 +244,6 @@ const createHexShape = (radius: number): Shape => {
   return shape;
 };
 
-const createHexHole = (radius: number): Path => {
-  const hole = new Path();
-  for (let i = 5; i >= 0; i -= 1) {
-    const angle = Math.PI / 180 * (60 * i - 30);
-    const x = radius * Math.cos(angle);
-    const y = radius * Math.sin(angle);
-    if (i === 5) hole.moveTo(x, y);
-    else hole.lineTo(x, y);
-  }
-  hole.closePath();
-  return hole;
-};
-
 const SurfaceMapCameraSync: React.FC<{ cameraState: CameraState }> = ({ cameraState }) => {
   const camera = useThree(state => state.camera);
   const size = useThree(state => state.size);
@@ -298,18 +287,19 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
   const config = map.descriptor.config;
   const count = config.w * config.h;
   const fillRef = useRef<InstancedMesh>(null);
-  const borderRef = useRef<InstancedMesh>(null);
   const temp = useMemo(() => new Object3D(), []);
   const color = useMemo(() => new Color(), []);
   const invalidate = useThree(state => state.invalidate);
 
-  const innerScale = 0.94;
-  const fillShape = useMemo(() => createHexShape(HEX_SIZE * innerScale), [innerScale]);
-  const borderShape = useMemo(() => {
-    const outer = createHexShape(HEX_SIZE);
-    outer.holes.push(createHexHole(HEX_SIZE * innerScale));
-    return outer;
-  }, [innerScale]);
+  const fillShape = useMemo(() => createHexShape(HEX_SIZE), []);
+  const hexCornerOffsets = useMemo(() => {
+    const corners: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < 6; i += 1) {
+      const angle = Math.PI / 180 * (60 * i - 30);
+      corners.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+    }
+    return corners;
+  }, []);
 
   const fillGeometry = useDisposableMemo(() => {
     const geometry = new ShapeGeometry(fillShape);
@@ -319,27 +309,77 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
     geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
     return geometry;
   }, [fillShape]);
-  const borderGeometry = useDisposableMemo(() => new ShapeGeometry(borderShape), [borderShape]);
   const fillMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
     []
   );
-  const borderMaterial = useDisposableMemo(
-    () =>
-      new MeshBasicMaterial({
-        color: '#94a3b8',
-        transparent: true,
-        opacity: 0.14,
-        depthTest: false,
-        depthWrite: false
-      }),
-    []
-  );
+  const gridGeometry = useDisposableMemo(() => {
+    const positions: number[] = [];
+    const z = 0.02;
+
+    const neighborOf = (q: number, r: number, edge: number): { q: number; r: number } | null => {
+      const odd = (r & 1) === 1;
+      switch (edge) {
+        case 0: // E
+          return { q: q + 1, r };
+        case 1: // SE
+          return { q: q + (odd ? 1 : 0), r: r + 1 };
+        case 2: // SW
+          return { q: q + (odd ? 0 : -1), r: r + 1 };
+        case 3: // W
+          return { q: q - 1, r };
+        case 4: // NW
+          return { q: q + (odd ? 0 : -1), r: r - 1 };
+        case 5: // NE
+          return { q: q + (odd ? 1 : 0), r: r - 1 };
+        default:
+          return null;
+      }
+    };
+
+    const inBounds = (coord: { q: number; r: number } | null): coord is { q: number; r: number } => {
+      if (!coord) return false;
+      return coord.q >= 0 && coord.q < config.w && coord.r >= 0 && coord.r < config.h;
+    };
+
+    const isLower = (a: { q: number; r: number }, b: { q: number; r: number }): boolean => (
+      a.r < b.r || (a.r === b.r && a.q < b.q)
+    );
+
+    for (let r = 0; r < config.h; r += 1) {
+      for (let q = 0; q < config.w; q += 1) {
+        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
+        const cx = x;
+        const cy = -y;
+
+        for (let edge = 0; edge < 6; edge += 1) {
+          const neighbor = neighborOf(q, r, edge);
+          const shouldDraw = !inBounds(neighbor) || isLower({ q, r }, neighbor);
+          if (!shouldDraw) continue;
+
+          const a = hexCornerOffsets[edge];
+          const b = hexCornerOffsets[(edge + 1) % 6];
+          positions.push(cx + a.x, cy + a.y, z, cx + b.x, cy + b.y, z);
+        }
+      }
+    }
+
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(new Float32Array(positions), 3));
+    return geometry;
+  }, [config.h, config.w, hexCornerOffsets, mapKey]);
+
+  const gridMaterial = useDisposableMemo(() => new LineBasicMaterial({
+    color: '#94a3b8',
+    transparent: true,
+    opacity: 0.28,
+    depthTest: false,
+    depthWrite: false
+  }), []);
 
   useLayoutEffect(() => {
     const fill = fillRef.current;
-    const border = borderRef.current;
-    if (!fill || !border) return;
+    if (!fill) return;
 
     for (let r = 0; r < config.h; r += 1) {
       for (let q = 0; q < config.w; q += 1) {
@@ -351,10 +391,6 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
         temp.rotation.set(0, 0, 0);
         temp.scale.set(1, 1, 1);
         temp.updateMatrix();
-        border.setMatrixAt(index, temp.matrix);
-
-        temp.position.set(x, -y, 0.01);
-        temp.updateMatrix();
         fill.setMatrixAt(index, temp.matrix);
 
         color.set(tile ? (biomeColors[tile.biome] ?? '#334155') : '#1f2937');
@@ -362,9 +398,7 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
       }
     }
 
-    border.count = count;
     fill.count = count;
-    border.instanceMatrix.needsUpdate = true;
     fill.instanceMatrix.needsUpdate = true;
     if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
 
@@ -373,8 +407,13 @@ const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> =
 
   return (
     <group>
-      <instancedMesh ref={borderRef} args={[borderGeometry, borderMaterial, count]} frustumCulled={false} />
       <instancedMesh ref={fillRef} args={[fillGeometry, fillMaterial, count]} frustumCulled={false} />
+      <lineSegments
+        geometry={gridGeometry}
+        material={gridMaterial}
+        frustumCulled={false}
+        renderOrder={1}
+      />
     </group>
   );
 });
@@ -1411,7 +1450,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           orthographic
           frameloop="demand"
           dpr={renderDpr}
-          gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }}
+          gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
           style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
         >
           <SurfaceMapCameraSync cameraState={camera} />
