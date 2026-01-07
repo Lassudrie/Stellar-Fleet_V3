@@ -24,6 +24,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   const focusVectorRef = useRef<Vector3>(new Vector3());
   const desiredPositionRef = useRef<Vector3>(new Vector3());
   const offsetRef = useRef<Vector3>(new Vector3());
+  const clampControlsRef = useRef<(options?: { skipUpdate?: boolean }) => void>(() => {});
+  const mapBoundsRef = useRef<ClampBounds | null | undefined>(mapBounds);
 
   const targetArray = useMemo<[number, number, number]>(() => {
     if (!initialTarget) return [0, 0, 0];
@@ -103,6 +105,14 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   }, [cameraBounds, mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
 
   useEffect(() => {
+    clampControlsRef.current = clampControls;
+  }, [clampControls]);
+
+  useEffect(() => {
+    mapBoundsRef.current = mapBounds;
+  }, [mapBounds]);
+
+  useEffect(() => {
     if (!ready) {
       hasInitialized.current = false;
     }
@@ -133,8 +143,9 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     const targetY = Array.isArray(focusTarget) ? focusTarget[1] : focusTarget.y;
     const targetZ = Array.isArray(focusTarget) ? focusTarget[2] : focusTarget.z;
 
-    const clampedX = mapBounds ? Math.min(mapBounds.maxX, Math.max(mapBounds.minX, targetX)) : targetX;
-    const clampedZ = mapBounds ? Math.min(mapBounds.maxZ, Math.max(mapBounds.minZ, targetZ)) : targetZ;
+    const bounds = mapBoundsRef.current ?? null;
+    const clampedX = bounds ? Math.min(bounds.maxX, Math.max(bounds.minX, targetX)) : targetX;
+    const clampedZ = bounds ? Math.min(bounds.maxZ, Math.max(bounds.minZ, targetZ)) : targetZ;
 
     focusVectorRef.current.set(clampedX, targetY, clampedZ);
 
@@ -154,7 +165,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       camera.position.lerp(desiredPositionRef.current, 0.12);
 
       controlsRef.current.update();
-      clampControls();
+      clampControlsRef.current();
 
       const targetDelta = target.distanceTo(focusVec);
       const positionDelta = camera.position.distanceTo(desiredPositionRef.current);
@@ -171,7 +182,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         cancelAnimationFrame(frameId);
       }
     };
-  }, [focusTarget, clampControls, mapBounds, ready]);
+  }, [focusTarget, ready]);
 
   return (
     <>
