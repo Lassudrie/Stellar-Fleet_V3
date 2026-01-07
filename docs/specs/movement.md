@@ -41,8 +41,8 @@ Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de
    - **Auto unload** dans un système allié correspondant à `unloadTargetSystemId`, vers la planète solide par défaut si elle existe ; risques supplémentaires si l'orbite est contestée (`applyContestedUnloadRisk`).
    - **Auto load** d'armées amies si `loadTargetSystemId` correspond au système d'arrivée.
    - **Auto invasion** si `invasionTargetSystemId` correspond au système d'arrivée :
-     - Si aucune planète solide n'est disponible, log d'échec.
-     - Sinon, tentative de déploiement avec risque d'échec en orbite contestée (`applyContestedDeploymentRisk`).
-     - Succès partiel ou total génère un log `combat` indiquant le nombre d'armées déposées et un avertissement si l'orbite est contestée.
+     - **Factions IA (non joueur)** : déploiement automatique identique à la v1.
+     - **Faction joueur** : aucun débarquement automatique ; un `GameMessage` `INVASION_DECISION` est créé pour proposer « Siège (bombardement orbital) » ou « Attaque (débarquement) » côté UI.
+     - Si aucune planète solide n'est disponible, la décision est limitée (débarquement impossible) et l'UI doit afficher l'information.
 
-Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `src/engine/movement/movementPhase.ts`.
+Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `src/engine/movement.ts`.

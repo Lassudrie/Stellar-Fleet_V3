@@ -6,6 +6,7 @@ import { useI18n } from '../../i18n';
 import { getFleetSpeed } from '../../../engine/movement';
 import { dist, distSq } from '../../../engine/math/vec3';
 import { ORBIT_PROXIMITY_RANGE_SQ } from '../../../content/data/static';
+import { isOrbitContested } from '../../../engine/orbit';
 import { sorted } from '../../../shared/shared';
 
 interface InvasionModalProps {
@@ -161,3 +162,122 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
 };
 
 export default InvasionModal;
+
+interface InvasionDecisionModalProps {
+  system: StarSystem;
+  fleet: Fleet | null;
+  fleets: Fleet[];
+  suggestedPlanetId: string | null;
+  onSiege: () => void;
+  onAttack: (planetId: string) => void;
+  onClose: () => void;
+}
+
+export const InvasionDecisionModal: React.FC<InvasionDecisionModalProps> = ({
+  system,
+  fleet,
+  fleets,
+  suggestedPlanetId,
+  onSiege,
+  onAttack,
+  onClose
+}) => {
+  const { t } = useI18n();
+  const getFleetName = useFleetName();
+
+  const solidPlanets = useMemo(() => {
+    return sorted(
+      system.planets.filter(planet => planet.isSolid),
+      (a, b) => a.id.localeCompare(b.id)
+    );
+  }, [system.planets]);
+
+  const [selectedPlanetId, setSelectedPlanetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const preferred = suggestedPlanetId && solidPlanets.some(p => p.id === suggestedPlanetId) ? suggestedPlanetId : null;
+    setSelectedPlanetId(preferred ?? solidPlanets[0]?.id ?? null);
+  }, [suggestedPlanetId, solidPlanets, system.id]);
+
+  const contested = useMemo(() => isOrbitContested(system, fleets), [system, fleets]);
+
+  const loadedTransports = useMemo(() => {
+    if (!fleet) return [];
+    return fleet.ships.filter(ship => ship.type === ShipType.TRANSPORTER && ship.carriedArmyId);
+  }, [fleet]);
+
+  const canAttack = Boolean(fleet && selectedPlanetId && loadedTransports.length > 0);
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-[2px] pointer-events-auto z-50 animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-red-500/50 w-11/12 max-w-lg max-h-[80vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
+        <div className="bg-red-950/30 p-4 border-b border-red-900/50 flex justify-between items-center">
+          <div>
+            <h3 className="text-red-300 font-bold text-lg tracking-wider uppercase">
+              {t('invasionDecision.title')}
+            </h3>
+            <p className="text-xs text-red-200/60 font-mono">{t('invasionDecision.system', { system: system.name.toUpperCase() })}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-900/50">
+          <div className="text-xs text-slate-300">
+            {t('invasionDecision.fleet', { fleet: fleet ? getFleetName(fleet.id) : '—' })}
+          </div>
+
+          {contested && (
+            <div className="text-xs text-amber-200 bg-amber-900/20 border border-amber-500/30 rounded p-2">
+              {t('invasionDecision.contested')}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-slate-300 font-semibold">{t('invasionDecision.selectPlanet')}</label>
+            <select
+              value={selectedPlanetId ?? ''}
+              onChange={e => setSelectedPlanetId(e.target.value || null)}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
+              disabled={solidPlanets.length === 0}
+            >
+              {solidPlanets.map(planet => (
+                <option key={planet.id} value={planet.id}>
+                  {planet.name}
+                </option>
+              ))}
+              {solidPlanets.length === 0 && <option value="">{t('invasionDecision.noSolidPlanets')}</option>}
+            </select>
+          </div>
+
+          {fleet && loadedTransports.length === 0 && (
+            <div className="text-xs text-slate-400">{t('invasionDecision.noEmbarkedArmies')}</div>
+          )}
+        </div>
+
+        <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white uppercase transition-colors"
+          >
+            {t('invasionDecision.later')}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSiege}
+              className="px-4 py-2 text-xs font-bold uppercase rounded border border-slate-700 text-slate-200 hover:border-red-400 hover:text-white transition-colors"
+            >
+              {t('invasionDecision.siege')}
+            </button>
+            <button
+              onClick={() => selectedPlanetId && onAttack(selectedPlanetId)}
+              disabled={!canAttack}
+              className="px-4 py-2 text-xs font-bold uppercase rounded bg-red-600/70 hover:bg-red-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t('invasionDecision.attack')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

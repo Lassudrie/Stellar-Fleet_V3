@@ -357,6 +357,18 @@ export const en = {
   'invasion.noSolidPlanets': 'No solid planets available',
   'invasion.viewSurface': 'Inspect surface',
 
+  // Invasion Decision
+  'invasionDecision.title': 'Invasion Decision',
+  'invasionDecision.system': 'System: {{system}}',
+  'invasionDecision.fleet': 'Fleet: {{fleet}}',
+  'invasionDecision.selectPlanet': 'Landing target',
+  'invasionDecision.noSolidPlanets': 'No solid planets available',
+  'invasionDecision.contested': 'Orbit contested: landing will cause losses; bombardment is blocked.',
+  'invasionDecision.noEmbarkedArmies': 'No embarked armies available to land.',
+  'invasionDecision.later': 'Later',
+  'invasionDecision.siege': 'Siege (Bombard)',
+  'invasionDecision.attack': 'Attack (Land)',
+
   // Battle Screen
   'battle.reportTitle': 'Battle Report',
   'battle.rounds_one': '1 ROUND',

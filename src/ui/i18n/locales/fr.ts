@@ -357,6 +357,18 @@ export const fr = {
   'invasion.noSolidPlanets': 'Aucune planète solide disponible',
   'invasion.viewSurface': 'Inspecter la surface',
 
+  // Invasion Decision
+  'invasionDecision.title': 'Décision d\'invasion',
+  'invasionDecision.system': 'Système : {{system}}',
+  'invasionDecision.fleet': 'Flotte : {{fleet}}',
+  'invasionDecision.selectPlanet': 'Cible de débarquement',
+  'invasionDecision.noSolidPlanets': 'Aucune planète solide disponible',
+  'invasionDecision.contested': 'Orbite contestée : le débarquement subira des pertes ; le bombardement est bloqué.',
+  'invasionDecision.noEmbarkedArmies': 'Aucune armée embarquée à débarquer.',
+  'invasionDecision.later': 'Plus tard',
+  'invasionDecision.siege': 'Siège (Bombardement orbital)',
+  'invasionDecision.attack': 'Attaquer (Débarquer)',
+
   // Battle Screen
   'battle.reportTitle': 'Rapport de Bataille',
   'battle.rounds_one': '1 ROUND',

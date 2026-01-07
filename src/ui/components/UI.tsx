@@ -9,7 +9,7 @@ import FleetPicker from './ui/FleetPicker';
 import FleetPanel, { AvailableArmy } from './ui/FleetPanel';
 import BattleScreen from './ui/BattleScreen';
 import FleetRegistryScreen from './ui/FleetRegistryScreen';
-import InvasionModal from './ui/InvasionModal';
+import InvasionModal, { InvasionDecisionModal } from './ui/InvasionModal';
 import OrbitingFleetPicker from './ui/OrbitingFleetPicker';
 import ShipDetailModal from './ui/ShipDetailModal';
 import SystemDetailModal from './ui/SystemDetailModal';
@@ -31,7 +31,17 @@ interface UIProps {
   logs: LogEntry[];
   messages: GameMessage[];
 
-  uiMode: 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
+  uiMode:
+    | 'NONE'
+    | 'SYSTEM_MENU'
+    | 'FLEET_PICKER'
+    | 'BATTLE_SCREEN'
+    | 'INVASION_MODAL'
+    | 'INVASION_DECISION_MODAL'
+    | 'ORBIT_FLEET_PICKER'
+    | 'SHIP_DETAIL_MODAL'
+    | 'GROUND_OPS_MODAL'
+    | 'SYSTEM_VIEW';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -70,6 +80,11 @@ interface UIProps {
   onInvade: (systemId: string) => void;
   onCommitInvasion: (fleetId: string, planetId: string | null) => void;
 
+  invasionDecision: { messageId: string; fleetId: string; systemId: string; planetId: string | null } | null;
+  onCloseInvasionDecision: () => void;
+  onConfirmInvasionDecisionSiege: () => void;
+  onConfirmInvasionDecisionAttack: (planetId: string) => void;
+
   onSave: () => void;
   onExportAiLogs?: () => void;
   onClearAiLogs?: () => void;
@@ -92,6 +107,7 @@ const UI: React.FC<UIProps> = ({
     onInspectFleet,
     onOpenSystemView, onOpenSurfaceView, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
+    invasionDecision, onCloseInvasionDecision, onConfirmInvasionDecisionSiege, onConfirmInvasionDecisionAttack,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
   devMode, godEyes, onSetUiSettings,
   onOpenMessage, onMarkMessageRead, onMarkAllMessagesRead
@@ -405,6 +421,18 @@ const UI: React.FC<UIProps> = ({
             onClose={onCloseMenu}
             playerFactionId={playerFactionId}
             onOpenSurfaceView={onOpenSurfaceView}
+        />
+      )}
+
+      {uiMode === 'INVASION_DECISION_MODAL' && invasionDecision && targetSystem && (
+        <InvasionDecisionModal
+            system={systems.find(s => s.id === invasionDecision.systemId) ?? targetSystem}
+            fleet={gameState.fleets.find(f => f.id === invasionDecision.fleetId) ?? null}
+            fleets={gameState.fleets}
+            suggestedPlanetId={invasionDecision.planetId}
+            onSiege={onConfirmInvasionDecisionSiege}
+            onAttack={onConfirmInvasionDecisionAttack}
+            onClose={onCloseInvasionDecision}
         />
       )}
 

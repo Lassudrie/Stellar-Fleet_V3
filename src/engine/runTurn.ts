@@ -392,6 +392,7 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
   const nextDay = ctx.turn; // Movement projects to current turn positions
   const fleetsToProcess = sorted(state.fleets, (a, b) => a.id.localeCompare(b.id));
   const newLogs: LogEntry[] = [];
+  let nextMessages = state.messages;
 
   let workingArmies = state.armies;
   let workingFleets = fleetsToProcess;
@@ -429,10 +430,46 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
     const fleet = workingFleets.find(f => f.id === result.fleet.id);
     if (!fleet) return;
 
+    const isPlayerInvasionArrival = fleet.factionId === state.playerFactionId && result.invasionTargetSystemId === system.id;
+
+    if (isPlayerInvasionArrival) {
+      const solidPlanets = sorted(
+        system.planets.filter(planet => planet.isSolid),
+        (a, b) => a.id.localeCompare(b.id)
+      );
+      const preferredPlanet =
+        result.invasionTargetPlanetId && solidPlanets.some(planet => planet.id === result.invasionTargetPlanetId)
+          ? solidPlanets.find(planet => planet.id === result.invasionTargetPlanetId) ?? null
+          : null;
+      const suggestedPlanet = preferredPlanet ?? solidPlanets[0] ?? null;
+
+      const message: GameMessage = {
+        id: ctx.rng.id('msg'),
+        day: ctx.turn,
+        type: 'INVASION_DECISION',
+        priority: 2,
+        title: `Invasion in orbit: ${system.name}`,
+        subtitle: suggestedPlanet ? `Decide: siege or land troops on ${suggestedPlanet.name}.` : 'No solid bodies available for landing.',
+        lines: suggestedPlanet
+          ? ['Option 1: siege (orbital bombardment).', 'Option 2: attack (land embarked armies).']
+          : ['This system has no solid bodies. Landing is impossible.'],
+        payload: {
+          fleetId: fleet.id,
+          systemId: system.id,
+          planetId: suggestedPlanet?.id ?? null
+        },
+        read: false,
+        dismissed: false,
+        createdAtTurn: ctx.turn
+      };
+
+      nextMessages = canonicalizeMessages([...nextMessages, message]);
+    }
+
     const arrivalFleet: Fleet = {
       ...fleet,
-      invasionTargetSystemId: result.invasionTargetSystemId,
-      invasionTargetPlanetId: result.invasionTargetPlanetId,
+      invasionTargetSystemId: isPlayerInvasionArrival ? null : result.invasionTargetSystemId,
+      invasionTargetPlanetId: isPlayerInvasionArrival ? null : result.invasionTargetPlanetId,
       loadTargetSystemId: result.loadTargetSystemId,
       unloadTargetSystemId: result.unloadTargetSystemId
     };
@@ -458,7 +495,8 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
     ...state,
     fleets: workingFleets,
     armies: workingArmies,
-    logs: [...state.logs, ...newLogs]
+    logs: [...state.logs, ...newLogs],
+    messages: nextMessages
   });
 }
 

@@ -72,6 +72,9 @@
 ### 5.4 Invasion
 - Condition : système ennemi possédant au moins une planète solide **et** présence d’une flotte du joueur embarquant une armée (`hasInvadingForce`).
 - Action : `Invade` ouvre l’`INVASION_MODAL`, puis `ORDER_INVASION` au système cible. En cas de succès, un log « invasion » est ajouté, sinon l’erreur est remontée à l’UI.
+- À l’arrivée en orbite du système cible (message `INVASION_DECISION`), l’UI ouvre une fenêtre proposant :
+  - **Siège** : ne pas débarquer ; le bombardement orbital reste automatique si l’orbite est non contestée et des vaisseaux capables sont présents.
+  - **Attaque** : débarquer les armées embarquées via `UNLOAD_ARMY` vers la planète choisie (autorisé même en orbite contestée, avec pertes), puis ouvrir la `SurfaceView` correspondante.
 
 ### 5.5 Opérations terrestres
 - Lorsque des forces au sol sont détectées, le menu peut exposer `Ground Ops` pour ouvrir le module dédié et déclencher des transferts ou vérifications.

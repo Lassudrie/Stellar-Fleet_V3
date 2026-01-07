@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody } from '../shared/shared';
+import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody, ShipType } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -27,7 +27,17 @@ import type { GameCommand } from '../engine/commands';
 import { BootstrapWorkerClient, buildSurfaceMapWorkerRequest, SurfaceMapWorkerClient } from './workers';
 import type { BootstrapProgressUpdate } from './workers';
 
-type UiMode = 'NONE' | 'SYSTEM_MENU' | 'FLEET_PICKER' | 'BATTLE_SCREEN' | 'INVASION_MODAL' | 'ORBIT_FLEET_PICKER' | 'SHIP_DETAIL_MODAL' | 'GROUND_OPS_MODAL' | 'SYSTEM_VIEW';
+type UiMode =
+  | 'NONE'
+  | 'SYSTEM_MENU'
+  | 'FLEET_PICKER'
+  | 'BATTLE_SCREEN'
+  | 'INVASION_MODAL'
+  | 'INVASION_DECISION_MODAL'
+  | 'ORBIT_FLEET_PICKER'
+  | 'SHIP_DETAIL_MODAL'
+  | 'GROUND_OPS_MODAL'
+  | 'SYSTEM_VIEW';
 type LoadingStage = 'prepare' | 'read' | 'worldgen' | 'deserialize' | 'engine' | 'assets' | 'render';
 type LoadingStatus = 'loading' | 'error' | 'done';
 type LoadingFlow = 'newGame' | 'loadGame';
@@ -167,6 +177,14 @@ const App: React.FC = () => {
   const [focusTarget, setFocusTarget] = useState<Vec3 | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
+
+  type InvasionDecisionContext = {
+      messageId: string;
+      fleetId: string;
+      systemId: string;
+      planetId: string | null;
+  };
+  const [invasionDecision, setInvasionDecision] = useState<InvasionDecisionContext | null>(null);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -1045,6 +1063,29 @@ const App: React.FC = () => {
       const battleId = typeof payload.battleId === 'string' ? payload.battleId : null;
       const systemId = typeof payload.systemId === 'string' ? payload.systemId : null;
       const planetId = typeof payload.planetId === 'string' ? payload.planetId : null;
+      const fleetId = typeof payload.fleetId === 'string' ? payload.fleetId : null;
+
+      if (message.type === 'INVASION_DECISION' && systemId && fleetId) {
+          const systemFromPlanet = planetId
+              ? viewGameState.systems.find(sys => sys.planets.some(planet => planet.id === planetId))
+              : null;
+          const sys = viewGameState.systems.find(s => s.id === systemId) || systemFromPlanet;
+          if (!sys) {
+              console.warn('[App] handleOpenMessage: Invasion decision system not found', { systemId, planetId });
+              return;
+          }
+
+          setTargetSystem(sys);
+          setFleetPickerMode(null);
+          setInvasionDecision({
+              messageId: message.id,
+              fleetId,
+              systemId: sys.id,
+              planetId: planetId ?? null
+          });
+          setUiMode('INVASION_DECISION_MODAL');
+          return;
+      }
 
       if (battleId) {
           setSelectedBattleId(battleId);
@@ -1074,6 +1115,98 @@ const App: React.FC = () => {
           setUiMode('NONE');
       }
   };
+
+  const handleCloseInvasionDecision = () => {
+      setUiMode('NONE');
+      setInvasionDecision(null);
+  };
+
+  const handleConfirmInvasionDecisionSiege = () => {
+      if (!engine || !invasionDecision) {
+          console.warn('[App] handleConfirmInvasionDecisionSiege: Missing engine or invasionDecision');
+          return;
+      }
+
+      engine.dismissMessage(invasionDecision.messageId);
+      setInvasionDecision(null);
+      setUiMode('NONE');
+  };
+
+  const handleConfirmInvasionDecisionAttack = (planetId: string) => {
+      if (!engine || !invasionDecision) {
+          console.warn('[App] handleConfirmInvasionDecisionAttack: Missing engine or invasionDecision');
+          return;
+      }
+
+      const { fleetId, systemId, messageId } = invasionDecision;
+      const system = engine.state.systems.find(s => s.id === systemId);
+      const fleet = engine.state.fleets.find(f => f.id === fleetId);
+
+      if (!system || !fleet) {
+          notifyCommandError('Invasion fleet or target system no longer exists.');
+          engine.dismissMessage(messageId);
+          setInvasionDecision(null);
+          setUiMode('NONE');
+          return;
+      }
+
+      const targetPlanet = system.planets.find(p => p.id === planetId && p.isSolid) ?? null;
+      if (!targetPlanet) {
+          notifyCommandError('Invalid invasion landing target.');
+          return;
+      }
+
+      const loadedTransports = fleet.ships.filter(ship => ship.type === ShipType.TRANSPORTER && ship.carriedArmyId);
+      if (loadedTransports.length === 0) {
+          notifyCommandError('No embarked armies available to land.');
+          return;
+      }
+
+      let anyLanded = false;
+      loadedTransports.forEach(ship => {
+          const armyId = ship.carriedArmyId;
+          if (!armyId) return;
+          const result = engine.dispatchPlayerCommand({
+              type: 'UNLOAD_ARMY',
+              fleetId: fleet.id,
+              shipId: ship.id,
+              armyId,
+              systemId: system.id,
+              planetId: targetPlanet.id
+          });
+          if (processCommandResult(result, notifyCommandError)) {
+              anyLanded = true;
+          }
+      });
+
+      engine.dismissMessage(messageId);
+      setInvasionDecision(null);
+      setUiMode('NONE');
+
+      if (anyLanded) {
+          handleOpenSurfaceView(targetPlanet.id, { systemHint: system, returnTo: 'GAME' });
+      }
+  };
+
+  useEffect(() => {
+      if (!engine || !viewGameState) return;
+      if (uiMode !== 'NONE') return;
+      if (invasionDecision) return;
+
+      const pending = viewGameState.messages.filter(msg => msg.type === 'INVASION_DECISION' && !msg.dismissed && !msg.read);
+      if (pending.length === 0) return;
+
+      const next = pending.reduce<GameMessage | null>((best, msg) => {
+          if (!best) return msg;
+          if (msg.createdAtTurn !== best.createdAtTurn) return msg.createdAtTurn > best.createdAtTurn ? msg : best;
+          if (msg.priority !== best.priority) return msg.priority > best.priority ? msg : best;
+          return msg.id > best.id ? msg : best;
+      }, null);
+
+      if (next) {
+          handleOpenMessage(next);
+      }
+  }, [engine, viewGameState, uiMode, invasionDecision]);
 
   const surfaceSystem = useMemo(() => {
       if (!surfaceViewSystem) return null;
@@ -1419,6 +1552,11 @@ useEffect(() => {
                     }}
                     onInvade={handleInvade}
                     onCommitInvasion={handleCommitInvasion}
+
+                    invasionDecision={invasionDecision}
+                    onCloseInvasionDecision={handleCloseInvasionDecision}
+                    onConfirmInvasionDecisionSiege={handleConfirmInvasionDecisionSiege}
+                    onConfirmInvasionDecisionAttack={handleConfirmInvasionDecisionAttack}
 
                     onSave={handleSave}
 

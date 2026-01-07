@@ -3943,7 +3943,7 @@ tests.push(
     }
   },
   {
-    name: 'Movement phase assigns surfacePos to armies auto-deployed during invasion',
+    name: 'Movement phase assigns surfacePos to armies auto-deployed during AI invasion',
     run: () => {
       const { state: base, body } = engine_ps_createStateWithOneSurface(1234, 'sys_invade');
 
@@ -4000,6 +4000,7 @@ tests.push(
 
       const state: GameState = {
         ...base,
+        playerFactionId: 'red',
         systems: [enemySystem],
         fleets: [fleet],
         armies: [defenderArmy, attackerArmy]
@@ -4018,6 +4019,77 @@ tests.push(
       assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h, 'surfacePos should be inside the grid');
       const biome = map.tiles[pos.r * w + pos.q].biome;
       assert.ok(!engine_ps_isWater(biome), `surfacePos should be passable, got biome '${biome}'`);
+    }
+  },
+  {
+    name: 'Player invasion arrival creates a decision message and defers landing',
+    run: () => {
+      const { state: base, body } = engine_ps_createStateWithOneSurface(1234, 'sys_invade_player');
+
+      const system = base.systems[0];
+      const enemySystem = {
+        ...system,
+        ownerFactionId: 'red',
+        planets: system.planets.map(p => ({ ...p, ownerFactionId: 'red' }))
+      };
+
+      const attackerArmyId = 'army-atk-player';
+      const fleetId = 'fleet-inv-player';
+
+      const attackerArmy = engine_ps_createArmy({
+        id: attackerArmyId,
+        factionId: 'blue',
+        members: 10000,
+        state: ArmyState.EMBARKED,
+        containerId: fleetId
+      });
+
+      const fleet: Fleet = {
+        id: fleetId,
+        factionId: 'blue',
+        ships: [
+          {
+            id: 'ship-1',
+            type: ShipType.TRANSPORTER,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: attackerArmyId
+          }
+        ],
+        position: enemySystem.position,
+        state: FleetState.MOVING,
+        targetSystemId: enemySystem.id,
+        targetPosition: enemySystem.position,
+        radius: 1,
+        stateStartTurn: base.day,
+        invasionTargetSystemId: enemySystem.id,
+        invasionTargetPlanetId: body.id
+      };
+
+      const state: GameState = {
+        ...base,
+        systems: [enemySystem],
+        fleets: [fleet],
+        armies: [attackerArmy]
+      };
+
+      const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
+
+      const landed = next.armies.find(a => a.id === attackerArmyId);
+      assert.ok(landed, 'Expected attacker army to exist after movement phase');
+      assert.strictEqual(landed.state, ArmyState.EMBARKED, 'Player invasion should not auto-deploy on arrival');
+      assert.strictEqual(landed.containerId, fleetId, 'Embarked army should remain in the invading fleet');
+
+      const decision = next.messages.find(msg => msg.type === 'INVASION_DECISION' && msg.payload?.fleetId === fleetId);
+      assert.ok(decision, 'Expected an invasion decision message to be created for the player');
+      assert.strictEqual(decision?.payload?.systemId, enemySystem.id);
+      assert.strictEqual(decision?.payload?.planetId, body.id);
+
+      const updatedFleet = next.fleets.find(f => f.id === fleetId);
+      assert.ok(updatedFleet, 'Expected invasion fleet to exist after movement phase');
+      assert.strictEqual(updatedFleet?.invasionTargetSystemId, null, 'Invasion order should be cleared after arrival processing');
+      assert.strictEqual(updatedFleet?.invasionTargetPlanetId, null, 'Preferred invasion planet should be cleared after arrival processing');
     }
   }
 );
