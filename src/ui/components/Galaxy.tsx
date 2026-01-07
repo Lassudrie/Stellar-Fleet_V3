@@ -1,7 +1,7 @@
 
 import React, { useMemo, useRef } from 'react';
 import { Billboard, Instance, Instances, Text } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
+import { DoubleSide } from 'three';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { Army, ArmyState, FactionState, Fleet, ShipType, StarSystem, sorted } from '../../shared/shared';
 import { CAPTURE_RANGE, COLORS } from '../../content/data/static';
@@ -37,6 +37,8 @@ interface GroundIndicatorInfo {
     squares: GroundIndicatorSquare[];
 }
 
+const GALAXY_PLANE_Y = 0;
+
 const hasGasPlanet = (system: StarSystem): boolean =>
     system.planets.some(body => body.bodyType === 'planet' && !body.isSolid);
 
@@ -67,7 +69,12 @@ const GroundIndicator: React.FC<{ indicator: GroundIndicatorInfo }> = ({ indicat
     </group>
 );
 
-const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor?: string }> = ({ system, armyInfo, iconColor }) => {
+const SystemLabel: React.FC<{
+    system: StarSystem;
+    position: [number, number, number];
+    armyInfo?: ArmyInfo;
+    iconColor?: string;
+}> = ({ system, position, armyInfo, iconColor }) => {
     const textRef = useRef<any>(null);
     const iconRef = useRef<any>(null);
     const armyIconRef = useRef<any>(null);
@@ -94,9 +101,9 @@ const SystemLabel: React.FC<{ system: StarSystem; armyInfo?: ArmyInfo; iconColor
     }, [armyInfo]);
 
     useFrame(({ camera }) => {
-        const dx = camera.position.x - system.position.x;
-        const dy = camera.position.y - system.position.y;
-        const dz = camera.position.z - system.position.z;
+        const dx = camera.position.x - position[0];
+        const dy = camera.position.y - position[1];
+        const dz = camera.position.z - position[2];
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         const maxDist = isOwned ? 135 : 90;
         const fadeRange = 30;
@@ -321,7 +328,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
 
           indicators.push({
               systemId: system.id,
-              position: [system.position.x, system.position.y + verticalOffset, system.position.z],
+              position: [system.position.x, GALAXY_PLANE_Y + verticalOffset, system.position.z],
               squares,
           });
       });
@@ -337,19 +344,6 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
       return factionColorById.get(system.ownerFactionId) ?? '#ffffff';
   };
 
-  const lineGeometry = useMemo(() => {
-    if (!systems || systems.length === 0) return new BufferGeometry();
-    const positions: number[] = [];
-    systems.forEach(sys => {
-        positions.push(sys.position.x, 0, sys.position.z);
-        positions.push(sys.position.x, sys.position.y, sys.position.z);
-    });
-    
-    const geo = new BufferGeometry();
-    geo.setAttribute('position', new Float32BufferAttribute(positions, 3));
-    return geo;
-  }, [systems]);
-
   const battleSystems = useMemo(() => {
     if (!battlingSystemIds) return [];
     return systems.filter(s => battlingSystemIds.has(s.id));
@@ -359,10 +353,6 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
 
   return (
     <group>
-        <lineSegments geometry={lineGeometry}>
-            <lineBasicMaterial color="#ffffff" transparent opacity={0.1} linewidth={1} depthWrite={false} />
-        </lineSegments>
-
         <Instances range={systems.length}>
             <sphereGeometry args={[0.25, 16, 16]} />
             <meshBasicMaterial />
@@ -370,7 +360,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             {systems.map((sys) => (
                 <Instance 
                     key={`vis-${sys.id}`}
-                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    position={[sys.position.x, GALAXY_PLANE_Y, sys.position.z]} 
                     scale={[1.5, 1.5, 1.5]}
                     color={sys.color} 
                 />
@@ -384,7 +374,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             {battleSystems.map((sys) => (
                <Instance
                   key={`battle-${sys.id}`}
-                  position={[sys.position.x, sys.position.y, sys.position.z]}
+                  position={[sys.position.x, GALAXY_PLANE_Y, sys.position.z]}
                   rotation={[Math.PI / 2, 0, 0]} 
                />
             ))}
@@ -398,7 +388,7 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
             {systems.map((sys) => (
                 <Instance 
                     key={`hit-${sys.id}`}
-                    position={[sys.position.x, sys.position.y, sys.position.z]} 
+                    position={[sys.position.x, GALAXY_PLANE_Y, sys.position.z]} 
                     scale={[1, 1, 1]} 
                     onClick={(e) => {
                         e.stopPropagation();
@@ -411,8 +401,13 @@ const Galaxy: React.FC<GalaxyProps> = React.memo(({ systems, fleets, factions, a
         </Instances>
 
         {systems.map((sys) => (
-            <group key={`label-${sys.id}`} position={[sys.position.x, sys.position.y, sys.position.z]}>
-                <SystemLabel system={sys} armyInfo={armyMap.get(sys.id)} iconColor={resolveGasIconColor(sys)} />
+            <group key={`label-${sys.id}`} position={[sys.position.x, GALAXY_PLANE_Y, sys.position.z]}>
+                <SystemLabel
+                    system={sys}
+                    position={[sys.position.x, GALAXY_PLANE_Y, sys.position.z]}
+                    armyInfo={armyMap.get(sys.id)}
+                    iconColor={resolveGasIconColor(sys)}
+                />
             </group>
         ))}
 

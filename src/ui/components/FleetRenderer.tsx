@@ -39,6 +39,7 @@ const _vec3 = new Vector3();
 const DEFAULT_DIRECTION = new Vector3(0, 0, 1);
 const _orientationTarget = new Vector3();
 const _movementDirection = new Vector3();
+const GALAXY_PLANE_Y = 0;
 
 const deriveHighlightPalette = (baseColor: string, lightnessDelta = 0.2) => {
   try {
@@ -104,7 +105,7 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
   // Set initial position immediately to prevent jumping from 0,0,0
   useLayoutEffect(() => {
     if (groupRef.current) {
-        groupRef.current.position.set(fleet.position.x, fleet.position.y, fleet.position.z);
+        groupRef.current.position.set(fleet.position.x, GALAXY_PLANE_Y, fleet.position.z);
     }
     if (groupRef.current && meshRef.current) {
         _orientationTarget.copy(groupRef.current.position).add(DEFAULT_DIRECTION);
@@ -169,23 +170,23 @@ const FleetMesh: React.FC<FleetMeshProps> = React.memo(({ fleet, day, isSelected
         const z = fleet.position.z + Math.sin(time) * ORBIT_RADIUS;
         
         // OPTIMIZATION: Reuse _vec3 to avoid new allocation
-        _vec3.set(x, fleet.position.y, z);
+        _vec3.set(x, GALAXY_PLANE_Y, z);
         groupRef.current.position.lerp(_vec3, 0.1);
 
         const futureTime = time + 0.1; 
         const lookAtX = fleet.position.x + Math.cos(futureTime) * ORBIT_RADIUS;
         const lookAtZ = fleet.position.z + Math.sin(futureTime) * ORBIT_RADIUS;
         
-        meshRef.current.lookAt(lookAtX, fleet.position.y, lookAtZ);
+        meshRef.current.lookAt(lookAtX, GALAXY_PLANE_Y, lookAtZ);
         lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
         meshRef.current.quaternion.multiply(tiltQuaternion);
 
     } else {
         // Convert Vec3 to Three.Vector3 on the fly for Lerp target
-        _vec3.set(fleet.position.x, fleet.position.y, fleet.position.z);
+        _vec3.set(fleet.position.x, GALAXY_PLANE_Y, fleet.position.z);
         groupRef.current.position.lerp(_vec3, 0.5);
         if (fleet.targetPosition) {
-            meshRef.current.lookAt(fleet.targetPosition.x, fleet.targetPosition.y, fleet.targetPosition.z);
+            meshRef.current.lookAt(fleet.targetPosition.x, GALAXY_PLANE_Y, fleet.targetPosition.z);
             lastLookQuaternionRef.current.copy(meshRef.current.quaternion);
             meshRef.current.quaternion.multiply(tiltQuaternion);
         }

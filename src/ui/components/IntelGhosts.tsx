@@ -44,7 +44,7 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
         list.push(
             <mesh
                 key={sighting.fleetId}
-                position={[sighting.position.x, sighting.position.y, sighting.position.z]}
+                position={[sighting.position.x, 0, sighting.position.z]}
                 raycast={() => null} // Ignore raycasting (non-clickable)
             >
                 {/* Tetrahedron = Diamond shape, classic radar blip look */}

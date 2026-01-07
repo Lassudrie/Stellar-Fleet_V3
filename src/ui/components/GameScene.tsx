@@ -72,30 +72,25 @@ function useMapMetrics(systems: StarSystem[], galaxyRadius?: number): MapMetrics
 
     let minX = systems[0].position.x;
     let maxX = systems[0].position.x;
-    let minY = systems[0].position.y;
-    let maxY = systems[0].position.y;
     let minZ = systems[0].position.z;
     let maxZ = systems[0].position.z;
 
     systems.forEach(({ position }) => {
       minX = Math.min(minX, position.x);
       maxX = Math.max(maxX, position.x);
-      minY = Math.min(minY, position.y);
-      maxY = Math.max(maxY, position.y);
       minZ = Math.min(minZ, position.z);
       maxZ = Math.max(maxZ, position.z);
     });
 
     const center: Vec3 = {
       x: (minX + maxX) / 2,
-      y: (minY + maxY) / 2,
+      y: 0,
       z: (minZ + maxZ) / 2
     };
 
     const extentX = maxX - minX;
-    const extentY = maxY - minY;
     const extentZ = maxZ - minZ;
-    const boundingDiagonal = Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
+    const boundingDiagonal = Math.sqrt(extentX * extentX + extentZ * extentZ);
     const radius = Math.max(boundingDiagonal / 2, DEFAULT_RADIUS, requestedRadius);
 
     let boundsMinX = minX;
@@ -165,8 +160,8 @@ const LaserRenderer: React.FC<{ lasers: LaserShot[] }> = React.memo(({ lasers })
       {lasers.map((laser) => (
         <SimpleLine
           key={laser.id}
-          start={laser.start}
-          end={laser.end}
+          start={{ x: laser.start.x, y: 0, z: laser.start.z }}
+          end={{ x: laser.end.x, y: 0, z: laser.end.z }}
           color={laser.color}
         />
       ))}
@@ -190,8 +185,8 @@ const TrajectoryRenderer: React.FC<{
                     return (
                         <SimpleLine
                             key={`traj-${fleet.id}`}
-                            start={fleet.position}
-                            end={fleet.targetPosition}
+                            start={{ x: fleet.position.x, y: 0, z: fleet.position.z }}
+                            end={{ x: fleet.targetPosition.x, y: 0, z: fleet.targetPosition.z }}
                             color={color}
                             dashed={!isPlayer}
                         />
@@ -234,13 +229,13 @@ const GameScene: React.FC<GameSceneProps> = ({
     );
 
     if (ownedHomeworld) {
-      return ownedHomeworld.position;
+      return { x: ownedHomeworld.position.x, y: 0, z: ownedHomeworld.position.z };
     }
 
     const ownedSystem = gameState.systems.find((system) => system.ownerFactionId === gameState.playerFactionId);
 
     if (ownedSystem) {
-      return ownedSystem.position;
+      return { x: ownedSystem.position.x, y: 0, z: ownedSystem.position.z };
     }
 
     return { x: 0, y: 0, z: 0 };
@@ -259,7 +254,7 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   useEffect(() => {
     if (focusTarget) {
-      setLastFocusedTarget(focusTarget);
+      setLastFocusedTarget({ x: focusTarget.x, y: 0, z: focusTarget.z });
     }
   }, [focusTarget]);
 
