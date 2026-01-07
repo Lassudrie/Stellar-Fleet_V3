@@ -1,6 +1,6 @@
 # Spécification Technique : Battle System V1
 
-**Feature Flag :** `ENABLE_V1_COMBAT`  
+**Feature Flag :** supprimé (Battle V1 est le comportement par défaut)  
 **Responsable :** Engine Team
 
 ---

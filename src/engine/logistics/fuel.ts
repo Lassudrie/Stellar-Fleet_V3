@@ -54,17 +54,6 @@ export const computeShipJumpCost = (type: ShipType, distanceLy: number): number 
   return ceilFuel(consumption * distanceLy);
 };
 
-export const getFleetMaxReachLy = (fleet: Fleet): number => {
-  if (fleet.ships.length === 0) return 0;
-
-  return fleet.ships.reduce((reach, ship) => {
-    const consumption = getFuelConsumption(ship.type);
-    if (consumption <= 0) return reach;
-    const shipReach = ship.fuel / consumption;
-    return Math.min(reach, shipReach);
-  }, MAX_HYPERJUMP_DISTANCE_LY);
-};
-
 export const canFleetPayJump = (fleet: Fleet, distanceLy: number, rules?: FuelRules): boolean => {
   if (hasUnlimitedFuel(rules)) return true;
   return fleet.ships.every(ship => {

@@ -164,7 +164,6 @@ export const PLANET_RADIUS_EARTH_CLAMP: Record<PlanetType, [number, number]> = {
   Dwarf: [0.1, 0.6]
 };
 
-export const MOON_MASS_EARTH_RANGE: [number, number] = [1e-5, 0.02];
 export const MOON_RADIUS_EARTH_RANGE: [number, number] = [0.03, 0.35];
 
 export const ATMOSPHERE_PRESSURE_BAR: Record<AtmosphereType, [number, number]> = {
@@ -834,11 +833,6 @@ const drawPlanetEccentricity = (rng: RNG, semiMajorAxisAu: number, config: Orbit
   return clamp(cooled, 0, config.eccClamp);
 };
 
-export function drawEccentricity(rng: RNG, _planetType: PlanetType): number {
-  const config = resolveOrbitConfig(DEFAULT_STELLAR_SYSTEM_GEN_PARAMS);
-  return clamp(drawOrbitEccentricity(rng, config) * config.eccScale, 0, config.eccClamp);
-}
-
 type OrbitCandidate = { index: number; semiMajorAxisAu: number; eccentricity: number };
 
 const applyOrbitStabilityFilter = (orbits: OrbitCandidate[], margin: number): number[] => {
@@ -888,16 +882,6 @@ const drawPlanetOrbitParamsForContext = (
   const orbitInclinationDeg = clamp(inclinationDeg, 0, config.iAbsClampDeg);
   const axialTiltDeg = drawAxialTiltDeg(rng, planetType, orbitInclinationDeg);
   return { orbitInclinationDeg, orbitAscendingNodeDeg: ascendingNodeDeg, axialTiltDeg };
-};
-
-export const drawPlanetOrbitParams = (
-  rng: RNG,
-  planetType: PlanetType
-): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
-  const config = resolveOrbitConfig(DEFAULT_STELLAR_SYSTEM_GEN_PARAMS);
-  const systemTiltDeg = drawSystemTiltDeg(rng, config);
-  const systemNodeDeg = rng.range(0, 360);
-  return drawPlanetOrbitParamsForContext(rng, planetType, config, systemTiltDeg, systemNodeDeg);
 };
 
 export const generatePlanetOrbitParams = (

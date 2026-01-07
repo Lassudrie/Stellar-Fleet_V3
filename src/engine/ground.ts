@@ -191,7 +191,6 @@ export const ENGAGEMENT_LOSS_CAP = 0.35;
 export const CONDITION_LOSS_COEFF = 0.60;
 export const MORALE_LOSS_COEFF = 0.60;
 export const BREAK_THRESHOLD = 0.25;
-export const RALLY_THRESHOLD = 0.40;
 export const ROUTED_ATK_MULT = 0.70;
 export const ROUTED_DEF_MULT = 0.70;
 export const ROUTED_MP_MULT = 0.50;
@@ -422,13 +421,6 @@ export const computeZocSnapshotFromArmies = (params: {
   return { bodyId, w, h, wrapX, zocByFactionId };
 };
 
-export const computeZocSnapshotForBody = (state: GameState, bodyId: string, armies: Army[]): ZocSnapshot | null => {
-  const map = generateSurfaceMapForState(state, bodyId);
-  if (!map) return null;
-  const { w, h, wrapX } = map.descriptor.config;
-  return computeZocSnapshotFromArmies({ bodyId, w, h, wrapX, armies });
-};
-
 export const isInEnemyZoc = (snapshot: ZocSnapshot, coord: HexCoord, ownFactionId: FactionId): boolean => {
   const norm = normalizeCoord(coord, snapshot.w, snapshot.h, snapshot.wrapX);
   if (!norm) return false;
@@ -440,85 +432,11 @@ export const isInEnemyZoc = (snapshot: ZocSnapshot, coord: HexCoord, ownFactionI
   return false;
 };
 
-// -------------------------------------
-// Break outcome (was: ground/breakOutcome.ts)
-// -------------------------------------
-
-export type BreakOutcome = { type: 'retreat'; to: HexCoord } | { type: 'overrun' };
-
-export const chooseDefenderRetreat = (params: {
-  state: GameState;
-  defender: Army;
-  from: HexCoord;
-  zocSnapshot: ZocSnapshot | null;
-  isOccupied: (coord: HexCoord) => boolean;
-}): BreakOutcome => {
-  const { state, defender, from, zocSnapshot, isOccupied } = params;
-  const map = generateSurfaceMapForState(state, defender.containerId);
-  if (!map) return { type: 'overrun' };
-  const { w, h, wrapX } = map.descriptor.config;
-
-  const candidates = neighborsAxial(from, w, h, wrapX)
-    .filter(c => {
-      const tile = map.tiles[c.r * w + c.q];
-      if (!tile || !isPassable(tile.biome)) return false;
-      if (isOccupied(c)) return false;
-      return true;
-    })
-    .map(c => {
-      const inEnemy = zocSnapshot ? isInEnemyZoc(zocSnapshot, c, defender.factionId) : false;
-      // Pressure heuristic: count adjacent enemy-zoc tiles.
-      let pressure = 0;
-      if (zocSnapshot) {
-        const ns = neighborsAxial(c, w, h, wrapX);
-        for (const n of ns) {
-          if (isInEnemyZoc(zocSnapshot, n, defender.factionId)) pressure += 1;
-        }
-      }
-      return { coord: c, inEnemy, pressure };
-    });
-
-  if (candidates.length === 0) return { type: 'overrun' };
-
-  const compare = (
-    a: { coord: HexCoord; inEnemy: boolean; pressure: number },
-    b: { coord: HexCoord; inEnemy: boolean; pressure: number }
-  ) => {
-    // Prefer out of enemy ZOC, then lower pressure, then stable (r, q).
-    if (a.inEnemy !== b.inEnemy) return a.inEnemy ? 1 : -1;
-    if (a.pressure !== b.pressure) return a.pressure - b.pressure;
-    if (a.coord.r !== b.coord.r) return a.coord.r - b.coord.r;
-    return a.coord.q - b.coord.q;
-  };
-
-  let best = candidates[0];
-  for (let i = 1; i < candidates.length; i += 1) {
-    const c = candidates[i];
-    if (compare(c, best) < 0) best = c;
-  }
-
-  return { type: 'retreat', to: best.coord };
-};
-
-export const applyOverrunPenalty = (army: Army): Army => {
-  // Deterministic penalty when no retreat is possible.
-  const extraLoss = Math.max(1, Math.floor(army.members * 0.1));
-  const members = Math.max(0, army.members - extraLoss);
-  const condition = clamp(army.condition - 0.05, 0, 1);
-  return { ...army, members, condition };
-};
-
 // ---------------------------
 // Supply (was: ground/supply.ts)
 // ---------------------------
 
 const INF = 0xffff;
-
-export const computeSupplyDistanceMapForBody = (state: GameState, bodyId: string, factionId: FactionId): Uint16Array | null => {
-  const map = generateSurfaceMapForState(state, bodyId);
-  if (!map) return null;
-  return computeSupplyDistanceMapFromSurfaceMap(map, state.groundBuildings ?? [], state.settlementControl, factionId);
-};
 
 export const computeSupplyDistanceMapFromSurfaceMap = (
   map: PlanetSurfaceMap,
@@ -1036,7 +954,7 @@ export const executeMoveOrder = (params: {
     return cost;
   };
 
-  const stepCostCenti = (a: HexCoord, b: HexCoord): number => {
+  const stepCostCenti = (_from: HexCoord, b: HexCoord): number => {
     let cost = getBaseMoveCostCenti(b);
     if (friendlyCount(b) > 0) cost *= 2;
     return cost;

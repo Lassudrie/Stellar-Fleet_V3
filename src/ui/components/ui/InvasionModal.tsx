@@ -134,7 +134,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
                   </div>
                   
                   <div className="px-3 pb-2 flex gap-1 flex-wrap">
-                    {transports.map((ship, i) => (
+                    {transports.map((_ship, i) => (
                         <div key={i} className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded border border-slate-700/50">
                              <div className="w-1.5 h-1.5 bg-red-500 rounded-full"></div>
                              <span className="text-[9px] font-mono text-slate-400">ARMY</span>

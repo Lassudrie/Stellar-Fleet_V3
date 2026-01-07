@@ -72,7 +72,6 @@ import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './plan
 // ============================================================
 
 export const SAVE_VERSION = 5 as const;
-export type SaveVersion = typeof SAVE_VERSION;
 
 // --- DTOs (Data Transfer Objects) ---
 

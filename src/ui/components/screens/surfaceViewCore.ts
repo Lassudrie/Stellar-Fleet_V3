@@ -1,10 +1,9 @@
-import { Biome, HexCoord, PlanetSurfaceMap, SurfacePos } from '../../../shared/shared';
+import { HexCoord, PlanetSurfaceMap, SurfacePos } from '../../../shared/shared';
 import { fnv1a32 } from '../../../engine/planetSurface';
 
 export const HEX_SIZE = 12;
 export const MIN_ZOOM = 0.20;
 export const MAX_ZOOM = 4.00;
-export const TERRAIN_ZOOM_STEP = 0.05;
 export const CLICK_DRAG_THRESHOLD_PX = 6;
 export const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 export const PAN_MARGIN_PX = 40;
@@ -13,12 +12,6 @@ export const CENTER_SLOP_PX = 24; // tolerance to prevent hard snapping when map
 export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 export const clampAffinity = (v: number | undefined): number => clamp(v ?? 1, 0.7, 1.3);
-
-export const approxRngRange = (r0: number, eps = 0.08): { min: number; max: number } => {
-  const min = r0 * ((1 - eps) / (1 + eps));
-  const max = r0 * ((1 + eps) / (1 - eps));
-  return { min, max };
-};
 
 export const sameHex = (a: HexCoord | null, b: HexCoord | null): boolean => {
   if (a === b) return true;
@@ -139,24 +132,6 @@ export const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['confi
   };
 };
 
-export const computeFitZoom = (
-  viewport: { width: number; height: number },
-  bounds: MapBoundsPx,
-  minZoom: number
-): number => {
-  const pad = 0.94;
-  const zx = viewport.width / Math.max(1, bounds.width);
-  const zy = viewport.height / Math.max(1, bounds.height);
-  const fit = Math.min(zx, zy) * pad;
-  // Avoid auto-zooming in above 1 (keeps the feel consistent on large screens).
-  return clamp(fit, minZoom, 1);
-};
-
-export const quantizeZoom = (zoom: number, step: number, minZoom: number, maxZoom: number): number => {
-  const snapped = Math.round(zoom / step) * step;
-  return clamp(snapped, minZoom, maxZoom);
-};
-
 export const normalizePos = (pos: SurfacePos | undefined, config: PlanetSurfaceMap['descriptor']['config']): HexCoord | null => {
   if (!pos) return null;
   const q = wrapQ(Math.round(pos.q), config.w, config.wrapX);
@@ -195,18 +170,8 @@ export const surfaceMapKey = (surfaceMap: PlanetSurfaceMap): string => {
   ].join('|');
 };
 
-export type TerrainBufferContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-
-export type TerrainBuffer = {
-  key: string;
-  zoom: number;
-  dpr: number;
-  bounds: MapBoundsPx;
-  canvas: OffscreenCanvas | HTMLCanvasElement;
-};
-
 export const drawHex = (
-  ctx: TerrainBufferContext,
+  ctx: CanvasRenderingContext2D,
   center: { x: number; y: number },
   size: number,
   options: { fill?: string; stroke?: string; lineWidth?: number }
@@ -229,57 +194,4 @@ export const drawHex = (
     if (typeof options.lineWidth === 'number') ctx.lineWidth = options.lineWidth;
     ctx.stroke();
   }
-};
-
-export const renderTerrainLayer = (
-  mapToRender: PlanetSurfaceMap,
-  config: PlanetSurfaceMap['descriptor']['config'],
-  zoom: number,
-  dpr: number,
-  hexSize: number,
-  biomePalette: Record<Biome, string>
-): TerrainBuffer | null => {
-  const bounds = computeMapBoundsPx(config, hexSize);
-  const width = Math.max(1, Math.ceil(bounds.width * zoom * dpr));
-  const height = Math.max(1, Math.ceil(bounds.height * zoom * dpr));
-
-  const canvas: OffscreenCanvas | HTMLCanvasElement = typeof OffscreenCanvas !== 'undefined'
-    ? new OffscreenCanvas(width, height)
-    : (() => {
-      const el = document.createElement('canvas');
-      el.width = width;
-      el.height = height;
-      return el;
-    })();
-
-  const context = canvas.getContext('2d');
-  if (!context || !('clearRect' in context)) return null;
-  const ctx = context as TerrainBufferContext;
-
-  const gridStroke = 'rgba(148, 163, 184, 0.22)';
-  const hex = hexSize * zoom * dpr;
-
-  ctx.clearRect(0, 0, width, height);
-
-  for (let r = 0; r < config.h; r += 1) {
-    for (let q = 0; q < config.w; q += 1) {
-      const tile = mapToRender.tiles[r * config.w + q];
-      if (!tile) continue;
-      const { x, y } = gridToPixel({ q, r }, hexSize);
-      const center = {
-        x: (x - bounds.minX) * zoom * dpr,
-        y: (y - bounds.minY) * zoom * dpr
-      };
-      const color = biomePalette[tile.biome] ?? '#334155';
-      drawHex(ctx, center, hex, { fill: color, stroke: gridStroke, lineWidth: 0.75 * dpr });
-    }
-  }
-
-  return {
-    key: surfaceMapKey(mapToRender),
-    zoom,
-    dpr,
-    bounds,
-    canvas
-  };
 };

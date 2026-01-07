@@ -836,12 +836,6 @@ const logWithLevel =
     }
   };
 
-export const setLogLevel = (level: LogLevel): void => {
-  currentLevel = level;
-};
-
-export const getLogLevel = (): LogLevel => currentLevel;
-
 export const logger = {
   error: logWithLevel('error', 'error'),
   warn: logWithLevel('warn', 'warn'),
@@ -853,7 +847,6 @@ export const logger = {
 export const devLog = (...args: Parameters<typeof console.log>) => logger.debug(...args);
 export const devWarn = (...args: Parameters<typeof console.warn>) => logger.warn(...args);
 export const devError = (...args: Parameters<typeof console.error>) => logger.error(...args);
-export const devInfo = (...args: Parameters<typeof console.info>) => logger.info(...args);
 
 export const sorted = <T>(items: readonly T[], compareFn?: (a: T, b: T) => number): T[] => {
   // eslint-disable-next-line no-restricted-syntax -- the copy ensures callers keep immutability
@@ -877,12 +870,4 @@ export const shortId = (id: string): string => {
   if (!normalized) return '???';
 
   return normalized.slice(0, 8).toUpperCase();
-};
-
-/**
- * Returns a standardized label for fleets.
- * Example: "FLEET A1B2C3"
- */
-export const fleetLabel = (id: string): string => {
-  return `FLEET ${shortId(id)}`;
 };

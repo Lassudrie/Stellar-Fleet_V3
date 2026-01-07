@@ -1,6 +1,6 @@
 
-import { StarSystem, Fleet, FactionId, ShipType, ShipEntity } from '../shared/shared';
-import { SENSOR_RANGE, SHIP_STATS } from '../content/data/static';
+import { StarSystem, Fleet, ShipType, ShipEntity } from '../shared/shared';
+import { SHIP_STATS } from '../content/data/static';
 import { RNG } from './rng';
 import { Vec3, distSq } from './math/vec3';
 import { devWarn } from '../shared/shared';
@@ -11,18 +11,6 @@ const DISTANCE_TOLERANCE = 1e-6;
 
 export const getSystemById = (systems: StarSystem[], id: string): StarSystem | undefined => {
   return systems.find(s => s.id === id);
-};
-
-export const getDistanceSquared = (a: Vec3, b: Vec3): number => {
-  return distSq(a, b);
-};
-
-export const getFleetsForFaction = (fleets: Fleet[], factionId: FactionId): Fleet[] => {
-  return fleets.filter(f => f.factionId === factionId);
-};
-
-export const getFleetsAtSystem = (fleets: Fleet[], systemPosition: Vec3, threshold = 2.0): Fleet[] => {
-  return fleets.filter(f => distSq(f.position, systemPosition) < threshold * threshold);
 };
 
 export const findNearestSystem = (systems: StarSystem[], position: Vec3): StarSystem | null => {
@@ -44,21 +32,6 @@ export const findNearestSystem = (systems: StarSystem[], position: Vec3): StarSy
     }
   }
   return nearest;
-};
-
-// --- STRATEGIC ANALYSIS ---
-
-export const getVisibleEnemies = (myFleet: Fleet, allFleets: Fleet[]): Fleet[] => {
-  const visible: Fleet[] = [];
-  const sensorSq = SENSOR_RANGE * SENSOR_RANGE;
-
-  for (const other of allFleets) {
-    if (other.factionId === myFleet.factionId) continue;
-    if (distSq(myFleet.position, other.position) < sensorSq) {
-      visible.push(other);
-    }
-  }
-  return visible;
 };
 
 // V1 Power Calculation: Robust estimation including HP, DPS and Burst capability

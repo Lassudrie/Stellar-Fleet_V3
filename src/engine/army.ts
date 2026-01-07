@@ -1,5 +1,5 @@
 
-import { Army, ArmyState, FactionId, GameState, ShipEntity, ShipType, Fleet, PlanetBody, GroundUnitType } from '../shared/shared';
+import { Army, ArmyState, FactionId, GameState, ShipType, Fleet, GroundUnitType } from '../shared/shared';
 import { RNG } from './rng';
 import { logger } from '../shared/shared';
 import { getPlanetById } from './planets';
@@ -241,82 +241,6 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
         },
         logs
     };
-};
-
-// --- TRANSPORT LOGIC ---
-
-/**
- * Checks if a ship is a valid candidate to carry an army.
- * Rule 1: Must be TRANSPORTER.
- * Rule 2: Must be empty.
- */
-export const canLoadArmy = (ship: ShipEntity): boolean => {
-    if (ship.type !== ShipType.TRANSPORTER) return false;
-    if (ship.carriedArmyId) return false; // Already full
-    return true;
-};
-
-/**
- * Loads an army into a transport ship.
- * Updates both the Ship (carriedArmyId) and the Army (state, containerId).
- * 
- * @returns true if successful, false if validation failed.
- */
-export const loadArmyIntoShip = (army: Army, ship: ShipEntity, fleet: Fleet): boolean => {
-    if (!canLoadArmy(ship)) {
-        logger.error(`[Army] Load Failed: Ship ${ship.id} cannot carry army.`);
-        return false;
-    }
-    
-    if (army.factionId !== fleet.factionId) {
-        logger.error('[Army] Load Failed: Faction mismatch.');
-        return false;
-    }
-
-    if (army.state !== ArmyState.DEPLOYED) {
-        logger.error(`[Army] Load Failed: Army ${army.id} is not deployed (State: ${army.state}).`);
-        return false;
-    }
-
-    // Mutate State (Simulated)
-    ship.carriedArmyId = army.id;
-    army.containerId = fleet.id;
-    army.state = ArmyState.EMBARKED;
-    
-    logger.debug(`[Army] ${army.id} EMBARKED into ${ship.type} ${ship.id} (Fleet ${fleet.id}).`);
-    return true;
-};
-
-/**
- * Unloads an army from a ship to a planet.
- * 
- * @returns true if successful.
- */
-export const deployArmyToSystem = (army: Army, ship: ShipEntity, planet: PlanetBody): boolean => {
-    if (ship.carriedArmyId !== army.id) {
-        logger.warn(`[Army] Deploy Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-        return false;
-    }
-
-    ship.carriedArmyId = null;
-    army.state = ArmyState.DEPLOYED;
-    army.containerId = planet.id;
-    
-    logger.info(`[Army] ${army.id} DEPLOYED to ${planet.name}.`);
-    return true;
-};
-
-/**
- * Unloads an army from a ship (Generic / Destruction context).
- * Does NOT set new state (Caller must handle that, e.g. deleting army).
- */
-export const unloadArmyFromShip = (army: Army, ship: ShipEntity): void => {
-    if (ship.carriedArmyId === army.id) {
-        ship.carriedArmyId = null;
-        logger.info(`[Army] ${army.id} UNLOADED from ${ship.id}.`);
-    } else {
-        logger.warn(`[Army] Unload Warning: Ship ${ship.id} does not carry army ${army.id}.`);
-    }
 };
 
 /**

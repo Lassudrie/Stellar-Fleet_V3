@@ -276,7 +276,7 @@ Effets:
   - projectionRange = 0
 - Ralliement:
   - si pas de combat pendant 2 tours, appliquer recovery
-  - sortie de routed si morale >= RALLY_THRESHOLD
+  - sortie de routed si morale >= BREAK_THRESHOLD
 
 ### 11.3 Fatigue
 
@@ -442,7 +442,6 @@ Constantes globales:
 - CONDITION_LOSS_COEFF = 0.60
 - MORALE_LOSS_COEFF = 0.60
 - BREAK_THRESHOLD = 0.25
-- RALLY_THRESHOLD = 0.40
 - ROUTED_ATK_MULT = 0.70
 - ROUTED_DEF_MULT = 0.70
 - ROUTED_MP_MULT = 0.50

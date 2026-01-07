@@ -3,7 +3,7 @@ import { generateWorld } from '../../engine/worldgen/worldGenerator';
 import { deserializeGameState } from '../../engine/serialization';
 import { getPlanetById } from '../../engine/planets';
 import type { GameScenario } from '../../content/scenarios';
-import type { GameState, PlanetSurfaceDescriptor, PlanetSurfaceMap, StarSystem } from '../../shared/shared';
+import type { GameState, PlanetSurfaceMap, StarSystem } from '../../shared/shared';
 import type {
   SurfaceMapWorkerRequest,
   SurfaceMapWorkerResponseMessage,
@@ -29,12 +29,6 @@ type PendingBootstrapRequest = {
   resolve: (state: GameState) => void;
   reject: (error: Error) => void;
   onProgress?: (update: BootstrapProgressUpdate) => void;
-};
-
-export type SurfaceMapRequestPayload = {
-  bodyId: string;
-  descriptor: PlanetSurfaceDescriptor;
-  system: StarSystem;
 };
 
 export class SurfaceMapWorkerClient {

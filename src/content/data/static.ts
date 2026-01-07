@@ -1,15 +1,8 @@
 
 import { ShipType, ShipStats } from '../../shared/shared';
 
-export const GALAXY_RADIUS = 100;
-export const SYSTEM_COUNT = 100;
-
-// Feature Flags
-export const ENABLE_V1_COMBAT = true;
-
 // Speed = Units per Day. 
 export const BASE_FLEET_SPEED = 25; 
-export const COMBAT_RANGE = 8;
 export const SENSOR_RANGE = 15;
 export const CAPTURE_RANGE = 5;
 export const CAPTURE_RANGE_SQ = CAPTURE_RANGE * CAPTURE_RANGE;

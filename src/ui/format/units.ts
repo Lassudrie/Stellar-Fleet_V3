@@ -7,11 +7,6 @@ export const formatAu = (value: number | undefined, fallback = DEFAULT_FALLBACK)
   return `${value.toFixed(2)} AU`;
 };
 
-export const formatKm = (value: number | undefined, fallback = DEFAULT_FALLBACK): string => {
-  if (!isFiniteNumber(value)) return fallback;
-  return `${value.toLocaleString('en-US', { maximumFractionDigits: 0 })} km`;
-};
-
 export const formatGravity = (value: number | undefined, fallback = DEFAULT_FALLBACK): string => {
   if (!isFiniteNumber(value)) return fallback;
   return `${value.toFixed(2)} g`;

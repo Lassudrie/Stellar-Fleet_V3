@@ -206,11 +206,6 @@ export const getPlanetById = (systems: StarSystem[], planetId: string): { system
   return null;
 };
 
-export const getSystemByPlanetId = (systems: StarSystem[], planetId: string): StarSystem | null => {
-  const match = getPlanetById(systems, planetId);
-  return match ? match.system : null;
-};
-
 export const getSolidPlanets = (system: StarSystem): PlanetBody[] =>
   system.planets.filter(body => body.isSolid);
 

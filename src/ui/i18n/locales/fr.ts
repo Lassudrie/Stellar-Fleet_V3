@@ -26,13 +26,6 @@ export const fr = {
   'scenario.spiral_convergence.title': 'Convergence Spiralée',
   'scenario.spiral_convergence.desc': 'Des coalitions rivales se dirigent vers le noyau galactique le long d\'un bras spiral, en combinant expansion et invasions au sol.',
 
-  // New Game Screen
-  'newgame.title': 'Nouvelle Simulation',
-  'newgame.subtitle': 'Configuration des paramètres d\'initialisation.',
-  'newgame.faction': 'Faction',
-  'newgame.cancel': 'Annuler',
-  'newgame.launch': 'Lancer',
-
   // Load/Options Placeholders
   'screen.underConstruction': '[ MODULE EN CONSTRUCTION ]',
   'screen.return': 'Retour',

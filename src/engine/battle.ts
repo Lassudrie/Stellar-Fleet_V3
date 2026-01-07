@@ -138,8 +138,6 @@ export const TORPEDO_HP = BALANCE_PROFILE.defense.torpedoHp;
 // Battle types (was: battle/types.ts)
 // -------------------------------------
 
-export type WeaponType = 'kinetic' | 'missile' | 'torpedo';
-
 export interface Projectile {
   id: string;
   type: 'missile' | 'torpedo';
@@ -1174,4 +1172,3 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
     destroyedArmyIds: Array.from(destroyedArmyIds)
   };
 }
-
