@@ -107,13 +107,16 @@ export const lineOfSight = (params: {
   const { from, to, map, isBlocked } = params;
   const { w, h, wrapX } = map.descriptor.config;
   const fromNorm = normalizeCoord(from, w, h, wrapX);
-  const toAdj = adjustTargetForWrap(from, to, w, wrapX);
-  const toNorm = normalizeCoord(toAdj, w, h, wrapX);
+  const toNorm = normalizeCoord(to, w, h, wrapX);
   if (!fromNorm || !toNorm) return false;
 
+  // For wrapX maps, unroll "to" so that dq is the minimal delta before rasterization.
+  // We still normalize sampled points back into [0..w) for tile access and blockers.
+  const toUnwrapped = adjustTargetForWrap(fromNorm, toNorm, w, wrapX);
+
   const a = axialToCube(fromNorm);
-  const b = axialToCube(toNorm);
-  const dist = hexDistance(fromNorm, toNorm, w, wrapX);
+  const b = axialToCube(toUnwrapped);
+  const dist = hexDistance(fromNorm, toUnwrapped, w, false);
   if (dist <= 1) return true;
 
   for (let i = 1; i < dist; i += 1) {
@@ -203,6 +206,7 @@ export const MORALE_RECOVERY = 0.20;
 export const CONDITION_RECOVERY = 0.05;
 export const POST_BATTLE_MORALE_CAP = 0.35;
 export const POST_BATTLE_FATIGUE_ADD = 0.15;
+export const PREPARED_DEFENSE_MULT = 1.2;
 export const LANDING_BASE = 0.10;
 export const LANDING_VAR = 0.15;
 export const LANDING_MAX = 0.60;
@@ -212,7 +216,17 @@ export const AO_COEFF = 0.15;
 export const AO_LANDING_COEFF = 0.05;
 export const AO_LANDING_MAX = 0.15;
 
+export const BOMBARD_COMBAT_MULT = 0.9;
+export const BOMBARD_COMBAT_CONDITION_LOSS = 0.05;
+
 export const isRouted = (army: Army): boolean => army.morale < BREAK_THRESHOLD;
+
+export const isPreparedDefenseActive = (army: Army, turn?: number): boolean => {
+  if (army.posture !== 'prepared_defense') return false;
+  if (!Number.isFinite(army.postureSetTurn)) return true;
+  if (!Number.isFinite(turn)) return true;
+  return turn > (army.postureSetTurn ?? turn);
+};
 
 export const computeStackingFactor = (index: number): number => {
   if (index < STACKING_FREE_SLOTS) return 1;
@@ -755,7 +769,7 @@ export const computeKBreakdown = (params: {
   const kTerrain = kTerrainBase * kAffinity;
 
   const situation: Array<{ label: string; k: number }> = [];
-  if (situationFlags.preparedDefense) situation.push({ label: 'prepared_defense', k: 1.2 });
+  if (situationFlags.preparedDefense) situation.push({ label: 'prepared_defense', k: PREPARED_DEFENSE_MULT });
   if (situationFlags.encirclement) situation.push({ label: 'encirclement', k: 1.4 });
   if (situationFlags.spent75pctMp) situation.push({ label: 'spent_75pct_mp', k: 0.9 });
   if (situationFlags.amphibiousOrAirborneAssault) situation.push({ label: 'amphibious_or_airborne', k: 0.7 });
@@ -1015,7 +1029,8 @@ export const executeMoveOrder = (params: {
     ? {
         ...army,
         surfacePos: { bodyId: army.containerId, q: pos.q, r: pos.r },
-        fatigue: clamp(army.fatigue + fatigue, 0, 1)
+        fatigue: clamp(army.fatigue + fatigue, 0, 1),
+        ...(army.posture === 'prepared_defense' ? { posture: 'normal', postureSetTurn: undefined } : {})
       }
     : army;
 
@@ -1150,6 +1165,7 @@ const computeDefensePowerBase = (params: {
   terrainType: TerrainType;
   supplied: boolean;
   stackingFactor: number;
+  turn?: number;
 }): number => {
   const { army, terrainType, supplied, stackingFactor } = params;
   if (army.members <= 0) return 0;
@@ -1163,8 +1179,10 @@ const computeDefensePowerBase = (params: {
     supplyDefFactor(supplied) *
     fatigueFactor(army) *
     clamp(stackingFactor, 0, 1);
-  const routedMult = isRouted(army) ? ROUTED_DEF_MULT : 1;
-  return base * routedMult;
+  const routed = isRouted(army);
+  const routedMult = routed ? ROUTED_DEF_MULT : 1;
+  const preparedDefenseMult = !routed && isPreparedDefenseActive(army, params.turn) ? PREPARED_DEFENSE_MULT : 1;
+  return base * routedMult * preparedDefenseMult;
 };
 
 const distributeLosses = (
@@ -1230,12 +1248,13 @@ const distributeLosses = (
   return losses;
 };
 
-const applyCombatLosses = (army: Army, losses: number, turn: number): Army => {
+const applyCombatLosses = (army: Army, losses: number, turn: number, params?: { bombarded?: boolean }): Army => {
   const membersBefore = Math.max(0, army.members);
   const clampedLosses = Math.min(membersBefore, Math.max(0, losses));
   const membersAfter = Math.max(0, membersBefore - clampedLosses);
   const lossRatio = membersBefore > 0 ? clampedLosses / membersBefore : 0;
-  const conditionAfter = clamp(army.condition - CONDITION_LOSS_COEFF * lossRatio, 0, 1);
+  const bombardConditionLoss = params?.bombarded ? BOMBARD_COMBAT_CONDITION_LOSS : 0;
+  const conditionAfter = clamp(army.condition - CONDITION_LOSS_COEFF * lossRatio - bombardConditionLoss, 0, 1);
   const moraleAfter = clamp(army.morale - MORALE_LOSS_COEFF * lossRatio, 0, 1);
   const fatigueAfter = clamp(army.fatigue + FATIGUE_COMBAT_ADD, 0, 1);
   return {
@@ -1255,13 +1274,23 @@ const computeEngagementMetrics = (params: {
   buildings: GroundBuilding[];
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
+  turn?: number;
+  bombardedKeys?: Set<string> | null;
 }): EngagementPreview => {
   const { rngAtk, rngDef, map, buildings, attackers, defender } = params;
+  const bombardedKeys = params.bombardedKeys ?? null;
   const defenderArmy = defender.army;
   const defenderPos = defenderArmy.surfacePos ? { q: defenderArmy.surfacePos.q, r: defenderArmy.surfacePos.r } : { q: 0, r: 0 };
   const defenderTerrain = deriveTerrainTypeFromSurfaceMap(map, buildings, defenderPos);
   const coverFactor = computeCoverFactorAtCoord(map, buildings, defenderPos);
   const fortifFactor = computeFortifFactorAtCoord(buildings, map.bodyId, defenderPos);
+  const { w, h, wrapX } = map.descriptor.config;
+  const isBombardedAt = (coord: HexCoord): boolean => {
+    if (!bombardedKeys) return false;
+    const norm = normalizeCoord(coord, w, h, wrapX);
+    if (!norm) return false;
+    return bombardedKeys.has(hexKey(norm));
+  };
 
   const attackerEntries = attackers.map(attacker => {
     const pos = attacker.army.surfacePos ? { q: attacker.army.surfacePos.q, r: attacker.army.surfacePos.r } : { q: 0, r: 0 };
@@ -1272,7 +1301,7 @@ const computeEngagementMetrics = (params: {
       supplied: attacker.supplied,
       stackingFactor: attacker.stackingFactor,
       frontAssault: attacker.frontAssault
-    });
+    }) * (isBombardedAt(pos) ? BOMBARD_COMBAT_MULT : 1);
     return { id: attacker.army.id, members: attacker.army.members, basePower };
   });
 
@@ -1283,8 +1312,9 @@ const computeEngagementMetrics = (params: {
     army: defenderArmy,
     terrainType: defenderTerrain,
     supplied: defender.supplied,
-    stackingFactor: defender.stackingFactor
-  });
+    stackingFactor: defender.stackingFactor,
+    turn: params.turn
+  }) * (isBombardedAt(defenderPos) ? BOMBARD_COMBAT_MULT : 1);
   const defensePower = defenseBase * coverFactor * fortifFactor * rngDef;
 
   const totalPower = attackPower + defensePower;
@@ -1321,6 +1351,8 @@ export const previewEngagement = (params: {
   buildings: GroundBuilding[];
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
+  turn?: number;
+  bombardedKeys?: Set<string> | null;
 }): EngagementPreview => {
   return computeEngagementMetrics({
     rngAtk: 1,
@@ -1328,7 +1360,9 @@ export const previewEngagement = (params: {
     map: params.map,
     buildings: params.buildings,
     attackers: params.attackers,
-    defender: params.defender
+    defender: params.defender,
+    turn: params.turn,
+    bombardedKeys: params.bombardedKeys
   });
 };
 
@@ -1338,6 +1372,7 @@ export const resolveEngagement = (params: {
   buildings: GroundBuilding[];
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
+  bombardedKeys?: Set<string> | null;
 }): EngagementResult => {
   const attackerIds = sorted(
     params.attackers.map(attacker => attacker.army.id),
@@ -1354,14 +1389,28 @@ export const resolveEngagement = (params: {
     map: params.map,
     buildings: params.buildings,
     attackers: params.attackers,
-    defender: params.defender
+    defender: params.defender,
+    turn: params.turn,
+    bombardedKeys: params.bombardedKeys
   });
+
+  const { w, h, wrapX } = params.map.descriptor.config;
+  const isBombardedAt = (coord: HexCoord | null | undefined): boolean => {
+    if (!params.bombardedKeys || !coord) return false;
+    const norm = normalizeCoord(coord, w, h, wrapX);
+    if (!norm) return false;
+    return params.bombardedKeys.has(hexKey(norm));
+  };
 
   const attackersAfter = params.attackers.map(attacker => {
     const losses = metrics.lossesByAttackerId[attacker.army.id] ?? 0;
-    return applyCombatLosses(attacker.army, losses, params.turn);
+    const coord = attacker.army.surfacePos ? { q: attacker.army.surfacePos.q, r: attacker.army.surfacePos.r } : null;
+    return applyCombatLosses(attacker.army, losses, params.turn, { bombarded: isBombardedAt(coord) });
   });
-  const defenderAfter = applyCombatLosses(params.defender.army, metrics.lossesDef, params.turn);
+  const defenderCoord = params.defender.army.surfacePos
+    ? { q: params.defender.army.surfacePos.q, r: params.defender.army.surfacePos.r }
+    : null;
+  const defenderAfter = applyCombatLosses(params.defender.army, metrics.lossesDef, params.turn, { bombarded: isBombardedAt(defenderCoord) });
 
   return {
     ...metrics,

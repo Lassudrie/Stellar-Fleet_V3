@@ -436,6 +436,7 @@ export interface Army {
   // --- Metadata (not part of combat formulas) ---
   unitType: GroundUnitType;
   posture?: GroundPosture;
+  postureSetTurn?: number;
   groundOrders?: GroundOrders;
   landingOrder?: GroundLandOrder;
   /**

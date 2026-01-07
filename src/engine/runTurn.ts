@@ -977,6 +977,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     const map = getSurfaceMap(bodyId);
     if (!map) return;
     const buildings = state.groundBuildings ?? [];
+    const bombardedKeys = bombardedHexKeysByBodyId.get(bodyId) ?? new Set<string>();
     const bodyArmies = sorted(deployedArmiesByBodyId.get(bodyId) ?? [], (a, b) => a.id.localeCompare(b.id));
     if (bodyArmies.length === 0) return;
     const { w, h, wrapX } = map.descriptor.config;
@@ -1253,6 +1254,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         turn: ctx.turn,
         map,
         buildings,
+        bombardedKeys,
         attackers,
         defender: {
           army: defender,
@@ -1262,12 +1264,16 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       });
 
       engagement.attackersAfter.forEach(updated => {
-        armiesById.set(updated.id, updated);
-        combatParticipants.add(updated.id);
-        if (updated.members <= 0) {
-          removeArmyIds.add(updated.id);
-          if (updated.surfacePos) {
-            removeFromOccupancy({ q: updated.surfacePos.q, r: updated.surfacePos.r }, updated.id);
+        const attackerAfter: Army =
+          updated.posture === 'prepared_defense'
+            ? { ...updated, posture: 'normal', postureSetTurn: undefined }
+            : updated;
+        armiesById.set(attackerAfter.id, attackerAfter);
+        combatParticipants.add(attackerAfter.id);
+        if (attackerAfter.members <= 0) {
+          removeArmyIds.add(attackerAfter.id);
+          if (attackerAfter.surfacePos) {
+            removeFromOccupancy({ q: attackerAfter.surfacePos.q, r: attackerAfter.surfacePos.r }, attackerAfter.id);
           }
         }
       });

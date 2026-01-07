@@ -52,7 +52,17 @@ import { SpatialIndex } from '../spatialIndex';
 import { deepFreezeDev } from '../state';
 import { buildPlanetBodies } from '../planets';
 import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState, neighborsAxial } from '../planetSurface';
-import { computeKBreakdown, deriveTerrainType, previewEngagement, resolveEngagement, rollTriangularCentered } from '../ground';
+import {
+  BOMBARD_COMBAT_CONDITION_LOSS,
+  BOMBARD_COMBAT_MULT,
+  PREPARED_DEFENSE_MULT,
+  computeKBreakdown,
+  deriveTerrainType,
+  lineOfSight,
+  previewEngagement,
+  resolveEngagement,
+  rollTriangularCentered
+} from '../ground';
 import { RNG_SEED_1_SEQUENCE } from './fixtures/rngSequence';
 import { RNG_GAUSSIAN_SEED_1_SEQUENCE } from './fixtures/rngGaussianSequence';
 
@@ -4839,6 +4849,25 @@ const groundCombatMap: PlanetSurfaceMap = {
   settlements: []
 };
 
+const wrapLosMap: PlanetSurfaceMap = {
+  systemId: 'sys-los-wrap',
+  bodyId: 'body-los-wrap',
+  descriptor: {
+    seed: 1,
+    config: { w: 10, h: 3, wrapX: true, generatorVersion: 1 },
+    astroRef: { planetIndex: 0 }
+  },
+  seaLevelElev: 0,
+  tiles: Array.from({ length: 30 }, () => ({
+    elev: 0,
+    tempC2: 0,
+    moist: 0,
+    biome: 'grassland',
+    featureBits: 0
+  })),
+  settlements: []
+};
+
 const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
   const base: Army = {
     id: overrides.id,
@@ -4863,6 +4892,30 @@ const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factio
 };
 
 tests.push(
+  {
+    name: 'LOS wrapX uses the shortest path (seam blocker blocks)',
+    run: () => {
+      const hasLos = lineOfSight({
+        map: wrapLosMap,
+        from: { q: 0, r: 1 },
+        to: { q: 8, r: 1 },
+        isBlocked: coord => coord.q === 9 && coord.r === 1
+      });
+      assert.strictEqual(hasLos, false);
+    }
+  },
+  {
+    name: 'LOS wrapX uses the shortest path (long-side blocker does not block)',
+    run: () => {
+      const hasLos = lineOfSight({
+        map: wrapLosMap,
+        from: { q: 0, r: 1 },
+        to: { q: 8, r: 1 },
+        isBlocked: coord => coord.q === 4 && coord.r === 1
+      });
+      assert.strictEqual(hasLos, true);
+    }
+  },
   {
     name: 'Ground order commands reject non-player armies',
     run: () => {
@@ -4900,6 +4953,67 @@ tests.push(
       );
       assert.strictEqual(cancel.ok, false);
       assert.strictEqual(cancel.error, 'Not your army');
+    }
+  },
+  {
+    name: 'SET_GROUND_POSTURE writes postureSetTurn (and clears it on normal)',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const bodyId = 'body-ground-orders';
+      const army = groundCombatMkArmy({
+        id: 'player-1',
+        factionId: 'blue',
+        containerId: bodyId,
+        surfacePos: { bodyId, q: 0, r: 0 }
+      });
+
+      const state: GameState = { ...base, day: 12, armies: [army] };
+
+      const prepared = applyCommand(
+        state,
+        { type: 'SET_GROUND_POSTURE', armyId: army.id, posture: 'prepared_defense' },
+        new RNG(1)
+      );
+      assert.strictEqual(prepared.ok, true);
+      const preparedArmy = prepared.state.armies.find(a => a.id === army.id);
+      assert.ok(preparedArmy);
+      assert.strictEqual(preparedArmy.posture, 'prepared_defense');
+      assert.strictEqual(preparedArmy.postureSetTurn, 12);
+
+      const cleared = applyCommand(
+        prepared.state,
+        { type: 'SET_GROUND_POSTURE', armyId: army.id, posture: 'normal' },
+        new RNG(1)
+      );
+      assert.strictEqual(cleared.ok, true);
+      const clearedArmy = cleared.state.armies.find(a => a.id === army.id);
+      assert.ok(clearedArmy);
+      assert.strictEqual(clearedArmy.posture, 'normal');
+      assert.strictEqual(clearedArmy.postureSetTurn, undefined);
+    }
+  },
+  {
+    name: 'CANCEL_GROUND_ORDER clears landingOrder too',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const bodyId = 'body-ground-orders';
+      const army = groundCombatMkArmy({
+        id: 'player-landing-1',
+        factionId: 'blue',
+        state: ArmyState.EMBARKED,
+        containerId: 'fleet-1',
+        surfacePos: undefined,
+        groundOrders: { move: { type: 'move', to: { bodyId, q: 1, r: 0 } } },
+        landingOrder: { type: 'land', to: { bodyId, q: 0, r: 0 } }
+      });
+
+      const state: GameState = { ...base, armies: [army] };
+      const canceled = applyCommand(state, { type: 'CANCEL_GROUND_ORDER', armyId: army.id }, new RNG(1));
+      assert.strictEqual(canceled.ok, true);
+      const canceledArmy = canceled.state.armies.find(a => a.id === army.id);
+      assert.ok(canceledArmy);
+      assert.strictEqual(canceledArmy.groundOrders, undefined);
+      assert.strictEqual(canceledArmy.landingOrder, undefined);
     }
   },
   {
@@ -4971,6 +5085,134 @@ tests.push(
         defender: { army: defender, supplied: true, stackingFactor: 1 }
       });
       assert.deepStrictEqual(a, b);
+    }
+  },
+  {
+    name: 'bombardedKeys applies combat multiplier + condition loss (defender)',
+    run: () => {
+      const attacker = groundCombatMkArmy({
+        id: 'a',
+        factionId: 'blue',
+        members: 1,
+        maxMembers: 1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 }
+      });
+      const defender = groundCombatMkArmy({
+        id: 'd',
+        factionId: 'red',
+        members: 1,
+        maxMembers: 1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 1, r: 0 }
+      });
+
+      const normal = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+
+      const bombarded = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        bombardedKeys: new Set(['1|0']),
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+
+      assert.ok(Math.abs(bombarded.defensePower - normal.defensePower * BOMBARD_COMBAT_MULT) < 1e-12);
+      assert.strictEqual(bombarded.attackPower, normal.attackPower);
+      assert.strictEqual(normal.lossesDef, 0);
+      assert.strictEqual(bombarded.lossesDef, 0);
+      assert.ok(Math.abs(bombarded.defenderAfter.condition - (normal.defenderAfter.condition - BOMBARD_COMBAT_CONDITION_LOSS)) < 1e-12);
+    }
+  },
+  {
+    name: 'bombardedKeys applies combat multiplier + condition loss (attacker)',
+    run: () => {
+      const attacker = groundCombatMkArmy({
+        id: 'a',
+        factionId: 'blue',
+        members: 1,
+        maxMembers: 1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 }
+      });
+      const defender = groundCombatMkArmy({
+        id: 'd',
+        factionId: 'red',
+        members: 1,
+        maxMembers: 1,
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 1, r: 0 }
+      });
+
+      const normal = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+
+      const bombarded = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        bombardedKeys: new Set(['0|0']),
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defender, supplied: true, stackingFactor: 1 }
+      });
+
+      assert.ok(Math.abs(bombarded.attackPower - normal.attackPower * BOMBARD_COMBAT_MULT) < 1e-12);
+      assert.strictEqual(bombarded.defensePower, normal.defensePower);
+      assert.strictEqual(normal.lossesAtkTotal, 0);
+      assert.strictEqual(bombarded.lossesAtkTotal, 0);
+      assert.ok(
+        Math.abs(bombarded.attackersAfter[0].condition - (normal.attackersAfter[0].condition - BOMBARD_COMBAT_CONDITION_LOSS)) < 1e-12
+      );
+    }
+  },
+  {
+    name: 'prepared defense applies only from next turn',
+    run: () => {
+      const attacker = groundCombatMkArmy({
+        id: 'a',
+        factionId: 'blue',
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 }
+      });
+      const defenderBase = groundCombatMkArmy({
+        id: 'd',
+        factionId: 'red',
+        surfacePos: { bodyId: groundCombatMap.bodyId, q: 1, r: 0 }
+      });
+
+      const normal = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: defenderBase, supplied: true, stackingFactor: 1 }
+      });
+
+      const preparedActive = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTurn: 6 }, supplied: true, stackingFactor: 1 }
+      });
+
+      const preparedThisTurn = resolveEngagement({
+        turn: 7,
+        map: groundCombatMap,
+        buildings: [],
+        attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
+        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTurn: 7 }, supplied: true, stackingFactor: 1 }
+      });
+
+      assert.ok(Math.abs(preparedActive.defensePower - normal.defensePower * PREPARED_DEFENSE_MULT) < 1e-12);
+      assert.ok(Math.abs(preparedThisTurn.defensePower - normal.defensePower) < 1e-12);
     }
   },
   {

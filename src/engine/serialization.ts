@@ -158,6 +158,7 @@ export interface ArmyDTO {
   projectionRange?: number;
 
   posture?: 'normal' | 'prepared_defense';
+  postureSetTurn?: number;
   groundOrder?: any;
   groundOrders?: any;
   landingOrder?: any;
@@ -1276,6 +1277,7 @@ export const serializeGameState = (state: GameState): string => {
       factionId: a.factionId,
       unitType: a.unitType,
       posture: a.posture ?? 'normal',
+      postureSetTurn: Number.isFinite(a.postureSetTurn) ? a.postureSetTurn : undefined,
       groundOrders: a.groundOrders,
       landingOrder: a.landingOrder,
       maxMembers: a.maxMembers,
@@ -1698,12 +1700,14 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         const landingOrder = sanitizeGroundLandOrder(a.landingOrder, planetIds);
         const lastDeployedTurn = isFiniteNumber(a.lastDeployedTurn) ? Math.max(0, Math.floor(a.lastDeployedTurn)) : undefined;
         const lastCombatTurn = isFiniteNumber(a.lastCombatTurn) ? Math.max(0, Math.floor(a.lastCombatTurn)) : undefined;
+        const postureSetTurn = isFiniteNumber(a.postureSetTurn) ? Math.max(0, Math.floor(a.postureSetTurn)) : undefined;
 
         const baseArmy: Army = {
           id: a.id,
           factionId,
           unitType,
           posture,
+          ...(postureSetTurn !== undefined ? { postureSetTurn } : {}),
           groundOrders,
           landingOrder,
           maxMembers,

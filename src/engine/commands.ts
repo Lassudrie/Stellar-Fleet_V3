@@ -182,9 +182,16 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');
             if (army.factionId !== state.playerFactionId) return fail('Not your army');
+            const postureSetTurn = Number.isFinite(executionTurn) ? executionTurn : state.day;
             return ok({
                 ...state,
-                armies: state.armies.map(a => a.id === army.id ? ({ ...a, posture: command.posture }) : a)
+                armies: state.armies.map(a =>
+                  a.id === army.id
+                    ? (command.posture === 'prepared_defense'
+                        ? ({ ...a, posture: command.posture, postureSetTurn })
+                        : ({ ...a, posture: command.posture, postureSetTurn: undefined }))
+                    : a
+                )
             });
         }
 
@@ -194,7 +201,11 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (army.factionId !== state.playerFactionId) return fail('Not your army');
             return ok({
                 ...state,
-                armies: state.armies.map(a => a.id === army.id ? ({ ...a, groundOrders: undefined }) : a)
+                armies: state.armies.map(a =>
+                  a.id === army.id
+                    ? ({ ...a, groundOrders: undefined, landingOrder: undefined })
+                    : a
+                )
             });
         }
 
