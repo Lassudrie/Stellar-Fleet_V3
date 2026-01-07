@@ -9,6 +9,7 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  Euler,
   Group,
   InstancedMesh,
   LinearFilter,
@@ -515,7 +516,7 @@ const positionFromSpherical = (state: CameraSphericalState, target: [number, num
 const buildPlanetModel = (
   planet: PlanetSource,
   index: number,
-  total: number,
+  _total: number,
   sceneScale: number,
   minPlanetRadius: number,
   minMoonRadius: number,
@@ -827,10 +828,10 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     () => new RingGeometry(Math.max(moon.orbitRadius - orbitThickness, 0.0025), moon.orbitRadius + orbitThickness, 96),
     [moon.orbitRadius, orbitThickness]
   );
-  const orbitRotation = useMemo<[number, number, number]>(() => {
+  const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
-    return [-Math.PI / 2 - inclination, ascendingNode, 0];
+    return new Euler(-Math.PI / 2 - inclination, -ascendingNode, 0, 'YXZ');
   }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
@@ -962,10 +963,10 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     () => new RingGeometry(Math.max(planet.orbitRadius - orbitThickness, 0.01), planet.orbitRadius + orbitThickness, 128),
     [orbitThickness, planet.orbitRadius]
   );
-  const orbitRotation = useMemo<[number, number, number]>(() => {
+  const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
-    return [-Math.PI / 2 - inclination, ascendingNode, 0];
+    return new Euler(-Math.PI / 2 - inclination, -ascendingNode, 0, 'YXZ');
   }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
