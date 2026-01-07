@@ -1212,11 +1212,13 @@ const createBodyLabelState = (
   };
 };
 
+const LABEL_RENDER_ORDER = 10;
+
 const applyMaterialOpacity = (material: Material | Material[], opacity: number) => {
   const materials = Array.isArray(material) ? material : [material];
   materials.forEach((mat) => {
     mat.opacity = opacity;
-    mat.transparent = opacity < 1;
+    mat.transparent = true;
     mat.depthTest = false;
     mat.depthWrite = false;
     mat.toneMapped = false;
@@ -1266,6 +1268,7 @@ const BodyLabel: React.FC<BodyLabelProps> = ({ target, baseScale, color = '#ffff
       <Billboard position={[0, labelOffset, 0]} frustumCulled={false}>
         <Text
           ref={textRef}
+          renderOrder={LABEL_RENDER_ORDER}
           fontSize={fontSize}
           color={color}
           outlineWidth={fontSize * 0.16}
