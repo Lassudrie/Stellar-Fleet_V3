@@ -515,6 +515,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     pendingPointerEvents.current.clear();
   }, []);
 
+  useEffect(() => {
+    setOrderMode('none');
+  }, [selectedArmyId]);
+
   const activeMapConfig = map?.descriptor.config ?? null;
 
   const clampOffset = useCallback(
@@ -911,25 +915,37 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!wasTap || !map) return;
 
     const coord = pickCoord(event.clientX, event.clientY);
-    setSelected(coord);
 
-    if (coord && onIssueCommand && selectedArmyId && body) {
-      const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
-      if (selectedArmy && selectedArmy.state === ArmyState.DEPLOYED && selectedArmy.containerId === body.id) {
-        if (orderMode === 'move') {
-          onIssueCommand({ type: 'ORDER_GROUND_MOVE', armyId: selectedArmyId, to: { bodyId: body.id, q: coord.q, r: coord.r } });
-          setOrderMode('none');
-        } else if (orderMode === 'attack') {
-          const target = normalizedArmies
-            .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
-            .map(m => m.army)
-            .find(a => a.factionId !== playerFactionId);
-          if (target) {
-            onIssueCommand({ type: 'ORDER_GROUND_ATTACK', attackerId: selectedArmyId, targetArmyId: target.id });
+    if (orderMode !== 'none') {
+      if (coord && onIssueCommand && selectedArmyId && body) {
+        const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
+        const canControl = selectedArmy?.factionId === playerFactionId;
+        if (canControl && selectedArmy && selectedArmy.state === ArmyState.DEPLOYED && selectedArmy.containerId === body.id) {
+          if (orderMode === 'move') {
+            onIssueCommand({ type: 'ORDER_GROUND_MOVE', armyId: selectedArmyId, to: { bodyId: body.id, q: coord.q, r: coord.r } });
             setOrderMode('none');
+          } else if (orderMode === 'attack') {
+            const target = normalizedArmies
+              .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
+              .map(m => m.army)
+              .find(a => a.factionId !== selectedArmy.factionId);
+            if (target) {
+              onIssueCommand({ type: 'ORDER_GROUND_ATTACK', attackerId: selectedArmyId, targetArmyId: target.id });
+              setOrderMode('none');
+            }
           }
         }
       }
+      return;
+    }
+
+    setSelected(coord);
+    if (coord) {
+      const friendly = normalizedArmies
+        .filter(m => m.coord.q === coord.q && m.coord.r === coord.r)
+        .map(m => m.army)
+        .find(a => a.factionId === playerFactionId);
+      if (friendly) setSelectedArmyId(friendly.id);
     }
   };
 
@@ -981,6 +997,14 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!body || army.containerId !== body.id) return null;
     return army;
   }, [armies, body, selectedArmyId]);
+
+  const canControlSelectedArmy = selectedArmy?.factionId === playerFactionId;
+
+  useEffect(() => {
+    if (orderMode !== 'none' && (!selectedArmy || !canControlSelectedArmy)) {
+      setOrderMode('none');
+    }
+  }, [canControlSelectedArmy, orderMode, selectedArmy]);
 
   const selectedArmyCoord = useMemo(() => {
     if (!selectedArmy || !activeMapConfig) return null;
@@ -1390,13 +1414,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     };
   }, [map, resolvedMapStatus, scheduleDraw]);
 
-  useEffect(() => {
-    // Auto-select a friendly army when clicking an occupied tile.
-    if (!activeCoord) return;
-    const friendly = tileArmies.map(x => x.army).find(a => a.factionId === playerFactionId) ?? null;
-    setSelectedArmyId(friendly?.id ?? null);
-  }, [activeCoord, playerFactionId, tileArmies]);
-
   const tileBuildings = useMemo(() => {
     if (!map || !activeCoord) return [];
     return normalizedBuildings.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
@@ -1594,7 +1611,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
               )}
             </div>
 
-            {selectedArmy && (
+            {selectedArmy && canControlSelectedArmy && (
               <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Orders</div>
                 <div className="grid grid-cols-2 gap-2">

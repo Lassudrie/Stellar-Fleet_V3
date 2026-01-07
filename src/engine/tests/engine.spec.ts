@@ -4864,6 +4864,72 @@ const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factio
 
 tests.push(
   {
+    name: 'Ground order commands reject non-player armies',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const bodyId = 'body-ground-orders';
+      const enemy = groundCombatMkArmy({
+        id: 'enemy-1',
+        factionId: 'red',
+        containerId: bodyId,
+        surfacePos: { bodyId, q: 0, r: 0 }
+      });
+
+      const state: GameState = { ...base, armies: [enemy] };
+
+      const move = applyCommand(
+        state,
+        { type: 'ORDER_GROUND_MOVE', armyId: enemy.id, to: { bodyId, q: 1, r: 0 } },
+        new RNG(1)
+      );
+      assert.strictEqual(move.ok, false);
+      assert.strictEqual(move.error, 'Not your army');
+
+      const posture = applyCommand(
+        state,
+        { type: 'SET_GROUND_POSTURE', armyId: enemy.id, posture: 'normal' },
+        new RNG(1)
+      );
+      assert.strictEqual(posture.ok, false);
+      assert.strictEqual(posture.error, 'Not your army');
+
+      const cancel = applyCommand(
+        state,
+        { type: 'CANCEL_GROUND_ORDER', armyId: enemy.id },
+        new RNG(1)
+      );
+      assert.strictEqual(cancel.ok, false);
+      assert.strictEqual(cancel.error, 'Not your army');
+    }
+  },
+  {
+    name: 'Ground attack orders reject friendly targets',
+    run: () => {
+      const base = engine_sr_createBaseState();
+      const bodyId = 'body-ground-orders';
+      const a = groundCombatMkArmy({
+        id: 'ally-a',
+        factionId: 'blue',
+        containerId: bodyId,
+        surfacePos: { bodyId, q: 0, r: 0 }
+      });
+      const b = groundCombatMkArmy({
+        id: 'ally-b',
+        factionId: 'blue',
+        containerId: bodyId,
+        surfacePos: { bodyId, q: 1, r: 0 }
+      });
+
+      const state: GameState = { ...base, armies: [a, b] };
+      const result = applyCommand(state, { type: 'ORDER_GROUND_ATTACK', attackerId: a.id, targetArmyId: b.id }, new RNG(1));
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.error, 'Cannot attack friendly army.');
+    }
+  }
+);
+
+tests.push(
+  {
     name: 'triangular RNG is bounded by epsilon',
     run: () => {
       const eps = 0.08;

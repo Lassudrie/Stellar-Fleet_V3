@@ -87,6 +87,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'ORDER_GROUND_MOVE': {
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');
+            if (army.factionId !== state.playerFactionId) return fail('Not your army');
             if (army.state !== ArmyState.DEPLOYED) return fail('Army is not deployed on a planet surface.');
 
             const bodyId = command.to.bodyId;
@@ -116,7 +117,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const defender = state.armies.find(a => a.id === command.targetArmyId);
             if (!attacker) return fail('Attacker army not found');
             if (!defender) return fail('Target army not found');
+            if (attacker.factionId !== state.playerFactionId) return fail('Not your army');
             if (attacker.id === defender.id) return fail('Invalid target');
+            if (attacker.factionId === defender.factionId) return fail('Cannot attack friendly army.');
             if (attacker.state !== ArmyState.DEPLOYED || defender.state !== ArmyState.DEPLOYED) {
                 return fail('Both armies must be deployed on a planet surface.');
             }
@@ -178,6 +181,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'SET_GROUND_POSTURE': {
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');
+            if (army.factionId !== state.playerFactionId) return fail('Not your army');
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === army.id ? ({ ...a, posture: command.posture }) : a)
@@ -187,6 +191,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'CANCEL_GROUND_ORDER': {
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');
+            if (army.factionId !== state.playerFactionId) return fail('Not your army');
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === army.id ? ({ ...a, groundOrders: undefined }) : a)
