@@ -595,16 +595,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     initialBodyOwners.set(bodyId, body.ownerFactionId ?? null);
   });
 
+  // NOTE: `settlementControl` is intentionally sparse.
+  // Generating all surface maps every turn (to pre-seed entries) is extremely expensive and can freeze the UI.
+  // Missing entries fall back to the settlement's generated `factionId` when needed.
   let settlementControl = state.settlementControl ? { ...state.settlementControl } : {};
-  bodyIndex.forEach(({ body }) => {
-    const map = getSurfaceMap(body.id);
-    if (!map) return;
-    map.settlements.forEach(settlement => {
-      if (!settlementControl[settlement.id]) {
-        settlementControl[settlement.id] = { factionId: settlement.factionId ?? null, lastCaptureTurn: state.day };
-      }
-    });
-  });
 
   const armiesById = new Map(state.armies.map(army => [army.id, army]));
   const removeArmyIds = new Set<string>();

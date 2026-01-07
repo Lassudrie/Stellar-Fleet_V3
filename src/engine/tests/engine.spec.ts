@@ -2202,6 +2202,32 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'Ground phase stays idle without ground activity',
+    run: () => {
+      const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
+        systemId: 'sys-green-capture',
+        seed: 120,
+        minSolids: 1,
+        ownerFactionId: 'red'
+      });
+
+      const body = solidBodies[0];
+      const systemWithBody = { ...system, planets: [body] };
+      const stateBase = createBaseState({
+        systems: [systemWithBody],
+        planetSurfaceDescriptorsByBodyId: { [body.id]: descriptors[body.id] }
+      });
+
+      const map = getSurfaceMapOrThrow(stateBase, body.id);
+      assert.ok(map.settlements.length > 0, 'Expected settlements to validate idle ground phase.');
+
+      const ctx = { rng: new RNG(1), turn: stateBase.day + 1 };
+      const nextState = phaseGround(stateBase, ctx);
+
+      assert.deepStrictEqual(nextState.settlementControl, {}, 'Idle ground phase should not pre-seed settlement control.');
+    }
+  },
+  {
     name: 'Phase ground conquest uses faction color and AI hold updates for any winner',
     run: () => {
       const { system, solidBodies, descriptors } = findSystemWithSolidBodies({
