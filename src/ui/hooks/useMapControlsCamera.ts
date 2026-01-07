@@ -28,12 +28,13 @@ const clampValue = (value: number, min: number, max: number) => Math.min(max, Ma
 export const clampCameraToBounds = (
   camera: Vector3,
   target: Vector3,
-  mapBounds: ClampBounds,
+  targetBounds: ClampBounds,
   distanceLimits: { min: number; max: number },
-  scratch: ClampScratch
+  scratch: ClampScratch,
+  cameraBounds: ClampBounds = targetBounds
 ): { targetChanged: boolean; positionChanged: boolean } => {
-  const clampedTargetX = clampValue(target.x, mapBounds.minX, mapBounds.maxX);
-  const clampedTargetZ = clampValue(target.z, mapBounds.minZ, mapBounds.maxZ);
+  const clampedTargetX = clampValue(target.x, targetBounds.minX, targetBounds.maxX);
+  const clampedTargetZ = clampValue(target.z, targetBounds.minZ, targetBounds.maxZ);
   const targetChanged = clampedTargetX !== target.x || clampedTargetZ !== target.z;
   target.set(clampedTargetX, target.y, clampedTargetZ);
 
@@ -51,15 +52,15 @@ export const clampCameraToBounds = (
   const maxDistanceWithinBounds = (() => {
     const distances: number[] = [];
     if (scratch.safeDirection.x > 0) {
-      distances.push((mapBounds.maxX - target.x) / scratch.safeDirection.x);
+      distances.push((cameraBounds.maxX - target.x) / scratch.safeDirection.x);
     } else if (scratch.safeDirection.x < 0) {
-      distances.push((mapBounds.minX - target.x) / scratch.safeDirection.x);
+      distances.push((cameraBounds.minX - target.x) / scratch.safeDirection.x);
     }
 
     if (scratch.safeDirection.z > 0) {
-      distances.push((mapBounds.maxZ - target.z) / scratch.safeDirection.z);
+      distances.push((cameraBounds.maxZ - target.z) / scratch.safeDirection.z);
     } else if (scratch.safeDirection.z < 0) {
-      distances.push((mapBounds.minZ - target.z) / scratch.safeDirection.z);
+      distances.push((cameraBounds.minZ - target.z) / scratch.safeDirection.z);
     }
 
     const positiveDistances = distances.filter(distance => distance >= 0);
@@ -71,9 +72,9 @@ export const clampCameraToBounds = (
 
   scratch.finalPosition.copy(target).addScaledVector(scratch.safeDirection, Math.max(0, boundedDistance));
   scratch.boundedPosition.set(
-    clampValue(scratch.finalPosition.x, mapBounds.minX, mapBounds.maxX),
+    clampValue(scratch.finalPosition.x, cameraBounds.minX, cameraBounds.maxX),
     scratch.finalPosition.y,
-    clampValue(scratch.finalPosition.z, mapBounds.minZ, mapBounds.maxZ)
+    clampValue(scratch.finalPosition.z, cameraBounds.minZ, cameraBounds.maxZ)
   );
 
   const positionChanged = !scratch.boundedPosition.equals(camera);

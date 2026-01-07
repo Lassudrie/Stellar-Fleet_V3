@@ -5,6 +5,7 @@ import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { BufferGeometry, BufferAttribute } from 'three';
 import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../../shared/shared';
+import { SCENARIO_TEMPLATES } from '../../content/scenarios';
 import Galaxy from './Galaxy';
 import FleetMesh from './FleetRenderer';
 import TerritoryBorders from './TerritoryBorders';
@@ -49,17 +50,22 @@ interface MapMetrics {
   bounds: MapBounds;
 }
 
-function useMapMetrics(systems: StarSystem[]): MapMetrics {
+function useMapMetrics(systems: StarSystem[], galaxyRadius?: number): MapMetrics {
   return useMemo(() => {
+    const requestedRadius = Math.max(galaxyRadius ?? 0, 0);
+    const fallbackRadius = Math.max(DEFAULT_RADIUS, requestedRadius);
+
     if (systems.length === 0) {
+      const span = fallbackRadius * 2;
+      const margin = Math.max(DEFAULT_MARGIN, span * 0.1);
       return {
         center: { x: 0, y: 0, z: 0 },
-        radius: DEFAULT_RADIUS,
+        radius: fallbackRadius,
         bounds: {
-          minX: -DEFAULT_RADIUS - DEFAULT_MARGIN,
-          maxX: DEFAULT_RADIUS + DEFAULT_MARGIN,
-          minZ: -DEFAULT_RADIUS - DEFAULT_MARGIN,
-          maxZ: DEFAULT_RADIUS + DEFAULT_MARGIN
+          minX: -fallbackRadius - margin,
+          maxX: fallbackRadius + margin,
+          minZ: -fallbackRadius - margin,
+          maxZ: fallbackRadius + margin
         }
       };
     }
@@ -90,21 +96,35 @@ function useMapMetrics(systems: StarSystem[]): MapMetrics {
     const extentY = maxY - minY;
     const extentZ = maxZ - minZ;
     const boundingDiagonal = Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
-    const radius = Math.max(boundingDiagonal / 2, DEFAULT_RADIUS);
+    const radius = Math.max(boundingDiagonal / 2, DEFAULT_RADIUS, requestedRadius);
 
-    const margin = Math.max(DEFAULT_MARGIN, Math.max(extentX, extentZ) * 0.1);
+    let boundsMinX = minX;
+    let boundsMaxX = maxX;
+    let boundsMinZ = minZ;
+    let boundsMaxZ = maxZ;
+
+    if (requestedRadius > 0) {
+      boundsMinX = Math.min(boundsMinX, -requestedRadius);
+      boundsMaxX = Math.max(boundsMaxX, requestedRadius);
+      boundsMinZ = Math.min(boundsMinZ, -requestedRadius);
+      boundsMaxZ = Math.max(boundsMaxZ, requestedRadius);
+    }
+
+    const spanX = boundsMaxX - boundsMinX;
+    const spanZ = boundsMaxZ - boundsMinZ;
+    const margin = Math.max(DEFAULT_MARGIN, Math.max(spanX, spanZ) * 0.1);
 
     return {
       center,
       radius,
       bounds: {
-        minX: minX - margin,
-        maxX: maxX + margin,
-        minZ: minZ - margin,
-        maxZ: maxZ + margin
+        minX: boundsMinX - margin,
+        maxX: boundsMaxX + margin,
+        minZ: boundsMinZ - margin,
+        maxZ: boundsMaxZ + margin
       }
     };
-  }, [systems]);
+  }, [galaxyRadius, systems]);
 }
 
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
@@ -258,7 +278,12 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   const cameraFocusTarget = lastFocusedTarget;
 
-  const mapMetrics = useMapMetrics(gameState.systems);
+  const scenarioRadius = useMemo(() => {
+    const template = SCENARIO_TEMPLATES.find(scenario => scenario.id === gameState.scenarioId);
+    return template?.generation.radius;
+  }, [gameState.scenarioId]);
+
+  const mapMetrics = useMapMetrics(gameState.systems, scenarioRadius);
 
   const ownershipSignature = useMemo(() => {
       const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);

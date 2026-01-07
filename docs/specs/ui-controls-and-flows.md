@@ -20,11 +20,11 @@
 
 ### 2.2 Pan et zoom
 - Pan fluide avec inertie (`dampingFactor 0.05`), verrouillé sur le plan XZ (`screenSpacePanning=false`) pour garder l’horizon stable. Aucune rotation n’est autorisée (`enableRotate=false`).
-- Zoom par molette/pinch borné par la taille de la carte : `minDistance ≈ max(mapRadius×0.3, 20)`, `maxDistance ≈ max(mapRadius×2.5, 240)`.
+- Zoom par molette/pinch borné par la taille de la carte : `minDistance ≈ max(mapRadius×0.3, 20)`. `maxDistance` est relevé pour garantir la visibilité de la carte entière (au moins `mapRadius / sin(fov/2)`, plancher 240).
 
 ### 2.3 Bornes et clamping
-- Les bornes sont dérivées du nuage de systèmes avec une marge minimale de 40 unités (`useMapMetrics`).
-- À chaque mouvement (`onChange` du `MapControls`), la position de la caméra **et** la cible sont clampées (`mapBounds.minX/maxX/minZ/maxZ`). Le pan ne peut jamais sortir du rectangle étendu, même à zoom minimum ou maximum.
+- Les bornes sont dérivées du rayon de scénario (generation.radius) et du nuage de systèmes, avec une marge minimale de 40 unités (`useMapMetrics`).
+- À chaque mouvement (`onChange` du `MapControls`), la cible est clampée aux bornes de carte. La caméra est clampée sur des bornes étendues pour autoriser le dézoom maximal sans laisser la cible sortir de la carte.
 - Les bornes se recalculent si le nuage de systèmes change (ex. chargement de partie ou génération), garantissant un centrage et des limites cohérents.
 
 ### 2.4 Validation

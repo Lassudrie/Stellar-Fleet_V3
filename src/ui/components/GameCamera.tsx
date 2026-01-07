@@ -14,6 +14,8 @@ interface GameCameraProps {
   mapBounds?: ClampBounds;
 }
 
+const CAMERA_FOV = 35;
+
 const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, focusTarget, ready, mapRadius, mapBounds }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
   const hasInitialized = useRef(false);
@@ -38,8 +40,10 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   const distanceConfig = useMemo(() => {
     const fallbackRadius = 120;
     const radius = Math.max(mapRadius ?? fallbackRadius, 1);
+    const halfFovRad = (CAMERA_FOV * Math.PI) / 360;
+    const fitDistance = radius / Math.sin(halfFovRad);
 
-    const maxDistance = Math.max(radius * 2.5, fallbackRadius * 2);
+    const maxDistance = Math.max(radius * 2.5, fallbackRadius * 2, fitDistance);
     const minDistance = Math.min(Math.max(20, radius * 0.3), maxDistance * 0.8);
 
     return { minDistance, maxDistance };
@@ -49,6 +53,26 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     min: Math.PI / 8,
     max: Math.PI / 2,
   }), []);
+
+  const cameraBounds = useMemo<ClampBounds | null>(() => {
+    if (!mapBounds) return null;
+    const offset = new Vector3(
+      positionArray[0] - targetArray[0],
+      positionArray[1] - targetArray[1],
+      positionArray[2] - targetArray[2]
+    );
+    const length = offset.length();
+    if (length === 0) return mapBounds;
+    offset.divideScalar(length);
+    const paddingX = Math.abs(offset.x) * distanceConfig.maxDistance;
+    const paddingZ = Math.abs(offset.z) * distanceConfig.maxDistance;
+    return {
+      minX: mapBounds.minX - paddingX,
+      maxX: mapBounds.maxX + paddingX,
+      minZ: mapBounds.minZ - paddingZ,
+      maxZ: mapBounds.maxZ + paddingZ
+    };
+  }, [distanceConfig.maxDistance, mapBounds, positionArray, targetArray]);
 
   const clampControls = useCallback((options?: { skipUpdate?: boolean }) => {
     if (!controlsRef.current || !mapBounds) return;
@@ -66,7 +90,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         target,
         mapBounds,
         distanceLimits,
-        clampScratchRef.current
+        clampScratchRef.current,
+        cameraBounds ?? mapBounds
       );
 
       if (!options?.skipUpdate && (result.targetChanged || result.positionChanged)) {
@@ -75,7 +100,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
     } finally {
       isClampingRef.current = false;
     }
-  }, [mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
+  }, [cameraBounds, mapBounds, distanceConfig.maxDistance, distanceConfig.minDistance]);
 
   useEffect(() => {
     if (!ready) {
@@ -155,7 +180,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
         - position: configurable pour centrer la scène sur le homeworld.
         - fov: 35 pour aplatir légèrement la perspective (effet isométrique).
       */}
-      <PerspectiveCamera makeDefault position={positionArray} fov={35} />
+      <PerspectiveCamera makeDefault position={positionArray} fov={CAMERA_FOV} />
 
       {/*
         MapControls:
