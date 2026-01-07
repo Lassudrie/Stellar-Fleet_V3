@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { Color, InstancedMesh, MeshBasicMaterial, Object3D, OrthographicCamera, Path, Shape, ShapeGeometry } from 'three';
 import {
   Army,
   ArmyState,
@@ -51,13 +53,9 @@ import {
   MIN_ZOOM,
   normalizePos,
   pixelToGrid,
-  quantizeZoom,
   sameHex,
   surfaceMapKey,
-  TerrainBuffer,
-  TERRAIN_ZOOM_STEP,
   PAN_MARGIN_PX,
-  renderTerrainLayer,
   drawHex
 } from './surfaceViewCore';
 
@@ -91,6 +89,18 @@ const MAX_DPR_MOBILE = 1.25;
 const MAX_DPR_DESKTOP = 1.75;
 
 const OTAN_SYMBOL_COLOR = '#0f172a';
+
+type UseMemoDisposableDeps = React.DependencyList;
+
+const useDisposableMemo = <T extends { dispose: () => void }>(factory: () => T, deps: UseMemoDisposableDeps): T => {
+  const resource = useMemo(factory, deps);
+  useEffect(() => {
+    return () => {
+      resource.dispose();
+    };
+  }, [resource]);
+  return resource;
+};
 
 const hexToRgba = (hex: string, alpha: number): string => {
   const raw = hex.trim();
@@ -209,6 +219,149 @@ const SETTLEMENT_MARKER_STROKE = 'rgba(30, 30, 30, 0.95)';
 const SETTLEMENT_LABEL_FILL = 'rgba(250, 250, 250, 0.95)';
 const SETTLEMENT_LABEL_STROKE = 'rgba(20, 20, 20, 0.85)';
 
+const createHexShape = (radius: number): Shape => {
+  const shape = new Shape();
+  for (let i = 0; i < 6; i += 1) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  return shape;
+};
+
+const createHexHole = (radius: number): Path => {
+  const hole = new Path();
+  for (let i = 5; i >= 0; i -= 1) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+    if (i === 5) hole.moveTo(x, y);
+    else hole.lineTo(x, y);
+  }
+  hole.closePath();
+  return hole;
+};
+
+const SurfaceMapCameraSync: React.FC<{ cameraState: CameraState }> = ({ cameraState }) => {
+  const camera = useThree(state => state.camera);
+  const size = useThree(state => state.size);
+  const invalidate = useThree(state => state.invalidate);
+
+  useEffect(() => {
+    if (!(camera instanceof OrthographicCamera)) return;
+
+    // World units are screen pixels at zoom=1, matching the Canvas-based math (camera.offset + zoom).
+    camera.left = -size.width / 2;
+    camera.right = size.width / 2;
+    camera.top = size.height / 2;
+    camera.bottom = -size.height / 2;
+    camera.near = 0.1;
+    camera.far = 1000;
+
+    camera.zoom = cameraState.zoom;
+    camera.position.set(
+      (size.width / 2 - cameraState.offset.x) / cameraState.zoom,
+      (cameraState.offset.y - size.height / 2) / cameraState.zoom,
+      100
+    );
+    camera.lookAt(camera.position.x, camera.position.y, 0);
+    camera.updateProjectionMatrix();
+
+    invalidate();
+  }, [
+    camera,
+    cameraState.offset.x,
+    cameraState.offset.y,
+    cameraState.zoom,
+    invalidate,
+    size.height,
+    size.width
+  ]);
+
+  return null;
+};
+
+const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> = React.memo(({ map, mapKey }) => {
+  const config = map.descriptor.config;
+  const count = config.w * config.h;
+  const fillRef = useRef<InstancedMesh>(null);
+  const borderRef = useRef<InstancedMesh>(null);
+  const temp = useMemo(() => new Object3D(), []);
+  const color = useMemo(() => new Color(), []);
+  const invalidate = useThree(state => state.invalidate);
+
+  const innerScale = 0.94;
+  const fillShape = useMemo(() => createHexShape(HEX_SIZE * innerScale), [innerScale]);
+  const borderShape = useMemo(() => {
+    const outer = createHexShape(HEX_SIZE);
+    outer.holes.push(createHexHole(HEX_SIZE * innerScale));
+    return outer;
+  }, [innerScale]);
+
+  const fillGeometry = useDisposableMemo(() => new ShapeGeometry(fillShape), [fillShape]);
+  const borderGeometry = useDisposableMemo(() => new ShapeGeometry(borderShape), [borderShape]);
+  const fillMaterial = useDisposableMemo(
+    () => new MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
+    []
+  );
+  const borderMaterial = useDisposableMemo(
+    () =>
+      new MeshBasicMaterial({
+        color: '#94a3b8',
+        transparent: true,
+        opacity: 0.14,
+        depthTest: false,
+        depthWrite: false
+      }),
+    []
+  );
+
+  useLayoutEffect(() => {
+    const fill = fillRef.current;
+    const border = borderRef.current;
+    if (!fill || !border) return;
+
+    for (let r = 0; r < config.h; r += 1) {
+      for (let q = 0; q < config.w; q += 1) {
+        const index = r * config.w + q;
+        const tile = map.tiles[index] ?? null;
+        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
+
+        temp.position.set(x, -y, 0);
+        temp.rotation.set(0, 0, 0);
+        temp.scale.set(1, 1, 1);
+        temp.updateMatrix();
+        border.setMatrixAt(index, temp.matrix);
+
+        temp.position.set(x, -y, 0.01);
+        temp.updateMatrix();
+        fill.setMatrixAt(index, temp.matrix);
+
+        color.set(tile ? (biomeColors[tile.biome] ?? '#334155') : '#1f2937');
+        fill.setColorAt(index, color);
+      }
+    }
+
+    border.count = count;
+    fill.count = count;
+    border.instanceMatrix.needsUpdate = true;
+    fill.instanceMatrix.needsUpdate = true;
+    if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
+
+    invalidate();
+  }, [color, config.h, config.w, invalidate, map.tiles, mapKey, temp]);
+
+  return (
+    <group>
+      <instancedMesh ref={borderRef} args={[borderGeometry, borderMaterial, count]} frustumCulled={false} />
+      <instancedMesh ref={fillRef} args={[fillGeometry, fillMaterial, count]} frustumCulled={false} />
+    </group>
+  );
+});
+
 const SurfaceView: React.FC<SurfaceViewProps> = ({
   map: mapProp,
   mapStatus = 'ready',
@@ -237,7 +390,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
   const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
   const [readyMapCache, setReadyMapCache] = useState<{ key: string; map: PlanetSurfaceMap } | null>(null);
-  const terrainBufferRef = useRef<TerrainBuffer | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
   const interactionDeadlineRef = useRef(0);
@@ -293,10 +445,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       return best;
     }, null);
   }, [map]);
-
-  useEffect(() => {
-    terrainBufferRef.current = null;
-  }, [currentMapKey]);
 
   useEffect(() => () => {
     if (wheelFrameRef.current !== null) {
@@ -598,25 +746,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const normalized = normalizePos({ ...rounded, bodyId: map.bodyId }, map.descriptor.config);
     return normalized;
   }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
-
-  const requestTerrainBuffer = useCallback((dpr: number): TerrainBuffer | null => {
-    if (!map || !activeMapConfig || !currentMapKey) return null;
-    const targetZoom = quantizeZoom(camera.zoom, TERRAIN_ZOOM_STEP, MIN_ZOOM, MAX_ZOOM);
-    const cached = terrainBufferRef.current;
-    const hot = isInteractionActive();
-    if (cached && cached.key === currentMapKey && cached.dpr === dpr) {
-      if (cached.zoom === targetZoom || hot) {
-        return cached;
-      }
-    }
-    if (hot && cached && cached.key === currentMapKey && cached.dpr === dpr) {
-      return cached;
-    }
-
-    const buffer = renderTerrainLayer(map, activeMapConfig, targetZoom, dpr, HEX_SIZE, biomeColors);
-    terrainBufferRef.current = buffer;
-    return buffer;
-  }, [activeMapConfig, camera.zoom, currentMapKey, isInteractionActive, map, renderTerrainLayer]);
 
   // draw() is defined later, after overlay computations.
 
@@ -978,6 +1107,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   ]);
 
   const resolvedMapStatus = mapStatus === 'idle' ? 'loading' : mapStatus;
+  const renderDpr = useMemo(() => getRenderDpr(), [getRenderDpr]);
 
   const draw = useCallback(() => {
     if (!map || !activeMapConfig) return;
@@ -986,37 +1116,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = getRenderDpr();
-    const terrainBuffer = requestTerrainBuffer(dpr);
+    const dpr = renderDpr;
     const hot = isInteractionActive();
 
     ctx.save();
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, viewport.width, viewport.height);
-
-    if (terrainBuffer) {
-      const destX = camera.offset.x + terrainBuffer.bounds.minX * camera.zoom;
-      const destY = camera.offset.y + terrainBuffer.bounds.minY * camera.zoom;
-      const destW = terrainBuffer.bounds.width * camera.zoom;
-      const destH = terrainBuffer.bounds.height * camera.zoom;
-      ctx.drawImage(terrainBuffer.canvas, destX, destY, destW, destH);
-    } else {
-      const fallbackGridStroke = 'rgba(148, 163, 184, 0.22)';
-      const fallbackHexSize = HEX_SIZE * camera.zoom;
-      for (let r = 0; r < activeMapConfig.h; r += 1) {
-        for (let q = 0; q < activeMapConfig.w; q += 1) {
-          const tile = map.tiles[r * activeMapConfig.w + q];
-          if (!tile) continue;
-          const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-          const center = {
-            x: x * camera.zoom + camera.offset.x,
-            y: y * camera.zoom + camera.offset.y
-          };
-          const color = biomeColors[tile.biome] ?? '#334155';
-          drawHex(ctx, center, fallbackHexSize, { fill: color, stroke: fallbackGridStroke, lineWidth: 0.75 });
-        }
-      }
-    }
 
     const hexSize = HEX_SIZE * camera.zoom;
 
@@ -1192,8 +1297,6 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     movePreview,
     normalizedArmies,
     normalizedBuildings,
-    requestTerrainBuffer,
-    getRenderDpr,
     isInteractionActive,
     playerFactionId,
     reachableCosts,
@@ -1201,7 +1304,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     selectedArmyCoord,
     settlements,
     viewport.height,
-    viewport.width
+    viewport.width,
+    renderDpr
   ]);
 
   const scheduleDraw = useCallback(() => {
@@ -1286,9 +1390,20 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   return (
     <div className="relative w-full h-screen bg-slate-950 text-white overflow-hidden">
       <div ref={containerRef} className="absolute inset-0">
+        <Canvas
+          orthographic
+          frameloop="demand"
+          dpr={renderDpr}
+          gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }}
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+        >
+          <SurfaceMapCameraSync cameraState={camera} />
+          {map && currentMapKey && <SurfaceTerrainLayer key={currentMapKey} map={map} mapKey={currentMapKey} />}
+        </Canvas>
+
         <canvas
           ref={canvasRef}
-          className={`w-full h-full touch-none ${cameraControls.isInteracting ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`absolute inset-0 w-full h-full touch-none ${cameraControls.isInteracting ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={{ touchAction: 'none' }}
           {...(pointerHandlersEnabled
             ? {
