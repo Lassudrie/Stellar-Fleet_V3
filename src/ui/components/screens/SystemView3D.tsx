@@ -828,7 +828,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   const orbitRotation = useMemo<[number, number, number]>(() => {
     const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
-    return [-Math.PI / 2 + inclination, ascendingNode, 0];
+    return [-Math.PI / 2 - inclination, ascendingNode, 0];
   }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
@@ -963,7 +963,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   const orbitRotation = useMemo<[number, number, number]>(() => {
     const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
-    return [-Math.PI / 2 + inclination, ascendingNode, 0];
+    return [-Math.PI / 2 - inclination, ascendingNode, 0];
   }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
