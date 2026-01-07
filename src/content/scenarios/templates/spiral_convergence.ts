@@ -114,7 +114,7 @@ export const spiralConvergence: ScenarioTemplate = {
     ]
   },
   objectives: {
-    win: [{ type: 'domination', value: 0.6 }],
+    win: [{ type: 'domination', value: 60 }],
     maxTurns: 200
   },
   rules: {
