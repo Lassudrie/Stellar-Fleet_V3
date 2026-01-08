@@ -1622,6 +1622,8 @@ const SystemSurfaceTextureManager: React.FC<{
     if (!(camera instanceof PerspectiveCamera)) return;
     if (!planetSurfaceDescriptorsByBodyId) return;
 
+    camera.updateMatrixWorld();
+
     const now = performance.now();
     const activeKeys = new Set<string>();
 
@@ -1651,8 +1653,11 @@ const SystemSurfaceTextureManager: React.FC<{
         && Math.abs(scratch.ndc.y) <= 1.15;
 
       scratch.view.copy(scratch.world).applyMatrix4(camera.matrixWorldInverse);
-      const z = -scratch.view.z;
-      if (!Number.isFinite(z) || z <= 0) return;
+      let z = -scratch.view.z;
+      if (!Number.isFinite(z) || z <= 0) {
+        z = camera.position.distanceTo(scratch.world);
+        if (!Number.isFinite(z) || z <= 0) return;
+      }
 
       let diameterPx = 0;
       if (isOnScreen) {
@@ -1661,6 +1666,9 @@ const SystemSurfaceTextureManager: React.FC<{
       }
 
       let resolution = pickSurfaceTextureResolution(diameterPx);
+      if (!resolution && isOnScreen) {
+        resolution = { width: 256, height: 128 };
+      }
       if (!resolution && shouldForceLowRes(bodyId)) {
         resolution = { width: 256, height: 128 };
       }
