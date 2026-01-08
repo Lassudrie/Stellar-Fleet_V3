@@ -77,7 +77,10 @@ Champs ajoutes:
 - landingOrder?: { type: 'land'; to: SurfacePos }
 
 Notes:
-- routed = morale < BREAK_THRESHOLD (pas de champ dedie).
+- rout (hysteresis break/rally):
+  - break: morale < BREAK_THRESHOLD
+  - une fois routed, l'unite reste routed tant que morale < RALLY_THRESHOLD
+  - etat persiste via `Army.routed` (champ dedie)
 - Dans l'implementation, `posture` et `postureSetTurn` sont des champs de `Army` (pas dans `groundOrders`).
 - `prepared_defense` : defensePower *= PREPARED_DEFENSE_MULT, actif si turn > postureSetTurn; annule si l'unite bouge ou attaque.
 
@@ -278,7 +281,7 @@ Effets:
   - projectionRange = 0
 - Ralliement:
   - si pas de combat pendant 2 tours, appliquer recovery
-  - sortie de routed si morale >= BREAK_THRESHOLD
+  - sortie de routed si morale >= RALLY_THRESHOLD (hysteresis)
 
 ### 11.3 Fatigue
 

@@ -10,7 +10,7 @@ import type {
   PlanetSurfaceMap,
   SettlementControlState
 } from '../shared/shared';
-import { sorted } from '../shared/shared';
+import { FeatureBits, sorted } from '../shared/shared';
 import { RNG } from './rng';
 import { generateSurfaceMapForState, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
 
@@ -194,6 +194,7 @@ export const ENGAGEMENT_LOSS_CAP = 0.35;
 export const CONDITION_LOSS_COEFF = 0.60;
 export const MORALE_LOSS_COEFF = 0.60;
 export const BREAK_THRESHOLD = 0.25;
+export const RALLY_THRESHOLD = 0.40;
 export const ROUTED_ATK_MULT = 0.70;
 export const ROUTED_DEF_MULT = 0.70;
 export const ROUTED_MP_MULT = 0.50;
@@ -219,7 +220,13 @@ export const AO_LANDING_MAX = 0.15;
 export const BOMBARD_COMBAT_MULT = 0.9;
 export const BOMBARD_COMBAT_CONDITION_LOSS = 0.05;
 
-export const isRouted = (army: Army): boolean => army.morale < BREAK_THRESHOLD;
+export const deriveRoutedAfterMorale = (army: Army, morale: number): boolean => {
+  const moraleClamped = clamp(morale, 0, 1);
+  const wasRouted = army.routed === true || army.morale < BREAK_THRESHOLD;
+  return wasRouted ? moraleClamped < RALLY_THRESHOLD : moraleClamped < BREAK_THRESHOLD;
+};
+
+export const isRouted = (army: Army): boolean => army.routed === true || army.morale < BREAK_THRESHOLD;
 
 export const isPreparedDefenseActive = (army: Army, turn?: number): boolean => {
   if (army.posture !== 'prepared_defense') return false;
@@ -960,10 +967,17 @@ export const executeMoveOrder = (params: {
     const cached = baseCostCacheCenti[idx];
     if (cached !== 0) return cached;
     const terrain = getTerrainTypeAt(c);
-    const baseCost = MOVE_COST[terrain];
+    const tileAt = map.tiles[idx];
+    const featureBits = tileAt?.featureBits ?? 0;
+    const hasRoad = (featureBits & FeatureBits.Road) !== 0;
+    const hasRiver = (featureBits & FeatureBits.River) !== 0;
+
+    // V2: roads reduce terrain cost to 1; rivers add +1 after roads.
+    const baseCost = hasRoad ? 1 : MOVE_COST[terrain];
     const affinityRaw = GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain];
     const affinity = clampAffinity(affinityRaw);
-    const cost = Math.max(1, Math.round(baseCost * affinity * 100));
+    let cost = Math.max(1, Math.round(baseCost * affinity * 100));
+    if (hasRiver) cost += 100;
     baseCostCacheCenti[idx] = cost;
     return cost;
   };
@@ -1256,12 +1270,14 @@ const applyCombatLosses = (army: Army, losses: number, turn: number, params?: { 
   const bombardConditionLoss = params?.bombarded ? BOMBARD_COMBAT_CONDITION_LOSS : 0;
   const conditionAfter = clamp(army.condition - CONDITION_LOSS_COEFF * lossRatio - bombardConditionLoss, 0, 1);
   const moraleAfter = clamp(army.morale - MORALE_LOSS_COEFF * lossRatio, 0, 1);
+  const routedAfter = deriveRoutedAfterMorale(army, moraleAfter);
   const fatigueAfter = clamp(army.fatigue + FATIGUE_COMBAT_ADD, 0, 1);
   return {
     ...army,
     members: membersAfter,
     condition: conditionAfter,
     morale: moraleAfter,
+    routed: routedAfter,
     fatigue: fatigueAfter,
     lastCombatTurn: turn
   };

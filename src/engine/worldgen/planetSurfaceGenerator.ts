@@ -1,4 +1,5 @@
 import type {
+  Army,
   AtmosphereType,
   Biome,
   GameState,
@@ -17,6 +18,7 @@ import type {
   SurfacePos
 } from '../../shared/shared';
 import { ArmyState, FeatureBits, sorted } from '../../shared/shared';
+import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
 import { RNG } from '../rng';
 import { getPlanetById } from '../planets';
 
@@ -3096,17 +3098,17 @@ export const relocateSurfacePosDeterministic = (params: {
   entityId: string;
   kind: 'army' | 'building';
   bodyId: string;
+  map?: PlanetSurfaceMap;
   origin: { q: number; r: number };
   predicate: (biome: Biome, q: number, r: number) => boolean;
   isOccupied?: (q: number, r: number) => boolean;
 }): SurfacePos | null => {
   const { state, entityId, bodyId } = params;
-  const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
-  if (!descriptor) return null;
-  const map = generateSurfaceMapForState(state, bodyId);
+  const map = params.map ?? generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
+  if (map.bodyId !== bodyId) return null;
 
-  const { w, h, wrapX } = descriptor.config;
+  const { w, h, wrapX } = map.descriptor.config;
   const inBounds = (q: number, r: number) => q >= 0 && q < w && r >= 0 && r < h;
   const occupied = params.isOccupied ?? (() => false);
 
@@ -3179,6 +3181,38 @@ const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): S
     predicate: biome => isPassable(biome)
   });
   return pos;
+};
+
+export const pickLandingSurfacePosForArmy = (params: {
+  state: GameState;
+  map: PlanetSurfaceMap;
+  army: Army;
+  isOccupied?: (q: number, r: number) => boolean;
+}): SurfacePos | null => {
+  const { state, map, army } = params;
+  const { w, h } = map.descriptor.config;
+
+  const explicitCapital = map.settlements.find(s => s.isCapital)?.coord;
+  // Fallback: pick the largest settlement by population if no explicit capital is flagged.
+  let largest: (typeof map.settlements)[number] | null = null;
+  for (const s of map.settlements) {
+    if (!largest || s.population > largest.population) largest = s;
+  }
+  const capital = explicitCapital ?? largest?.coord;
+  const origin = capital ? { q: capital.q, r: capital.r } : { q: Math.floor(w / 2), r: Math.floor(h / 2) };
+
+  const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
+
+  return relocateSurfacePosDeterministic({
+    state,
+    map,
+    entityId: army.id,
+    kind: 'army',
+    bodyId: map.bodyId,
+    origin,
+    predicate: biome => isPassable(biome) || (isAmphibious && isWaterBiome(biome)),
+    isOccupied: params.isOccupied
+  });
 };
 
 export const normalizeSurfacePositions = (state: GameState): GameState => {
@@ -3299,6 +3333,10 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
     const map = generateSurfaceMapForState(state, bodyId);
     if (!map) return a;
 
+    const isAmphibious = GROUND_UNIT_STATS[a.unitType].tags?.includes('amphibious') ?? false;
+    const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+    const isPassableForArmy = (biome: Biome): boolean => isPassable(biome) || (isAmphibious && isWaterBiome(biome));
+
     const existing = a.surfacePos;
     const q0 = existing ? clampInt2(existing.q) : NaN;
     const r0 = existing ? clampInt2(existing.r) : NaN;
@@ -3312,14 +3350,14 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
         nextPos = pickInitialArmyPos(state, a.id, bodyId);
       } else {
         const biome = map.tiles[normalized.r * descriptor.config.w + normalized.q].biome;
-        if (!isPassable(biome)) {
+        if (!isPassableForArmy(biome)) {
           nextPos = relocateSurfacePosDeterministic({
             state,
             entityId: a.id,
             kind: 'army',
             bodyId,
             origin: { q: normalized.q, r: normalized.r },
-            predicate: b2 => isPassable(b2)
+            predicate: b2 => isPassableForArmy(b2)
           });
         } else {
           nextPos = normalized;

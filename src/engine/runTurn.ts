@@ -52,6 +52,7 @@ import {
   computeStackingFactors,
   computeSupplyDistanceMapFromSurfaceMap,
   computeZocSnapshotFromArmies,
+  deriveRoutedAfterMorale,
   executeMoveOrder,
   hasLineOfSight,
   hexDistance,
@@ -474,7 +475,7 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
       unloadTargetSystemId: result.unloadTargetSystemId
     };
 
-    const arrivalOutcome = executeArrivalOperations(arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
+    const arrivalOutcome = executeArrivalOperations(state, arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
 
     workingArmies = arrivalOutcome.armies;
     workingFleets = workingFleets.map(existing =>
@@ -574,7 +575,8 @@ export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): Gam
   const nextArmies = state.armies.map(army => {
     const update = result.updates.get(army.id);
     if (!update) return army;
-    return { ...army, members: update.members, morale: update.morale };
+    const routed = deriveRoutedAfterMorale(army, update.morale);
+    return { ...army, members: update.members, morale: update.morale, routed };
   });
 
   const nextLogs = [...state.logs];
@@ -1430,8 +1432,9 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       postCombatArmies.forEach(army => {
         const morale = Math.min(army.morale, POST_BATTLE_MORALE_CAP);
         const fatigue = Math.min(1, army.fatigue + POST_BATTLE_FATIGUE_ADD);
-        if (morale !== army.morale || fatigue !== army.fatigue) {
-          armiesById.set(army.id, { ...army, morale, fatigue });
+        const routed = deriveRoutedAfterMorale(army, morale);
+        if (morale !== army.morale || fatigue !== army.fatigue || routed !== (army.routed ?? false)) {
+          armiesById.set(army.id, { ...army, morale, fatigue, routed });
         }
       });
     }
@@ -1444,8 +1447,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       const morale = Math.min(1, army.morale + MORALE_RECOVERY);
       const condition = Math.min(1, army.condition + CONDITION_RECOVERY);
       const fatigue = Math.max(0, army.fatigue - FATIGUE_RECOVERY);
-      if (morale !== army.morale || condition !== army.condition || fatigue !== army.fatigue) {
-        armiesById.set(army.id, { ...army, morale, condition, fatigue });
+      const routed = deriveRoutedAfterMorale(army, morale);
+      if (
+        morale !== army.morale ||
+        condition !== army.condition ||
+        fatigue !== army.fatigue ||
+        routed !== (army.routed ?? false)
+      ) {
+        armiesById.set(army.id, { ...army, morale, condition, fatigue, routed });
       }
     });
   });

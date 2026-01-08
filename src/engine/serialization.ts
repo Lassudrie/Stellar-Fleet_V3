@@ -66,6 +66,7 @@ import {
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
 import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './planetSurface';
+import { BREAK_THRESHOLD, RALLY_THRESHOLD } from './ground';
 
 // ============================================================
 // Save format + DTOs (was: engine/saveFormat.ts)
@@ -153,6 +154,7 @@ export interface ArmyDTO {
   defense?: number;
   condition?: number;
   fatigue?: number;
+  routed?: boolean;
   rangeMin?: number;
   rangeMax?: number;
   projectionRange?: number;
@@ -1286,6 +1288,7 @@ export const serializeGameState = (state: GameState): string => {
       defense: a.defense,
       condition: a.condition,
       morale: a.morale,
+      routed: a.routed ? true : undefined,
       fatigue: a.fatigue,
       rangeMin: a.rangeMin,
       rangeMax: a.rangeMax,
@@ -1673,6 +1676,11 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         const condition = isFiniteNumber(a.condition) ? Math.max(0, Math.min(1, a.condition)) : legacyMorale;
         const morale = isFiniteNumber(a.morale) ? Math.max(0, Math.min(1, a.morale)) : defaults.baseMorale;
         const fatigue = isFiniteNumber(a.fatigue) ? Math.max(0, Math.min(1, a.fatigue)) : defaults.baseFatigue;
+
+        const routedRaw = typeof a.routed === 'boolean' ? a.routed : undefined;
+        let routed = routedRaw ?? false;
+        if (morale < BREAK_THRESHOLD) routed = true;
+        if (routedRaw === true && morale >= RALLY_THRESHOLD) routed = false;
         const rangeMin = isFiniteNumber(a.rangeMin) ? Math.max(0, Math.floor(a.rangeMin)) : defaults.rangeMin;
         const rangeMaxRaw = isFiniteNumber(a.rangeMax) ? Math.max(0, Math.floor(a.rangeMax)) : defaults.rangeMax;
         const rangeMax = Math.max(rangeMin, rangeMaxRaw);
@@ -1717,6 +1725,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
           condition,
           morale,
           fatigue,
+          ...(routed ? { routed } : {}),
           rangeMin,
           rangeMax,
           projectionRange,

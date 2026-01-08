@@ -1,17 +1,18 @@
 
 import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType, GroundBuildingType } from '../shared/shared';
+import type { Army } from '../shared/shared';
 import { RNG } from './rng';
 import { getSystemById } from './world';
 import { clone } from './math/vec3';
 import { deepFreezeDev } from './state';
-import { applyContestedLandingRisk, computeLoadOps, computeUnloadOps } from './armyOps';
+import { computeLoadOps } from './armyOps';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from '../shared/shared';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/shared';
-import { getTileAt, isBuildable, isPassable, normalizeSurfacePositions } from './planetSurface';
+import { generateSurfaceMapForState, getTileAt, isBuildable, isPassable, normalizeSurfacePositions, pickLandingSurfacePosForArmy } from './planetSurface';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { STACKING_CAP } from './ground';
 
@@ -487,40 +488,84 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (!system || !fleet) return fail('Fleet or system not found');
             if (!isFleetOrbitingSystem(fleet, system)) return fail('Fleet must be in orbit to unload armies.');
 
-            const unloadResult = computeUnloadOps({
-                fleet,
-                system,
-                armies: state.armies,
-                day: state.day,
-                rng,
-                fleetLabel: fleet.id,
-                targetPlanetId: command.targetPlanetId
+            const targetPlanet = command.targetPlanetId
+              ? system.planets.find(planet => planet.id === command.targetPlanetId && planet.isSolid) ?? null
+              : getDefaultSolidPlanet(system);
+            if (!targetPlanet) return fail('No solid bodies available for landing.');
+
+            const carriedArmyIds = new Set<string>(fleet.ships.map(ship => ship.carriedArmyId).filter((id): id is string => Boolean(id)));
+            const embarkedArmies = sorted(
+              state.armies.filter(army =>
+                army.containerId === fleet.id &&
+                army.factionId === fleet.factionId &&
+                army.state === ArmyState.EMBARKED &&
+                carriedArmyIds.has(army.id)
+              ),
+              (a, b) => a.id.localeCompare(b.id)
+            );
+            if (embarkedArmies.length === 0) return fail('No armies available to unload.');
+
+            const map = generateSurfaceMapForState(state, targetPlanet.id);
+            if (!map) return fail('Missing surface descriptor for body.');
+
+            const occupancy = new Map<string, { enemy: boolean; friendlyCount: number }>();
+            state.armies.forEach(army => {
+              if (army.state !== ArmyState.DEPLOYED) return;
+              if (army.containerId !== targetPlanet.id) return;
+              if (!army.surfacePos) return;
+              const key = `${army.surfacePos.q}|${army.surfacePos.r}`;
+              const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+              if (army.factionId === fleet.factionId) {
+                occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+              } else {
+                occupancy.set(key, { enemy: true, friendlyCount: current.friendlyCount });
+              }
+            });
+            state.armies.forEach(army => {
+              if (army.state !== ArmyState.EMBARKED) return;
+              if (!army.landingOrder || army.landingOrder.to.bodyId !== targetPlanet.id) return;
+              const key = `${Math.floor(army.landingOrder.to.q)}|${Math.floor(army.landingOrder.to.r)}`;
+              const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+              if (army.factionId === fleet.factionId) {
+                occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+              } else {
+                occupancy.set(key, { enemy: true, friendlyCount: current.friendlyCount });
+              }
             });
 
-            if (unloadResult.count === 0) return fail('No armies available to unload.');
+            const embarkedIds = new Set(embarkedArmies.map(army => army.id));
+            const landingPosByArmyId = new Map<string, { bodyId: string; q: number; r: number }>();
 
-            const contested = isOrbitContested(system, state);
-            const targetPlanet = command.targetPlanetId
-                ? system.planets.find(planet => planet.id === command.targetPlanetId && planet.isSolid)
-                : getDefaultSolidPlanet(system);
-            const riskOutcome = contested && unloadResult.unloadedArmyIds?.length
-                ? applyContestedLandingRisk({
-                    mode: 'always_land',
-                    armies: unloadResult.armies,
-                    targetArmyIds: unloadResult.unloadedArmyIds,
-                    systemName: system.name,
-                    planetName: targetPlanet?.name,
-                    targetPlanetId: targetPlanet?.id,
-                    day: state.day,
-                    rng
-                })
-                : { armies: unloadResult.armies, logs: [], succeeded: [], failed: [] };
+            const isOccupied = (q: number, r: number): boolean => {
+              const entry = occupancy.get(`${q}|${r}`);
+              if (!entry) return false;
+              if (entry.enemy) return true;
+              return entry.friendlyCount >= STACKING_CAP;
+            };
+
+            embarkedArmies.forEach(army => {
+              const chosen =
+                pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
+                pickLandingSurfacePosForArmy({ state, map, army });
+              if (!chosen) return;
+              landingPosByArmyId.set(army.id, chosen);
+              const key = `${chosen.q}|${chosen.r}`;
+              const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+              occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+            });
+
+            if (landingPosByArmyId.size === 0) return fail('Unable to choose landing position.');
+
+            const nextArmies: Army[] = state.armies.map(army => {
+              if (!embarkedIds.has(army.id)) return army;
+              const chosen = landingPosByArmyId.get(army.id);
+              if (!chosen) return army;
+              return { ...army, landingOrder: { type: 'land', to: chosen } };
+            });
 
             return ok({
-                ...state,
-                fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
-                armies: riskOutcome.armies,
-                logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
+              ...state,
+              armies: nextArmies
             });
         }
 
@@ -584,46 +629,54 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const validArmy = army.state === ArmyState.EMBARKED && army.containerId === fleet.id && army.factionId === fleet.factionId;
             if (!validArmy) return fail('Army is not eligible for unload.');
 
-            const contested = isOrbitContested(system, state);
+            const bodyId = targetPlanet.planet.id;
+            const map = generateSurfaceMapForState(state, bodyId);
+            if (!map) return fail('Missing surface descriptor for body.');
 
-            const deployTurn = Number.isFinite(executionTurn) ? executionTurn : state.day + 1;
-            const unloadResult = computeUnloadOps({
-                fleet,
-                system,
-                armies: state.armies,
-                day: state.day,
-                rng,
-                deployTurn,
-                fleetLabel: fleet.id,
-                targetPlanetId: targetPlanet.planet.id,
-                allowedArmyIds: new Set([command.armyId]),
-                allowedShipIds: new Set([command.shipId]),
-                logText: `Fleet ${fleet.id} unloaded army ${command.armyId} at ${targetPlanet.planet.name}.`
+            const occupancy = new Map<string, { enemy: boolean; friendlyCount: number }>();
+            state.armies.forEach(other => {
+              if (other.state !== ArmyState.DEPLOYED) return;
+              if (other.containerId !== bodyId) return;
+              if (!other.surfacePos) return;
+              const key = `${other.surfacePos.q}|${other.surfacePos.r}`;
+              const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+              if (other.factionId === fleet.factionId) {
+                occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+              } else {
+                occupancy.set(key, { enemy: true, friendlyCount: current.friendlyCount });
+              }
+            });
+            state.armies.forEach(other => {
+              if (other.state !== ArmyState.EMBARKED) return;
+              if (!other.landingOrder || other.landingOrder.to.bodyId !== bodyId) return;
+              const key = `${Math.floor(other.landingOrder.to.q)}|${Math.floor(other.landingOrder.to.r)}`;
+              const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+              if (other.factionId === fleet.factionId) {
+                occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+              } else {
+                occupancy.set(key, { enemy: true, friendlyCount: current.friendlyCount });
+              }
             });
 
-            if (unloadResult.count === 0) return fail('Unable to unload the selected army.');
-
-            const riskOutcome = contested
-                ? applyContestedLandingRisk({
-                    mode: 'always_land',
-                    armies: unloadResult.armies,
-                    targetArmyIds: [command.armyId],
-                    systemName: system.name,
-                    planetName: targetPlanet.planet.name,
-                    targetPlanetId: targetPlanet.planet.id,
-                    day: state.day,
-                    rng
-                })
-                : { armies: unloadResult.armies, logs: [], succeeded: [], failed: [] };
-
-            const nextState = {
-                ...state,
-                fleets: state.fleets.map(f => (f.id === fleet.id ? unloadResult.fleet : f)),
-                armies: riskOutcome.armies,
-                logs: [...state.logs, ...unloadResult.logs, ...riskOutcome.logs]
+            const isOccupied = (q: number, r: number): boolean => {
+              const entry = occupancy.get(`${q}|${r}`);
+              if (!entry) return false;
+              if (entry.enemy) return true;
+              return entry.friendlyCount >= STACKING_CAP;
             };
+            const chosen =
+              pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
+              pickLandingSurfacePosForArmy({ state, map, army });
+            if (!chosen) return fail('Unable to choose landing position.');
 
-            return ok(normalizeSurfacePositions(nextState));
+            const key = `${chosen.q}|${chosen.r}`;
+            const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
+            occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
+
+            return ok({
+              ...state,
+              armies: state.armies.map(a => a.id === army.id ? ({ ...a, landingOrder: { type: 'land', to: chosen } }) : a)
+            });
         }
 
         case 'TRANSFER_ARMY_PLANET': {

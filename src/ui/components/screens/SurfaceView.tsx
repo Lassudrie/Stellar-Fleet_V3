@@ -16,6 +16,7 @@ import {
   Army,
   ArmyState,
   Biome,
+  FeatureBits,
   FactionId,
   FactionState,
   GroundBuilding,
@@ -746,6 +747,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       });
   }, [activeMapConfig, armies, factionIndex, map]);
 
+  const plannedLandings = useMemo(() => {
+    if (!map || !activeMapConfig) return [];
+    return armies
+      .filter(army => army.state === ArmyState.EMBARKED && army.landingOrder?.type === 'land' && army.landingOrder.to.bodyId === map.bodyId)
+      .map(army => {
+        const coord =
+          normalizePos(army.landingOrder?.to, activeMapConfig) ??
+          deriveFallbackPos(`${army.id}:land`, activeMapConfig);
+        return {
+          army,
+          coord,
+          faction: factionIndex[army.factionId]
+        };
+      });
+  }, [activeMapConfig, armies, factionIndex, map]);
+
   const normalizedBuildings = useMemo(() => {
     if (!map || !activeMapConfig) return [];
     return buildings
@@ -989,6 +1006,11 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return normalizedArmies.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, normalizedArmies]);
 
+  const tilePlannedLandings = useMemo(() => {
+    if (!map || !activeCoord) return [];
+    return plannedLandings.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
+  }, [activeCoord, map, plannedLandings]);
+
   const selectedArmy = useMemo(() => {
     if (!selectedArmyId) return null;
     const army = armies.find(a => a.id === selectedArmyId) ?? null;
@@ -1036,10 +1058,16 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
   const movementStepCostCenti = useCallback((_from: HexCoord, to: HexCoord, army: Army): number => {
     if (!map) return 0;
+    const { w } = map.descriptor.config;
+    const tile = map.tiles[to.r * w + to.q];
+    const featureBits = tile?.featureBits ?? 0;
+    const hasRoad = (featureBits & FeatureBits.Road) !== 0;
+    const hasRiver = (featureBits & FeatureBits.River) !== 0;
     const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, to);
-    const baseCost = MOVE_COST[terrain];
+    const baseCost = hasRoad ? 1 : MOVE_COST[terrain];
     const affinity = clampAffinity(GROUND_UNIT_STATS[army.unitType].terrainMoveAffinity[terrain]);
     let cost = Math.max(1, Math.round(baseCost * affinity * 100));
+    if (hasRiver) cost += 100;
 
     const key = engineHexKey(to);
     const occupants = occupancyByHex.get(key) ?? [];
@@ -1353,6 +1381,20 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       drawOtanInfantry(ctx, center, hexSize, frameColor, showSymbol, showEchelon);
     });
 
+    plannedLandings.forEach(marker => {
+      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
+      const center = {
+        x: x * camera.zoom + camera.offset.x,
+        y: y * camera.zoom + camera.offset.y
+      };
+      const frameColor = marker.faction?.color ?? '#93c5fd';
+      ctx.save();
+      ctx.setLineDash([Math.max(4, hexSize * 0.35), Math.max(3, hexSize * 0.25)]);
+      drawHex(ctx, center, hexSize * 0.92, { stroke: hexToRgba(frameColor, 0.95), lineWidth: Math.max(1.5, hexSize * 0.1) });
+      ctx.setLineDash([]);
+      ctx.restore();
+    });
+
     const drawHighlight = (coord: HexCoord, color: string) => {
       const { x, y } = gridToPixel(coord, HEX_SIZE);
       const center = {
@@ -1376,6 +1418,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     map,
     movePreview,
     normalizedArmies,
+    plannedLandings,
     normalizedBuildings,
     isInteractionActive,
     playerFactionId,
@@ -1610,6 +1653,52 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                 </div>
               )}
             </div>
+
+            {plannedLandings.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  {t('surfaceView.plannedLandings')}
+                </div>
+                {tilePlannedLandings.length === 0 ? (
+                  <div className="text-sm text-slate-500">{t('surfaceView.noPlannedLandings')}</div>
+                ) : (
+                  <div className="space-y-1">
+                    {tilePlannedLandings.map(marker => {
+                      const canCancel = marker.army.factionId === playerFactionId;
+                      return (
+                        <div key={marker.army.id} className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: marker.faction?.color ?? '#e2e8f0' }} />
+                            <span className="font-semibold text-slate-100">{marker.faction?.name ?? marker.army.factionId}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              className="text-xs font-mono px-2 py-0.5 rounded border border-emerald-700 text-emerald-200 hover:border-emerald-500"
+                              onClick={() => setSelectedArmyId(marker.army.id)}
+                              title="Select landing"
+                            >
+                              {marker.army.members.toFixed(0)}
+                            </button>
+                            <button
+                              disabled={!onIssueCommand || !canCancel}
+                              onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: marker.army.id })}
+                              className={`rounded border px-2 py-0.5 text-xs font-semibold ${
+                                onIssueCommand && canCancel
+                                  ? 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
+                                  : 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
+                              }`}
+                            >
+                              {t('surfaceView.cancelLanding')}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectedArmy && canControlSelectedArmy && (
               <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">

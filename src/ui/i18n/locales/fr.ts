@@ -190,6 +190,9 @@ export const fr = {
   'surfaceView.tileMoisture': 'Humidité',
   'surfaceView.armies': 'Forces au sol',
   'surfaceView.noArmies': 'Aucune armée positionnée ici.',
+  'surfaceView.plannedLandings': 'Atterrissages planifiés',
+  'surfaceView.noPlannedLandings': 'Aucun atterrissage planifié sur cette tuile.',
+  'surfaceView.cancelLanding': 'Annuler',
   'surfaceView.buildings': 'Installations',
   'surfaceView.noBuildings': 'Aucun bâtiment présent.',
 

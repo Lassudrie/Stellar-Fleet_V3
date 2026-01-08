@@ -55,8 +55,13 @@ import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, 
 import {
   BOMBARD_COMBAT_CONDITION_LOSS,
   BOMBARD_COMBAT_MULT,
+  BREAK_THRESHOLD,
+  LANDING_BASE,
+  ORBIT_CONTESTED_LANDING_PENALTY,
   PREPARED_DEFENSE_MULT,
+  RALLY_THRESHOLD,
   computeKBreakdown,
+  deriveRoutedAfterMorale,
   deriveTerrainType,
   lineOfSight,
   previewEngagement,
@@ -1175,7 +1180,8 @@ const tests: TestCase[] = [
       const groundArmy = createArmy('army-blue-ground', 'blue', 6000, ArmyState.DEPLOYED, system.planets[0].id);
       const rng = new RNG(11);
 
-      const result = resolveFleetMovement(movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
+      const state = createBaseState({ systems: [system], fleets: [movingFleet], armies: [groundArmy] });
+      const result = resolveFleetMovement(state, movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
 
       const updatedFleet = result.nextFleet;
       const loadedShip = updatedFleet.ships.find(ship => ship.id === transport.id);
@@ -1201,6 +1207,7 @@ const tests: TestCase[] = [
     name: 'Unloading proceeds safely when orbit is clear',
     run: () => {
       const system = createSystem('sys-unload-clear', null);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 1, systemId: system.id, body: system.planets[0] });
       const transport: TestShipInput = {
         id: 'blue-transport',
         type: ShipType.TRANSPORTER,
@@ -1212,7 +1219,12 @@ const tests: TestCase[] = [
       const blueArmy = createArmy(transport.carriedArmyId!, 'blue', 8000, ArmyState.EMBARKED, 'fleet-blue');
       const blueFleet = createFleet('fleet-blue', 'blue', { ...baseVec }, [transport]);
 
-      const state = createBaseState({ systems: [system], fleets: [blueFleet], armies: [blueArmy] });
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet],
+        armies: [blueArmy],
+        planetSurfaceDescriptorsByBodyId: { [system.planets[0].id]: descriptor }
+      });
       const rng = new RNG(1);
 
       const updated = applyCommand(
@@ -1228,20 +1240,32 @@ const tests: TestCase[] = [
         rng
       ).state;
 
-      const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
-      assert.ok(unloadedArmy, 'Army should still exist after unloading');
-      assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must be deployed on the surface');
-      assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
-      assert.strictEqual(unloadedArmy?.members, blueArmy.members, 'No risk should apply in a clear orbit');
+      const queuedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.ok(queuedArmy, 'Army should still exist after unload command');
+      assert.strictEqual(queuedArmy?.state, ArmyState.EMBARKED, 'UNLOAD_ARMY should schedule a landing (army stays embarked)');
+      assert.strictEqual(queuedArmy?.containerId, blueFleet.id, 'Army remains attached to the carrier fleet until landing resolves');
+      assert.ok(queuedArmy?.landingOrder, 'UNLOAD_ARMY should schedule a landingOrder');
+      assert.strictEqual(queuedArmy?.landingOrder?.type, 'land', 'Landing order must be of type land');
+      assert.strictEqual(queuedArmy?.landingOrder?.to.bodyId, system.planets[0].id, 'Landing order must target the selected planet');
 
-      const combatLogs = updated.logs.filter(log => log.type === 'combat');
-      assert.strictEqual(combatLogs.length, 0, 'No combat logs should be generated when orbit is clear');
+      assert.strictEqual(updated.logs.length, state.logs.length, 'UNLOAD_ARMY does not emit logs (landing is resolved in phaseGround)');
+
+      const afterGround = phaseGround(updated, { turn: 1, rng: new RNG(2) });
+      const landedArmy = afterGround.armies.find(army => army.id === blueArmy.id);
+      assert.ok(landedArmy, 'Army should still exist after landing resolution');
+      assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Landing should deploy the army onto the surface');
+      assert.strictEqual(landedArmy?.containerId, system.planets[0].id, 'Deployed army must be placed on the target planet');
+      assert.ok(landedArmy?.surfacePos, 'Deployed army must have a surfacePos');
+      assert.strictEqual(landedArmy?.landingOrder, undefined, 'Landing order should be cleared after deployment');
+      const expectedLosses = Math.round(blueArmy.members * LANDING_BASE);
+      assert.strictEqual(landedArmy?.members, blueArmy.members - expectedLosses, 'Base landing attrition should apply');
     }
   },
   {
     name: 'Contested orbit applies deterministic risk to unloading armies',
     run: () => {
       const system = createSystem('sys-unload-risk', null);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 1, systemId: system.id, body: system.planets[0] });
       const transport: TestShipInput = {
         id: 'blue-risk-transport',
         type: ShipType.TRANSPORTER,
@@ -1259,7 +1283,12 @@ const tests: TestCase[] = [
         [{ id: 'red-escort', type: ShipType.FIGHTER, hp: 40, maxHp: 40, carriedArmyId: null }]
       );
 
-      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], armies: [blueArmy] });
+      const state = createBaseState({
+        systems: [system],
+        fleets: [blueFleet, redFleet],
+        armies: [blueArmy],
+        planetSurfaceDescriptorsByBodyId: { [system.planets[0].id]: descriptor }
+      });
       const rng = new RNG(4); // Deterministic roll below threshold to trigger losses
 
       const updated = applyCommand(
@@ -1275,21 +1304,18 @@ const tests: TestCase[] = [
         rng
       ).state;
 
-      const unloadedArmy = updated.armies.find(army => army.id === blueArmy.id);
-      assert.ok(unloadedArmy, 'Army should persist after contested unload');
-      assert.strictEqual(unloadedArmy?.state, ArmyState.DEPLOYED, 'Army must still disembark');
-      assert.strictEqual(unloadedArmy?.containerId, system.planets[0].id, 'Army container should move to the planet');
-      assert.ok(
-        (unloadedArmy?.members ?? 0) < blueArmy.members,
-        'Contested unload should apply deterministic members loss'
-      );
+      const queuedArmy = updated.armies.find(army => army.id === blueArmy.id);
+      assert.ok(queuedArmy, 'Army should persist after issuing UNLOAD_ARMY');
+      assert.strictEqual(queuedArmy?.state, ArmyState.EMBARKED, 'UNLOAD_ARMY schedules landing even under contested orbit');
+      assert.ok(queuedArmy?.landingOrder, 'Landing order should be queued');
+      assert.strictEqual(updated.logs.length, state.logs.length, 'UNLOAD_ARMY does not emit logs directly');
 
-      const combatLog = updated.logs.find(log => log.type === 'combat');
-      assert.ok(combatLog, 'Risk resolution should produce a combat log');
-      assert.ok(
-        combatLog?.text.includes('took fire'),
-        'Combat log should record the contested drop losses'
-      );
+      const afterGround = phaseGround(updated, { turn: 1, rng: new RNG(5) });
+      const landedArmy = afterGround.armies.find(army => army.id === blueArmy.id);
+      assert.ok(landedArmy, 'Army should still exist after landing resolution');
+      assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Landing should deploy the army even under contested orbit');
+      const expectedLosses = Math.round(blueArmy.members * (LANDING_BASE + ORBIT_CONTESTED_LANDING_PENALTY));
+      assert.strictEqual(landedArmy?.members, blueArmy.members - expectedLosses, 'Contested orbit should increase landing attrition');
     }
   },
   {
@@ -1512,14 +1538,19 @@ const tests: TestCase[] = [
 
       const rng = new RNG(17);
 
-      const arrival = resolveFleetMovement(
-        fleet,
-        [system],
-        [attackerArmy1, attackerArmy2, defenderA, defenderB],
-        0,
-        rng,
-        [fleet]
-      );
+      const descriptors = {
+        [planetA.id]: createPlanetSurfaceDescriptor({ gameSeed: 1, systemId, body: planetA }),
+        [planetB.id]: createPlanetSurfaceDescriptor({ gameSeed: 1, systemId, body: planetB })
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [fleet],
+        armies: [attackerArmy1, attackerArmy2, defenderA, defenderB],
+        planetSurfaceDescriptorsByBodyId: descriptors
+      });
+
+      const arrival = resolveFleetMovement(state, fleet, [system], [attackerArmy1, attackerArmy2, defenderA, defenderB], 0, rng, [fleet]);
 
       const updatedArmies = [attackerArmy1, attackerArmy2, defenderA, defenderB].map(army => {
         const update = arrival.armyUpdates.find(change => change.id === army.id);
@@ -1529,18 +1560,17 @@ const tests: TestCase[] = [
       const landedArmy1 = updatedArmies.find(army => army.id === attackerArmy1.id);
       const landedArmy2 = updatedArmies.find(army => army.id === attackerArmy2.id);
 
-      assert.strictEqual(landedArmy1?.containerId, planetB.id, 'First army should target the strongest defended planet');
-      assert.strictEqual(landedArmy2?.containerId, planetA.id, 'Second army should rotate to the next target');
+      assert.strictEqual(
+        landedArmy1?.landingOrder?.to.bodyId,
+        planetB.id,
+        'First army should target the strongest defended planet'
+      );
+      assert.strictEqual(landedArmy2?.landingOrder?.to.bodyId, planetA.id, 'Second army should rotate to the next target');
 
-      const landingLogs = arrival.logs.filter(log => log.text.includes('landed on'));
-      assert.ok(
-        landingLogs.some(log => log.text.includes(planetB.name)),
-        'Logs should mention the primary defended target'
-      );
-      assert.ok(
-        landingLogs.some(log => log.text.includes(planetA.name)),
-        'Logs should mention each army assignment outcome'
-      );
+      const invasionLog = arrival.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
+      assert.ok(invasionLog, 'Arrival should queue landings and emit an invasion log');
+      assert.ok(invasionLog?.text.includes(planetB.name), 'Log should mention the primary defended target');
+      assert.ok(invasionLog?.text.includes(planetA.name), 'Log should mention the other target assignment');
     }
   },
   {
@@ -1588,7 +1618,20 @@ const tests: TestCase[] = [
 
       const rng = new RNG(27);
 
-      const arrival = resolveFleetMovement(fleet, [system], [...attackers, ...defenders], 0, rng, [fleet]);
+      const descriptors = {
+        [planetStrong.id]: createPlanetSurfaceDescriptor({ gameSeed: 1, systemId, body: planetStrong }),
+        [planetMedium.id]: createPlanetSurfaceDescriptor({ gameSeed: 1, systemId, body: planetMedium }),
+        [planetWeak.id]: createPlanetSurfaceDescriptor({ gameSeed: 1, systemId, body: planetWeak })
+      };
+
+      const state = createBaseState({
+        systems: [system],
+        fleets: [fleet],
+        armies: [...attackers, ...defenders],
+        planetSurfaceDescriptorsByBodyId: descriptors
+      });
+
+      const arrival = resolveFleetMovement(state, fleet, [system], [...attackers, ...defenders], 0, rng, [fleet]);
 
       const armiesAfterArrival = [...attackers, ...defenders].map(army => {
         const update = arrival.armyUpdates.find(change => change.id === army.id);
@@ -1597,8 +1640,9 @@ const tests: TestCase[] = [
 
       const targetByArmy = new Map<string, string>();
       armiesAfterArrival.forEach(army => {
-        if (army.state === ArmyState.DEPLOYED && [planetStrong.id, planetMedium.id, planetWeak.id].includes(army.containerId)) {
-          targetByArmy.set(army.id, army.containerId);
+        const target = army.landingOrder?.to.bodyId ?? null;
+        if (target && [planetStrong.id, planetMedium.id, planetWeak.id].includes(target)) {
+          targetByArmy.set(army.id, target);
         }
       });
 
@@ -1607,20 +1651,18 @@ const tests: TestCase[] = [
       assert.strictEqual(targetByArmy.get('atk-3'), planetWeak.id, 'Third landing should use the last defended planet before rotating');
       assert.strictEqual(targetByArmy.get('atk-4'), planetStrong.id, 'Assignments should rotate back to the top of the defended queue');
 
-      const landingLogs = arrival.logs.filter(log => log.text.includes('landed on'));
-      const expectedOrder = [planetStrong.name, planetMedium.name, planetWeak.name, planetStrong.name];
-      expectedOrder.forEach((planetName, index) => {
-        assert.ok(
-          landingLogs[index]?.text.includes(planetName),
-          `Landing log ${index + 1} should mention ${planetName}`
-        );
-      });
+      const invasionLog = arrival.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
+      assert.ok(invasionLog, 'Arrival should queue landings and emit an invasion log');
+      assert.ok(invasionLog?.text.includes(planetStrong.name), 'Log should mention the strongest defended target');
+      assert.ok(invasionLog?.text.includes(planetMedium.name), 'Log should mention the medium defended target');
+      assert.ok(invasionLog?.text.includes(planetWeak.name), 'Log should mention the weakest defended target');
     }
   },
   {
     name: 'Invasion movement deploys embarked armies and logs the landing on arrival',
     run: () => {
       const system: StarSystem = { ...createSystem('sys-invasion', 'red'), position: { x: 0, y: 0, z: 0 } };
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 1, systemId: system.id, body: system.planets[0] });
 
       const transport: TestShipInput = {
         id: 'transport-invasion',
@@ -1641,11 +1683,20 @@ const tests: TestCase[] = [
 
       const rng = new RNG(9);
 
-      const initialStep = resolveFleetMovement(movingFleet, [system], [army], 0, rng, [movingFleet]);
+      const baseState = createBaseState({
+        systems: [system],
+        fleets: [movingFleet],
+        armies: [army],
+        planetSurfaceDescriptorsByBodyId: { [system.planets[0].id]: descriptor }
+      });
+
+      const initialStep = resolveFleetMovement(baseState, movingFleet, [system], [army], 0, rng, [movingFleet]);
       const fleetsAfterFirstStep = [initialStep.nextFleet];
       const armiesAfterFirstStep = [army];
 
+      const stateAfterFirstStep = { ...baseState, fleets: fleetsAfterFirstStep, armies: armiesAfterFirstStep };
       const arrivalStep = resolveFleetMovement(
+        stateAfterFirstStep,
         initialStep.nextFleet,
         [system],
         armiesAfterFirstStep,
@@ -1660,12 +1711,9 @@ const tests: TestCase[] = [
       });
 
       const landedArmy = armiesAfterArrival.find(updatedArmy => updatedArmy.id === army.id);
-      assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Army should be deployed upon invasion arrival');
-      assert.strictEqual(
-        landedArmy?.containerId,
-        system.planets[0].id,
-        'Deployed army must be placed on the invaded planet after landing'
-      );
+      assert.strictEqual(landedArmy?.state, ArmyState.EMBARKED, 'Invasion arrival should queue landing orders (deployment happens in phaseGround)');
+      assert.ok(landedArmy?.landingOrder, 'Invasion arrival should queue a landingOrder for the army');
+      assert.strictEqual(landedArmy?.landingOrder?.to.bodyId, system.planets[0].id, 'Queued landing must target the invaded planet');
 
       const invasionLog = arrivalStep.logs.find(log => log.type === 'combat' && log.text.includes('INVASION STARTED'));
       assert.ok(invasionLog, 'Arrival should generate an invasion log entry');
@@ -1709,7 +1757,8 @@ const tests: TestCase[] = [
       };
 
       const rng = new RNG(11);
-      const arrival = resolveFleetMovement(movingFleet, [gasSystem], [embarkedArmy], 0, rng, [movingFleet]);
+      const state = createBaseState({ systems: [gasSystem], fleets: [movingFleet], armies: [embarkedArmy] });
+      const arrival = resolveFleetMovement(state, movingFleet, [gasSystem], [embarkedArmy], 0, rng, [movingFleet]);
 
       assert.strictEqual(
         arrival.nextFleet.invasionTargetSystemId,
@@ -4017,18 +4066,28 @@ tests.push(
       };
 
       const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
-      const landed = next.armies.find(a => a.id === attackerArmyId);
-      assert.ok(landed, 'Expected attacker army to exist after movement phase');
-      assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected attacker army to be deployed by invasion logic');
-      assert.strictEqual(landed.containerId, body.id, 'Expected attacker army to be deployed onto the target body');
-      assert.ok(landed.surfacePos, 'Expected normalizeSurfacePositions to assign surfacePos');
+      const queued = next.armies.find(a => a.id === attackerArmyId);
+      assert.ok(queued, 'Expected attacker army to exist after movement phase');
+      assert.strictEqual(queued.state, ArmyState.EMBARKED, 'AI invasion should queue landing orders during movement (deployment happens in phaseGround)');
+      assert.strictEqual(queued.containerId, fleetId, 'Embarked army should remain attached to the invading fleet until landing resolves');
+      assert.ok(queued.landingOrder, 'Expected AI invasion to schedule a landingOrder');
+      assert.strictEqual(queued.landingOrder?.to.bodyId, body.id, 'Expected landingOrder to target the invasion body');
 
       const map = generateSurfaceMapForState(next, body.id)!;
       const { w, h } = map.descriptor.config;
-      const pos = landed.surfacePos!;
-      assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h, 'surfacePos should be inside the grid');
-      const biome = map.tiles[pos.r * w + pos.q].biome;
-      assert.ok(!engine_ps_isWater(biome), `surfacePos should be passable, got biome '${biome}'`);
+      const planned = queued.landingOrder!.to;
+      assert.ok(planned.q >= 0 && planned.q < w && planned.r >= 0 && planned.r < h, 'landingOrder should target a valid grid coordinate');
+      const plannedBiome = map.tiles[planned.r * w + planned.q].biome;
+      assert.ok(!engine_ps_isWater(plannedBiome), `landingOrder should target passable terrain, got biome '${plannedBiome}'`);
+
+      const afterGround = phaseGround(next, { turn: state.day, rng: new RNG(3) });
+      const landed = afterGround.armies.find(a => a.id === attackerArmyId);
+      assert.ok(landed, 'Expected attacker army to exist after ground phase');
+      assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected landingOrder to be resolved during phaseGround');
+      assert.strictEqual(landed.containerId, body.id, 'Expected attacker army to be deployed onto the target body');
+      assert.ok(landed.surfacePos, 'Expected deployed army to have a surfacePos');
+      assert.strictEqual(landed.surfacePos?.q, planned.q);
+      assert.strictEqual(landed.surfacePos?.r, planned.r);
     }
   },
   {
@@ -5213,6 +5272,31 @@ tests.push(
 
       assert.ok(Math.abs(preparedActive.defensePower - normal.defensePower * PREPARED_DEFENSE_MULT) < 1e-12);
       assert.ok(Math.abs(preparedThisTurn.defensePower - normal.defensePower) < 1e-12);
+    }
+  },
+  {
+    name: 'routed hysteresis requires rally threshold to recover',
+    run: () => {
+      const base = groundCombatMkArmy({
+        id: 'routed-1',
+        factionId: 'blue',
+        morale: BREAK_THRESHOLD - 0.01
+      });
+
+      assert.strictEqual(deriveRoutedAfterMorale(base, BREAK_THRESHOLD + 0.01), true, 'A unit that broke stays routed above break threshold');
+      assert.strictEqual(deriveRoutedAfterMorale(base, RALLY_THRESHOLD + 0.01), false, 'Routed unit rallies only after passing rally threshold');
+
+      const ralliedArmy: Army = { ...base, morale: RALLY_THRESHOLD + 0.01, routed: false };
+      assert.strictEqual(
+        deriveRoutedAfterMorale(ralliedArmy, RALLY_THRESHOLD - 0.05),
+        false,
+        'After rallying, morale must fall below break threshold to become routed again'
+      );
+      assert.strictEqual(
+        deriveRoutedAfterMorale(ralliedArmy, BREAK_THRESHOLD - 0.01),
+        true,
+        'After rallying, falling below break threshold re-triggers routed'
+      );
     }
   },
   {

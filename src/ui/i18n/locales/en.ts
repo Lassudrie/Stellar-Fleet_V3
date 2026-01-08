@@ -191,6 +191,9 @@ export const en = {
   'surfaceView.tileMoisture': 'Moisture',
   'surfaceView.armies': 'Armies on tile',
   'surfaceView.noArmies': 'No armies stationed here.',
+  'surfaceView.plannedLandings': 'Planned landings',
+  'surfaceView.noPlannedLandings': 'No planned landings on this tile.',
+  'surfaceView.cancelLanding': 'Cancel',
   'surfaceView.buildings': 'Installations',
   'surfaceView.noBuildings': 'No buildings present.',
 

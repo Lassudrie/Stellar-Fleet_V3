@@ -457,6 +457,11 @@ export interface Army {
   defense: number; // D
   condition: number; // C in [0..1]
   morale: number; // [0..1]
+  /**
+   * Whether the army is currently routed (break/rally hysteresis).
+   * When routed, the unit remains routed until morale recovers above the rally threshold.
+   */
+  routed?: boolean;
   fatigue: number; // [0..1]
   rangeMin: number; // Min attack range (hex)
   rangeMax: number; // Max attack range (hex)
