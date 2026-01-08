@@ -104,6 +104,17 @@ const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
 const LENS_FLARE_TEXTURE_SIZE = 128;
+const LENS_FLARE_BASE_STRENGTH = 0.55;
+const LENS_FLARE_CENTER_FADE_START = 0.08;
+const LENS_FLARE_CENTER_FADE_END = 0.55;
+const LENS_FLARE_INTENSITY_POWER = 2.4;
+const LENS_FLARE_STAR_DIAMETER_MIN_PX = 8;
+const LENS_FLARE_STAR_DIAMETER_FULL_PX = 48;
+const LENS_FLARE_STAR_DIAMETER_FADE_OUT_START_PX = 380;
+const LENS_FLARE_STAR_DIAMETER_FADE_OUT_END_PX = 720;
+const LENS_FLARE_BASE_SIZE_MULTIPLIER = 2.0;
+const LENS_FLARE_SIZE_MIN_PX = 18;
+const LENS_FLARE_SIZE_MAX_PX = 220;
 const STAR_TINT_STRENGTH = 0.18;
 const STAR_FALLBACK_TINT_STRENGTH = 0.08;
 const STAR_SURFACE_TINT_STRENGTH = 0.2;
@@ -894,6 +905,8 @@ interface StarMeshProps {
   surfaceTintColor: string;
   geometry: SphereGeometry;
   seedKey: string;
+  enableLensFlare?: boolean;
+  lensFlareStrength?: number;
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
   onHover?: () => void;
   onBlur?: () => void;
@@ -906,6 +919,8 @@ const StarMesh: React.FC<StarMeshProps> = ({
   surfaceTintColor,
   geometry,
   seedKey,
+  enableLensFlare = true,
+  lensFlareStrength = LENS_FLARE_BASE_STRENGTH,
   onDoubleClick,
   onHover,
   onBlur,
@@ -970,6 +985,8 @@ const StarMesh: React.FC<StarMeshProps> = ({
   const groupRef = useRef<Group | null>(null);
   const coreRef = useRef<Mesh | null>(null);
   const lensFlareState = useMemo(() => {
+    if (!enableLensFlare || lensFlareStrength <= 0) return null;
+
     const lensflare = new Lensflare();
     lensflare.raycast = () => null;
 
@@ -1001,6 +1018,10 @@ const StarMesh: React.FC<StarMeshProps> = ({
       baseColors: [haloBaseColor, ringBaseColor, ghostBaseColor, sparkBaseColor],
       sizeScales: [1, 0.75, 0.42, 0.22],
       intensityScales: [1, 0.85, 0.65, 0.5],
+      smoothed: {
+        intensity: 0,
+        baseSizePx: LENS_FLARE_SIZE_MIN_PX
+      },
       scratch: {
         starWorld: new Vector3(),
         lensWorld: new Vector3(),
@@ -1009,11 +1030,11 @@ const StarMesh: React.FC<StarMeshProps> = ({
         toCamera: new Vector3()
       }
     };
-  }, [tintColor]);
+  }, [enableLensFlare, lensFlareStrength, tintColor]);
 
   useEffect(() => {
     return () => {
-      lensFlareState.lensflare.dispose();
+      lensFlareState?.lensflare.dispose();
     };
   }, [lensFlareState]);
 
@@ -1022,48 +1043,68 @@ const StarMesh: React.FC<StarMeshProps> = ({
     coreRef.current.rotation.y += delta * 0.08;
     coreRef.current.rotation.z += delta * 0.02;
 
-    if (!groupRef.current) return;
+    const group = groupRef.current;
+    const lensflare = lensFlareState?.lensflare ?? null;
+    if (!group || !lensflare || !lensFlareState) return;
 
-    const { scratch, lensflare, elements, baseColors, sizeScales, intensityScales } = lensFlareState;
-    groupRef.current.getWorldPosition(scratch.starWorld);
+    const { scratch, elements, baseColors, sizeScales, intensityScales, smoothed } = lensFlareState;
+    group.getWorldPosition(scratch.starWorld);
     scratch.toCamera.copy(state.camera.position).sub(scratch.starWorld);
     const distanceToCamera = scratch.toCamera.length();
     if (!Number.isFinite(distanceToCamera) || distanceToCamera < 0.001) {
+      smoothed.intensity = MathUtils.damp(smoothed.intensity, 0, 10, delta);
       lensflare.visible = false;
       return;
     }
-
-    scratch.toCamera.divideScalar(distanceToCamera);
-    scratch.lensWorld.copy(scratch.starWorld).addScaledVector(scratch.toCamera, radius * 1.02);
-    scratch.lensLocal.copy(scratch.lensWorld);
-    groupRef.current.worldToLocal(scratch.lensLocal);
-    lensflare.position.copy(scratch.lensLocal);
-
-    scratch.projected.copy(scratch.lensWorld).project(state.camera);
-    const onScreen = scratch.projected.z > -1
-      && scratch.projected.z < 1
-      && Math.abs(scratch.projected.x) <= 1.2
-      && Math.abs(scratch.projected.y) <= 1.2;
-
-    const centerDist = Math.sqrt(scratch.projected.x * scratch.projected.x + scratch.projected.y * scratch.projected.y);
-    const centerFactor = 1 - MathUtils.smoothstep(centerDist, 0.15, 0.95);
-    const intensity = MathUtils.clamp(Math.pow(centerFactor, 1.25), 0, 1);
-
-    const shouldShow = onScreen && intensity > 0.02;
-    lensflare.visible = shouldShow;
-    if (!shouldShow) return;
 
     const viewportHeightPx = state.size.height * state.gl.getPixelRatio();
     const fovRad = (state.camera as PerspectiveCamera).isPerspectiveCamera
       ? MathUtils.degToRad((state.camera as PerspectiveCamera).fov)
       : MathUtils.degToRad(55);
     const starDiameterPx = (radius / distanceToCamera) * (viewportHeightPx / Math.tan(fovRad * 0.5));
-    const baseSizePx = MathUtils.clamp(starDiameterPx * 1.4, 48, viewportHeightPx * 0.75);
+    const targetBaseSizePx = MathUtils.clamp(
+      starDiameterPx * LENS_FLARE_BASE_SIZE_MULTIPLIER,
+      LENS_FLARE_SIZE_MIN_PX,
+      LENS_FLARE_SIZE_MAX_PX
+    );
+
+    scratch.toCamera.divideScalar(distanceToCamera);
+    scratch.lensWorld.copy(scratch.starWorld).addScaledVector(scratch.toCamera, radius * 1.02);
+    scratch.lensLocal.copy(scratch.lensWorld);
+    group.worldToLocal(scratch.lensLocal);
+    lensflare.position.copy(scratch.lensLocal);
+
+    scratch.projected.copy(scratch.lensWorld).project(state.camera);
+    const onScreen = scratch.projected.z > -1
+      && scratch.projected.z < 1
+      && Math.abs(scratch.projected.x) <= 1.15
+      && Math.abs(scratch.projected.y) <= 1.15;
+
+    const centerDist = Math.sqrt(scratch.projected.x * scratch.projected.x + scratch.projected.y * scratch.projected.y);
+    const centerFactor = 1 - MathUtils.smoothstep(centerDist, LENS_FLARE_CENTER_FADE_START, LENS_FLARE_CENTER_FADE_END);
+    const sizeFactor = MathUtils.smoothstep(starDiameterPx, LENS_FLARE_STAR_DIAMETER_MIN_PX, LENS_FLARE_STAR_DIAMETER_FULL_PX);
+    const closeFactor = 1 - MathUtils.smoothstep(
+      starDiameterPx,
+      LENS_FLARE_STAR_DIAMETER_FADE_OUT_START_PX,
+      LENS_FLARE_STAR_DIAMETER_FADE_OUT_END_PX
+    );
+    const targetIntensity = onScreen
+      ? MathUtils.clamp(Math.pow(centerFactor, LENS_FLARE_INTENSITY_POWER) * sizeFactor * closeFactor * lensFlareStrength, 0, 1)
+      : 0;
+
+    smoothed.intensity = MathUtils.damp(smoothed.intensity, targetIntensity, 12, delta);
+    smoothed.baseSizePx = MathUtils.damp(smoothed.baseSizePx, targetBaseSizePx, 12, delta);
+
+    const shouldShow = onScreen && smoothed.intensity > 0.01;
+    lensflare.visible = shouldShow;
+    if (!shouldShow) return;
+
+    const baseSizePx = smoothed.baseSizePx;
 
     for (let index = 0; index < elements.length; index += 1) {
       const element = elements[index];
       element.size = baseSizePx * sizeScales[index];
-      element.color.copy(baseColors[index]).multiplyScalar(intensity * intensityScales[index]);
+      element.color.copy(baseColors[index]).multiplyScalar(smoothed.intensity * intensityScales[index]);
     }
   });
 
@@ -1117,7 +1158,9 @@ const StarMesh: React.FC<StarMeshProps> = ({
         renderOrder={3}
         frustumCulled
       />
-      <primitive object={lensFlareState.lensflare} dispose={null} />
+      {lensFlareState?.lensflare && (
+        <primitive object={lensFlareState.lensflare} dispose={null} />
+      )}
     </group>
   );
 };
@@ -1505,6 +1548,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
             surfaceTintColor={star.surfaceTintColor}
             geometry={starGeometry}
             seedKey={star.seedKey}
+            enableLensFlare={star.data.role === 'primary'}
             onDoubleClick={(event) => {
               event.stopPropagation();
               onFocusBody(star.id);
