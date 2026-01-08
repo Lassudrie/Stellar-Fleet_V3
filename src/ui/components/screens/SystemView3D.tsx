@@ -5,6 +5,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
   AdditiveBlending,
   BackSide,
+  BufferAttribute,
   Camera,
   CanvasTexture,
   ClampToEdgeWrapping,
@@ -35,6 +36,7 @@ import {
   Spherical,
   SphereGeometry,
   TorusGeometry,
+  Vector2,
   Vector3
 } from 'three';
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
@@ -152,6 +154,8 @@ const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
 const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
 const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
+const SURFACE_NORMAL_SCALE = 0.85;
+const SURFACE_AO_INTENSITY = 0.6;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
@@ -2151,7 +2155,12 @@ const SystemSurfaceTextureManager: React.FC<{
 }) => {
   const { camera, gl, size } = useThree();
   const workerRef = useRef<SurfaceMapWorkerClient | null>(null);
-  const cacheRef = useRef<Map<string, DataTexture>>(new Map());
+  type SurfaceTextureBundle = {
+    color: DataTexture;
+    normal: DataTexture | null;
+    ao: DataTexture | null;
+  };
+  const cacheRef = useRef<Map<string, SurfaceTextureBundle>>(new Map());
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
   const inFlightRef = useRef<Map<string, { bodyId: string }>>(new Map());
   const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
@@ -2168,6 +2177,21 @@ const SystemSurfaceTextureManager: React.FC<{
       return 1;
     }
   }, [gl.capabilities]);
+  const createDataTexture = useCallback((rgba: Uint8Array, width: number, height: number, useSrgb: boolean): DataTexture => {
+    const texture = new DataTexture(rgba, width, height);
+    if (useSrgb) {
+      texture.colorSpace = SRGBColorSpace;
+    }
+    texture.wrapS = RepeatWrapping;
+    texture.wrapT = ClampToEdgeWrapping;
+    texture.minFilter = LinearMipmapLinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = Math.min(16, Math.max(1, maxAnisotropy));
+    texture.flipY = true;
+    texture.needsUpdate = true;
+    return texture;
+  }, [maxAnisotropy]);
 
   useEffect(() => {
     requestStateRef.current = ({
@@ -2176,18 +2200,24 @@ const SystemSurfaceTextureManager: React.FC<{
     } as unknown as GameState);
   }, [planetSurfaceDescriptorsByBodyId, starSystem]);
 
+  const disposeTextureBundle = useCallback((bundle: SurfaceTextureBundle) => {
+    bundle.color.dispose();
+    bundle.normal?.dispose();
+    bundle.ao?.dispose();
+  }, []);
+
   useEffect(() => {
     workerRef.current = new SurfaceMapWorkerClient();
     return () => {
       workerRef.current?.dispose();
       workerRef.current = null;
-      cacheRef.current.forEach(texture => texture.dispose());
+      cacheRef.current.forEach(bundle => disposeTextureBundle(bundle));
       cacheRef.current.clear();
       cacheLastUsedRef.current.clear();
       inFlightRef.current.clear();
       desiredKeyByBodyIdRef.current.clear();
     };
-  }, []);
+  }, [disposeTextureBundle]);
 
   const buildTextureKey = useCallback((bodyId: string, descriptor: PlanetSurfaceDescriptor, resolution: SurfaceTextureResolution): string => {
     const config = descriptor.config;
@@ -2209,18 +2239,46 @@ const SystemSurfaceTextureManager: React.FC<{
     ].join('|');
   }, [astroKey, ownerKeyByBodyId]);
 
-  const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, texture: DataTexture) => {
-    if (material.map !== texture) {
-      material.map = texture;
+  const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, bundle: SurfaceTextureBundle) => {
+    let needsUpdate = false;
+    if (material.map !== bundle.color) {
+      material.map = bundle.color;
       material.color.set('#ffffff');
+      needsUpdate = true;
+    }
+    const nextNormal = bundle.normal ?? null;
+    if (material.normalMap !== nextNormal) {
+      material.normalMap = nextNormal;
+      needsUpdate = true;
+    }
+    const nextAo = bundle.ao ?? null;
+    if (material.aoMap !== nextAo) {
+      material.aoMap = nextAo;
+      needsUpdate = true;
+    }
+    if (needsUpdate) {
       material.needsUpdate = true;
     }
     material.userData.surfaceTextureKey = key;
+    material.userData.surfaceNormalTextureKey = nextNormal ? key : null;
+    material.userData.surfaceAoTextureKey = nextAo ? key : null;
   }, []);
 
   const clearTextureFromMaterial = useCallback((material: MeshStandardMaterial) => {
+    let needsUpdate = false;
     if (material.map) {
       material.map = null;
+      needsUpdate = true;
+    }
+    if (material.normalMap) {
+      material.normalMap = null;
+      needsUpdate = true;
+    }
+    if (material.aoMap) {
+      material.aoMap = null;
+      needsUpdate = true;
+    }
+    if (needsUpdate) {
       material.needsUpdate = true;
     }
     const baseColor = typeof material.userData.baseColor === 'string' ? material.userData.baseColor : null;
@@ -2228,6 +2286,8 @@ const SystemSurfaceTextureManager: React.FC<{
       material.color.set(baseColor);
     }
     material.userData.surfaceTextureKey = null;
+    material.userData.surfaceNormalTextureKey = null;
+    material.userData.surfaceAoTextureKey = null;
   }, []);
 
   useFrame(() => {
@@ -2310,13 +2370,13 @@ const SystemSurfaceTextureManager: React.FC<{
       desiredKeyByBodyIdRef.current.set(bodyId, key);
       touchKey(key);
 
-      const cachedTexture = cacheRef.current.get(key) ?? null;
+      const cachedBundle = cacheRef.current.get(key) ?? null;
       const material = resolveMaterial(bodyId);
-      if (material && cachedTexture) {
-        applyTextureToMaterial(material, key, cachedTexture);
+      if (material && cachedBundle) {
+        applyTextureToMaterial(material, key, cachedBundle);
       }
 
-      if (cachedTexture) return;
+      if (cachedBundle) return;
       if (inFlightRef.current.has(key)) return;
       if (inFlightRef.current.size >= SURFACE_TEXTURE_MAX_INFLIGHT) return;
 
@@ -2333,25 +2393,23 @@ const SystemSurfaceTextureManager: React.FC<{
           inFlightRef.current.delete(key);
           if (!result) return;
 
-          const texture = new DataTexture(result.rgba, result.width, result.height);
-          texture.colorSpace = SRGBColorSpace;
-          texture.wrapS = RepeatWrapping;
-          texture.wrapT = ClampToEdgeWrapping;
-          texture.minFilter = LinearMipmapLinearFilter;
-          texture.magFilter = LinearFilter;
-          texture.generateMipmaps = true;
-          texture.anisotropy = Math.min(16, Math.max(1, maxAnisotropy));
-          texture.flipY = true;
-          texture.needsUpdate = true;
+          const colorTexture = createDataTexture(result.rgba, result.width, result.height, true);
+          const normalTexture = result.normalRgba
+            ? createDataTexture(result.normalRgba, result.width, result.height, false)
+            : null;
+          const aoTexture = result.aoRgba
+            ? createDataTexture(result.aoRgba, result.width, result.height, false)
+            : null;
+          const bundle = { color: colorTexture, normal: normalTexture, ao: aoTexture };
 
-          cacheRef.current.set(key, texture);
+          cacheRef.current.set(key, bundle);
           cacheLastUsedRef.current.set(key, performance.now());
 
           const desiredKey = desiredKeyByBodyIdRef.current.get(bodyId);
           if (desiredKey !== key) return;
           const mat = resolveMaterial(bodyId);
           if (!mat) return;
-          applyTextureToMaterial(mat, key, texture);
+          applyTextureToMaterial(mat, key, bundle);
         })
         .catch(() => {
           inFlightRef.current.delete(key);
@@ -2366,17 +2424,27 @@ const SystemSurfaceTextureManager: React.FC<{
     if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) return;
 
     const keys = Array.from(cacheRef.current.keys());
-    keys.sort((a, b) => (cacheLastUsedRef.current.get(a) ?? 0) - (cacheLastUsedRef.current.get(b) ?? 0));
+    // Manual stable sort to avoid in-place .sort() lint rule.
+    for (let i = 1; i < keys.length; i += 1) {
+      const key = keys[i];
+      const keyUsed = cacheLastUsedRef.current.get(key) ?? 0;
+      let j = i - 1;
+      while (j >= 0 && (cacheLastUsedRef.current.get(keys[j]) ?? 0) > keyUsed) {
+        keys[j + 1] = keys[j];
+        j -= 1;
+      }
+      keys[j + 1] = key;
+    }
 
     for (const key of keys) {
       if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) break;
       if (activeKeys.has(key)) continue;
       if (inFlightRef.current.has(key)) continue;
-      const tex = cacheRef.current.get(key);
-      if (!tex) continue;
+      const bundle = cacheRef.current.get(key);
+      if (!bundle) continue;
       cacheRef.current.delete(key);
       cacheLastUsedRef.current.delete(key);
-      tex.dispose();
+      disposeTextureBundle(bundle);
     }
   });
 
@@ -3540,6 +3608,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const existing = bodyMaterialByIdRef.current.get(planet.id);
     if (existing) return existing;
     const material = base.clone();
+    material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
+    material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.userData.baseColor = baseColor;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
@@ -3554,6 +3624,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const existing = bodyMaterialByIdRef.current.get(moon.id);
     if (existing) return existing;
     const material = base.clone();
+    material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
+    material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.userData.baseColor = baseColor;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
@@ -3567,8 +3639,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, []);
 
   const starGeometry = useDisposableMemo(() => new SphereGeometry(1, 64, 64), []);
-  const planetGeometry = useDisposableMemo(() => new SphereGeometry(1, 48, 48), []);
-  const moonGeometry = useDisposableMemo(() => new SphereGeometry(1, 32, 32), []);
+  const planetGeometry = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, 48, 48);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, []);
+  const moonGeometry = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, 32, 32);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, []);
 
   const bodyWorldPositions = useMemo<Record<string, [number, number, number]>>(() => {
     const positions: Record<string, [number, number, number]> = {};

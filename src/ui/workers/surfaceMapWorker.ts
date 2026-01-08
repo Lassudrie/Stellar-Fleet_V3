@@ -37,6 +37,8 @@ export interface SurfaceTextureWorkerResponseMessage {
     width: number;
     height: number;
     rgba: Uint8Array | null;
+    normalRgba?: Uint8Array | null;
+    aoRgba?: Uint8Array | null;
     error?: string;
   };
 }
@@ -270,16 +272,23 @@ const getTile = (tiles: PlanetSurfaceTile[], w: number, q: number, r: number): P
   return tiles[r * w + q];
 };
 
-const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureResolution): Uint8Array => {
+const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureResolution): {
+  rgba: Uint8Array;
+  normalRgba: Uint8Array | null;
+  aoRgba: Uint8Array | null;
+} => {
   const { w, h, wrapX } = map.descriptor.config;
   const seed = map.descriptor.seed >>> 0;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
+  const heightField = new Float32Array(width * height);
 
   const { min: elevMin, max: elevMax } = computeElevRange(map.tiles);
   const elevRange = Math.max(1, elevMax - elevMin);
   const seaLevel = map.seaLevelElev;
+  const invElevRange = 1 / elevRange;
+  const seaLevelNorm = (seaLevel - elevMin) * invElevRange;
 
   const useWrap = Boolean(wrapX);
   const macroNoiseScaleX = 12;
@@ -343,6 +352,7 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       const e01 = t01.elev;
       const e11 = t11.elev;
       const elev = e00 * w00 + e10 * w10 + e01 * w01 + e11 * w11;
+      const heightNorm = (elev - elevMin) * invElevRange;
 
       // Local slope magnitude (normalized) for subtle relief shading (direction-independent).
       const dElevDq = (e10 - e00) * wR0 + (e11 - e01) * wR1;
@@ -399,10 +409,74 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       rgba[idx + 1] = gg;
       rgba[idx + 2] = bb;
       rgba[idx + 3] = 255;
+      heightField[y * width + x] = heightNorm;
     }
   }
 
-  return rgba;
+  const shouldComputeRelief = width >= 256 && height >= 128;
+  if (!shouldComputeRelief) {
+    return { rgba, normalRgba: null, aoRgba: null };
+  }
+
+  const normalRgba = new Uint8Array(width * height * 4);
+  const aoRgba = new Uint8Array(width * height * 4);
+  const heightScale = Math.min(1.6, Math.max(0.55, elevRange / 1200));
+  const normalStrength = 1.1 * heightScale;
+  const aoStrength = 1.5 * heightScale;
+
+  for (let y = 0; y < height; y += 1) {
+    const y0 = y > 0 ? y - 1 : 0;
+    const y1 = y < height - 1 ? y + 1 : height - 1;
+    const row = y * width;
+    const row0 = y0 * width;
+    const row1 = y1 * width;
+
+    for (let x = 0; x < width; x += 1) {
+      const x0 = useWrap ? (x === 0 ? width - 1 : x - 1) : Math.max(0, x - 1);
+      const x1 = useWrap ? (x === width - 1 ? 0 : x + 1) : Math.min(width - 1, x + 1);
+
+      const idx = row + x;
+      const hC = heightField[idx];
+      const hL = heightField[row + x0];
+      const hR = heightField[row + x1];
+      const hU = heightField[row0 + x];
+      const hD = heightField[row1 + x];
+
+      const dx = hR - hL;
+      const dy = hD - hU;
+      let nx = -dx * normalStrength;
+      let ny = -dy * normalStrength;
+      let nz = 1.0;
+      const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      nx *= invLen;
+      ny *= invLen;
+      nz *= invLen;
+
+      const nIdx = idx * 4;
+      normalRgba[nIdx] = Math.round((nx * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 3] = 255;
+
+      const hUL = heightField[row0 + x0];
+      const hUR = heightField[row0 + x1];
+      const hDL = heightField[row1 + x0];
+      const hDR = heightField[row1 + x1];
+      const neighborAvg = (hL + hR + hU + hD + hUL + hUR + hDL + hDR) / 8;
+      const concavity = Math.max(0, neighborAvg - hC);
+      const waterFactor = hC < seaLevelNorm ? 0.55 : 1;
+      let ao = 1 - concavity * (2.1 * aoStrength) * waterFactor;
+      ao = Math.min(1, Math.max(0.6, ao));
+
+      const aoByte = Math.round(ao * 255);
+      aoRgba[nIdx] = aoByte;
+      aoRgba[nIdx + 1] = aoByte;
+      aoRgba[nIdx + 2] = aoByte;
+      aoRgba[nIdx + 3] = 255;
+    }
+  }
+
+  return { rgba, normalRgba, aoRgba };
 };
 
 self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
@@ -441,26 +515,51 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
         postResponse({
           kind: 'surfaceTexture',
           id,
-          payload: { bodyId: payload.bodyId, width: payload.resolution.width, height: payload.resolution.height, rgba: null }
+          payload: {
+            bodyId: payload.bodyId,
+            width: payload.resolution.width,
+            height: payload.resolution.height,
+            rgba: null,
+            normalRgba: null,
+            aoRgba: null
+          }
         });
         return;
       }
 
-      const rgba = renderSurfaceTexture(map, payload.resolution);
+      const { rgba, normalRgba, aoRgba } = renderSurfaceTexture(map, payload.resolution);
+      const transfer: Transferable[] = [rgba.buffer];
+      if (normalRgba) transfer.push(normalRgba.buffer);
+      if (aoRgba) transfer.push(aoRgba.buffer);
       postResponse(
         {
           kind: 'surfaceTexture',
           id,
-          payload: { bodyId: payload.bodyId, width: payload.resolution.width, height: payload.resolution.height, rgba }
+          payload: {
+            bodyId: payload.bodyId,
+            width: payload.resolution.width,
+            height: payload.resolution.height,
+            rgba,
+            normalRgba,
+            aoRgba
+          }
         },
-        [rgba.buffer]
+        transfer
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       postResponse({
         kind: 'surfaceTexture',
         id,
-        payload: { bodyId: payload.bodyId, width: payload.resolution.width, height: payload.resolution.height, rgba: null, error: errorMessage }
+        payload: {
+          bodyId: payload.bodyId,
+          width: payload.resolution.width,
+          height: payload.resolution.height,
+          rgba: null,
+          normalRgba: null,
+          aoRgba: null,
+          error: errorMessage
+        }
       });
     }
     return;
