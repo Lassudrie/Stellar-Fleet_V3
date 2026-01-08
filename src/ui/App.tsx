@@ -1402,6 +1402,7 @@ useEffect(() => {
                   stations={viewGameState?.stations ?? []}
                   factions={viewGameState?.factions ?? []}
                   playerFactionId={viewGameState?.playerFactionId}
+                  planetSurfaceDescriptorsByBodyId={viewGameState?.planetSurfaceDescriptorsByBodyId}
                   day={viewGameState?.day ?? 0}
                   selectedFleetId={selectedFleetId}
                   onSelectFleet={handleFleetSelect}

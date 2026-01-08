@@ -4,15 +4,19 @@ import { Billboard, OrbitControls, Text } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
   AdditiveBlending,
+  BackSide,
   Camera,
   CanvasTexture,
+  ClampToEdgeWrapping,
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DataTexture,
   Euler,
   Group,
   InstancedMesh,
   LinearFilter,
+  LinearMipmapLinearFilter,
   Material,
   MathUtils,
   MeshBasicMaterial,
@@ -20,8 +24,10 @@ import {
   Mesh,
   Object3D,
   PerspectiveCamera,
+  RepeatWrapping,
   RingGeometry,
   SRGBColorSpace,
+  ShaderMaterial,
   Spherical,
   SphereGeometry,
   TorusGeometry,
@@ -29,14 +35,17 @@ import {
 } from 'three';
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
 import {
+  AtmosphereType,
   FactionState,
   Fleet,
+  GameState,
   MoonData,
   MoonType,
   PlanetData,
   PlanetType,
   PlanetBodyType,
   PlanetBody,
+  PlanetSurfaceDescriptor,
   Station,
   StarData,
   StarOrbit,
@@ -60,6 +69,7 @@ import {
   type TacticalRingConfig,
   type SystemObjectId
 } from './systemViewLayout';
+import { SurfaceMapWorkerClient, buildSurfaceMapWorkerRequest, type SurfaceTextureResult } from '../../workers';
 
 interface SystemView3DProps {
   starSystem: StarSystem;
@@ -68,6 +78,7 @@ interface SystemView3DProps {
   stations?: Station[];
   factions?: FactionState[];
   playerFactionId?: string;
+  planetSurfaceDescriptorsByBodyId?: GameState['planetSurfaceDescriptorsByBodyId'];
   day?: number;
   selectedFleetId?: string | null;
   onSelectFleet?: (fleetId: string | null) => void;
@@ -120,6 +131,21 @@ const MOON_TYPE_COLORS: Record<MoonType, string> = {
   Irregular: '#a5b4fc'
 };
 
+const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
+const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
+const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
+const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
+const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
+
+type SurfaceTextureResolution = { width: number; height: number };
+
+const pickSurfaceTextureResolution = (diameterPx: number): SurfaceTextureResolution | null => {
+  if (!Number.isFinite(diameterPx) || diameterPx < SURFACE_TEXTURE_MIN_DIAMETER_PX) return null;
+  if (diameterPx >= SURFACE_TEXTURE_HIGH_DIAMETER_PX) return { width: 1024, height: 512 };
+  if (diameterPx >= SURFACE_TEXTURE_MED_DIAMETER_PX) return { width: 512, height: 256 };
+  return { width: 256, height: 128 };
+};
+
 type OrbitingMoon = {
   id: string;
   radius: number;
@@ -129,6 +155,7 @@ type OrbitingMoon = {
   orbitAscendingNodeDeg: number;
   type: MoonType;
   isSolid?: boolean;
+  atmosphere?: AtmosphereType;
 };
 
 type OrbitingPlanet = {
@@ -139,6 +166,8 @@ type OrbitingPlanet = {
   orbitInclinationDeg: number;
   orbitAscendingNodeDeg: number;
   type: PlanetType;
+  isSolid?: boolean;
+  atmosphere?: AtmosphereType;
   moons: OrbitingMoon[];
 };
 
@@ -678,6 +707,8 @@ const buildPlanetModel = (
   const orbitRadius = semiMajorAxisKm * sceneScale;
   const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
   const planetType = getPlanetType(planet);
+  const isSolid = (planet as { isSolid?: boolean }).isSolid ?? true;
+  const atmosphere = (planet as PlanetData).atmosphere;
 
   const moons = (planet.moons ?? []).map((moon, moonIndex) => {
     const moonRadiusKm = getMoonRadiusKm(moon as MoonSource);
@@ -699,7 +730,8 @@ const buildPlanetModel = (
       orbitInclinationDeg: moonInclinationDeg,
       orbitAscendingNodeDeg: moonAscendingNodeDeg,
       type: getMoonType(moon as MoonSource),
-      isSolid: (moon as MoonSource).isSolid
+      isSolid: (moon as MoonSource).isSolid,
+      atmosphere: (moon as MoonSource).atmosphere
     };
   });
 
@@ -711,6 +743,8 @@ const buildPlanetModel = (
     orbitInclinationDeg,
     orbitAscendingNodeDeg,
     type: planetType,
+    isSolid,
+    atmosphere,
     moons
   };
 };
@@ -1035,6 +1069,7 @@ interface MoonOrbitGroupProps {
   orbitMaterial: MeshBasicMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
+  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
   orbitThickness: number;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
@@ -1046,6 +1081,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   orbitMaterial,
   moonGeometry,
   moonMaterial,
+  atmosphereMaterials,
   orbitThickness,
   onFocus,
   onHover,
@@ -1156,6 +1192,16 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         }}
         frustumCulled
       />
+      {moon.atmosphere && moon.atmosphere !== 'None' && (
+        <group position={moonPosition}>
+          <AtmosphereShell
+            geometry={moonGeometry}
+            radius={moon.radius}
+            atmosphere={moon.atmosphere}
+            materialByType={atmosphereMaterials}
+          />
+        </group>
+      )}
     </group>
   );
 };
@@ -1166,7 +1212,8 @@ interface PlanetOrbitGroupProps {
   planetGeometry: SphereGeometry;
   moonGeometry: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
-  moonMaterials: Record<MoonType, MeshStandardMaterial>;
+  resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
+  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
   orbitThickness: number;
   onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
@@ -1180,7 +1227,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   planetGeometry,
   moonGeometry,
   planetMaterial,
-  moonMaterials,
+  resolveMoonMaterial,
+  atmosphereMaterials,
   orbitThickness,
   onFocus,
   onHover,
@@ -1293,13 +1341,22 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           }}
           frustumCulled
         />
+        {planet.atmosphere && planet.atmosphere !== 'None' && (
+          <AtmosphereShell
+            geometry={planetGeometry}
+            radius={planet.radius}
+            atmosphere={planet.atmosphere}
+            materialByType={atmosphereMaterials}
+          />
+        )}
         {planet.moons.map(moon => (
           <MoonOrbitGroup
             key={moon.id}
             moon={moon}
             orbitMaterial={orbitMaterial}
             moonGeometry={moonGeometry}
-            moonMaterial={moonMaterials[moon.type]}
+            moonMaterial={resolveMoonMaterial(moon)}
+            atmosphereMaterials={atmosphereMaterials}
             orbitThickness={orbitThickness}
             onFocus={onFocus}
             onHover={onHover}
@@ -1319,8 +1376,9 @@ interface SystemCelestialLayerProps {
   orbitMaterial: MeshBasicMaterial;
   planetGeometry: SphereGeometry;
   moonGeometry: SphereGeometry;
-  planetMaterialMap: Record<PlanetType, MeshStandardMaterial>;
-  moonMaterialMap: Record<MoonType, MeshStandardMaterial>;
+  resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
+  resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
+  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
   orbitThickness: number;
   onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
@@ -1335,8 +1393,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   orbitMaterial,
   planetGeometry,
   moonGeometry,
-  planetMaterialMap,
-  moonMaterialMap,
+  resolvePlanetMaterial,
+  resolveMoonMaterial,
+  atmosphereMaterials,
   orbitThickness,
   onFocusBody,
   onHoverBody,
@@ -1370,8 +1429,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           orbitMaterial={orbitMaterial}
           planetGeometry={planetGeometry}
           moonGeometry={moonGeometry}
-          planetMaterial={planetMaterialMap[planet.type]}
-          moonMaterials={moonMaterialMap}
+          planetMaterial={resolvePlanetMaterial(planet)}
+          resolveMoonMaterial={resolveMoonMaterial}
+          atmosphereMaterials={atmosphereMaterials}
           orbitThickness={orbitThickness}
           onFocus={onFocusBody}
           onHover={onHoverBody}
@@ -1381,6 +1441,311 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
       ))}
     </group>
   );
+};
+
+const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, { color: string; intensity: number; power: number; scale: number }> = {
+  Thin: { color: '#a5f3fc', intensity: 0.6, power: 3.0, scale: 1.035 },
+  Earthlike: { color: '#38bdf8', intensity: 0.85, power: 2.6, scale: 1.05 },
+  CO2: { color: '#fb923c', intensity: 0.9, power: 2.4, scale: 1.06 },
+  H2He: { color: '#a78bfa', intensity: 1.05, power: 2.2, scale: 1.09 }
+};
+
+const createAtmosphereMaterial = (params: { color: string; intensity: number; power: number }): ShaderMaterial => {
+  return new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: BackSide,
+    uniforms: {
+      uColor: { value: new Color(params.color) },
+      uIntensity: { value: params.intensity },
+      uPower: { value: params.power }
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uIntensity;
+      uniform float uPower;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+        float ndv = max(dot(normalize(vWorldNormal), viewDir), 0.0);
+        float rim = pow(1.0 - ndv, uPower);
+        vec3 color = uColor * rim * uIntensity;
+        gl_FragColor = vec4(color, rim * uIntensity);
+      }
+    `,
+    toneMapped: false
+  });
+};
+
+const AtmosphereShell: React.FC<{
+  geometry: SphereGeometry;
+  radius: number;
+  atmosphere?: AtmosphereType;
+  materialByType: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+}> = ({ geometry, radius, atmosphere, materialByType }) => {
+  if (!atmosphere || atmosphere === 'None') return null;
+  const style = ATMOSPHERE_STYLE[atmosphere];
+  const material = materialByType[atmosphere];
+  if (!style || !material) return null;
+
+  const shellRadius = radius * style.scale;
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      scale={[shellRadius, shellRadius, shellRadius]}
+      frustumCulled
+      raycast={() => {}}
+    />
+  );
+};
+
+const SystemSurfaceTextureManager: React.FC<{
+  starSystem: StarSystem;
+  astroKey: string;
+  planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
+  ownerKeyByBodyId: Record<string, string>;
+  planets: OrbitingPlanet[];
+  bodyWorldPositions: Record<string, [number, number, number]>;
+  bodyRadii: Record<string, number>;
+  selectedBodyId: string | null;
+  hoveredBodyId: string | null;
+  resolveMaterial: (bodyId: string) => MeshStandardMaterial | null;
+}> = ({
+  starSystem,
+  astroKey,
+  planetSurfaceDescriptorsByBodyId,
+  ownerKeyByBodyId,
+  planets,
+  bodyWorldPositions,
+  bodyRadii,
+  selectedBodyId,
+  hoveredBodyId,
+  resolveMaterial
+}) => {
+  const { camera, gl, size } = useThree();
+  const workerRef = useRef<SurfaceMapWorkerClient | null>(null);
+  const cacheRef = useRef<Map<string, DataTexture>>(new Map());
+  const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
+  const inFlightRef = useRef<Map<string, { bodyId: string }>>(new Map());
+  const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
+  const requestStateRef = useRef<GameState | null>(null);
+  const scratch = useMemo(() => ({
+    world: new Vector3(),
+    view: new Vector3(),
+    ndc: new Vector3()
+  }), []);
+  const maxAnisotropy = useMemo(() => {
+    try {
+      return gl.capabilities.getMaxAnisotropy?.() ?? 1;
+    } catch {
+      return 1;
+    }
+  }, [gl.capabilities]);
+
+  useEffect(() => {
+    requestStateRef.current = ({
+      systems: [starSystem],
+      planetSurfaceDescriptorsByBodyId
+    } as unknown as GameState);
+  }, [planetSurfaceDescriptorsByBodyId, starSystem]);
+
+  useEffect(() => {
+    workerRef.current = new SurfaceMapWorkerClient();
+    return () => {
+      workerRef.current?.dispose();
+      workerRef.current = null;
+      cacheRef.current.forEach(texture => texture.dispose());
+      cacheRef.current.clear();
+      cacheLastUsedRef.current.clear();
+      inFlightRef.current.clear();
+      desiredKeyByBodyIdRef.current.clear();
+    };
+  }, []);
+
+  const buildTextureKey = useCallback((bodyId: string, descriptor: PlanetSurfaceDescriptor, resolution: SurfaceTextureResolution): string => {
+    const config = descriptor.config;
+    const ownerKey = ownerKeyByBodyId[bodyId] ?? '__neutral__';
+    const { planetIndex, moonIndex } = descriptor.astroRef;
+    return [
+      bodyId,
+      descriptor.seed,
+      config.w,
+      config.h,
+      config.wrapX ? 'wrap' : 'nowrap',
+      config.generatorVersion,
+      planetIndex,
+      moonIndex ?? 'no-moon',
+      astroKey,
+      ownerKey,
+      resolution.width,
+      resolution.height
+    ].join('|');
+  }, [astroKey, ownerKeyByBodyId]);
+
+  const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, texture: DataTexture) => {
+    if (material.map !== texture) {
+      material.map = texture;
+      material.color.set('#ffffff');
+      material.needsUpdate = true;
+    }
+    material.userData.surfaceTextureKey = key;
+  }, []);
+
+  const clearTextureFromMaterial = useCallback((material: MeshStandardMaterial) => {
+    if (material.map) {
+      material.map = null;
+      material.needsUpdate = true;
+    }
+    const baseColor = typeof material.userData.baseColor === 'string' ? material.userData.baseColor : null;
+    if (baseColor) {
+      material.color.set(baseColor);
+    }
+    material.userData.surfaceTextureKey = null;
+  }, []);
+
+  useFrame(() => {
+    if (!(camera instanceof PerspectiveCamera)) return;
+    if (!planetSurfaceDescriptorsByBodyId) return;
+
+    const now = performance.now();
+    const activeKeys = new Set<string>();
+
+    const cameraFovRad = MathUtils.degToRad(camera.fov);
+    const pixelsPerWorldUnitAtZ1 = size.height / (2 * Math.tan(cameraFovRad / 2));
+
+    const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
+
+    const touchKey = (key: string) => {
+      cacheLastUsedRef.current.set(key, now);
+      activeKeys.add(key);
+    };
+
+    const updateBody = (bodyId: string, isSolid: boolean) => {
+      const descriptor = planetSurfaceDescriptorsByBodyId[bodyId];
+      if (!descriptor) return;
+      if (!isSolid) return;
+
+      const worldPos = bodyWorldPositions[bodyId];
+      const radius = bodyRadii[bodyId];
+      if (!worldPos || typeof radius !== 'number') return;
+
+      scratch.world.set(...worldPos);
+      scratch.ndc.copy(scratch.world).project(camera);
+      const isOnScreen = scratch.ndc.z > -1 && scratch.ndc.z < 1
+        && Math.abs(scratch.ndc.x) <= 1.15
+        && Math.abs(scratch.ndc.y) <= 1.15;
+
+      scratch.view.copy(scratch.world).applyMatrix4(camera.matrixWorldInverse);
+      const z = -scratch.view.z;
+      if (!Number.isFinite(z) || z <= 0) return;
+
+      let diameterPx = 0;
+      if (isOnScreen) {
+        const pixelRadius = (radius / z) * pixelsPerWorldUnitAtZ1;
+        diameterPx = pixelRadius * 2;
+      }
+
+      let resolution = pickSurfaceTextureResolution(diameterPx);
+      if (!resolution && shouldForceLowRes(bodyId)) {
+        resolution = { width: 256, height: 128 };
+      }
+      if (!resolution) {
+        desiredKeyByBodyIdRef.current.set(bodyId, null);
+        const material = resolveMaterial(bodyId);
+        if (material && material.userData.surfaceTextureKey) {
+          clearTextureFromMaterial(material);
+        }
+        return;
+      }
+
+      const key = buildTextureKey(bodyId, descriptor, resolution);
+      desiredKeyByBodyIdRef.current.set(bodyId, key);
+      touchKey(key);
+
+      const cachedTexture = cacheRef.current.get(key) ?? null;
+      const material = resolveMaterial(bodyId);
+      if (material && cachedTexture) {
+        applyTextureToMaterial(material, key, cachedTexture);
+      }
+
+      if (cachedTexture) return;
+      if (inFlightRef.current.has(key)) return;
+      if (inFlightRef.current.size >= SURFACE_TEXTURE_MAX_INFLIGHT) return;
+
+      const state = requestStateRef.current;
+      if (!state) return;
+      const workerRequest = buildSurfaceMapWorkerRequest(state, bodyId);
+      if (!workerRequest) return;
+      const worker = workerRef.current;
+      if (!worker) return;
+
+      inFlightRef.current.set(key, { bodyId });
+      worker.requestSurfaceTexture(workerRequest, resolution)
+        .then((result: SurfaceTextureResult | null) => {
+          inFlightRef.current.delete(key);
+          if (!result) return;
+
+          const texture = new DataTexture(result.rgba, result.width, result.height);
+          texture.colorSpace = SRGBColorSpace;
+          texture.wrapS = RepeatWrapping;
+          texture.wrapT = ClampToEdgeWrapping;
+          texture.minFilter = LinearMipmapLinearFilter;
+          texture.magFilter = LinearFilter;
+          texture.generateMipmaps = true;
+          texture.anisotropy = Math.min(8, Math.max(1, maxAnisotropy));
+          texture.flipY = true;
+          texture.needsUpdate = true;
+
+          cacheRef.current.set(key, texture);
+          cacheLastUsedRef.current.set(key, performance.now());
+
+          const desiredKey = desiredKeyByBodyIdRef.current.get(bodyId);
+          if (desiredKey !== key) return;
+          const mat = resolveMaterial(bodyId);
+          if (!mat) return;
+          applyTextureToMaterial(mat, key, texture);
+        })
+        .catch(() => {
+          inFlightRef.current.delete(key);
+        });
+    };
+
+    planets.forEach((planet) => {
+      updateBody(planet.id, planet.isSolid ?? true);
+      planet.moons.forEach(moon => updateBody(moon.id, moon.isSolid ?? true));
+    });
+
+    if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) return;
+
+    const keys = Array.from(cacheRef.current.keys());
+    keys.sort((a, b) => (cacheLastUsedRef.current.get(a) ?? 0) - (cacheLastUsedRef.current.get(b) ?? 0));
+
+    for (const key of keys) {
+      if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) break;
+      if (activeKeys.has(key)) continue;
+      if (inFlightRef.current.has(key)) continue;
+      const tex = cacheRef.current.get(key);
+      if (!tex) continue;
+      cacheRef.current.delete(key);
+      cacheLastUsedRef.current.delete(key);
+      tex.dispose();
+    }
+  });
+
+  return null;
 };
 
 type BodyLabelEvaluation = {
@@ -2164,6 +2529,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   fleets = [],
   stations = [],
   factions = [],
+  planetSurfaceDescriptorsByBodyId,
   day = 0,
   selectedFleetId = null,
   onSelectFleet,
@@ -2239,10 +2605,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const starRadius = primaryStar?.radius ?? minStarRadius;
   const starTintColor = primaryStar?.tintColor ?? getSpectralTint(astro?.primarySpectralType, starSystem.color || '#ffffff');
   const orbitMassSun = Math.max(primaryStar?.data.massSun ?? 1, 0.1);
+  const astroKey = useMemo(() => {
+    if (!astro) return 'no-astro';
+    return `${astro.seed}|${astro.starCount}|${astro.planets.length}`;
+  }, [astro]);
   const planetBodies = useMemo(
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
   );
+  const ownerKeyByBodyId = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    starSystem.planets.forEach(body => {
+      out[body.id] = body.ownerFactionId ?? '__neutral__';
+    });
+    return out;
+  }, [starSystem.planets]);
   const moonBodiesByPlanetIndex = useMemo(() => {
     const buckets: PlanetBody[][] = [];
     let planetIndex = -1;
@@ -2366,6 +2743,56 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       Object.values(moonMaterialMap).forEach(material => material.dispose());
     };
   }, [moonMaterialMap, planetMaterialMap]);
+
+  const atmosphereMaterials = useMemo(() => {
+    return {
+      Thin: createAtmosphereMaterial(ATMOSPHERE_STYLE.Thin),
+      Earthlike: createAtmosphereMaterial(ATMOSPHERE_STYLE.Earthlike),
+      CO2: createAtmosphereMaterial(ATMOSPHERE_STYLE.CO2),
+      H2He: createAtmosphereMaterial(ATMOSPHERE_STYLE.H2He)
+    } satisfies Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+  }, []);
+  useEffect(() => {
+    return () => {
+      Object.values(atmosphereMaterials).forEach(material => material?.dispose());
+    };
+  }, [atmosphereMaterials]);
+
+  const bodyMaterialByIdRef = useRef<Map<string, MeshStandardMaterial>>(new Map());
+  useEffect(() => () => {
+    bodyMaterialByIdRef.current.forEach(material => material.dispose());
+    bodyMaterialByIdRef.current.clear();
+  }, []);
+
+  const resolvePlanetMaterial = useCallback((planet: OrbitingPlanet): MeshStandardMaterial => {
+    const base = planetMaterialMap[planet.type];
+    const baseColor = PLANET_TYPE_COLORS[planet.type];
+    const existing = bodyMaterialByIdRef.current.get(planet.id);
+    if (existing) return existing;
+    const material = base.clone();
+    material.userData.baseColor = baseColor;
+    material.userData.surfaceTextureKey = null;
+    material.color.set(baseColor);
+    bodyMaterialByIdRef.current.set(planet.id, material);
+    return material;
+  }, [planetMaterialMap]);
+
+  const resolveMoonMaterial = useCallback((moon: OrbitingMoon): MeshStandardMaterial => {
+    const base = moonMaterialMap[moon.type];
+    const baseColor = MOON_TYPE_COLORS[moon.type];
+    const existing = bodyMaterialByIdRef.current.get(moon.id);
+    if (existing) return existing;
+    const material = base.clone();
+    material.userData.baseColor = baseColor;
+    material.userData.surfaceTextureKey = null;
+    material.color.set(baseColor);
+    bodyMaterialByIdRef.current.set(moon.id, material);
+    return material;
+  }, [moonMaterialMap]);
+
+  const resolveBodyMaterial = useCallback((bodyId: string): MeshStandardMaterial | null => {
+    return bodyMaterialByIdRef.current.get(bodyId) ?? null;
+  }, []);
 
   const starGeometry = useDisposableMemo(() => new SphereGeometry(1, 64, 64), []);
   const planetGeometry = useDisposableMemo(() => new SphereGeometry(1, 48, 48), []);
@@ -2508,6 +2935,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       }
     }
   }, [selectedFleetId, selectedObjectId]);
+
+  const selectedBodyId = useMemo(() => {
+    const parsed = parseObjectId(selectedObjectId);
+    return parsed?.kind === 'body' ? parsed.id : null;
+  }, [selectedObjectId]);
+  const hoveredBodyId = useMemo(() => {
+    const parsed = parseObjectId(hoveredObjectId);
+    return parsed?.kind === 'body' ? parsed.id : null;
+  }, [hoveredObjectId]);
 
   const displayedObject = useMemo(
     () => parseObjectId(selectedObjectId ?? hoveredObjectId),
@@ -2821,6 +3257,18 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         />
 
         <SystemRoot>
+          <SystemSurfaceTextureManager
+            starSystem={starSystem}
+            astroKey={astroKey}
+            planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
+            ownerKeyByBodyId={ownerKeyByBodyId}
+            planets={planets}
+            bodyWorldPositions={bodyWorldPositions}
+            bodyRadii={bodyRadii}
+            selectedBodyId={selectedBodyId}
+            hoveredBodyId={hoveredBodyId}
+            resolveMaterial={resolveBodyMaterial}
+          />
           <SystemCelestialLayer
             stars={starModels}
             starGeometry={starGeometry}
@@ -2828,8 +3276,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             orbitMaterial={orbitMaterial}
             planetGeometry={planetGeometry}
             moonGeometry={moonGeometry}
-            planetMaterialMap={planetMaterialMap}
-            moonMaterialMap={moonMaterialMap}
+            resolvePlanetMaterial={resolvePlanetMaterial}
+            resolveMoonMaterial={resolveMoonMaterial}
+            atmosphereMaterials={atmosphereMaterials}
             orbitThickness={orbitThickness}
             onFocusBody={requestFocusOnBody}
             onHoverBody={handleHoverBody}
