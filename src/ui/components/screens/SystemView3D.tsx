@@ -114,6 +114,8 @@ const MIN_MOON_ORBIT_INCLINATION_DEG = 0.25;
 const MAX_MOON_ORBIT_INCLINATION_DEG = 14;
 const MAX_DPR_MOBILE = 1.25;
 const MAX_DPR_DESKTOP = 2;
+const SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR = 5.5;
+const SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR = 1.15;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -3075,7 +3077,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       return Math.max(max, moonExtent);
     }, starExtent);
   }, [planets, starModels, starRadius]);
-  const cameraMaxDistance = Math.max(maxOrbitRadius * 3.5, baseCameraDistance);
+  const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
   const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.04, 0.1, 0.22);
   const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.05, 0.16, 0.32);
   const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
@@ -3099,7 +3101,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const cameraMinDistance = useMemo(() => {
     const anchoredRadius = bodyRadii[anchoredBodyId ?? ''];
     const effectiveRadius = typeof anchoredRadius === 'number' ? anchoredRadius : focusDistanceFloor;
-    return Math.max(focusDistanceFloor, effectiveRadius * 2);
+    return Math.max(focusDistanceFloor, effectiveRadius * SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR);
   }, [anchoredBodyId, bodyRadii, focusDistanceFloor]);
   const rotateSpeed = MathUtils.clamp(1 / clampedScale, 0.35, 2.5);
   const zoomSpeed = MathUtils.clamp(1 / clampedScale, 0.4, 3);
