@@ -188,8 +188,8 @@ vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
-vWorldPosition = worldPosition.xyz;`
+vec4 sfWorldPosition = modelMatrix * vec4(transformed, 1.0);
+vWorldPosition = sfWorldPosition.xyz;`
       );
 
     shader.fragmentShader = shader.fragmentShader
@@ -202,13 +202,14 @@ uniform float uNightMin;
 uniform float uTerminatorSoftness;`
       )
       .replace(
-        '#include <output_fragment>',
+        '#include <opaque_fragment>',
         `float sunDistance = length(vWorldPosition);
 vec3 sunDir = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
 float nDotL = dot(normalize(vWorldNormal), sunDir);
 float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
 float lightFactor = mix(uNightMin, 1.0, terminator);
-gl_FragColor = vec4(outgoingLight * lightFactor, diffuseColor.a);`
+outgoingLight *= lightFactor;
+#include <opaque_fragment>`
       );
   };
 
