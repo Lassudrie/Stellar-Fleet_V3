@@ -3,7 +3,7 @@ import React, { Suspense, useEffect, useMemo, useLayoutEffect, useRef, useState 
 import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import { Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { BufferGeometry, BufferAttribute } from 'three';
+import { BufferGeometry, BufferAttribute, Points } from 'three';
 import { GameState, StarSystem, LaserShot, FleetState, EnemySighting } from '../../shared/shared';
 import { SCENARIO_TEMPLATES } from '../../content/scenarios';
 import Galaxy from './Galaxy';
@@ -210,6 +210,28 @@ const SceneReadyReporter: React.FC<{ onReady?: () => void }> = ({ onReady }) => 
   return null;
 };
 
+const PARALLAX_STAR_RENDER_ORDER = -1000;
+
+const ParallaxStars: React.FC = () => {
+  const starsRef = useRef<Points>(null);
+
+  useLayoutEffect(() => {
+    const stars = starsRef.current;
+    if (!stars) return;
+    stars.renderOrder = PARALLAX_STAR_RENDER_ORDER;
+
+    const materials = Array.isArray(stars.material) ? stars.material : [stars.material];
+    materials.forEach((material) => {
+      material.transparent = false;
+      material.depthWrite = false;
+    });
+  }, []);
+
+  return (
+    <Stars radius={200} depth={50} count={3000} factor={4} saturation={0} fade speed={0.5} ref={starsRef} />
+  );
+};
+
 const GameScene: React.FC<GameSceneProps> = ({
   gameState,
   enemySightings,
@@ -346,7 +368,7 @@ const GameScene: React.FC<GameSceneProps> = ({
             />
             <ambientLight intensity={0.4} color="#aaccff" />
             <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
-            <Stars radius={200} depth={50} count={3000} factor={4} saturation={0} fade speed={0.5} />
+            <ParallaxStars />
             
             <group>
                 <TerritoryBorders 

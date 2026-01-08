@@ -153,7 +153,6 @@ const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
 const DAY_NIGHT_NIGHT_MIN = 0.12;
-const ATMOSPHERE_DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
 
@@ -225,6 +224,10 @@ type OrbitingMoon = {
   type: MoonType;
   isSolid?: boolean;
   atmosphere?: AtmosphereType;
+  airMassIndex?: number;
+  pressureBar?: number;
+  temperatureK?: number;
+  gravityG?: number;
 };
 
 type OrbitingPlanet = {
@@ -237,6 +240,10 @@ type OrbitingPlanet = {
   type: PlanetType;
   isSolid?: boolean;
   atmosphere?: AtmosphereType;
+  airMassIndex?: number;
+  pressureBar?: number;
+  temperatureK?: number;
+  gravityG?: number;
   moons: OrbitingMoon[];
 };
 
@@ -777,7 +784,12 @@ const buildPlanetModel = (
   const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
   const planetType = getPlanetType(planet);
   const isSolid = (planet as { isSolid?: boolean }).isSolid ?? true;
-  const atmosphere = (planet as PlanetData).atmosphere;
+  const planetData = planet as Partial<PlanetData>;
+  const atmosphere = planetData.atmosphere;
+  const airMassIndex = planetData.airMassIndex;
+  const pressureBar = planetData.pressureBar;
+  const temperatureK = planetData.temperatureK;
+  const gravityG = planetData.gravityG;
 
   const moons = (planet.moons ?? []).map((moon, moonIndex) => {
     const moonRadiusKm = getMoonRadiusKm(moon as MoonSource);
@@ -791,6 +803,7 @@ const buildPlanetModel = (
     const moonAscendingNodeDeg = typeof (moon as MoonSource).orbitAscendingNodeDeg === 'number'
       ? (moon as MoonSource).orbitAscendingNodeDeg
       : getMoonOrbitAscendingNodeDeg(moonId);
+    const moonData = moon as Partial<MoonData>;
     return {
       id: moonId,
       radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
@@ -800,7 +813,11 @@ const buildPlanetModel = (
       orbitAscendingNodeDeg: moonAscendingNodeDeg,
       type: getMoonType(moon as MoonSource),
       isSolid: (moon as MoonSource).isSolid,
-      atmosphere: (moon as MoonSource).atmosphere
+      atmosphere: (moon as MoonSource).atmosphere,
+      airMassIndex: moonData.airMassIndex,
+      pressureBar: moonData.pressureBar,
+      temperatureK: moonData.temperatureK,
+      gravityG: moonData.gravityG
     };
   });
 
@@ -814,6 +831,10 @@ const buildPlanetModel = (
     type: planetType,
     isSolid,
     atmosphere,
+    airMassIndex,
+    pressureBar,
+    temperatureK,
+    gravityG,
     moons
   };
 };
@@ -1179,7 +1200,7 @@ interface MoonOrbitGroupProps {
   orbitShadowMaterial: ShadowMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
-  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+  resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
@@ -1192,7 +1213,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   orbitShadowMaterial,
   moonGeometry,
   moonMaterial,
-  atmosphereMaterials,
+  resolveAtmosphereBundle,
   orbitThickness,
   onFocus,
   onHover,
@@ -1229,6 +1250,9 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     [moon.radius]
   );
   const moonScale = useMemo<[number, number, number]>(() => [moon.radius, moon.radius, moon.radius], [moon.radius]);
+  const atmosphereBundle = moon.atmosphere && moon.atmosphere !== 'None'
+    ? resolveAtmosphereBundle(moon)
+    : null;
 
   return (
     <group>
@@ -1317,13 +1341,12 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         }}
         frustumCulled
       />
-      {moon.atmosphere && moon.atmosphere !== 'None' && (
+      {atmosphereBundle && (
         <group position={moonPosition}>
-          <AtmosphereShell
+          <AtmosphereStack
             geometry={moonGeometry}
             radius={moon.radius}
-            atmosphere={moon.atmosphere}
-            materialByType={atmosphereMaterials}
+            bundle={atmosphereBundle}
           />
         </group>
       )}
@@ -1339,7 +1362,7 @@ interface PlanetOrbitGroupProps {
   moonGeometry: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
-  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+  resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
@@ -1355,7 +1378,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   moonGeometry,
   planetMaterial,
   resolveMoonMaterial,
-  atmosphereMaterials,
+  resolveAtmosphereBundle,
   orbitThickness,
   onFocus,
   onHover,
@@ -1395,6 +1418,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     () => [planet.radius * 1.5, planet.radius * 1.5, planet.radius * 1.5],
     [planet.radius]
   );
+  const atmosphereBundle = planet.atmosphere && planet.atmosphere !== 'None'
+    ? resolveAtmosphereBundle(planet)
+    : null;
 
   return (
     <group>
@@ -1482,12 +1508,11 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           }}
           frustumCulled
         />
-        {planet.atmosphere && planet.atmosphere !== 'None' && (
-          <AtmosphereShell
+        {atmosphereBundle && (
+          <AtmosphereStack
             geometry={planetGeometry}
             radius={planet.radius}
-            atmosphere={planet.atmosphere}
-            materialByType={atmosphereMaterials}
+            bundle={atmosphereBundle}
           />
         )}
         {planet.moons.map(moon => (
@@ -1498,7 +1523,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             orbitShadowMaterial={orbitShadowMaterial}
             moonGeometry={moonGeometry}
             moonMaterial={resolveMoonMaterial(moon)}
-            atmosphereMaterials={atmosphereMaterials}
+            resolveAtmosphereBundle={resolveAtmosphereBundle}
             orbitThickness={orbitThickness}
             onFocus={onFocus}
             onHover={onHover}
@@ -1521,7 +1546,7 @@ interface SystemCelestialLayerProps {
   moonGeometry: SphereGeometry;
   resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
-  atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+  resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
@@ -1539,7 +1564,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   moonGeometry,
   resolvePlanetMaterial,
   resolveMoonMaterial,
-  atmosphereMaterials,
+  resolveAtmosphereBundle,
   orbitThickness,
   onFocusBody,
   onHoverBody,
@@ -1577,7 +1602,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           moonGeometry={moonGeometry}
           planetMaterial={resolvePlanetMaterial(planet)}
           resolveMoonMaterial={resolveMoonMaterial}
-          atmosphereMaterials={atmosphereMaterials}
+          resolveAtmosphereBundle={resolveAtmosphereBundle}
           orbitThickness={orbitThickness}
           onFocus={onFocusBody}
           onHover={onHoverBody}
@@ -1589,24 +1614,199 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   );
 };
 
-const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, { color: string; intensity: number; power: number; scale: number }> = {
-  Thin: { color: '#a5f3fc', intensity: 0.6, power: 3.0, scale: 1.035 },
-  Earthlike: { color: '#38bdf8', intensity: 0.85, power: 2.6, scale: 1.05 },
-  CO2: { color: '#fb923c', intensity: 0.9, power: 2.4, scale: 1.06 },
-  H2He: { color: '#a78bfa', intensity: 1.05, power: 2.2, scale: 1.09 }
+type AtmosphereLayerBundle = {
+  lower: { material: ShaderMaterial; scale: number };
+  haze: { material: ShaderMaterial; scale: number };
 };
 
-const createAtmosphereMaterial = (params: { color: string; intensity: number; power: number }): ShaderMaterial => {
+type AtmosphereLayerStyle = {
+  rayleighColor: string;
+  mieColor: string;
+  sunsetColor: string;
+  baseThickness: number;
+  lower: {
+    intensity: number;
+    density: number;
+    rimPower: number;
+    miePower: number;
+    mieStrength: number;
+    sunsetStrength: number;
+    nightMin: number;
+  };
+  haze: {
+    intensity: number;
+    density: number;
+    rimPower: number;
+    miePower: number;
+    mieStrength: number;
+    sunsetStrength: number;
+    nightMin: number;
+    thicknessMultiplier: number;
+  };
+};
+
+const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerStyle> = {
+  Thin: {
+    rayleighColor: '#a5f3fc',
+    mieColor: '#ffffff',
+    sunsetColor: '#ffd7aa',
+    baseThickness: 0.02,
+    lower: {
+      intensity: 0.32,
+      density: 0.75,
+      rimPower: 2.6,
+      miePower: 10,
+      mieStrength: 0.18,
+      sunsetStrength: 0.55,
+      nightMin: 0.08
+    },
+    haze: {
+      intensity: 0.16,
+      density: 0.5,
+      rimPower: 3.2,
+      miePower: 9,
+      mieStrength: 0.12,
+      sunsetStrength: 0.45,
+      nightMin: 0.06,
+      thicknessMultiplier: 1.85
+    }
+  },
+  Earthlike: {
+    rayleighColor: '#38bdf8',
+    mieColor: '#f8fafc',
+    sunsetColor: '#ffb36b',
+    baseThickness: 0.035,
+    lower: {
+      intensity: 0.4,
+      density: 0.9,
+      rimPower: 2.45,
+      miePower: 11,
+      mieStrength: 0.26,
+      sunsetStrength: 0.9,
+      nightMin: 0.09
+    },
+    haze: {
+      intensity: 0.2,
+      density: 0.6,
+      rimPower: 3.15,
+      miePower: 10,
+      mieStrength: 0.18,
+      sunsetStrength: 0.75,
+      nightMin: 0.07,
+      thicknessMultiplier: 1.9
+    }
+  },
+  CO2: {
+    rayleighColor: '#fb923c',
+    mieColor: '#fff7ed',
+    sunsetColor: '#ff6b3d',
+    baseThickness: 0.048,
+    lower: {
+      intensity: 0.45,
+      density: 1.0,
+      rimPower: 2.35,
+      miePower: 11,
+      mieStrength: 0.22,
+      sunsetStrength: 1.05,
+      nightMin: 0.1
+    },
+    haze: {
+      intensity: 0.24,
+      density: 0.7,
+      rimPower: 3.05,
+      miePower: 10,
+      mieStrength: 0.16,
+      sunsetStrength: 0.9,
+      nightMin: 0.08,
+      thicknessMultiplier: 1.95
+    }
+  },
+  H2He: {
+    rayleighColor: '#a78bfa',
+    mieColor: '#f5f3ff',
+    sunsetColor: '#fbcfe8',
+    baseThickness: 0.09,
+    lower: {
+      intensity: 0.6,
+      density: 1.15,
+      rimPower: 2.15,
+      miePower: 9,
+      mieStrength: 0.35,
+      sunsetStrength: 0.5,
+      nightMin: 0.12
+    },
+    haze: {
+      intensity: 0.32,
+      density: 0.9,
+      rimPower: 2.8,
+      miePower: 8,
+      mieStrength: 0.28,
+      sunsetStrength: 0.35,
+      nightMin: 0.1,
+      thicknessMultiplier: 2.05
+    }
+  }
+};
+
+const fallbackAirMassIndex = (atmosphere: AtmosphereType): number => {
+  switch (atmosphere) {
+    case 'Thin':
+      return 0.25;
+    case 'Earthlike':
+      return 0.6;
+    case 'CO2':
+      return 0.8;
+    case 'H2He':
+      return 1.0;
+    default:
+      return 0;
+  }
+};
+
+const resolveAirMassIndex = (airMassIndex: number | undefined, pressureBar: number | undefined, atmosphere: AtmosphereType): number => {
+  if (typeof airMassIndex === 'number' && Number.isFinite(airMassIndex)) {
+    return MathUtils.clamp(airMassIndex, 0, 1);
+  }
+
+  if (typeof pressureBar === 'number' && Number.isFinite(pressureBar)) {
+    const pressure = MathUtils.clamp(pressureBar, 0.01, 50);
+    const normalized = (Math.log10(pressure) + 1) / 2;
+    return MathUtils.clamp(normalized, 0, 1);
+  }
+
+  return fallbackAirMassIndex(atmosphere);
+};
+
+const createAtmosphereLayerMaterial = (params: {
+  sunColor: Color;
+  rayleighColor: string;
+  mieColor: string;
+  sunsetColor: string;
+  intensity: number;
+  density: number;
+  rimPower: number;
+  miePower: number;
+  mieStrength: number;
+  sunsetStrength: number;
+  nightMin: number;
+}): ShaderMaterial => {
   return new ShaderMaterial({
     transparent: true,
     depthWrite: false,
     blending: AdditiveBlending,
     side: BackSide,
     uniforms: {
-      uColor: { value: new Color(params.color) },
+      uSunColor: { value: params.sunColor },
+      uRayleighColor: { value: new Color(params.rayleighColor) },
+      uMieColor: { value: new Color(params.mieColor) },
+      uSunsetColor: { value: new Color(params.sunsetColor) },
       uIntensity: { value: params.intensity },
-      uPower: { value: params.power },
-      uNightMin: { value: ATMOSPHERE_DAY_NIGHT_NIGHT_MIN },
+      uDensity: { value: params.density },
+      uRimPower: { value: params.rimPower },
+      uMiePower: { value: params.miePower },
+      uMieStrength: { value: params.mieStrength },
+      uSunsetStrength: { value: params.sunsetStrength },
+      uNightMin: { value: params.nightMin },
       uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
     },
     vertexShader: `
@@ -1620,52 +1820,91 @@ const createAtmosphereMaterial = (params: { color: string; intensity: number; po
       }
     `,
     fragmentShader: `
-      uniform vec3 uColor;
+      uniform vec3 uSunColor;
+      uniform vec3 uRayleighColor;
+      uniform vec3 uMieColor;
+      uniform vec3 uSunsetColor;
       uniform float uIntensity;
-      uniform float uPower;
+      uniform float uDensity;
+      uniform float uRimPower;
+      uniform float uMiePower;
+      uniform float uMieStrength;
+      uniform float uSunsetStrength;
       uniform float uNightMin;
       uniform float uTerminatorSoftness;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
+
       void main() {
-        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-        float ndv = max(dot(normalize(vWorldNormal), viewDir), 0.0);
-        float rim = pow(1.0 - ndv, uPower);
+        vec3 N = normalize(vWorldNormal);
+        #ifdef FLIP_SIDED
+          N = -N;
+        #endif
+        vec3 V = normalize(cameraPosition - vWorldPosition);
+
         float sunDistance = length(vWorldPosition);
-        vec3 sunDir = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
-        float nDotL = dot(normalize(vWorldNormal), sunDir);
-        float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
-        float lightFactor = mix(uNightMin, 1.0, terminator);
-        vec3 color = uColor * rim * uIntensity * lightFactor;
-        gl_FragColor = vec4(color, rim * uIntensity * lightFactor);
+        vec3 L = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+
+        float mu = dot(N, L);
+        float day = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, mu);
+        float daylight = mix(uNightMin, 1.0, day);
+
+        float nv = clamp(dot(N, V), 0.0, 1.0);
+        float limb = pow(1.0 - nv, uRimPower);
+        float depth = limb * uDensity;
+
+        float rayleigh = depth;
+        float miePhase = pow(max(dot(V, L), 0.0), uMiePower);
+        float mie = miePhase * depth * uMieStrength;
+
+        float terminatorBand = 1.0 - smoothstep(0.0, uTerminatorSoftness * 2.5, abs(mu));
+        float sunset = terminatorBand * depth * uSunsetStrength;
+
+        float scatter = rayleigh + mie + sunset;
+        if (scatter <= 0.00001) discard;
+
+        vec3 scatterColor = (uRayleighColor * rayleigh + uMieColor * mie + uSunsetColor * sunset) / max(scatter, 0.0001);
+        float alpha = clamp(scatter * uIntensity * daylight, 0.0, 1.0);
+        vec3 color = uSunColor * scatterColor;
+
+        gl_FragColor = vec4(color, alpha);
       }
     `,
     toneMapped: false
   });
 };
 
-const AtmosphereShell: React.FC<{
+const AtmosphereStack: React.FC<{
   geometry: SphereGeometry;
   radius: number;
-  atmosphere?: AtmosphereType;
-  materialByType: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
-}> = ({ geometry, radius, atmosphere, materialByType }) => {
-  if (!atmosphere || atmosphere === 'None') return null;
-  const style = ATMOSPHERE_STYLE[atmosphere];
-  const material = materialByType[atmosphere];
-  if (!style || !material) return null;
+  bundle: AtmosphereLayerBundle;
+}> = ({ geometry, radius, bundle }) => {
+  const lowerRadius = radius * bundle.lower.scale;
+  const hazeRadius = radius * bundle.haze.scale;
 
-  const shellRadius = radius * style.scale;
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
-      scale={[shellRadius, shellRadius, shellRadius]}
-      castShadow={false}
-      receiveShadow={false}
-      frustumCulled
-      raycast={() => {}}
-    />
+    <group raycast={() => null}>
+      <mesh
+        geometry={geometry}
+        material={bundle.lower.material}
+        scale={[lowerRadius, lowerRadius, lowerRadius]}
+        castShadow={false}
+        receiveShadow={false}
+        frustumCulled
+        raycast={() => null}
+        renderOrder={4}
+      />
+      <mesh
+        geometry={geometry}
+        material={bundle.haze.material}
+        scale={[hazeRadius, hazeRadius, hazeRadius]}
+        castShadow={false}
+        receiveShadow={false}
+        frustumCulled
+        raycast={() => null}
+        renderOrder={5}
+      />
+    </group>
   );
 };
 
@@ -1803,10 +2042,6 @@ const SystemSurfaceTextureManager: React.FC<{
 
       scratch.world.set(...worldPos);
       scratch.ndc.copy(scratch.world).project(camera);
-      const isOnScreen = scratch.ndc.z > -1 && scratch.ndc.z < 1
-        && Math.abs(scratch.ndc.x) <= 1.15
-        && Math.abs(scratch.ndc.y) <= 1.15;
-
       scratch.view.copy(scratch.world).applyMatrix4(camera.matrixWorldInverse);
       let z = -scratch.view.z;
       if (!Number.isFinite(z) || z <= 0) {
@@ -1814,9 +2049,16 @@ const SystemSurfaceTextureManager: React.FC<{
         if (!Number.isFinite(z) || z <= 0) return;
       }
 
+      const pixelRadius = (radius / z) * pixelsPerWorldUnitAtZ1;
+      const screenMargin = 0.15;
+      const ndcRadiusX = size.width > 0 ? (pixelRadius * 2) / size.width : 0;
+      const ndcRadiusY = size.height > 0 ? (pixelRadius * 2) / size.height : 0;
+      const isOnScreen = scratch.ndc.z > -1 && scratch.ndc.z < 1
+        && Math.abs(scratch.ndc.x) <= 1 + screenMargin + ndcRadiusX
+        && Math.abs(scratch.ndc.y) <= 1 + screenMargin + ndcRadiusY;
+
       let diameterPx = 0;
       if (isOnScreen) {
-        const pixelRadius = (radius / z) * pixelsPerWorldUnitAtZ1;
         diameterPx = pixelRadius * 2;
       }
 
@@ -2916,19 +3158,81 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     };
   }, [moonMaterialMap, planetMaterialMap]);
 
-  const atmosphereMaterials = useMemo(() => {
-    return {
-      Thin: createAtmosphereMaterial(ATMOSPHERE_STYLE.Thin),
-      Earthlike: createAtmosphereMaterial(ATMOSPHERE_STYLE.Earthlike),
-      CO2: createAtmosphereMaterial(ATMOSPHERE_STYLE.CO2),
-      H2He: createAtmosphereMaterial(ATMOSPHERE_STYLE.H2He)
-    } satisfies Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
+  type AtmosphereBundleCacheEntry = AtmosphereLayerBundle & { key: string };
+
+  const sunColorRef = useRef<Color>(new Color('#ffffff'));
+  const atmosphereBundleByBodyIdRef = useRef<Map<string, AtmosphereBundleCacheEntry>>(new Map());
+  const disposeAtmosphereBundle = useCallback((bundle: AtmosphereLayerBundle) => {
+    bundle.lower.material.dispose();
+    bundle.haze.material.dispose();
   }, []);
+  const clearAtmosphereCache = useCallback(() => {
+    atmosphereBundleByBodyIdRef.current.forEach(entry => disposeAtmosphereBundle(entry));
+    atmosphereBundleByBodyIdRef.current.clear();
+  }, [disposeAtmosphereBundle]);
+  useEffect(() => () => clearAtmosphereCache(), [clearAtmosphereCache]);
   useEffect(() => {
-    return () => {
-      Object.values(atmosphereMaterials).forEach(material => material?.dispose());
+    clearAtmosphereCache();
+  }, [astroKey, clearAtmosphereCache]);
+
+  const resolveAtmosphereBundle = useCallback((body: OrbitingPlanet | OrbitingMoon): AtmosphereLayerBundle | null => {
+    const atmosphere = body.atmosphere;
+    if (!atmosphere || atmosphere === 'None') return null;
+
+    const style = ATMOSPHERE_STYLE[atmosphere];
+    const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
+    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}`;
+
+    const existing = atmosphereBundleByBodyIdRef.current.get(body.id);
+    if (existing && existing.key === cacheKey) return existing;
+    if (existing) {
+      disposeAtmosphereBundle(existing);
+      atmosphereBundleByBodyIdRef.current.delete(body.id);
+    }
+
+    const thickness = style.baseThickness * MathUtils.lerp(0.55, 1.25, airMass);
+    const intensityFactor = MathUtils.lerp(0.65, 1.0, airMass);
+    const densityFactor = MathUtils.lerp(0.55, 1.0, airMass);
+
+    const bundle: AtmosphereBundleCacheEntry = {
+      key: cacheKey,
+      lower: {
+        material: createAtmosphereLayerMaterial({
+          sunColor: sunColorRef.current,
+          rayleighColor: style.rayleighColor,
+          mieColor: style.mieColor,
+          sunsetColor: style.sunsetColor,
+          intensity: style.lower.intensity * intensityFactor,
+          density: style.lower.density * densityFactor,
+          rimPower: style.lower.rimPower,
+          miePower: style.lower.miePower,
+          mieStrength: style.lower.mieStrength,
+          sunsetStrength: style.lower.sunsetStrength,
+          nightMin: style.lower.nightMin
+        }),
+        scale: 1 + thickness
+      },
+      haze: {
+        material: createAtmosphereLayerMaterial({
+          sunColor: sunColorRef.current,
+          rayleighColor: style.rayleighColor,
+          mieColor: style.mieColor,
+          sunsetColor: style.sunsetColor,
+          intensity: style.haze.intensity * intensityFactor,
+          density: style.haze.density * densityFactor,
+          rimPower: style.haze.rimPower,
+          miePower: style.haze.miePower,
+          mieStrength: style.haze.mieStrength,
+          sunsetStrength: style.haze.sunsetStrength,
+          nightMin: style.haze.nightMin
+        }),
+        scale: 1 + thickness * style.haze.thicknessMultiplier
+      }
     };
-  }, [atmosphereMaterials]);
+
+    atmosphereBundleByBodyIdRef.current.set(body.id, bundle);
+    return bundle;
+  }, [disposeAtmosphereBundle]);
 
   const bodyMaterialByIdRef = useRef<Map<string, MeshStandardMaterial>>(new Map());
   useEffect(() => () => {
@@ -3270,6 +3574,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
     [starTintColor]
   );
+  useEffect(() => {
+    sunColorRef.current.set(starLightColor);
+  }, [starLightColor]);
   const starIdSet = useMemo(() => new Set(starModels.map(star => star.id)), [starModels]);
   const cameraZoomConstraints = useMemo(() => {
     const anchorId = anchoredBodyId ?? starBodyId;
@@ -3481,7 +3788,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             moonGeometry={moonGeometry}
             resolvePlanetMaterial={resolvePlanetMaterial}
             resolveMoonMaterial={resolveMoonMaterial}
-            atmosphereMaterials={atmosphereMaterials}
+            resolveAtmosphereBundle={resolveAtmosphereBundle}
             orbitThickness={orbitThickness}
             onFocusBody={requestFocusOnBody}
             onHoverBody={handleHoverBody}
