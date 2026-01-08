@@ -2,8 +2,14 @@ import { distSq } from './math/vec3';
 
 type PositionedEntity = { position: { x: number; y: number; z: number } };
 
+// Optimizing spatial key generation to avoid string allocation.
+// Assuming a world size reasonable for a 2^16 offset (65536) and safe integer limits.
+// We use a large offset to handle negative coordinates.
+const KEY_OFFSET = 100000;
+const KEY_STRIDE = 1000000; // Multiplier for X component, enough to separate Z.
+
 export class SpatialIndex<T extends PositionedEntity> {
-  private readonly buckets = new Map<string, T[]>();
+  private readonly buckets = new Map<number, T[]>();
   private readonly cellSize: number;
   private readonly minCell: { x: number; z: number } = { x: Infinity, z: Infinity };
   private readonly maxCell: { x: number; z: number } = { x: -Infinity, z: -Infinity };
@@ -42,7 +48,9 @@ export class SpatialIndex<T extends PositionedEntity> {
   }
 
   private getKey(x: number, z: number) {
-    return `${x}:${z}`;
+    // Pack x and z into a safe integer key
+    // Map supports numeric keys efficiently.
+    return (x + KEY_OFFSET) * KEY_STRIDE + (z + KEY_OFFSET);
   }
 
   private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
