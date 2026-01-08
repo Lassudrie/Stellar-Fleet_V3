@@ -19,6 +19,7 @@ import {
   FeatureBits,
   FactionId,
   FactionState,
+  Fleet,
   GroundBuilding,
   HexCoord,
   PlanetBody,
@@ -26,7 +27,9 @@ import {
   Settlement,
   SettlementControlState,
   SettlementType,
-  StarSystem
+  StarSystem,
+  shortId,
+  sorted
 } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import type { GameCommand } from '../../../engine/commands';
@@ -49,6 +52,7 @@ import {
   SUPPLY_RADIUS
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
+import { isFleetOrbitingSystem } from '../../../engine/orbit';
 import { isPassable } from '../../../engine/planetSurface';
 import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
 import {
@@ -77,6 +81,7 @@ interface SurfaceViewProps {
   system: StarSystem | null;
   body: PlanetBody | null;
   armies: Army[];
+  fleets: Fleet[];
   buildings: GroundBuilding[];
   settlementControl?: Record<string, SettlementControlState>;
   factions: FactionState[];
@@ -425,6 +430,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   system,
   body,
   armies,
+  fleets,
   buildings,
   settlementControl,
   factions,
@@ -445,7 +451,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const [hovered, setHovered] = useState<HexCoord | null>(null);
   const [selected, setSelected] = useState<HexCoord | null>(null);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
-  const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack'>('none');
+  const [landingArmyId, setLandingArmyId] = useState<string | null>(null);
+  const [orderMode, setOrderMode] = useState<'none' | 'move' | 'attack' | 'land'>('none');
   const [readyMapCache, setReadyMapCache] = useState<{ key: string; map: PlanetSurfaceMap } | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
@@ -457,6 +464,22 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     acc[faction.id] = faction;
     return acc;
   }, {}), [factions]);
+
+  const fleetById = useMemo(() => {
+    const next = new Map<string, Fleet>();
+    fleets.forEach(fleet => {
+      next.set(fleet.id, fleet);
+    });
+    return next;
+  }, [fleets]);
+
+  const planetNameById = useMemo(() => {
+    const next = new Map<string, string>();
+    system?.planets.forEach(planet => {
+      next.set(planet.id, planet.name);
+    });
+    return next;
+  }, [system?.planets]);
 
   const mapKeyFromProp = useMemo(() => (mapProp ? surfaceMapKey(mapProp) : null), [mapProp]);
 
@@ -519,6 +542,10 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   useEffect(() => {
     setOrderMode('none');
   }, [selectedArmyId]);
+
+  useEffect(() => {
+    setLandingArmyId(null);
+  }, [body?.id]);
 
   const activeMapConfig = map?.descriptor.config ?? null;
 
@@ -763,6 +790,52 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       });
   }, [activeMapConfig, armies, factionIndex, map]);
 
+  const landingCandidates = useMemo(() => {
+    if (!system) return [];
+    const entries: Array<{
+      army: Army;
+      plannedBodyId: string | null;
+      plannedBodyName: string | null;
+      plannedPos: { q: number; r: number } | null;
+    }> = [];
+
+    armies.forEach(army => {
+      if (army.state !== ArmyState.EMBARKED) return;
+      if (army.factionId !== playerFactionId) return;
+
+      const fleet = fleetById.get(army.containerId);
+      if (!fleet || !isFleetOrbitingSystem(fleet, system)) return;
+
+      let plannedBodyId: string | null = null;
+      let plannedBodyName: string | null = null;
+      let plannedPos: { q: number; r: number } | null = null;
+
+      if (army.landingOrder?.type === 'land') {
+        plannedBodyId = army.landingOrder.to.bodyId;
+        plannedBodyName = planetNameById.get(plannedBodyId) ?? plannedBodyId;
+        if (plannedBodyId === body?.id && activeMapConfig) {
+          const normalized = normalizePos(army.landingOrder.to, activeMapConfig) ?? army.landingOrder.to;
+          plannedPos = { q: normalized.q, r: normalized.r };
+        }
+      }
+
+      entries.push({ army, plannedBodyId, plannedBodyName, plannedPos });
+    });
+
+    return sorted(entries, (a, b) => a.army.id.localeCompare(b.army.id));
+  }, [activeMapConfig, armies, body?.id, fleetById, planetNameById, playerFactionId, system]);
+
+  const selectedLanding = useMemo(() => {
+    if (!landingArmyId) return null;
+    return landingCandidates.find(entry => entry.army.id === landingArmyId) ?? null;
+  }, [landingArmyId, landingCandidates]);
+
+  useEffect(() => {
+    if (orderMode === 'land' && !selectedLanding) {
+      setOrderMode('none');
+    }
+  }, [orderMode, selectedLanding]);
+
   const normalizedBuildings = useMemo(() => {
     if (!map || !activeMapConfig) return [];
     return buildings
@@ -952,6 +1025,17 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const coord = pickCoord(event.clientX, event.clientY);
 
     if (orderMode !== 'none') {
+      if (orderMode === 'land') {
+        if (coord && onIssueCommand && body && selectedLanding) {
+          onIssueCommand({
+            type: 'ORDER_GROUND_LAND',
+            armyId: selectedLanding.army.id,
+            to: { bodyId: body.id, q: coord.q, r: coord.r }
+          });
+        }
+        return;
+      }
+
       if (coord && onIssueCommand && selectedArmyId && body) {
         const selectedArmy = armies.find(a => a.id === selectedArmyId) ?? null;
         const canControl = selectedArmy?.factionId === playerFactionId;
@@ -1033,6 +1117,15 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return plannedLandings.filter(entry => entry.coord.q === activeCoord.q && entry.coord.r === activeCoord.r);
   }, [activeCoord, map, plannedLandings]);
 
+  const handleSelectLanding = useCallback((armyId: string) => {
+    if (orderMode === 'land' && landingArmyId === armyId) {
+      setOrderMode('none');
+      return;
+    }
+    setLandingArmyId(armyId);
+    setOrderMode('land');
+  }, [landingArmyId, orderMode]);
+
   const selectedArmy = useMemo(() => {
     if (!selectedArmyId) return null;
     const army = armies.find(a => a.id === selectedArmyId) ?? null;
@@ -1045,6 +1138,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const canControlSelectedArmy = selectedArmy?.factionId === playerFactionId;
 
   useEffect(() => {
+    if (orderMode === 'land') return;
     if (orderMode !== 'none' && (!selectedArmy || !canControlSelectedArmy)) {
       setOrderMode('none');
     }
@@ -1676,6 +1770,76 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
               )}
             </div>
 
+            <div className="mt-4 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                {t('surfaceView.landingOps')}
+              </div>
+              {landingCandidates.length === 0 ? (
+                <div className="text-sm text-slate-500">{t('surfaceView.noLandingOps')}</div>
+              ) : (
+                <div className="space-y-2">
+                  {landingCandidates.map(entry => {
+                    const faction = factionIndex[entry.army.factionId];
+                    const isActive = orderMode === 'land' && landingArmyId === entry.army.id;
+                    const plannedLabel = entry.plannedPos
+                      ? t('surfaceView.landingPlanned', { q: entry.plannedPos.q, r: entry.plannedPos.r })
+                      : entry.plannedBodyName
+                        ? t('surfaceView.landingPlannedOther', { planet: entry.plannedBodyName })
+                        : null;
+                    return (
+                      <div key={entry.army.id} className="flex items-center justify-between text-sm">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: faction?.color ?? '#e2e8f0' }} />
+                            <span className="font-mono text-slate-100">{shortId(entry.army.id)}</span>
+                            <span className="text-xs text-slate-400">{entry.army.members.toFixed(0)}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500">{entry.army.unitType}</div>
+                          {plannedLabel && (
+                            <div className="text-[10px] text-emerald-300">{plannedLabel}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            disabled={!onIssueCommand}
+                            onClick={() => handleSelectLanding(entry.army.id)}
+                            className={`rounded border px-2 py-0.5 text-xs font-semibold ${
+                              !onIssueCommand
+                                ? 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
+                                : isActive
+                                  ? 'border-amber-400 bg-amber-900/30 text-amber-100'
+                                  : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
+                            }`}
+                          >
+                            {t('surfaceView.selectLanding')}
+                          </button>
+                          {entry.plannedBodyId && (
+                            <button
+                              disabled={!onIssueCommand}
+                              onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: entry.army.id })}
+                              className={`rounded border px-2 py-0.5 text-xs font-semibold ${
+                                onIssueCommand
+                                  ? 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
+                                  : 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
+                              }`}
+                            >
+                              {t('surfaceView.cancelLanding')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {orderMode === 'land' && selectedLanding && (
+                <div className="text-[11px] text-amber-200">
+                  {t('surfaceView.landingHint', { army: shortId(selectedLanding.army.id) })}
+                </div>
+              )}
+            </div>
+
             {plannedLandings.length > 0 && (
               <div className="mt-4 space-y-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
@@ -1688,6 +1852,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                   <div className="space-y-1">
                     {tilePlannedLandings.map(marker => {
                       const canCancel = marker.army.factionId === playerFactionId;
+                      const isLandingSelected = orderMode === 'land' && landingArmyId === marker.army.id;
                       return (
                         <div key={marker.army.id} className="flex items-center justify-between text-sm">
                           <div className="flex items-center gap-2">
@@ -1696,8 +1861,12 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
                           </div>
                           <div className="flex items-center gap-2">
                             <button
-                              className="text-xs font-mono px-2 py-0.5 rounded border border-emerald-700 text-emerald-200 hover:border-emerald-500"
-                              onClick={() => setSelectedArmyId(marker.army.id)}
+                              className={`text-xs font-mono px-2 py-0.5 rounded border ${
+                                isLandingSelected
+                                  ? 'border-amber-400 text-amber-200'
+                                  : 'border-emerald-700 text-emerald-200 hover:border-emerald-500'
+                              }`}
+                              onClick={() => handleSelectLanding(marker.army.id)}
                               title="Select landing"
                             >
                               {marker.army.members.toFixed(0)}

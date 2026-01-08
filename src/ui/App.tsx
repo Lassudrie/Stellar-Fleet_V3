@@ -1,7 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, ArmyState, PlanetSurfaceMap, PlanetBody, ShipType } from '../shared/shared';
+import { GameMessage, GameState, StarSystem, EnemySighting, PlanetSurfaceMap, PlanetBody, ShipType } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
@@ -1354,11 +1354,9 @@ useEffect(() => {
 }, [screen, pendingScreen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
 
   const surfaceArmies = useMemo(() => {
-      if (!viewGameState || !surfaceViewBodyId) return [];
-      return viewGameState.armies.filter(
-          army => army.containerId === surfaceViewBodyId && army.state === ArmyState.DEPLOYED
-      );
-  }, [surfaceViewBodyId, viewGameState]);
+      if (!viewGameState) return [];
+      return viewGameState.armies;
+  }, [viewGameState]);
 
   const surfaceBuildings = useMemo(() => {
       if (!viewGameState || !surfaceViewBodyId) return [];
@@ -1471,6 +1469,7 @@ useEffect(() => {
               system={surfaceSystem}
               body={surfaceBody}
               armies={surfaceArmies}
+              fleets={viewGameState.fleets}
               buildings={surfaceBuildings}
               settlementControl={viewGameState.settlementControl}
               factions={viewGameState.factions}
