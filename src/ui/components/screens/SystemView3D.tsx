@@ -19,6 +19,7 @@ import {
   MeshStandardMaterial,
   Mesh,
   Object3D,
+  PerspectiveCamera,
   RingGeometry,
   SRGBColorSpace,
   Spherical,
@@ -26,6 +27,7 @@ import {
   TorusGeometry,
   Vector3
 } from 'three';
+import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
 import {
   FactionState,
   Fleet,
@@ -88,6 +90,7 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
+const LENS_FLARE_TEXTURE_SIZE = 128;
 const STAR_TINT_STRENGTH = 0.18;
 const STAR_FALLBACK_TINT_STRENGTH = 0.08;
 const DAYS_PER_YEAR = 365.25;
@@ -403,6 +406,109 @@ const createStarGlowTexture = (tintColor: string): CanvasTexture => {
   gradient.addColorStop(1, toRgbaString(outer, 0));
   context.fillStyle = gradient;
   context.fillRect(0, 0, STAR_TEXTURE_SIZE, STAR_TEXTURE_SIZE);
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const createLensFlareHaloTexture = (): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = LENS_FLARE_TEXTURE_SIZE;
+  canvas.height = LENS_FLARE_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const center = LENS_FLARE_TEXTURE_SIZE * 0.5;
+  const gradient = context.createRadialGradient(center, center, LENS_FLARE_TEXTURE_SIZE * 0.04, center, center, center);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+  gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.28)');
+  gradient.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
+  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, LENS_FLARE_TEXTURE_SIZE, LENS_FLARE_TEXTURE_SIZE);
+
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const createLensFlareRingTexture = (): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = LENS_FLARE_TEXTURE_SIZE;
+  canvas.height = LENS_FLARE_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const center = LENS_FLARE_TEXTURE_SIZE * 0.5;
+  context.translate(center, center);
+  context.globalCompositeOperation = 'lighter';
+
+  context.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+  context.lineWidth = LENS_FLARE_TEXTURE_SIZE * 0.08;
+  context.beginPath();
+  context.arc(0, 0, LENS_FLARE_TEXTURE_SIZE * 0.22, 0, Math.PI * 2);
+  context.stroke();
+
+  context.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  context.lineWidth = LENS_FLARE_TEXTURE_SIZE * 0.028;
+  context.beginPath();
+  context.arc(0, 0, LENS_FLARE_TEXTURE_SIZE * 0.36, 0, Math.PI * 2);
+  context.stroke();
+
+  const haze = context.createRadialGradient(0, 0, 0, 0, 0, LENS_FLARE_TEXTURE_SIZE * 0.5);
+  haze.addColorStop(0, 'rgba(255, 255, 255, 0)');
+  haze.addColorStop(0.5, 'rgba(255, 255, 255, 0.06)');
+  haze.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  context.fillStyle = haze;
+  context.beginPath();
+  context.arc(0, 0, LENS_FLARE_TEXTURE_SIZE * 0.5, 0, Math.PI * 2);
+  context.fill();
+
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const createLensFlareSparkTexture = (): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = LENS_FLARE_TEXTURE_SIZE;
+  canvas.height = LENS_FLARE_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const center = LENS_FLARE_TEXTURE_SIZE * 0.5;
+  const bloom = context.createRadialGradient(center, center, 0, center, center, center);
+  bloom.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
+  bloom.addColorStop(0.18, 'rgba(255, 255, 255, 0.18)');
+  bloom.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  context.fillStyle = bloom;
+  context.fillRect(0, 0, LENS_FLARE_TEXTURE_SIZE, LENS_FLARE_TEXTURE_SIZE);
+
+  context.globalCompositeOperation = 'lighter';
+  context.fillStyle = 'rgba(255, 255, 255, 0.14)';
+  const streakThickness = LENS_FLARE_TEXTURE_SIZE * 0.035;
+  context.fillRect(center - streakThickness * 0.5, 0, streakThickness, LENS_FLARE_TEXTURE_SIZE);
+  context.fillRect(0, center - streakThickness * 0.5, LENS_FLARE_TEXTURE_SIZE, streakThickness);
+
   texture.needsUpdate = true;
   return texture;
 };
@@ -733,16 +839,108 @@ const StarMesh: React.FC<StarMeshProps> = ({
     () => [radius * 1.45, radius * 1.45, radius * 1.45],
     [radius]
   );
+  const groupRef = useRef<Group | null>(null);
   const coreRef = useRef<Mesh | null>(null);
+  const lensFlareState = useMemo(() => {
+    const lensflare = new Lensflare();
+    lensflare.raycast = () => null;
 
-  useFrame((_, delta) => {
+    const haloTexture = createLensFlareHaloTexture();
+    const ghostTexture = createLensFlareHaloTexture();
+    const ringTexture = createLensFlareRingTexture();
+    const sparkTexture = createLensFlareSparkTexture();
+
+    const base = new Color('#ffffff');
+    const tint = new Color(tintColor);
+    const haloBaseColor = base.clone().lerp(tint, 0.5);
+    const ringBaseColor = base.clone().lerp(tint, 0.35);
+    const ghostBaseColor = base.clone().lerp(tint, 0.25);
+    const sparkBaseColor = base.clone();
+
+    const halo = new LensflareElement(haloTexture, 256, 0, haloBaseColor.clone());
+    const ring = new LensflareElement(ringTexture, 180, 0.08, ringBaseColor.clone());
+    const ghost = new LensflareElement(ghostTexture, 96, 0.62, ghostBaseColor.clone());
+    const spark = new LensflareElement(sparkTexture, 54, 0.88, sparkBaseColor.clone());
+
+    lensflare.addElement(halo);
+    lensflare.addElement(ring);
+    lensflare.addElement(ghost);
+    lensflare.addElement(spark);
+
+    return {
+      lensflare,
+      elements: [halo, ring, ghost, spark],
+      baseColors: [haloBaseColor, ringBaseColor, ghostBaseColor, sparkBaseColor],
+      sizeScales: [1, 0.75, 0.42, 0.22],
+      intensityScales: [1, 0.85, 0.65, 0.5],
+      scratch: {
+        starWorld: new Vector3(),
+        lensWorld: new Vector3(),
+        lensLocal: new Vector3(),
+        projected: new Vector3(),
+        toCamera: new Vector3()
+      }
+    };
+  }, [tintColor]);
+
+  useEffect(() => {
+    return () => {
+      lensFlareState.lensflare.dispose();
+    };
+  }, [lensFlareState]);
+
+  useFrame((state, delta) => {
     if (!coreRef.current) return;
     coreRef.current.rotation.y += delta * 0.08;
     coreRef.current.rotation.z += delta * 0.02;
+
+    if (!groupRef.current) return;
+
+    const { scratch, lensflare, elements, baseColors, sizeScales, intensityScales } = lensFlareState;
+    groupRef.current.getWorldPosition(scratch.starWorld);
+    scratch.toCamera.copy(state.camera.position).sub(scratch.starWorld);
+    const distanceToCamera = scratch.toCamera.length();
+    if (!Number.isFinite(distanceToCamera) || distanceToCamera < 0.001) {
+      lensflare.visible = false;
+      return;
+    }
+
+    scratch.toCamera.divideScalar(distanceToCamera);
+    scratch.lensWorld.copy(scratch.starWorld).addScaledVector(scratch.toCamera, radius * 1.02);
+    scratch.lensLocal.copy(scratch.lensWorld);
+    groupRef.current.worldToLocal(scratch.lensLocal);
+    lensflare.position.copy(scratch.lensLocal);
+
+    scratch.projected.copy(scratch.lensWorld).project(state.camera);
+    const onScreen = scratch.projected.z > -1
+      && scratch.projected.z < 1
+      && Math.abs(scratch.projected.x) <= 1.2
+      && Math.abs(scratch.projected.y) <= 1.2;
+
+    const centerDist = Math.sqrt(scratch.projected.x * scratch.projected.x + scratch.projected.y * scratch.projected.y);
+    const centerFactor = 1 - MathUtils.smoothstep(centerDist, 0.15, 0.95);
+    const intensity = MathUtils.clamp(Math.pow(centerFactor, 1.25), 0, 1);
+
+    const shouldShow = onScreen && intensity > 0.02;
+    lensflare.visible = shouldShow;
+    if (!shouldShow) return;
+
+    const viewportHeightPx = state.size.height * state.gl.getPixelRatio();
+    const fovRad = (state.camera as PerspectiveCamera).isPerspectiveCamera
+      ? MathUtils.degToRad((state.camera as PerspectiveCamera).fov)
+      : MathUtils.degToRad(55);
+    const starDiameterPx = (radius / distanceToCamera) * (viewportHeightPx / Math.tan(fovRad * 0.5));
+    const baseSizePx = MathUtils.clamp(starDiameterPx * 1.4, 48, viewportHeightPx * 0.75);
+
+    for (let index = 0; index < elements.length; index += 1) {
+      const element = elements[index];
+      element.size = baseSizePx * sizeScales[index];
+      element.color.copy(baseColors[index]).multiplyScalar(intensity * intensityScales[index]);
+    }
   });
 
   return (
-    <group>
+    <group ref={groupRef}>
       <mesh
         ref={coreRef}
         geometry={geometry}
@@ -791,6 +989,7 @@ const StarMesh: React.FC<StarMeshProps> = ({
         renderOrder={3}
         frustumCulled
       />
+      <primitive object={lensFlareState.lensflare} dispose={null} />
     </group>
   );
 };
