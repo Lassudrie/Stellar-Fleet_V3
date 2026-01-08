@@ -10,6 +10,7 @@ import {
   ClampToEdgeWrapping,
   Color,
   ConeGeometry,
+  PCFSoftShadowMap,
   CylinderGeometry,
   DataTexture,
   Euler,
@@ -1183,6 +1184,8 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         material={hitboxMaterial}
         position={moonPosition}
         scale={moonHitboxScale}
+        castShadow={false}
+        receiveShadow={false}
         onDoubleClick={(event) => {
           event.stopPropagation();
           onFocus(moon.id);
@@ -1218,6 +1221,8 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         material={moonMaterial}
         position={moonPosition}
         scale={moonScale}
+        castShadow
+        receiveShadow
         onDoubleClick={(event) => {
           event.stopPropagation();
           onFocus(moon.id);
@@ -1333,6 +1338,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           geometry={planetGeometry}
           material={hitboxMaterial}
           scale={planetHitboxScale}
+          castShadow={false}
+          receiveShadow={false}
           onDoubleClick={(event) => {
             event.stopPropagation();
             onFocus(planet.id);
@@ -1367,6 +1374,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           geometry={planetGeometry}
           material={planetMaterial}
           scale={planetScale}
+          castShadow
+          receiveShadow
           onDoubleClick={(event) => {
             event.stopPropagation();
             onFocus(planet.id);
@@ -1571,6 +1580,8 @@ const AtmosphereShell: React.FC<{
       geometry={geometry}
       material={material}
       scale={[shellRadius, shellRadius, shellRadius]}
+      castShadow={false}
+      receiveShadow={false}
       frustumCulled
       raycast={() => {}}
     />
@@ -3151,8 +3162,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starExtent);
   }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
-  const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.04, 0.1, 0.22);
-  const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.05, 0.16, 0.32);
+  const ambientLightIntensity = MathUtils.clamp(0.06 + clampedScale * 0.02, 0.05, 0.12);
+  const hemisphereLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.03, 0.1, 0.22);
   const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
   const starLightIntensity = MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14);
   const ambientLightColor = useMemo(
@@ -3306,10 +3317,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
+  const shadowMapSize = prefersTouchFallback ? 512 : 1024;
+  const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
+  const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
 
   return (
     <div className="relative w-full h-full bg-black">
       <Canvas
+        shadows
+        onCreated={({ gl }) => {
+          gl.shadowMap.type = PCFSoftShadowMap;
+        }}
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
         dpr={[1, maxDpr]}
@@ -3327,6 +3345,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           distance={starLightDistance}
           decay={2}
           color={starLightColor}
+          castShadow
+          shadow-mapSize={[shadowMapSize, shadowMapSize]}
+          shadow-camera-near={shadowCameraNear}
+          shadow-camera-far={shadowCameraFar}
+          shadow-bias={-0.00015}
+          shadow-normalBias={0.02}
         />
 
         <SystemCamera
