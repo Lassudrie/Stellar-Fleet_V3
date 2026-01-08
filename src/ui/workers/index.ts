@@ -151,6 +151,7 @@ export class SurfaceMapWorkerClient {
     if (!map) return null;
 
     const { w, h, wrapX } = map.descriptor.config;
+    const seed = map.descriptor.seed >>> 0;
     const width = Math.max(1, Math.floor(resolution.width));
     const height = Math.max(1, Math.floor(resolution.height));
 
@@ -183,6 +184,7 @@ export class SurfaceMapWorkerClient {
     };
 
     const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+    const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
     const hexToRgb8 = (hex: string): { r: number; g: number; b: number } => {
       const raw = hex.startsWith('#') ? hex.slice(1) : hex;
       const int = Number.parseInt(raw, 16);
@@ -219,8 +221,75 @@ export class SurfaceMapWorkerClient {
       return m < 0 ? m + mod : m;
     };
 
+    const hash2 = (x: number, y: number, hashSeed: number): number => {
+      const xi = x | 0;
+      const yi = y | 0;
+      let h = hashSeed >>> 0;
+      h ^= Math.imul(xi, 0x9e3779b1);
+      h ^= Math.imul(yi, 0x85ebca6b);
+      h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+      h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967295;
+    };
+
+    const valueNoise2D = (x: number, y: number, noiseSeed: number, wrapPeriodX?: number): number => {
+      const x0 = Math.floor(x);
+      const y0 = Math.floor(y);
+      const xf = x - x0;
+      const yf = y - y0;
+      const sx = xf * xf * (3 - 2 * xf);
+      const sy = yf * yf * (3 - 2 * yf);
+      const xi0 = typeof wrapPeriodX === 'number' ? wrapIndex(x0, wrapPeriodX) : x0;
+      const xi1 = typeof wrapPeriodX === 'number' ? wrapIndex(x0 + 1, wrapPeriodX) : x0 + 1;
+      const n00 = hash2(xi0, y0, noiseSeed);
+      const n10 = hash2(xi1, y0, noiseSeed);
+      const n01 = hash2(xi0, y0 + 1, noiseSeed);
+      const n11 = hash2(xi1, y0 + 1, noiseSeed);
+      const nx0 = lerp(n00, n10, sx);
+      const nx1 = lerp(n01, n11, sx);
+      return lerp(nx0, nx1, sy);
+    };
+
+    const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+
+    const biomeNoiseAmplitude = (biome: Biome): { macro: number; micro: number } => {
+      switch (biome) {
+        case 'ocean':
+        case 'lake':
+          return { macro: 0.06, micro: 0.018 };
+        case 'coast':
+          return { macro: 0.07, micro: 0.024 };
+        case 'ice':
+        case 'fractured_ice':
+        case 'dusty_ice':
+        case 'cryovolcanic':
+          return { macro: 0.06, micro: 0.02 };
+        case 'taiga':
+        case 'grassland':
+        case 'forest':
+        case 'rainforest':
+        case 'tundra':
+          return { macro: 0.08, micro: 0.03 };
+        case 'desert':
+        case 'ash_desert':
+        case 'thermal_polygons':
+          return { macro: 0.09, micro: 0.034 };
+        case 'lava_flats':
+        case 'volcanic':
+        case 'vitrified':
+          return { macro: 0.08, micro: 0.028 };
+        default:
+          return { macro: 0.075, micro: 0.028 };
+      }
+    };
+
     const rgba = new Uint8Array(width * height * 4);
     const useWrap = Boolean(wrapX);
+    const macroNoiseScaleX = 12;
+    const macroNoiseScaleY = 6;
+    const microNoiseScaleX = 96;
+    const microNoiseScaleY = 48;
 
     for (let y = 0; y < height; y += 1) {
       const v = (y + 0.5) / height;
@@ -288,9 +357,41 @@ export class SurfaceMapWorkerClient {
         const altShade = 1 + Math.max(-0.06, Math.min(0.09, altNorm * 0.12));
         const shade = slopeShade * altShade;
 
+        const amp00 = biomeNoiseAmplitude(t00.biome);
+        const amp10 = biomeNoiseAmplitude(t10.biome);
+        const amp01 = biomeNoiseAmplitude(t01.biome);
+        const amp11 = biomeNoiseAmplitude(t11.biome);
+        const macroAmp = amp00.macro * w00 + amp10.macro * w10 + amp01.macro * w01 + amp11.macro * w11;
+        const microAmp = amp00.micro * w00 + amp10.micro * w10 + amp01.micro * w01 + amp11.micro * w11;
+
+        const macroNoise = valueNoise2D(u * macroNoiseScaleX, v * macroNoiseScaleY, seed + 1013, useWrap ? macroNoiseScaleX : undefined);
+        const microNoise = valueNoise2D(u * microNoiseScaleX, v * microNoiseScaleY, seed + 2017, useWrap ? microNoiseScaleX : undefined);
+        const noiseShade = Math.min(1.18, Math.max(0.86, 1 + (macroNoise - 0.5) * macroAmp + (microNoise - 0.5) * microAmp));
+
+        const moist = t00.moist * w00 + t10.moist * w10 + t01.moist * w01 + t11.moist * w11;
+        const tempC2 = t00.tempC2 * w00 + t10.tempC2 * w10 + t01.tempC2 * w01 + t11.tempC2 * w11;
+        const moistNorm = clamp01(moist / 255);
+        const tempC = tempC2 * 0.5;
+        const tempNorm = clamp01((tempC + 50) / 100);
+
+        const waterWeight = (isWaterBiome(t00.biome) ? w00 : 0)
+          + (isWaterBiome(t10.biome) ? w10 : 0)
+          + (isWaterBiome(t01.biome) ? w01 : 0)
+          + (isWaterBiome(t11.biome) ? w11 : 0);
+        const landWeight = 1 - waterWeight;
+        const climateShade = 1 + landWeight * ((moistNorm - 0.5) * 0.05 + (tempNorm - 0.5) * 0.03);
+
+        const waterDepth = clamp01((seaLevel - elev) / elevRange);
+        const shallow = 1 - clamp01(waterDepth * 2.4);
+        const waterShade = 1 + waterWeight * (shallow * 0.08 - waterDepth * 0.22);
+
         rLin *= shade;
         gLin *= shade;
         bLin *= shade;
+
+        rLin *= noiseShade * climateShade * waterShade;
+        gLin *= noiseShade * climateShade * waterShade;
+        bLin *= noiseShade * climateShade * waterShade;
 
         const rr = Math.round(clamp01(linearToSrgb(Math.max(0, rLin))) * 255);
         const gg = Math.round(clamp01(linearToSrgb(Math.max(0, gLin))) * 255);

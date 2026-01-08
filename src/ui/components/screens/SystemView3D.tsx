@@ -151,6 +151,7 @@ const MOON_TYPE_COLORS: Record<MoonType, string> = {
 const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
 const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
 const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
+const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
@@ -158,8 +159,9 @@ const DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
 
-const pickSurfaceTextureResolution = (diameterPx: number): SurfaceTextureResolution | null => {
+const pickSurfaceTextureResolution = (diameterPx: number, preferUltra: boolean): SurfaceTextureResolution | null => {
   if (!Number.isFinite(diameterPx) || diameterPx < SURFACE_TEXTURE_MIN_DIAMETER_PX) return null;
+  if (preferUltra && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX) return { width: 2048, height: 1024 };
   if (diameterPx >= SURFACE_TEXTURE_HIGH_DIAMETER_PX) return { width: 1024, height: 512 };
   if (diameterPx >= SURFACE_TEXTURE_MED_DIAMETER_PX) return { width: 512, height: 256 };
   return { width: 256, height: 128 };
@@ -2238,9 +2240,19 @@ const SystemSurfaceTextureManager: React.FC<{
     const activeKeys = new Set<string>();
 
     const cameraFovRad = MathUtils.degToRad(camera.fov);
-    const pixelsPerWorldUnitAtZ1 = size.height / (2 * Math.tan(cameraFovRad / 2));
+    const pixelRatio = (() => {
+      try {
+        return gl.getPixelRatio?.() ?? 1;
+      } catch {
+        return 1;
+      }
+    })();
+    const renderWidthPx = size.width * pixelRatio;
+    const renderHeightPx = size.height * pixelRatio;
+    const pixelsPerWorldUnitAtZ1 = renderHeightPx / (2 * Math.tan(cameraFovRad / 2));
 
     const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
+    const shouldPreferUltra = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
 
     const touchKey = (key: string) => {
       cacheLastUsedRef.current.set(key, now);
@@ -2267,8 +2279,8 @@ const SystemSurfaceTextureManager: React.FC<{
 
       const pixelRadius = (radius / z) * pixelsPerWorldUnitAtZ1;
       const screenMargin = 0.15;
-      const ndcRadiusX = size.width > 0 ? (pixelRadius * 2) / size.width : 0;
-      const ndcRadiusY = size.height > 0 ? (pixelRadius * 2) / size.height : 0;
+      const ndcRadiusX = renderWidthPx > 0 ? (pixelRadius * 2) / renderWidthPx : 0;
+      const ndcRadiusY = renderHeightPx > 0 ? (pixelRadius * 2) / renderHeightPx : 0;
       const isOnScreen = scratch.ndc.z > -1 && scratch.ndc.z < 1
         && Math.abs(scratch.ndc.x) <= 1 + screenMargin + ndcRadiusX
         && Math.abs(scratch.ndc.y) <= 1 + screenMargin + ndcRadiusY;
@@ -2278,7 +2290,7 @@ const SystemSurfaceTextureManager: React.FC<{
         diameterPx = pixelRadius * 2;
       }
 
-      let resolution = pickSurfaceTextureResolution(diameterPx);
+      let resolution = pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId));
       if (!resolution && isOnScreen) {
         resolution = { width: 256, height: 128 };
       }
@@ -2328,7 +2340,7 @@ const SystemSurfaceTextureManager: React.FC<{
           texture.minFilter = LinearMipmapLinearFilter;
           texture.magFilter = LinearFilter;
           texture.generateMipmaps = true;
-          texture.anisotropy = Math.min(8, Math.max(1, maxAnisotropy));
+          texture.anisotropy = Math.min(16, Math.max(1, maxAnisotropy));
           texture.flipY = true;
           texture.needsUpdate = true;
 
