@@ -2634,6 +2634,88 @@ const tests: TestCase[] = [
     }
   },
   {
+    name: 'AI threat evaluation does not double-count visible fleets as memory',
+    run: () => {
+      const aiFaction: FactionState = { id: 'ai-threat', name: 'AI Threat', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
+      const enemyFaction: FactionState = { id: 'enemy-threat', name: 'Enemy Threat', color: '#ff0000', isPlayable: true };
+
+      const homeSystem: StarSystem = { ...createSystem('threat-home', aiFaction.id), position: { x: 0, y: 0, z: 0 } };
+      const targetSystem: StarSystem = {
+        ...createSystem('threat-target', enemyFaction.id),
+        position: { x: 100, y: 0, z: 0 },
+        resourceType: 'gas'
+      };
+
+      const fighterShip: TestShipInput = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const aiFleet = createFleet('ai-fleet-threat', aiFaction.id, { ...homeSystem.position }, [
+        { ...fighterShip, id: 'ai-fighter-1' },
+        { ...fighterShip, id: 'ai-fighter-2' }
+      ]);
+      const enemyFleet = createFleet('enemy-fleet-threat', enemyFaction.id, { ...targetSystem.position }, [
+        { ...fighterShip, id: 'enemy-fighter-1' }
+      ]);
+
+      const state = createBaseState({
+        factions: [aiFaction, enemyFaction],
+        systems: [homeSystem, targetSystem],
+        fleets: [aiFleet, enemyFleet],
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
+        playerFactionId: enemyFaction.id
+      });
+
+      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(13));
+      const moveCommands = commands.filter((cmd): cmd is Extract<GameCommand, { type: 'MOVE_FLEET' }> => cmd.type === 'MOVE_FLEET');
+
+      const hasAttackMove = moveCommands.some(
+        cmd => cmd.targetSystemId === targetSystem.id && (cmd.reason?.includes('ATTACK') ?? false)
+      );
+      assert.ok(hasAttackMove, 'Expected AI to attack when a visible fleet contributes only once to threat');
+
+      const hasScoutMove = moveCommands.some(
+        cmd => cmd.targetSystemId === targetSystem.id && (cmd.reason?.includes('SCOUT') ?? false)
+      );
+      assert.strictEqual(hasScoutMove, false, 'Expected AI to avoid SCOUT fallback when threat is not inflated');
+    }
+  },
+  {
+    name: 'AI observed systems include non-commandable fleets under fog of war',
+    run: () => {
+      const aiFaction: FactionState = { id: 'ai-observe', name: 'AI Observe', color: '#00ff00', isPlayable: false, aiProfile: 'aggressive' };
+      const enemyFaction: FactionState = { id: 'enemy-observe', name: 'Enemy Observe', color: '#ff0000', isPlayable: true };
+
+      const enemySystem: StarSystem = { ...createSystem('observe-target', enemyFaction.id), position: { x: 0, y: 0, z: 0 } };
+      const fighterShip: TestShipInput = { id: 'fighter-template', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null };
+      const observerFleet: Fleet = {
+        ...createFleet('ai-observer', aiFaction.id, { ...enemySystem.position }, [{ ...fighterShip, id: 'ai-observer-ship' }]),
+        state: FleetState.COMBAT
+      };
+
+      const state = createBaseState({
+        day: 5,
+        factions: [aiFaction, enemyFaction],
+        systems: [enemySystem],
+        fleets: [observerFleet],
+        rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false },
+        playerFactionId: enemyFaction.id
+      });
+
+      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(7));
+      const update = commands.find((cmd): cmd is Extract<GameCommand, { type: 'AI_UPDATE_STATE' }> => cmd.type === 'AI_UPDATE_STATE');
+      assert.ok(update, 'Expected AI_UPDATE_STATE command to be generated');
+
+      assert.strictEqual(
+        update.newState.systemLastSeen[enemySystem.id],
+        state.day,
+        'Observed system should refresh systemLastSeen even if the observing fleet is in combat'
+      );
+      assert.strictEqual(
+        update.newState.lastOwnerBySystemId[enemySystem.id],
+        enemyFaction.id,
+        'Observed system owner should refresh even if the observing fleet is in combat'
+      );
+    }
+  },
+  {
     name: 'Cleanup drops embarked armies when their fleet no longer exists',
     run: () => {
       const system = createSystem('sys-cleanup-loss', null);

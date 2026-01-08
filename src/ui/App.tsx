@@ -497,7 +497,11 @@ const App: React.FC = () => {
           const entries = Object.values(next);
           if (entries.length > ENEMY_SIGHTING_LIMIT) {
               const keepIds = new Set(
-                  sorted(entries, (a, b) => b.daySeen - a.daySeen)
+                  sorted(entries, (a, b) => {
+                      const dayDiff = b.daySeen - a.daySeen;
+                      if (dayDiff !== 0) return dayDiff;
+                      return a.fleetId < b.fleetId ? -1 : a.fleetId > b.fleetId ? 1 : 0;
+                  })
                       .slice(0, ENEMY_SIGHTING_LIMIT)
                       .map(s => s.fleetId)
               );

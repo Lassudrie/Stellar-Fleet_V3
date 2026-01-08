@@ -36,7 +36,7 @@ const IntelGhosts: React.FC<IntelGhostsProps> = React.memo(({ sightings, current
         if (age > FADE_DURATION) return;
 
         // Calculate Opacity: Starts at 0.5, fades to 0
-        const signalStrength = Math.max(0, 1 - (age / FADE_DURATION));
+        const signalStrength = Math.min(1, Math.max(0, 1 - (age / FADE_DURATION)));
         const opacity = 0.5 * signalStrength;
 
         if (opacity < 0.05) return;

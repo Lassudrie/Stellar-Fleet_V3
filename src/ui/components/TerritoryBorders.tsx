@@ -150,6 +150,7 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
 
             systems.forEach(other => {
                 if (sys.id === other.id) return;
+                if (!other.ownerFactionId) return;
 
                 const dx = other.position.x - sys.position.x;
                 const dy = other.position.z - sys.position.z; 

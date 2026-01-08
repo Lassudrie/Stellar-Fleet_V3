@@ -205,7 +205,7 @@ const updateMemory = (
   });
 
   const observedSystemIds = state.rules.fogOfWar
-    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f)))
+    ? getObservedSystemIds(perceivedState, factionId, perceivedState.fleets.filter(f => f.factionId === factionId))
     : new Set(state.systems.map(s => s.id));
 
   const visibleEnemyFleets = perceivedState.fleets.filter(
@@ -294,6 +294,7 @@ const evaluateSystems = (
   }[] = [];
   const visibleEnemyFleets = perceivedState.fleets
     .filter(f => f.factionId !== factionId && isCommandableFleet(f));
+  const visibleEnemyFleetIds = new Set(visibleEnemyFleets.map(fleet => fleet.id));
   const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE, state.day);
   // Cache fleet power to avoid recomputing it repeatedly within a single evaluation pass.
   const fleetPowerCache = new Map<string, number>();
@@ -308,6 +309,7 @@ const evaluateSystems = (
   const sightingsBySystemId: Record<string, EnemySighting[]> = {};
   Object.values(memory.sightings).forEach(sighting => {
     if (!sighting.systemId) return;
+    if (visibleEnemyFleetIds.has(sighting.fleetId)) return;
     (sightingsBySystemId[sighting.systemId] ??= []).push(sighting);
   });
   const totalMyPower = perceivedState.fleets
