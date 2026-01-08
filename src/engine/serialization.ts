@@ -274,6 +274,7 @@ export interface GameStateDTO {
 
   seed: number;
   rngState?: number;
+  idRngState?: number;
   startYear: number;
   day: number;
   systems: StarSystemDTO[];
@@ -1239,6 +1240,7 @@ export const serializeGameState = (state: GameState): string => {
     factions: state.factions,
     seed: state.seed,
     rngState: state.rngState,
+    idRngState: state.idRngState ?? state.rngState,
     startYear: state.startYear,
     day: state.day,
     systems: state.systems.map(s => ({
@@ -1934,6 +1936,12 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       throw new Error("Field 'rngState' must be a finite number or derive from a valid 'seed'.");
     }
 
+    const normalizedIdRngStateSource = dto.idRngState ?? normalizedRngState;
+    const normalizedIdRngState = Number(normalizedIdRngStateSource);
+    if (!Number.isFinite(normalizedIdRngState)) {
+      throw new Error("Field 'idRngState' must be a finite number or derive from a valid 'rngState'.");
+    }
+
     const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
     const day = Number.isFinite(dto.day) ? dto.day : 0;
 
@@ -1958,6 +1966,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       factions,
       seed: normalizedSeed,
       rngState: normalizedRngState,
+      idRngState: normalizedIdRngState,
       startYear,
       day,
       systems,

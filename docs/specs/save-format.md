@@ -30,6 +30,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `factions` : tableau des factions (`id`, `name`, `color`, etc.).
 - `seed` : graine monde **obligatoire** (number) utilisée pour les régénérations.
 - `rngState` : état RNG en cours (number). Si absent en lecture, il hérite de `seed`.
+- `idRngState` : état RNG dédié aux identifiants (number). Si absent en lecture, il hérite de `rngState`.
 - `startYear`, `day` : repères temporels (numbers).
 - `rules` : options de gameplay (`fogOfWar`, `aiEnabled`, `useAdvancedCombat`, `totalWar`).
 
@@ -63,7 +64,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 ## 3. Champs sensibles et validations
 - **Références croisées** : `playerFactionId`, `ownerFactionId`, `factionId` (flottes/armées) et `winnerFactionId` doivent appartenir au registre `factions`. Une faction inconnue déclenche une erreur à la désérialisation.
 - **Vecteurs** : `position`, `targetPosition`, `start`/`end` des lasers doivent porter des composantes numériques finies (`x`, `y`, `z`). Toute valeur non numérique lève une erreur contextuelle.
-- **Seeds et RNG** : `seed` et `rngState` doivent être des nombres finis. Une valeur absente ou non numérique entraîne un rejet du fichier.
+- **Seeds et RNG** : `seed` et `rngState` doivent être des nombres finis. `idRngState` doit être fini lorsqu’il est présent (sinon il hérite de `rngState`).
 - **Points de vie et consommables** : `hp` est clampé à `[0, maxHp]`; les munitions (`offensiveMissiles`, `torpedoes`, `interceptors`) sont remises à leur stock du vaisseau quand la valeur est manquante ou invalide.
 - **Kill history & messages** : les entrées sont assainies (`id` par défaut, dates numériques, chaînes forcées) pour éviter les charges arbitraires.
 
@@ -76,16 +77,17 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `factions` ou `playerFactionId` absents : injection de factions par défaut (Blue/Red) et sélection du joueur sur la première faction disponible.
 - `systems`, `fleets`, `armies`, `lasers`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
 - `stateStartTurn`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
+- `idRngState` : hérite de `rngState` si absent.
 - `members/maxMembers/condition/morale/fatigue` : valeurs clampées ou défauts issus des stats d’unité si absentes.
 - `lastDeployedTurn` / `lastCombatTurn` : optionnels, ignorés si absents ou invalides.
 - `bombardedHexesByBodyId` : valeur par défaut `{}` si absente.
 - `objectives` et `rules` : valeurs par défaut si manquantes (`conditions: []`, règles activées).
-- **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
+- **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis (ou `idRngState` non fini s’il est fourni) ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
 
 ## 6. Régénération et dérivations (astro, seeds)
 - **Bloc `astro`** : si absent ou invalide, il est régénéré via `generateStellarSystem({ worldSeed: seed, systemId, systemPosition, galacticRadius })` quand ces infos sont disponibles, à condition de disposer d’une `seed` valide et d’un `id` de système non vide. Sinon, `astro` reste `undefined` et les planètes sont simplement normalisées.
 - **Planètes** : toujours passées par `normalizePlanetBodies` avec le contexte système pour garantir la cohérence des références et des types.
-- **RNG** : `rngState` hérite de `seed` lorsqu’il manque, assurant une continuité de génération entre anciennes sauvegardes v2 et les réécritures v3.
+- **RNG** : `rngState` hérite de `seed` lorsqu’il manque, et `idRngState` hérite de `rngState` pour préserver la continuité des identifiants.
 - **Consommables navals** : les stocks sont recalculés à partir des `SHIP_STATS` lorsque les champs de munitions sont manquants, évitant des vaisseaux bloqués sans armement.
 
 ## 7. Bonnes pratiques d’écriture

@@ -17,6 +17,7 @@ import {
 import { FleetState, ShipType } from '../shared/shared';
 import { shortId } from '../shared/shared';
 import { distSq } from './math/vec3';
+import { hashJoin32 } from './planetSurface';
 import { RNG } from './rng';
 import { withUpdatedFleetDerived } from './fleetDerived';
 
@@ -64,7 +65,7 @@ interface BalanceConfig {
 export const BALANCE_PROFILE_V11: BalanceConfig = {
   profile: 'Balance v1.1',
   targeting: {
-    // 80% chance de conserver la cible si elle reste valide
+    // 60% chance de conserver la cible si elle reste valide
     frictionKeepChance: 0.6,
     // Faible focus bomber pour les capitals (anti-spam strike craft)
     capitalFocusBomberChance: 0.25,
@@ -118,6 +119,18 @@ export const LOCK_GAIN_PER_ROUND = BALANCE_PROFILE.pacing.lockGainPerRound;
 
 // Maximum missiles/torps a single ship can launch per round (Burst limit)
 export const MAX_LAUNCH_PER_ROUND = BALANCE_PROFILE.pacing.maxLaunchPerRound;
+
+const DISTANCE_TOLERANCE = 1e-6;
+const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
+
+const buildBattleId = (turn: number, systemId: string, fleetIds: string[]): string => {
+  const hash = hashJoin32('battle', turn, systemId, ...fleetIds) >>> 0;
+  return `battle_${turn}_${systemId}_${hash.toString(16).padStart(8, '0')}`;
+};
+
+const computeBattleSeed = (seed: number, turn: number, systemId: string, fleetIds: string[]): number => {
+  return hashJoin32(seed, 'battle', turn, systemId, ...fleetIds) >>> 0;
+};
 
 // Targeting
 export const TARGET_FRICTION_KEEP_CHANCE = BALANCE_PROFILE.targeting.frictionKeepChance;
@@ -368,7 +381,7 @@ export function selectTarget(
  * Scans the galaxy for contested systems.
  * Rule: A battle starts if at least two DIFFERENT factions have fleets within range.
  */
-export function detectNewBattles(state: GameState, rng: RNG, turn: number): Battle[] {
+export function detectNewBattles(state: GameState, turn: number): Battle[] {
   const newBattles: Battle[] = [];
 
   const activeBattleSystemIds = new Set(state.battles.filter(b => b.status !== 'resolved').map(b => b.systemId));
@@ -392,7 +405,10 @@ export function detectNewBattles(state: GameState, rng: RNG, turn: number): Batt
     activeSystems.forEach(system => {
       const distanceSq = distSq(fleet.position, system.position);
       if (distanceSq > CAPTURE_RANGE_SQ) return;
-      if (distanceSq < nearestDistanceSq) {
+      const distanceDiff = distanceSq - nearestDistanceSq;
+      const isCloser = distanceDiff < -DISTANCE_TOLERANCE;
+      const withinTolerance = Math.abs(distanceDiff) <= DISTANCE_TOLERANCE;
+      if (nearestSystemId === null || isCloser || (withinTolerance && compareIds(system.id, nearestSystemId) < 0)) {
         nearestDistanceSq = distanceSq;
         nearestSystemId = system.id;
       }
@@ -424,8 +440,8 @@ export function detectNewBattles(state: GameState, rng: RNG, turn: number): Batt
     fleetsInSystem.forEach(fleet => presentFactionIds.add(fleet.factionId));
 
     if (presentFactionIds.size > 1) {
-      const battleId = rng.id('battle');
-      const involvedFleetIds = sorted([...fleetIds]);
+      const involvedFleetIds = sorted([...fleetIds], compareIds);
+      const battleId = buildBattleId(turn, system.id, involvedFleetIds);
 
       const battle: Battle = {
         id: battleId,
@@ -591,11 +607,9 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
   const formatLog = (message: string) => `${logReference} ${message}`;
 
   // 1. SETUP - Isolate Determinism
-  let seedHash = 0;
-  const seedString = `${battle.id}_${battle.turnCreated}`;
-  for (let i = 0; i < seedString.length; i++) seedHash = (seedHash << 5) - seedHash + seedString.charCodeAt(i);
-
-  const rng = new RNG(state.seed + seedHash);
+  const sortedFleetIds = sorted(battle.involvedFleetIds, compareIds);
+  const seed = computeBattleSeed(state.seed, battle.turnCreated, battle.systemId, sortedFleetIds);
+  const rng = new RNG(seed);
 
   // 2. INITIALIZE BATTLE STATE
   const involvedFleets = state.fleets.filter(f => battle.involvedFleetIds.includes(f.id));

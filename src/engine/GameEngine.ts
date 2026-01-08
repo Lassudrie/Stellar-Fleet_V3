@@ -33,6 +33,9 @@ export class GameEngine {
         if (canonicalState.rngState !== undefined) {
             this.rng.setState(canonicalState.rngState);
         }
+
+        const idRngState = canonicalState.idRngState ?? canonicalState.rngState ?? canonicalState.seed;
+        this.rng.setIdState(idRngState);
     }
 
     private commitState(nextState: GameState) {
@@ -44,7 +47,8 @@ export class GameEngine {
         // Persist current RNG cursor to state so next save/load continues correctly
         const syncedState: GameState = {
             ...state,
-            rngState: this.rng.getState()
+            rngState: this.rng.getState(),
+            idRngState: this.rng.getIdState()
         };
 
         // DEV Assertion: Check for duplicate Log IDs

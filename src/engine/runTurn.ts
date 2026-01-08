@@ -207,6 +207,38 @@ function formatAmmunitionLine(totals: BattleAmmunitionBreakdown): string {
   ].join(' | ');
 }
 
+function invalidateStaleInvasionDecisions(
+  messages: GameMessage[],
+  fleets: Fleet[],
+  systems: StarSystem[]
+): GameMessage[] {
+  if (messages.length === 0) return messages;
+
+  const fleetsById = new Map(fleets.map(fleet => [fleet.id, fleet]));
+  const systemsById = new Map(systems.map(system => [system.id, system]));
+  let changed = false;
+
+  const updatedMessages = messages.map(message => {
+    if (message.type !== 'INVASION_DECISION' || message.dismissed) return message;
+
+    const payload = message.payload ?? {};
+    const fleetId = typeof payload.fleetId === 'string' ? payload.fleetId : null;
+    const systemId = typeof payload.systemId === 'string' ? payload.systemId : null;
+    if (!fleetId || !systemId) return message;
+
+    const fleet = fleetsById.get(fleetId);
+    const system = systemsById.get(systemId);
+    if (fleet && system && isFleetOrbitingSystem(fleet, system)) {
+      return message;
+    }
+
+    changed = true;
+    return { ...message, dismissed: true, read: true };
+  });
+
+  return changed ? updatedMessages : messages;
+}
+
 export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameState {
   const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
 
@@ -340,6 +372,8 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
 
     nextMessages = canonicalizeMessages([...nextMessages, message]);
   });
+
+  nextMessages = invalidateStaleInvasionDecisions(nextMessages, nextFleets, currentTurnState.systems);
 
   return {
     ...currentTurnState,
@@ -506,7 +540,7 @@ export function phaseBattleDetection(state: GameState, ctx: TurnContext): GameSt
   if (!state.rules.useAdvancedCombat) return state;
 
   // 1. Detect New Battles based on positions
-  const newBattles = detectNewBattles(state, ctx.rng, ctx.turn);
+  const newBattles = detectNewBattles(state, ctx.turn);
   if (newBattles.length === 0) return state;
 
   // 2. Collect IDs of all fleets engaged

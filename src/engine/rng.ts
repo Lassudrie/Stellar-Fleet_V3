@@ -49,10 +49,13 @@ const evaluateTail = (q: number): number =>
 
 export class RNG {
   private state: number;
+  private idState: number;
   private generatedIds?: Set<string>;
 
   constructor(seed: number) {
-    this.state = this.normalizeState(seed);
+    const normalizedSeed = this.normalizeState(seed);
+    this.state = normalizedSeed;
+    this.idState = normalizedSeed;
   }
 
   // --- STATE MANAGEMENT ---
@@ -62,10 +65,20 @@ export class RNG {
     return this.state;
   }
 
+  // Retrieve current ID stream state for serialization
+  public getIdState(): number {
+    return this.idState;
+  }
+
   // Restore internal state from serialization
   // Normalizes the value to ensure valid 32-bit unsigned integer range
   public setState(state: number): void {
     this.state = this.normalizeState(state);
+  }
+
+  // Restore ID stream state from serialization
+  public setIdState(state: number): void {
+    this.idState = this.normalizeState(state);
   }
 
   // Normalize state to valid 32-bit unsigned integer
@@ -82,14 +95,27 @@ export class RNG {
 
   // --- GENERATION ---
 
+  private nextUint32From(state: number): { nextState: number; value: number } {
+    const nextState = (state + 0x6d2b79f5) >>> 0;
+    let t = nextState;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return { nextState, value: (t ^ (t >>> 14)) >>> 0 };
+  }
+
   // Returns an unsigned 32-bit integer (0 to 4294967295)
   // This exposes the raw output of the Mulberry32 algorithm
   public nextUint32(): number {
-    this.state = (this.state + 0x6d2b79f5) >>> 0;
-    let t = this.state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return (t ^ (t >>> 14)) >>> 0;
+    const { nextState, value } = this.nextUint32From(this.state);
+    this.state = nextState;
+    return value;
+  }
+
+  // Returns an unsigned 32-bit integer for ID generation
+  private nextIdUint32(): number {
+    const { nextState, value } = this.nextUint32From(this.idState);
+    this.idState = nextState;
+    return value;
   }
 
   // Returns a float between 0 and 1
@@ -119,7 +145,7 @@ export class RNG {
 
   // Deterministic ID Generator
   public id(prefix: string): string {
-    const bytes = this.nextBytes16();
+    const bytes = this.nextIdBytes16();
 
     // RFC 4122 compliance
     bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
@@ -141,10 +167,10 @@ export class RNG {
     return fullId;
   }
 
-  private nextBytes16(): Uint8Array {
+  private nextBytes16(nextUint32: () => number): Uint8Array {
     const buffer = new Uint8Array(16);
     for (let i = 0; i < 4; i++) {
-      const value = this.nextUint32();
+      const value = nextUint32();
       const offset = i * 4;
       buffer[offset] = value & 0xff;
       buffer[offset + 1] = (value >>> 8) & 0xff;
@@ -152,6 +178,10 @@ export class RNG {
       buffer[offset + 3] = (value >>> 24) & 0xff;
     }
     return buffer;
+  }
+
+  private nextIdBytes16(): Uint8Array {
+    return this.nextBytes16(() => this.nextIdUint32());
   }
 
   private inverseStandardNormal(probability: number): number {

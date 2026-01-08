@@ -1184,13 +1184,23 @@ export const generateWorld = (
 
   // --- 5. ASSEMBLE STATE ---
   reportStep('finalize', 0);
+  const initLog = {
+      id: rng.id('log'),
+      day: 1,
+      text: `Simulation initialized. Seed: ${scenario.seed}. Topology: ${topology}`,
+      type: 'info' as const
+  };
+  const rngState = rng.getState();
+  const idRngState = rng.getIdState();
+
   const state: GameState = {
       scenarioId: scenario.id,
       scenarioTitle: scenario.meta.title,
       playerFactionId,
       factions,
       seed: scenario.seed,
-      rngState: rng.getState(),
+      rngState,
+      idRngState,
       startYear: 2300,
       day: 1,
       systems,
@@ -1199,12 +1209,7 @@ export const generateWorld = (
       armies,
       lasers: [],
       battles: [],
-      logs: [{
-          id: rng.id('log'),
-          day: 1,
-          text: `Simulation initialized. Seed: ${scenario.seed}. Topology: ${topology}`,
-          type: 'info'
-      }],
+      logs: [initLog],
       messages: [],
       selectedFleetId: null,
       winnerFactionId: null,

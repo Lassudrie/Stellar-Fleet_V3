@@ -629,6 +629,7 @@ export interface GameState {
 
   seed: number;
   rngState: number;
+  idRngState?: number;
   startYear: number;
   day: number;
   systems: StarSystem[];

@@ -14,6 +14,7 @@ import {
   Army,
   ArmyState,
   Battle,
+  GameMessage,
   FactionId,
   FactionState,
   Fleet,
@@ -3147,9 +3148,8 @@ tests.push(
         rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
       };
 
-      const rng = new RNG(123);
       const orbitContested = isOrbitContested(state.systems[0], state.fleets);
-      const battles = detectNewBattles(state, rng, 0);
+      const battles = detectNewBattles(state, 0);
 
       assert.strictEqual(orbitContested, true, 'Orbit should be contested when fleets are inside capture range');
       assert.strictEqual(battles.length, 1, 'Battle should be scheduled when multiple factions contest a system');
@@ -3219,12 +3219,91 @@ tests.push(
         rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
       };
 
-      const rng = new RNG(321);
       const orbitContested = isOrbitContested(state.systems[0], state.fleets);
-      const battles = detectNewBattles(state, rng, 0);
+      const battles = detectNewBattles(state, 0);
 
       assert.strictEqual(orbitContested, false, 'Orbit should not be contested just outside capture range');
       assert.strictEqual(battles.length, 0, 'No battle should be scheduled when fleets are out of range');
+    }
+  },
+  {
+    name: 'Battle detection tie-breaks by system id when distances are equal',
+    run: () => {
+      const localFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const systemAlpha: StarSystem = {
+        id: 'alpha',
+        name: 'alpha',
+        position: { x: -1, y: 0, z: 0 },
+        color: '#ffffff',
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: []
+      };
+
+      const systemBeta: StarSystem = {
+        id: 'beta',
+        name: 'beta',
+        position: { x: 1, y: 0, z: 0 },
+        color: '#ffffff',
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: []
+      };
+
+      const mkFleet = (id: string, factionId: string): Fleet => ({
+        id,
+        factionId,
+        ships: [
+          {
+            id: `${id}-ship`,
+            type: ShipType.FRIGATE,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: null
+          }
+        ],
+        position: { x: 0, y: 0, z: 0 },
+        state: FleetState.ORBIT,
+        targetSystemId: null,
+        targetPosition: null,
+        radius: 1,
+        stateStartTurn: 0
+      });
+
+      const state: GameState = {
+        scenarioId: 'test',
+        playerFactionId: 'blue',
+        factions: localFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 0,
+        systems: [systemBeta, systemAlpha],
+        fleets: [mkFleet('fleet-blue', 'blue'), mkFleet('fleet-red', 'red')],
+        armies: [],
+        lasers: [],
+        battles: [],
+        logs: [],
+        messages: [],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        aiStates: {},
+        objectives: { conditions: [] },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
+      };
+
+      const battles = detectNewBattles(state, 0);
+      assert.strictEqual(battles.length, 1, 'Battle should be scheduled when contested');
+      assert.strictEqual(battles[0].systemId, 'alpha', 'Tie-breaker should pick the lowest system id');
     }
   }
 );
@@ -4241,6 +4320,115 @@ tests.push(
       assert.ok(updatedFleet, 'Expected invasion fleet to exist after movement phase');
       assert.strictEqual(updatedFleet?.invasionTargetSystemId, null, 'Invasion order should be cleared after arrival processing');
       assert.strictEqual(updatedFleet?.invasionTargetPlanetId, null, 'Preferred invasion planet should be cleared after arrival processing');
+    }
+  },
+  {
+    name: 'Invasion decision is dismissed when the fleet is removed during battle resolution',
+    run: () => {
+      const localFactions: FactionState[] = [
+        { id: 'blue', name: 'Blue', color: '#3b82f6', isPlayable: true },
+        { id: 'red', name: 'Red', color: '#ef4444', isPlayable: true }
+      ];
+
+      const system: StarSystem = {
+        id: 'sys-inv-battle',
+        name: 'Sys Inv Battle',
+        position: { x: 0, y: 0, z: 0 },
+        color: '#ffffff',
+        size: 1,
+        ownerFactionId: null,
+        resourceType: 'none',
+        isHomeworld: false,
+        planets: []
+      };
+
+      const playerFleet: Fleet = {
+        id: 'fleet-player',
+        factionId: 'blue',
+        ships: [],
+        position: { x: 0, y: 0, z: 0 },
+        state: FleetState.COMBAT,
+        targetSystemId: null,
+        targetPosition: null,
+        radius: 1,
+        stateStartTurn: 1
+      };
+
+      const enemyFleet: Fleet = {
+        id: 'fleet-enemy',
+        factionId: 'red',
+        ships: [
+          {
+            id: 'enemy-ship-1',
+            type: ShipType.DESTROYER,
+            hp: 100,
+            maxHp: 100,
+            fuel: 100,
+            carriedArmyId: null
+          }
+        ],
+        position: { x: 0, y: 0, z: 0 },
+        state: FleetState.COMBAT,
+        targetSystemId: null,
+        targetPosition: null,
+        radius: 1,
+        stateStartTurn: 1
+      };
+
+      const decisionMessage: GameMessage = {
+        id: 'msg-invasion',
+        day: 1,
+        type: 'INVASION_DECISION',
+        priority: 2,
+        title: 'Invasion in orbit',
+        subtitle: 'Decide on landing',
+        lines: [],
+        payload: {
+          fleetId: playerFleet.id,
+          systemId: system.id,
+          planetId: null
+        },
+        read: false,
+        dismissed: false,
+        createdAtTurn: 1
+      };
+
+      const battle: Battle = {
+        id: 'battle-inv',
+        systemId: system.id,
+        turnCreated: 1,
+        status: 'scheduled',
+        involvedFleetIds: [playerFleet.id, enemyFleet.id],
+        logs: []
+      };
+
+      const state: GameState = {
+        scenarioId: 'test',
+        playerFactionId: 'blue',
+        factions: localFactions,
+        seed: 1,
+        rngState: 1,
+        startYear: 0,
+        day: 1,
+        systems: [system],
+        fleets: [playerFleet, enemyFleet],
+        armies: [],
+        lasers: [],
+        battles: [battle],
+        logs: [],
+        messages: [decisionMessage],
+        selectedFleetId: null,
+        winnerFactionId: null,
+        aiStates: {},
+        objectives: { conditions: [] },
+        rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
+      };
+
+      const next = phaseBattleResolution(state, { turn: 1, rng: new RNG(1) });
+      const updated = next.messages.find(msg => msg.id === decisionMessage.id);
+      assert.ok(updated, 'Expected invasion decision message to remain in state');
+      assert.strictEqual(updated?.dismissed, true, 'Expected invasion decision message to be dismissed');
+      assert.strictEqual(updated?.read, true, 'Expected invasion decision message to be marked as read');
     }
   }
 );
@@ -5503,6 +5691,15 @@ tests.push(
         const [, uuid] = id.split('_');
         assert.ok(ENGINE_UUID_V4_REGEX.test(uuid), `ID ${id} must include a valid UUID v4`);
       });
+    }
+  },
+  {
+    name: 'id() does not advance the primary RNG state',
+    run: () => {
+      const rng = new RNG(42);
+      const before = rng.getState();
+      rng.id('probe');
+      assert.strictEqual(rng.getState(), before);
     }
   },
   {

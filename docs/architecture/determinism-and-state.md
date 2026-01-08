@@ -15,6 +15,7 @@ Stellar Fleet est conçu pour être strictement déterministe.
 *   Interdiction totale d'utiliser `Math.random()`.
 *   Utilisation exclusive de la classe `RNG` (`src/engine/rng.ts`), basée sur l'algorithme Mulberry32.
 *   L'instance `RNG` est passée dans toute la chaîne d'appel de `runTurn`.
+*   Les identifiants (logs/messages/batailles) utilisent un flux RNG dédié (`idRngState`) qui n'altère pas les tirages gameplay.
 
 ### Règle #2 : Pas de temps système dans la logique
 *   Interdiction d'utiliser `Date.now()` ou `performance.now()` pour influencer la logique de jeu.
@@ -35,14 +36,14 @@ battleShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
 ### Règle #4 : Isolation RNG locale
 Pour éviter que l'ordre de résolution des batailles n'influence le reste de la galaxie (effet papillon indésirable sur la génération procédurale future) :
 *   Les sous-systèmes complexes (comme Battle V1) doivent instancier leur propre `RNG` dérivée.
-*   `const battleRng = new RNG(currentState.seed + battleHash)`.
+*   `const battleRng = new RNG(hashJoin32(seed, 'battle', turn, systemId, ...fleetIds))`.
 
 ## 3. Sérialisation et Sauvegarde
 Le système de sauvegarde repose sur la sérialisation complète du `GameState`.
 
 *   **Format** : JSON.
 *   **Versioning** : `SAVE_VERSION` dans `saveFormat.ts` pour gérer les migrations futures.
-*   **Persistance RNG** : L'état interne du générateur RNG (`rngState`) est sauvegardé. Au chargement, la classe `RNG` est restaurée dans cet état précis.
+*   **Persistance RNG** : Les états internes du générateur RNG (`rngState` et `idRngState`) sont sauvegardés. Au chargement, la classe `RNG` est restaurée dans ces états précis.
 
 ### Structure DTO (Data Transfer Object)
 Nous distinguons les types Runtime (`Vector3` de Three.js) des types DTO (`{x,y,z}`).
