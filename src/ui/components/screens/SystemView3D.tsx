@@ -141,7 +141,7 @@ const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
-const DAY_NIGHT_NIGHT_MIN = 0.08;
+const DAY_NIGHT_NIGHT_MIN = 0.12;
 const ATMOSPHERE_DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
@@ -3198,10 +3198,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starExtent);
   }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
-  const ambientLightIntensity = MathUtils.clamp(0.06 + clampedScale * 0.02, 0.05, 0.12);
-  const hemisphereLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.03, 0.1, 0.22);
+  const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.03, 0.1, 0.22);
+  const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.04, 0.16, 0.32);
   const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
-  const starLightIntensity = MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14);
+  const starLightIntensity = MathUtils.clamp(MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14) * 35, 45, 260);
   const ambientLightColor = useMemo(
     () => new Color(starTintColor).lerp(new Color('#0b1020'), 0.7).getStyle(),
     [starTintColor]
@@ -3353,6 +3353,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
+  const toneMappingExposure = prefersTouchFallback ? 1.05 : 1.12;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
@@ -3363,6 +3364,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         shadows
         onCreated={({ gl }) => {
           gl.shadowMap.type = PCFSoftShadowMap;
+          gl.toneMappingExposure = toneMappingExposure;
         }}
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
