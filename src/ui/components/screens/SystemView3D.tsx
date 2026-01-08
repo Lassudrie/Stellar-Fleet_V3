@@ -29,6 +29,7 @@ import {
   RingGeometry,
   SRGBColorSpace,
   ShaderMaterial,
+  ShadowMaterial,
   Spherical,
   SphereGeometry,
   TorusGeometry,
@@ -1124,6 +1125,7 @@ const StarMesh: React.FC<StarMeshProps> = ({
 interface MoonOrbitGroupProps {
   moon: OrbitingMoon;
   orbitMaterial: MeshBasicMaterial;
+  orbitShadowMaterial: ShadowMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
   atmosphereMaterials: Partial<Record<Exclude<AtmosphereType, 'None'>, ShaderMaterial>>;
@@ -1136,6 +1138,7 @@ interface MoonOrbitGroupProps {
 const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string) => void }> = ({
   moon,
   orbitMaterial,
+  orbitShadowMaterial,
   moonGeometry,
   moonMaterial,
   atmosphereMaterials,
@@ -1179,6 +1182,16 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   return (
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
+      <mesh
+        geometry={orbitGeometry}
+        material={orbitShadowMaterial}
+        rotation={orbitRotation}
+        castShadow={false}
+        receiveShadow
+        frustumCulled
+        raycast={() => null}
+        renderOrder={1}
+      />
       <mesh
         geometry={moonGeometry}
         material={hitboxMaterial}
@@ -1270,6 +1283,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
 interface PlanetOrbitGroupProps {
   planet: OrbitingPlanet;
   orbitMaterial: MeshBasicMaterial;
+  orbitShadowMaterial: ShadowMaterial;
   planetGeometry: SphereGeometry;
   moonGeometry: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
@@ -1285,6 +1299,7 @@ interface PlanetOrbitGroupProps {
 const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   planet,
   orbitMaterial,
+  orbitShadowMaterial,
   planetGeometry,
   moonGeometry,
   planetMaterial,
@@ -1333,6 +1348,16 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   return (
     <group>
       <mesh geometry={orbitGeometry} material={orbitMaterial} rotation={orbitRotation} frustumCulled />
+      <mesh
+        geometry={orbitGeometry}
+        material={orbitShadowMaterial}
+        rotation={orbitRotation}
+        castShadow={false}
+        receiveShadow
+        frustumCulled
+        raycast={() => null}
+        renderOrder={1}
+      />
       <group position={planetPosition}>
         <mesh
           geometry={planetGeometry}
@@ -1419,6 +1444,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             key={moon.id}
             moon={moon}
             orbitMaterial={orbitMaterial}
+            orbitShadowMaterial={orbitShadowMaterial}
             moonGeometry={moonGeometry}
             moonMaterial={resolveMoonMaterial(moon)}
             atmosphereMaterials={atmosphereMaterials}
@@ -1439,6 +1465,7 @@ interface SystemCelestialLayerProps {
   starGeometry: SphereGeometry;
   planets: OrbitingPlanet[];
   orbitMaterial: MeshBasicMaterial;
+  orbitShadowMaterial: ShadowMaterial;
   planetGeometry: SphereGeometry;
   moonGeometry: SphereGeometry;
   resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
@@ -1456,6 +1483,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   starGeometry,
   planets,
   orbitMaterial,
+  orbitShadowMaterial,
   planetGeometry,
   moonGeometry,
   resolvePlanetMaterial,
@@ -1492,6 +1520,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           key={planet.id}
           planet={planet}
           orbitMaterial={orbitMaterial}
+          orbitShadowMaterial={orbitShadowMaterial}
           planetGeometry={planetGeometry}
           moonGeometry={moonGeometry}
           planetMaterial={resolvePlanetMaterial(planet)}
@@ -2796,6 +2825,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
     []
   );
+  const orbitShadowMaterial = useDisposableMemo(() => {
+    const material = new ShadowMaterial();
+    material.opacity = 0.32;
+    material.transparent = true;
+    material.depthWrite = false;
+    return material;
+  }, []);
 
   const planetMaterialMap = useMemo<Record<PlanetType, MeshStandardMaterial>>(() => {
     const materials = Object.entries(PLANET_TYPE_COLORS).reduce((acc, [type, color]) => {
@@ -3386,6 +3422,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             starGeometry={starGeometry}
             planets={planets}
             orbitMaterial={orbitMaterial}
+            orbitShadowMaterial={orbitShadowMaterial}
             planetGeometry={planetGeometry}
             moonGeometry={moonGeometry}
             resolvePlanetMaterial={resolvePlanetMaterial}
