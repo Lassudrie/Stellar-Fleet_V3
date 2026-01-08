@@ -14,6 +14,7 @@ import {
   CylinderGeometry,
   DataTexture,
   Euler,
+  FrontSide,
   Group,
   InstancedMesh,
   LinearFilter,
@@ -23,6 +24,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Mesh,
+  NormalBlending,
   Object3D,
   PerspectiveCamera,
   RepeatWrapping,
@@ -1617,6 +1619,21 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
 type AtmosphereLayerBundle = {
   lower: { material: ShaderMaterial; scale: number };
   haze: { material: ShaderMaterial; scale: number };
+  clouds?: { material: ShaderMaterial; scale: number };
+};
+
+type CloudLayerStyle = {
+  color: string;
+  shadowColor: string;
+  baseAltitude: number;
+  noiseScale: number;
+  threshold: number;
+  softness: number;
+  opacity: number;
+  rimPower: number;
+  rimStrength: number;
+  bandStrength: number;
+  bandFrequency: number;
 };
 
 type AtmosphereLayerStyle = {
@@ -1643,6 +1660,7 @@ type AtmosphereLayerStyle = {
     nightMin: number;
     thicknessMultiplier: number;
   };
+  clouds?: CloudLayerStyle;
 };
 
 const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerStyle> = {
@@ -1694,6 +1712,19 @@ const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerS
       sunsetStrength: 0.75,
       nightMin: 0.07,
       thicknessMultiplier: 1.9
+    },
+    clouds: {
+      color: '#f8fafc',
+      shadowColor: '#64748b',
+      baseAltitude: 0.006,
+      noiseScale: 4.2,
+      threshold: 0.58,
+      softness: 0.08,
+      opacity: 0.34,
+      rimPower: 2.2,
+      rimStrength: 0.28,
+      bandStrength: 0,
+      bandFrequency: 0
     }
   },
   CO2: {
@@ -1719,6 +1750,19 @@ const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerS
       sunsetStrength: 0.9,
       nightMin: 0.08,
       thicknessMultiplier: 1.95
+    },
+    clouds: {
+      color: '#fff7ed',
+      shadowColor: '#a16207',
+      baseAltitude: 0.008,
+      noiseScale: 3.8,
+      threshold: 0.62,
+      softness: 0.09,
+      opacity: 0.28,
+      rimPower: 2.15,
+      rimStrength: 0.22,
+      bandStrength: 0,
+      bandFrequency: 0
     }
   },
   H2He: {
@@ -1744,6 +1788,19 @@ const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerS
       sunsetStrength: 0.35,
       nightMin: 0.1,
       thicknessMultiplier: 2.05
+    },
+    clouds: {
+      color: '#f5f3ff',
+      shadowColor: '#7c3aed',
+      baseAltitude: 0.014,
+      noiseScale: 7.2,
+      threshold: 0.5,
+      softness: 0.1,
+      opacity: 0.45,
+      rimPower: 2.0,
+      rimStrength: 0.2,
+      bandStrength: 0.85,
+      bandFrequency: 18
     }
   }
 };
@@ -1874,16 +1931,174 @@ const createAtmosphereLayerMaterial = (params: {
   });
 };
 
+const createCloudLayerMaterial = (params: {
+  sunColor: Color;
+  cloudColor: string;
+  shadowColor: string;
+  opacity: number;
+  threshold: number;
+  softness: number;
+  noiseScale: number;
+  seed: number;
+  seed2: number;
+  bandStrength: number;
+  bandFrequency: number;
+  bandOffset: number;
+  rimPower: number;
+  rimStrength: number;
+  nightMin: number;
+}): ShaderMaterial => {
+  return new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: NormalBlending,
+    side: FrontSide,
+    uniforms: {
+      uSunColor: { value: params.sunColor },
+      uCloudColor: { value: new Color(params.cloudColor) },
+      uShadowColor: { value: new Color(params.shadowColor) },
+      uOpacity: { value: params.opacity },
+      uThreshold: { value: params.threshold },
+      uSoftness: { value: params.softness },
+      uNoiseScale: { value: params.noiseScale },
+      uSeed: { value: params.seed },
+      uSeed2: { value: params.seed2 },
+      uBandStrength: { value: params.bandStrength },
+      uBandFrequency: { value: params.bandFrequency },
+      uBandOffset: { value: params.bandOffset },
+      uRimPower: { value: params.rimPower },
+      uRimStrength: { value: params.rimStrength },
+      uNightMin: { value: params.nightMin },
+      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uSunColor;
+      uniform vec3 uCloudColor;
+      uniform vec3 uShadowColor;
+      uniform float uOpacity;
+      uniform float uThreshold;
+      uniform float uSoftness;
+      uniform float uNoiseScale;
+      uniform float uSeed;
+      uniform float uSeed2;
+      uniform float uBandStrength;
+      uniform float uBandFrequency;
+      uniform float uBandOffset;
+      uniform float uRimPower;
+      uniform float uRimStrength;
+      uniform float uNightMin;
+      uniform float uTerminatorSoftness;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+
+      float hash(vec3 p) {
+        return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+      }
+
+      float noise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);
+
+        float n000 = hash(i + vec3(0.0, 0.0, 0.0));
+        float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+
+        float nx00 = mix(n000, n100, u.x);
+        float nx10 = mix(n010, n110, u.x);
+        float nx01 = mix(n001, n101, u.x);
+        float nx11 = mix(n011, n111, u.x);
+        float nxy0 = mix(nx00, nx10, u.y);
+        float nxy1 = mix(nx01, nx11, u.y);
+        return mix(nxy0, nxy1, u.z);
+      }
+
+      float fbm(vec3 p) {
+        float value = 0.0;
+        float amplitude = 0.55;
+        for (int i = 0; i < 4; i += 1) {
+          value += amplitude * noise(p);
+          p = p * 2.02 + vec3(19.1, 7.7, 13.5);
+          amplitude *= 0.5;
+        }
+        return value;
+      }
+
+      void main() {
+        vec3 N = normalize(vWorldNormal);
+        vec3 V = normalize(cameraPosition - vWorldPosition);
+
+        float sunDistance = length(vWorldPosition);
+        vec3 L = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+
+        float mu = dot(N, L);
+        float day = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, mu);
+        float daylight = mix(uNightMin, 1.0, day);
+
+        vec3 seedVec = vec3(uSeed * 11.0, uSeed2 * 17.0, uSeed * 23.0);
+        float n1 = fbm(N * uNoiseScale + seedVec);
+        float n2 = fbm(N * (uNoiseScale * 1.9) + vec3(uSeed2 * 31.0, uSeed * 37.0, uSeed2 * 41.0));
+        float field = mix(n1, n2, 0.35);
+
+        float stripe = 0.5 + 0.5 * sin((N.y + uBandOffset) * uBandFrequency);
+        float band = smoothstep(0.25, 0.78, stripe);
+        field *= mix(1.0, band, clamp(uBandStrength, 0.0, 1.0));
+
+        float alpha = smoothstep(uThreshold, uThreshold + uSoftness, field) * uOpacity;
+        if (alpha <= 0.001) discard;
+
+        float diffuse = clamp(mu * 0.75 + 0.25, 0.0, 1.0);
+        float nv = clamp(dot(N, V), 0.0, 1.0);
+        float rim = pow(1.0 - nv, uRimPower) * uRimStrength;
+
+        vec3 base = mix(uShadowColor, uCloudColor, diffuse);
+        base = mix(base, uCloudColor, rim);
+        vec3 color = base * uSunColor * daylight;
+
+        gl_FragColor = vec4(color, alpha);
+      }
+    `
+  });
+};
+
 const AtmosphereStack: React.FC<{
   geometry: SphereGeometry;
   radius: number;
   bundle: AtmosphereLayerBundle;
 }> = ({ geometry, radius, bundle }) => {
+  const cloudRadius = bundle.clouds ? radius * bundle.clouds.scale : 0;
   const lowerRadius = radius * bundle.lower.scale;
   const hazeRadius = radius * bundle.haze.scale;
 
   return (
     <group raycast={() => null}>
+      {bundle.clouds && (
+        <mesh
+          geometry={geometry}
+          material={bundle.clouds.material}
+          scale={[cloudRadius, cloudRadius, cloudRadius]}
+          castShadow={false}
+          receiveShadow={false}
+          frustumCulled
+          raycast={() => null}
+          renderOrder={3.5}
+        />
+      )}
       <mesh
         geometry={geometry}
         material={bundle.lower.material}
@@ -3165,6 +3380,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const disposeAtmosphereBundle = useCallback((bundle: AtmosphereLayerBundle) => {
     bundle.lower.material.dispose();
     bundle.haze.material.dispose();
+    bundle.clouds?.material.dispose();
   }, []);
   const clearAtmosphereCache = useCallback(() => {
     atmosphereBundleByBodyIdRef.current.forEach(entry => disposeAtmosphereBundle(entry));
@@ -3181,7 +3397,68 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     const style = ATMOSPHERE_STYLE[atmosphere];
     const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
-    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}`;
+    const temperatureK = typeof body.temperatureK === 'number' && Number.isFinite(body.temperatureK)
+      ? body.temperatureK
+      : (atmosphere === 'H2He' ? 140 : 288);
+
+    let cloudsKey = 'cloud:none';
+    let clouds: AtmosphereLayerBundle['clouds'] = undefined;
+    const cloudStyle = style.clouds;
+    if (cloudStyle) {
+      let cloudiness = 0;
+      switch (atmosphere) {
+        case 'Earthlike': {
+          const tempSuitability = MathUtils.clamp(1 - Math.abs(temperatureK - 288) / 170, 0, 1);
+          cloudiness = MathUtils.clamp(0.15 + airMass * 0.75 * tempSuitability, 0, 1);
+          break;
+        }
+        case 'CO2': {
+          cloudiness = MathUtils.clamp(0.1 + airMass * 0.65, 0, 1);
+          break;
+        }
+        case 'H2He': {
+          cloudiness = MathUtils.clamp(0.6 + airMass * 0.4, 0, 1);
+          break;
+        }
+        default:
+          cloudiness = 0;
+      }
+
+      if (cloudiness > 0.08) {
+        const seed = hashStringToUnit(`${body.id}|cloud_seed`);
+        const seed2 = hashStringToUnit(`${body.id}|cloud_seed2`);
+        const bandOffset = hashStringToUnit(`${body.id}|cloud_band_offset`) * Math.PI * 2;
+
+        const threshold = MathUtils.clamp(cloudStyle.threshold - cloudiness * 0.14, 0.22, 0.9);
+        const opacity = MathUtils.clamp(cloudStyle.opacity * MathUtils.lerp(0.65, 1.05, cloudiness), 0, 0.95);
+        const altitude = cloudStyle.baseAltitude * MathUtils.lerp(0.85, 1.25, airMass);
+        const cloudScale = 1 + altitude;
+        cloudsKey = `cloud:${cloudScale.toFixed(4)}:${threshold.toFixed(3)}:${opacity.toFixed(3)}`;
+
+        clouds = {
+          material: createCloudLayerMaterial({
+            sunColor: sunColorRef.current,
+            cloudColor: cloudStyle.color,
+            shadowColor: cloudStyle.shadowColor,
+            opacity,
+            threshold,
+            softness: cloudStyle.softness,
+            noiseScale: cloudStyle.noiseScale,
+            seed,
+            seed2,
+            bandStrength: cloudStyle.bandStrength,
+            bandFrequency: cloudStyle.bandFrequency,
+            bandOffset,
+            rimPower: cloudStyle.rimPower,
+            rimStrength: cloudStyle.rimStrength,
+            nightMin: MathUtils.clamp(0.06 + airMass * 0.04, 0.06, 0.13)
+          }),
+          scale: cloudScale
+        };
+      }
+    }
+
+    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}|${cloudsKey}`;
 
     const existing = atmosphereBundleByBodyIdRef.current.get(body.id);
     if (existing && existing.key === cacheKey) return existing;
@@ -3229,6 +3506,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         scale: 1 + thickness * style.haze.thicknessMultiplier
       }
     };
+
+    if (clouds) {
+      bundle.clouds = clouds;
+    }
 
     atmosphereBundleByBodyIdRef.current.set(body.id, bundle);
     return bundle;
