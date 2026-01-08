@@ -93,6 +93,9 @@ const STAR_TEXTURE_SIZE = 256;
 const LENS_FLARE_TEXTURE_SIZE = 128;
 const STAR_TINT_STRENGTH = 0.18;
 const STAR_FALLBACK_TINT_STRENGTH = 0.08;
+const STAR_SURFACE_TINT_STRENGTH = 0.2;
+const MIN_STAR_TEMPERATURE_K = 1000;
+const MAX_STAR_TEMPERATURE_K = 40000;
 const DAYS_PER_YEAR = 365.25;
 const MIN_PLANET_ORBIT_INCLINATION_DEG = 0.35;
 const MAX_PLANET_ORBIT_INCLINATION_DEG = 10;
@@ -145,6 +148,7 @@ type OrbitingStar = {
   radius: number;
   radiusKm: number;
   tintColor: string;
+  surfaceTintColor: string;
   seedKey: string;
   position: [number, number, number];
 };
@@ -286,6 +290,36 @@ const getSpectralTint = (spectralType: string | undefined, fallback?: string): s
   return base.getStyle();
 };
 
+const temperatureToColor = (temperatureK: number | undefined): Color | null => {
+  if (!Number.isFinite(temperatureK)) return null;
+  const clampedK = MathUtils.clamp(temperatureK, MIN_STAR_TEMPERATURE_K, MAX_STAR_TEMPERATURE_K);
+  const temp = clampedK / 100;
+  let red = 255;
+  let green = 0;
+  let blue = 255;
+
+  if (temp <= 66) {
+    red = 255;
+    green = 99.4708025861 * Math.log(temp) - 161.1195681661;
+    blue = temp <= 19 ? 0 : 138.5177312231 * Math.log(temp - 10) - 305.0447927307;
+  } else {
+    red = 329.698727446 * Math.pow(temp - 60, -0.1332047592);
+    green = 288.1221695283 * Math.pow(temp - 60, -0.0755148492);
+    blue = 255;
+  }
+
+  const clampChannel = (value: number) => MathUtils.clamp(value, 0, 255) / 255;
+  return new Color(clampChannel(red), clampChannel(green), clampChannel(blue));
+};
+
+const getSurfaceTintFromTemperature = (temperatureK: number | undefined, fallback: string): string => {
+  const tempColor = temperatureToColor(temperatureK);
+  if (!tempColor) {
+    return fallback;
+  }
+  return new Color('#ffffff').lerp(tempColor, STAR_SURFACE_TINT_STRENGTH).getStyle();
+};
+
 const createSeededRandom = (seed: number): (() => number) => {
   let state = seed >>> 0;
   return () => {
@@ -304,7 +338,7 @@ const toRgbaString = (color: Color, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
-const createStarSurfaceTexture = (tintColor: string, seed: number): CanvasTexture => {
+const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): CanvasTexture => {
   const canvas = document.createElement('canvas');
   canvas.width = STAR_TEXTURE_SIZE;
   canvas.height = STAR_TEXTURE_SIZE;
@@ -319,7 +353,7 @@ const createStarSurfaceTexture = (tintColor: string, seed: number): CanvasTextur
   }
 
   const base = new Color('#ffffff');
-  const tint = new Color(tintColor).lerp(base, 0.6);
+  const tint = new Color(surfaceTintColor).lerp(base, 0.6);
   const highlight = base.clone().lerp(tint, 0.25);
   const shadow = base.clone().lerp(tint, 0.2).multiplyScalar(0.9);
 
@@ -765,6 +799,7 @@ const computeFleetRingBaseRadius = ({
 interface StarMeshProps {
   radius: number;
   tintColor: string;
+  surfaceTintColor: string;
   geometry: SphereGeometry;
   seedKey: string;
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
@@ -776,6 +811,7 @@ interface StarMeshProps {
 const StarMesh: React.FC<StarMeshProps> = ({
   radius,
   tintColor,
+  surfaceTintColor,
   geometry,
   seedKey,
   onDoubleClick,
@@ -788,8 +824,8 @@ const StarMesh: React.FC<StarMeshProps> = ({
     [seedKey]
   );
   const surfaceTexture = useDisposableMemo(
-    () => createStarSurfaceTexture(tintColor, seed),
-    [seed, tintColor]
+    () => createStarSurfaceTexture(surfaceTintColor, seed),
+    [seed, surfaceTintColor]
   );
   const glowTexture = useDisposableMemo(
     () => createStarGlowTexture(tintColor),
@@ -1314,6 +1350,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           <StarMesh
             radius={star.radius}
             tintColor={star.tintColor}
+            surfaceTintColor={star.surfaceTintColor}
             geometry={starGeometry}
             seedKey={star.seedKey}
             onDoubleClick={(event) => {
@@ -2175,6 +2212,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minStarRadius);
       const spectralType = star.spectralType ?? astro?.primarySpectralType;
       const tintColor = getSpectralTint(spectralType, starSystem.color || '#ffffff');
+      const surfaceTintColor = getSurfaceTintFromTemperature(star.teffK, tintColor);
       const seedKey = `${starSystem.id}-star-${index + 1}`;
       let position: [number, number, number] = [0, 0, 0];
       if (!isPrimary) {
@@ -2190,6 +2228,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         radius,
         radiusKm,
         tintColor,
+        surfaceTintColor,
         seedKey,
         position
       };
