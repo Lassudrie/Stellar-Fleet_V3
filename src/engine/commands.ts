@@ -6,7 +6,7 @@ import { getSystemById } from './world';
 import { clone } from './math/vec3';
 import { deepFreezeDev } from './state';
 import { computeLoadOps } from './armyOps';
-import { areFleetsSharingOrbit, isFleetOrbitingSystem, isOrbitContested } from './orbit';
+import { areFleetsSharingOrbit, isFleetOrbitingSystem } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from '../shared/shared';
 import { withUpdatedFleetDerived } from './fleetDerived';
