@@ -823,17 +823,25 @@ const applyPlanetOrbitSpacing = (
   starRadius: number,
   planetOrbitClearance: number
 ): OrbitingPlanet[] => {
+  const computePlanetFootprintRadius = (planet: OrbitingPlanet): number => {
+    const moonExtent = planet.moons.reduce((max, moon) => {
+      return Math.max(max, moon.orbitRadius + moon.radius);
+    }, 0);
+    return Math.max(planet.radius, moonExtent);
+  };
+
   let lastOrbitRadius = starRadius;
-  let lastPlanetRadius = 0;
+  let lastFootprintRadius = 0;
 
   return planets.map((planet, index) => {
-    const minimumDistanceFromStar = starRadius + planet.radius + planetOrbitClearance;
+    const footprintRadius = computePlanetFootprintRadius(planet);
+    const minimumDistanceFromStar = starRadius + footprintRadius + planetOrbitClearance;
     const minimumDistanceFromPrevious = index === 0
       ? minimumDistanceFromStar
-      : lastOrbitRadius + lastPlanetRadius + planet.radius + planetOrbitClearance;
+      : lastOrbitRadius + lastFootprintRadius + footprintRadius + planetOrbitClearance;
     const adjustedOrbitRadius = Math.max(planet.orbitRadius, minimumDistanceFromPrevious);
     lastOrbitRadius = adjustedOrbitRadius;
-    lastPlanetRadius = planet.radius;
+    lastFootprintRadius = footprintRadius;
     return { ...planet, orbitRadius: adjustedOrbitRadius };
   });
 };
