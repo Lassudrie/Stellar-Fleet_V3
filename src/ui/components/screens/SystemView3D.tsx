@@ -115,7 +115,7 @@ const MAX_MOON_ORBIT_INCLINATION_DEG = 14;
 const MAX_DPR_MOBILE = 1.25;
 const MAX_DPR_DESKTOP = 2;
 const SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR = 5.5;
-const SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR = 1.15;
+const SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR = 1.06;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -3171,15 +3171,28 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
     [starTintColor]
   );
-  const cameraMinDistance = useMemo(() => {
-    const anchoredRadius = bodyRadii[anchoredBodyId ?? ''];
+  const starIdSet = useMemo(() => new Set(starModels.map(star => star.id)), [starModels]);
+  const cameraZoomConstraints = useMemo(() => {
+    const anchorId = anchoredBodyId ?? starBodyId;
+    const anchoredRadius = bodyRadii[anchorId];
     const effectiveRadius = typeof anchoredRadius === 'number' ? anchoredRadius : focusDistanceFloor;
-    return Math.max(focusDistanceFloor, effectiveRadius * SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR);
-  }, [anchoredBodyId, bodyRadii, focusDistanceFloor]);
+    const isStarAnchor = starIdSet.has(anchorId);
+    const minRadiusDistance = effectiveRadius * SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR;
+    const minDistance = isStarAnchor ? Math.max(focusDistanceFloor, minRadiusDistance) : minRadiusDistance;
+    return {
+      minDistance,
+      effectiveRadius,
+      surfaceClearance: Math.max(minDistance - effectiveRadius, 0.0001 * clampedScale),
+      isStarAnchor
+    };
+  }, [anchoredBodyId, bodyRadii, clampedScale, focusDistanceFloor, starBodyId, starIdSet]);
+  const cameraMinDistance = cameraZoomConstraints.minDistance;
   const rotateSpeed = MathUtils.clamp(1 / clampedScale, 0.35, 2.5);
   const zoomSpeed = MathUtils.clamp(1 / clampedScale, 0.4, 3);
   const cameraFar = cameraMaxDistance + maxOrbitRadius * 2.5;
-  const cameraNear = Math.max(0.05, Math.min(cameraMinDistance * 0.25, cameraFar / 2000));
+  const cameraNear = cameraZoomConstraints.isStarAnchor
+    ? Math.max(0.05, Math.min(cameraMinDistance * 0.25, cameraFar / 2000))
+    : Math.max(0.001 * clampedScale, Math.min(cameraZoomConstraints.surfaceClearance * 0.5, cameraFar / 20000));
   const focusRequestRef = useRef<FocusRequest | null>(null);
   const anchoredTarget = useMemo<[number, number, number]>(() => {
     return bodyWorldPositions[anchoredBodyId ?? ''] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
