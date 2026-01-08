@@ -138,6 +138,9 @@ const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
 const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
+const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
+const DAY_NIGHT_NIGHT_MIN = 0.08;
+const ATMOSPHERE_DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
 
@@ -146,6 +149,57 @@ const pickSurfaceTextureResolution = (diameterPx: number): SurfaceTextureResolut
   if (diameterPx >= SURFACE_TEXTURE_HIGH_DIAMETER_PX) return { width: 1024, height: 512 };
   if (diameterPx >= SURFACE_TEXTURE_MED_DIAMETER_PX) return { width: 512, height: 256 };
   return { width: 256, height: 128 };
+};
+
+const applyDayNightTerminator = (material: MeshStandardMaterial) => {
+  if (material.userData.dayNightTerminatorApplied) return;
+  material.userData.dayNightTerminatorApplied = true;
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uNightMin = { value: DAY_NIGHT_NIGHT_MIN };
+    shader.uniforms.uTerminatorSoftness = { value: DAY_NIGHT_TERMINATOR_SOFTNESS };
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vWorldPosition;
+varying vec3 vWorldNormal;`
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
+vWorldPosition = worldPosition.xyz;`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vWorldPosition;
+varying vec3 vWorldNormal;
+uniform float uNightMin;
+uniform float uTerminatorSoftness;`
+      )
+      .replace(
+        '#include <output_fragment>',
+        `float sunDistance = length(vWorldPosition);
+vec3 sunDir = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+float nDotL = dot(normalize(vWorldNormal), sunDir);
+float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
+float lightFactor = mix(uNightMin, 1.0, terminator);
+gl_FragColor = vec4(outgoingLight * lightFactor, diffuseColor.a);`
+      );
+  };
+
+  material.customProgramCacheKey = () => 'sf_day_night_terminator_v1';
+  material.needsUpdate = true;
 };
 
 type OrbitingMoon = {
@@ -1461,7 +1515,9 @@ const createAtmosphereMaterial = (params: { color: string; intensity: number; po
     uniforms: {
       uColor: { value: new Color(params.color) },
       uIntensity: { value: params.intensity },
-      uPower: { value: params.power }
+      uPower: { value: params.power },
+      uNightMin: { value: ATMOSPHERE_DAY_NIGHT_NIGHT_MIN },
+      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
     },
     vertexShader: `
       varying vec3 vWorldPosition;
@@ -1477,14 +1533,21 @@ const createAtmosphereMaterial = (params: { color: string; intensity: number; po
       uniform vec3 uColor;
       uniform float uIntensity;
       uniform float uPower;
+      uniform float uNightMin;
+      uniform float uTerminatorSoftness;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
       void main() {
         vec3 viewDir = normalize(cameraPosition - vWorldPosition);
         float ndv = max(dot(normalize(vWorldNormal), viewDir), 0.0);
         float rim = pow(1.0 - ndv, uPower);
-        vec3 color = uColor * rim * uIntensity;
-        gl_FragColor = vec4(color, rim * uIntensity);
+        float sunDistance = length(vWorldPosition);
+        vec3 sunDir = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+        float nDotL = dot(normalize(vWorldNormal), sunDir);
+        float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
+        float lightFactor = mix(uNightMin, 1.0, terminator);
+        vec3 color = uColor * rim * uIntensity * lightFactor;
+        gl_FragColor = vec4(color, rim * uIntensity * lightFactor);
       }
     `,
     toneMapped: false
@@ -2783,6 +2846,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.baseColor = baseColor;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
+    applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(planet.id, material);
     return material;
   }, [planetMaterialMap]);
@@ -2796,6 +2860,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.baseColor = baseColor;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
+    applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(moon.id, material);
     return material;
   }, [moonMaterialMap]);
