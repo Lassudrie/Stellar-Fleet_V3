@@ -125,6 +125,7 @@ const STARFIELD_NEBULA_LAYERS = 4;
 const STARFIELD_BASE_COLOR = '#04060c';
 const BODY_SPIN_SPEED_MIN = 0.0035;
 const BODY_SPIN_SPEED_MAX = 0.011;
+const BODY_SPIN_SPEED_MULTIPLIER = 2;
 const CLOUD_SPIN_MULTIPLIER_MIN = 1.2;
 const CLOUD_SPIN_MULTIPLIER_MAX = 1.6;
 const CLOUD_NOISE_SPEED_MIN = 0.015;
@@ -153,6 +154,10 @@ const MIN_MOON_ORBIT_INCLINATION_DEG = 0.25;
 const MAX_MOON_ORBIT_INCLINATION_DEG = 14;
 const MAX_DPR_MOBILE = 1.25;
 const MAX_DPR_DESKTOP = 2;
+const POST_FX_MSAA_SAMPLES_DESKTOP = 4;
+const POST_FX_MSAA_SAMPLES_MOBILE = 2;
+const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
+const SURFACE_MIPMAP_ANISOTROPY_MOBILE = 4;
 const SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR = 5.5;
 const SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR = 1.06;
 
@@ -1453,8 +1458,8 @@ const StarMesh: React.FC<StarMeshProps> = ({
 
   useFrame((state, delta) => {
     if (!coreRef.current) return;
-    coreRef.current.rotation.y += delta * 0.08;
-    coreRef.current.rotation.z += delta * 0.02;
+    coreRef.current.rotation.y += delta * 0.08 * BODY_SPIN_SPEED_MULTIPLIER;
+    coreRef.current.rotation.z += delta * 0.02 * BODY_SPIN_SPEED_MULTIPLIER;
 
     const group = groupRef.current;
     const lensflare = lensFlareState?.lensflare ?? null;
@@ -1639,7 +1644,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     : null;
   const spinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-spin`);
-    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed) * BODY_SPIN_SPEED_MULTIPLIER;
   }, [moon.id]);
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-cloud-spin`);
@@ -1829,7 +1834,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     : null;
   const spinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-spin`);
-    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed) * BODY_SPIN_SPEED_MULTIPLIER;
   }, [planet.id]);
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-cloud-spin`);
@@ -2658,11 +2663,12 @@ const SystemSurfaceTextureManager: React.FC<{
     }
     texture.wrapS = RepeatWrapping;
     texture.wrapT = ClampToEdgeWrapping;
-    const useMipmaps = !lowSpec;
+    const useMipmaps = true;
+    const maxSurfaceAnisotropy = lowSpec ? SURFACE_MIPMAP_ANISOTROPY_MOBILE : SURFACE_MIPMAP_ANISOTROPY_DESKTOP;
     texture.minFilter = useMipmaps ? LinearMipmapLinearFilter : LinearFilter;
     texture.magFilter = LinearFilter;
     texture.generateMipmaps = useMipmaps;
-    texture.anisotropy = useMipmaps ? Math.min(8, Math.max(1, maxAnisotropy)) : 1;
+    texture.anisotropy = useMipmaps ? Math.min(maxSurfaceAnisotropy, Math.max(1, maxAnisotropy)) : 1;
     texture.flipY = true;
     texture.needsUpdate = true;
     return texture;
@@ -4808,14 +4814,28 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
   const lowSpec = prefersTouchFallback;
-  const enablePostFX = !lowSpec;
+  const [rendererCaps, setRendererCaps] = useState(() => ({
+    contextAntialias: false,
+    isWebGL2: false,
+    maxSamples: 0
+  }));
+  const wantsBloom = !lowSpec;
+  const wantsVignette = !lowSpec;
+  const enablePostFX = wantsBloom || wantsVignette || !rendererCaps.contextAntialias;
   const enableShadows = !lowSpec;
-  const enableAntialias = !lowSpec;
+  const enableAntialias = true;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
   const toneMappingExposure = prefersTouchFallback ? 1.05 : 1.12;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
+  const postFxMultisampling = useMemo(() => {
+    if (!enablePostFX || !rendererCaps.isWebGL2) return 0;
+    const targetSamples = prefersTouchFallback ? POST_FX_MSAA_SAMPLES_MOBILE : POST_FX_MSAA_SAMPLES_DESKTOP;
+    const maxSamples = rendererCaps.maxSamples || targetSamples;
+    return Math.min(targetSamples, maxSamples);
+  }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
+  const enableSmaa = enablePostFX && postFxMultisampling === 0;
   const bloomIntensity = prefersTouchFallback ? 0.4 : 0.75;
   const bloomThreshold = prefersTouchFallback ? 0.32 : 0.26;
   const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.6;
@@ -4847,16 +4867,35 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
   return (
     <div className="relative w-full h-full bg-black">
-        <Canvas
-          shadows={enableShadows}
+      <Canvas
+        shadows={enableShadows}
         onCreated={({ gl }) => {
           gl.shadowMap.type = PCFSoftShadowMap;
           gl.outputColorSpace = SRGBColorSpace;
           gl.toneMapping = ACESFilmicToneMapping;
           gl.toneMappingExposure = toneMappingExposure;
+          const context = gl.getContext();
+          const attributes = context.getContextAttributes?.();
+          const nextCaps = {
+            contextAntialias: Boolean(attributes?.antialias),
+            isWebGL2: gl.capabilities.isWebGL2,
+            maxSamples: gl.capabilities.maxSamples ?? 0
+          };
+          setRendererCaps((prev) => (
+            prev.contextAntialias === nextCaps.contextAntialias
+            && prev.isWebGL2 === nextCaps.isWebGL2
+            && prev.maxSamples === nextCaps.maxSamples
+              ? prev
+              : nextCaps
+          ));
         }}
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
-        gl={{ antialias: enableAntialias, powerPreference: lowSpec ? 'low-power' : 'high-performance' }}
+        gl={{
+          antialias: enableAntialias,
+          depth: true,
+          stencil: false,
+          powerPreference: lowSpec ? 'low-power' : 'high-performance'
+        }}
         dpr={[1, maxDpr]}
       >
         <color attach="background" args={['#000000']} />
@@ -4971,9 +5010,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             </SystemRoot>
           </Select>
           {enablePostFX && (
-            <EffectComposer enableNormalPass={false}>
-              <SMAA />
-              {bloomLightsReady && (
+            <EffectComposer enableNormalPass={false} multisampling={postFxMultisampling}>
+              {enableSmaa && <SMAA />}
+              {wantsBloom && bloomLightsReady && (
                 <SelectiveBloom
                   intensity={bloomIntensity}
                   mipmapBlur={!prefersTouchFallback}
@@ -4983,7 +5022,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                   lights={bloomLights}
                 />
               )}
-              <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
+              {wantsVignette && <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />}
             </EffectComposer>
           )}
         </Selection>
