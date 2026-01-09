@@ -126,6 +126,16 @@ const STARFIELD_BASE_COLOR = '#04060c';
 const BODY_SPIN_SPEED_MIN = 0.0035;
 const BODY_SPIN_SPEED_MAX = 0.011;
 const BODY_SPIN_SPEED_MULTIPLIER = 2;
+const SPIN_SCALE_EXPONENT = 0.6;
+const PLANET_SPIN_SCALE_MIN = 0.6;
+const PLANET_SPIN_SCALE_MAX = 2.4;
+const MOON_SPIN_SCALE_MIN = 0.7;
+const MOON_SPIN_SCALE_MAX = 2.6;
+const STAR_SPIN_SCALE_MIN = 0.55;
+const STAR_SPIN_SCALE_MAX = 1.8;
+const PLANET_SPIN_REFERENCE_RADIUS_FACTOR = 2.4;
+const MOON_SPIN_REFERENCE_RADIUS_FACTOR = 2.8;
+const STAR_SPIN_REFERENCE_RADIUS_FACTOR = 3.0;
 const CLOUD_SPIN_MULTIPLIER_MIN = 1.2;
 const CLOUD_SPIN_MULTIPLIER_MAX = 1.6;
 const CLOUD_NOISE_SPEED_MIN = 0.015;
@@ -983,6 +993,18 @@ const getMoonOrbitKm = (moon: MoonSource, planetRadiusKm: number): number => {
 
 const clampPhi = (phi: number): number => MathUtils.clamp(phi, MIN_POLAR_ANGLE, MAX_POLAR_ANGLE);
 
+const getSpinScaleFromRadius = (
+  radius: number,
+  referenceRadius: number,
+  minScale: number,
+  maxScale: number
+): number => {
+  const safeRadius = Math.max(radius, 0.0001);
+  const ratio = referenceRadius / safeRadius;
+  const eased = Math.pow(ratio, SPIN_SCALE_EXPONENT);
+  return MathUtils.clamp(eased, minScale, maxScale);
+};
+
 const sphericalFromOffset = (offset: Vector3): CameraSphericalState => {
   const spherical = new Spherical().setFromVector3(offset);
   return {
@@ -1323,6 +1345,7 @@ interface StarMeshProps {
   surfaceTintColor: string;
   geometry: SphereGeometry;
   seedKey: string;
+  spinReferenceRadius: number;
   enableLensFlare?: boolean;
   lensFlareStrength?: number;
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
@@ -1337,6 +1360,7 @@ const StarMesh: React.FC<StarMeshProps> = ({
   surfaceTintColor,
   geometry,
   seedKey,
+  spinReferenceRadius,
   enableLensFlare = true,
   lensFlareStrength = LENS_FLARE_BASE_STRENGTH,
   onDoubleClick,
@@ -1400,6 +1424,10 @@ const StarMesh: React.FC<StarMeshProps> = ({
     () => [radius * 1.45, radius * 1.45, radius * 1.45],
     [radius]
   );
+  const spinScale = useMemo(
+    () => getSpinScaleFromRadius(radius, spinReferenceRadius, STAR_SPIN_SCALE_MIN, STAR_SPIN_SCALE_MAX),
+    [radius, spinReferenceRadius]
+  );
   const groupRef = useRef<Group | null>(null);
   const coreRef = useRef<Mesh | null>(null);
   const lensFlareState = useMemo(() => {
@@ -1458,8 +1486,9 @@ const StarMesh: React.FC<StarMeshProps> = ({
 
   useFrame((state, delta) => {
     if (!coreRef.current) return;
-    coreRef.current.rotation.y += delta * 0.08 * BODY_SPIN_SPEED_MULTIPLIER;
-    coreRef.current.rotation.z += delta * 0.02 * BODY_SPIN_SPEED_MULTIPLIER;
+    const spinFactor = BODY_SPIN_SPEED_MULTIPLIER * spinScale;
+    coreRef.current.rotation.y += delta * 0.08 * spinFactor;
+    coreRef.current.rotation.z += delta * 0.02 * spinFactor;
 
     const group = groupRef.current;
     const lensflare = lensFlareState?.lensflare ?? null;
@@ -1591,6 +1620,7 @@ interface MoonOrbitGroupProps {
   moonMaterial: MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
+  spinReferenceRadius: number;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
   onSelect: (bodyId: string) => void;
@@ -1604,6 +1634,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   moonMaterial,
   resolveAtmosphereBundle,
   orbitThickness,
+  spinReferenceRadius,
   onFocus,
   onHover,
   onBlur,
@@ -1642,10 +1673,16 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   const atmosphereBundle = moon.atmosphere && moon.atmosphere !== 'None'
     ? resolveAtmosphereBundle(moon)
     : null;
+  const spinScale = useMemo(
+    () => getSpinScaleFromRadius(moon.radius, spinReferenceRadius, MOON_SPIN_SCALE_MIN, MOON_SPIN_SCALE_MAX),
+    [moon.radius, spinReferenceRadius]
+  );
   const spinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-spin`);
-    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed) * BODY_SPIN_SPEED_MULTIPLIER;
-  }, [moon.id]);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed)
+      * BODY_SPIN_SPEED_MULTIPLIER
+      * spinScale;
+  }, [moon.id, spinScale]);
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-cloud-spin`);
     const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
@@ -1775,6 +1812,8 @@ interface PlanetOrbitGroupProps {
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
+  spinReferenceRadius: number;
+  moonSpinReferenceRadius: number;
   onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
@@ -1791,6 +1830,8 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   resolveMoonMaterial,
   resolveAtmosphereBundle,
   orbitThickness,
+  spinReferenceRadius,
+  moonSpinReferenceRadius,
   onFocus,
   onHover,
   onBlur,
@@ -1832,10 +1873,16 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   const atmosphereBundle = planet.atmosphere && planet.atmosphere !== 'None'
     ? resolveAtmosphereBundle(planet)
     : null;
+  const spinScale = useMemo(
+    () => getSpinScaleFromRadius(planet.radius, spinReferenceRadius, PLANET_SPIN_SCALE_MIN, PLANET_SPIN_SCALE_MAX),
+    [planet.radius, spinReferenceRadius]
+  );
   const spinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-spin`);
-    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed) * BODY_SPIN_SPEED_MULTIPLIER;
-  }, [planet.id]);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed)
+      * BODY_SPIN_SPEED_MULTIPLIER
+      * spinScale;
+  }, [planet.id, spinScale]);
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-cloud-spin`);
     const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
@@ -1960,6 +2007,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             moonMaterial={resolveMoonMaterial(moon)}
             resolveAtmosphereBundle={resolveAtmosphereBundle}
             orbitThickness={orbitThickness}
+            spinReferenceRadius={moonSpinReferenceRadius}
             onFocus={onFocus}
             onHover={onHover}
             onBlur={onBlur}
@@ -1983,6 +2031,9 @@ interface SystemCelestialLayerProps {
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
+  starSpinReferenceRadius: number;
+  planetSpinReferenceRadius: number;
+  moonSpinReferenceRadius: number;
   onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
   onBlurBody: (bodyId: string) => void;
@@ -2001,6 +2052,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   resolveMoonMaterial,
   resolveAtmosphereBundle,
   orbitThickness,
+  starSpinReferenceRadius,
+  planetSpinReferenceRadius,
+  moonSpinReferenceRadius,
   onFocusBody,
   onHoverBody,
   onBlurBody,
@@ -2016,6 +2070,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
             surfaceTintColor={star.surfaceTintColor}
             geometry={starGeometry}
             seedKey={star.seedKey}
+            spinReferenceRadius={starSpinReferenceRadius}
             enableLensFlare={star.data.role === 'primary'}
             onDoubleClick={(event) => {
               event.stopPropagation();
@@ -2039,6 +2094,8 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           resolveMoonMaterial={resolveMoonMaterial}
           resolveAtmosphereBundle={resolveAtmosphereBundle}
           orbitThickness={orbitThickness}
+          spinReferenceRadius={planetSpinReferenceRadius}
+          moonSpinReferenceRadius={moonSpinReferenceRadius}
           onFocus={onFocusBody}
           onHover={onHoverBody}
           onBlur={onBlurBody}
@@ -3963,6 +4020,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
   const minMoonRadius = minPlanetRadius / 3;
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
+  const planetSpinReferenceRadius = minPlanetRadius * PLANET_SPIN_REFERENCE_RADIUS_FACTOR;
+  const moonSpinReferenceRadius = minMoonRadius * MOON_SPIN_REFERENCE_RADIUS_FACTOR;
+  const starSpinReferenceRadius = minStarRadius * STAR_SPIN_REFERENCE_RADIUS_FACTOR;
   // Visual padding to keep planets and the star clearly separated; tune to adjust orbit spacing.
   const planetOrbitClearance = Math.max(minPlanetRadius * 2, clampedScale * 0.75);
   const moonOrbitClearance = Math.max(minMoonRadius * 2, clampedScale * 0.35);
@@ -4656,7 +4716,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
   const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.03, 0.1, 0.22);
-  const hemisphereLightIntensity = MathUtils.clamp(0.18 + clampedScale * 0.04, 0.16, 0.32);
+  const hemisphereLightIntensity = 0;
   const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
   const starLightIntensity = MathUtils.clamp(MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14) * 35, 45, 260);
   const ambientLightColor = useMemo(
@@ -4668,7 +4728,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     [starTintColor]
   );
   const hemisphereGroundColor = useMemo(
-    () => new Color('#0b1020').getStyle(),
+    () => new Color('#000000').getStyle(),
     []
   );
   const starLightColor = useMemo(
@@ -4976,6 +5036,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 resolveMoonMaterial={resolveMoonMaterial}
                 resolveAtmosphereBundle={resolveAtmosphereBundle}
                 orbitThickness={orbitThickness}
+                starSpinReferenceRadius={starSpinReferenceRadius}
+                planetSpinReferenceRadius={planetSpinReferenceRadius}
+                moonSpinReferenceRadius={moonSpinReferenceRadius}
                 onFocusBody={requestFocusOnBody}
                 onHoverBody={handleHoverBody}
                 onBlurBody={handleBlurBody}
