@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Billboard, OrbitControls, Text } from '@react-three/drei';
-import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Select, SelectiveBloom, Selection, SMAA, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
   AdditiveBlending,
   ACESFilmicToneMapping,
+  AmbientLight,
   BackSide,
   BufferAttribute,
   Camera,
@@ -20,6 +21,7 @@ import {
   Euler,
   FrontSide,
   Group,
+  HemisphereLight,
   InstancedMesh,
   LinearFilter,
   LinearMipmapLinearFilter,
@@ -32,6 +34,7 @@ import {
   NormalBlending,
   Object3D,
   PerspectiveCamera,
+  PointLight,
   RepeatWrapping,
   RingGeometry,
   SRGBColorSpace,
@@ -658,12 +661,14 @@ const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTextu
   const context = canvas.getContext('2d');
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
-  texture.minFilter = LinearFilter;
-  texture.magFilter = LinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
 
   if (!context) {
     return texture;
   }
+  context.imageSmoothingEnabled = false;
 
   const size = STARFIELD_TEXTURE_SIZE;
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
@@ -698,10 +703,12 @@ const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTextu
   const baseStar = new Color('#ffffff');
 
   const drawStar = (x: number, y: number, radius: number, color: string) => {
+    const size = Math.max(1, Math.round(radius));
+    const half = Math.floor(size / 2);
+    const xi = Math.round(x);
+    const yi = Math.round(y);
     context.fillStyle = color;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+    context.fillRect(xi - half, yi - half, size, size);
   };
 
   for (let i = 0; i < starCount; i += 1) {
@@ -4706,6 +4713,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new Color('#e6ecff').lerp(new Color(starTintColor), 0.3).getStyle(),
     [starTintColor]
   );
+  const ambientLightRef = useRef<AmbientLight>(null);
+  const hemisphereLightRef = useRef<HemisphereLight>(null);
+  const starLightRef = useRef<PointLight>(null);
+  const bloomLights = useMemo(
+    () => [ambientLightRef, hemisphereLightRef, starLightRef],
+    [ambientLightRef, hemisphereLightRef, starLightRef]
+  );
 
   return (
     <div className="relative w-full h-full bg-black">
@@ -4733,13 +4747,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           distance={rimLightDistance}
           target={anchoredTarget}
         />
-        <ambientLight intensity={ambientLightIntensity} color={ambientLightColor} />
+        <ambientLight ref={ambientLightRef} intensity={ambientLightIntensity} color={ambientLightColor} />
         <hemisphereLight
+          ref={hemisphereLightRef}
           intensity={hemisphereLightIntensity}
           color={hemisphereSkyColor}
           groundColor={hemisphereGroundColor}
         />
         <pointLight
+          ref={starLightRef}
           position={[0, 0, 0]}
           intensity={starLightIntensity}
           distance={starLightDistance}
@@ -4768,75 +4784,80 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           cameraFar={cameraFar}
         />
 
-        <SystemRoot>
-          <SystemSurfaceTextureManager
-            starSystem={starSystem}
-            astroKey={astroKey}
-            planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
-            ownerKeyByBodyId={ownerKeyByBodyId}
-            planets={planets}
-            bodyWorldPositions={bodyWorldPositions}
-            bodyRadii={bodyRadii}
-            selectedBodyId={selectedBodyId}
-            hoveredBodyId={hoveredBodyId}
-            cloudShadowStrengthScale={cloudShadowStrengthScale}
-            resolveMaterial={resolveBodyMaterial}
-          />
-          <SystemCelestialLayer
-            stars={starModels}
-            starGeometry={starGeometry}
-            planets={planets}
-            orbitMaterial={orbitMaterial}
-            orbitShadowMaterial={orbitShadowMaterial}
-            planetGeometry={planetGeometry}
-            moonGeometry={moonGeometry}
-            resolvePlanetMaterial={resolvePlanetMaterial}
-            resolveMoonMaterial={resolveMoonMaterial}
-            resolveAtmosphereBundle={resolveAtmosphereBundle}
-            orbitThickness={orbitThickness}
-            onFocusBody={requestFocusOnBody}
-            onHoverBody={handleHoverBody}
-            onBlurBody={handleBlurBody}
-            onSelectBody={handleSelectBody}
-          />
-          <SystemEntitiesLayer
-            starBodyId={starBodyId}
-            fleets={systemFleets}
-            stations={systemStations}
-            day={day}
-            starRadius={starRadius}
-            bodyWorldPositions={bodyWorldPositions}
-            bodyRadii={bodyRadii}
-            clampedScale={clampedScale}
-            selectedFleetId={selectedFleetId}
-            selectedObjectId={selectedObjectId}
-            hoveredObjectId={hoveredObjectId}
-            fleetIconScale={fleetIconScale}
-            fleetLayoutConfig={fleetLayoutConfig}
-            getFactionColor={getFactionColor}
-            onHoverObject={handleHoverObject}
-            onBlurObject={handleBlurObject}
-            onSelectObject={handleSelectObject}
-            onFocusPoint={requestFocusOnPoint}
-          />
-          {showBodyLabels && (
-            <SystemBodyLabels
-              labels={bodyLabels}
-              baseScale={clampedScale}
+        <Selection>
+          <Select enabled>
+            <SystemRoot>
+              <SystemSurfaceTextureManager
+                starSystem={starSystem}
+                astroKey={astroKey}
+                planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
+                ownerKeyByBodyId={ownerKeyByBodyId}
+                planets={planets}
+                bodyWorldPositions={bodyWorldPositions}
+                bodyRadii={bodyRadii}
+                selectedBodyId={selectedBodyId}
+                hoveredBodyId={hoveredBodyId}
+                cloudShadowStrengthScale={cloudShadowStrengthScale}
+                resolveMaterial={resolveBodyMaterial}
+              />
+              <SystemCelestialLayer
+                stars={starModels}
+                starGeometry={starGeometry}
+                planets={planets}
+                orbitMaterial={orbitMaterial}
+                orbitShadowMaterial={orbitShadowMaterial}
+                planetGeometry={planetGeometry}
+                moonGeometry={moonGeometry}
+                resolvePlanetMaterial={resolvePlanetMaterial}
+                resolveMoonMaterial={resolveMoonMaterial}
+                resolveAtmosphereBundle={resolveAtmosphereBundle}
+                orbitThickness={orbitThickness}
+                onFocusBody={requestFocusOnBody}
+                onHoverBody={handleHoverBody}
+                onBlurBody={handleBlurBody}
+                onSelectBody={handleSelectBody}
+              />
+              <SystemEntitiesLayer
+                starBodyId={starBodyId}
+                fleets={systemFleets}
+                stations={systemStations}
+                day={day}
+                starRadius={starRadius}
+                bodyWorldPositions={bodyWorldPositions}
+                bodyRadii={bodyRadii}
+                clampedScale={clampedScale}
+                selectedFleetId={selectedFleetId}
+                selectedObjectId={selectedObjectId}
+                hoveredObjectId={hoveredObjectId}
+                fleetIconScale={fleetIconScale}
+                fleetLayoutConfig={fleetLayoutConfig}
+                getFactionColor={getFactionColor}
+                onHoverObject={handleHoverObject}
+                onBlurObject={handleBlurObject}
+                onSelectObject={handleSelectObject}
+                onFocusPoint={requestFocusOnPoint}
+              />
+              {showBodyLabels && (
+                <SystemBodyLabels
+                  labels={bodyLabels}
+                  baseScale={clampedScale}
+                />
+              )}
+            </SystemRoot>
+          </Select>
+          <EffectComposer enableNormalPass={false}>
+            <SMAA />
+            <SelectiveBloom
+              intensity={bloomIntensity}
+              mipmapBlur={!prefersTouchFallback}
+              radius={bloomRadius}
+              luminanceThreshold={bloomThreshold}
+              luminanceSmoothing={bloomSmoothing}
+              lights={bloomLights}
             />
-          )}
-        </SystemRoot>
-        <EffectComposer enableNormalPass={false}>
-          <SMAA />
-          <Bloom
-            intensity={bloomIntensity}
-            mipmapBlur={!prefersTouchFallback}
-            radius={bloomRadius}
-            luminanceThreshold={bloomThreshold}
-            luminanceSmoothing={bloomSmoothing}
-          />
-          <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
-        </EffectComposer>
+            <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
+          </EffectComposer>
+        </Selection>
       </Canvas>
       <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
         <div className="pointer-events-auto flex gap-2">
