@@ -2526,9 +2526,11 @@ const SystemSurfaceTextureManager: React.FC<{
   };
   const cacheRef = useRef<Map<string, SurfaceTextureBundle>>(new Map());
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
-  const inFlightRef = useRef<Map<string, { bodyId: string }>>(new Map());
+  const inFlightRef = useRef<Map<string, { bodyId: string; epoch: number }>>(new Map());
   const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
   const requestStateRef = useRef<GameState | null>(null);
+  const requestEpochRef = useRef(0);
+  const planetsRef = useRef(planets);
   const scratch = useMemo(() => ({
     world: new Vector3(),
     view: new Vector3(),
@@ -2633,6 +2635,10 @@ const SystemSurfaceTextureManager: React.FC<{
     } as unknown as GameState);
   }, [planetSurfaceDescriptorsByBodyId, starSystem]);
 
+  useEffect(() => {
+    planetsRef.current = planets;
+  }, [planets]);
+
   const disposeTextureBundle = useCallback((bundle: SurfaceTextureBundle) => {
     bundle.color.dispose();
     bundle.normal?.dispose();
@@ -2673,8 +2679,12 @@ const SystemSurfaceTextureManager: React.FC<{
     ].join('|');
   }, [astroKey, ownerKeyByBodyId]);
 
-  const buildGasGiantTextureKey = useCallback((bodyId: string, resolution: SurfaceTextureResolution): string => (
-    ['gas', bodyId, astroKey, resolution.width, resolution.height].join('|')
+  const buildGasGiantTextureKey = useCallback((
+    bodyId: string,
+    planetType: PlanetType | null,
+    resolution: SurfaceTextureResolution
+  ): string => (
+    ['gas', bodyId, planetType ?? 'unknown', astroKey, resolution.width, resolution.height].join('|')
   ), [astroKey]);
 
   const buildGasGiantBundle = useCallback((
@@ -2769,6 +2779,28 @@ const SystemSurfaceTextureManager: React.FC<{
     material.userData.surfaceAoTextureKey = null;
     material.userData.surfaceRoughnessTextureKey = null;
   }, []);
+
+  useEffect(() => {
+    requestEpochRef.current += 1;
+    cacheRef.current.forEach(bundle => disposeTextureBundle(bundle));
+    cacheRef.current.clear();
+    cacheLastUsedRef.current.clear();
+    inFlightRef.current.clear();
+    desiredKeyByBodyIdRef.current.clear();
+
+    planetsRef.current.forEach((planet) => {
+      const material = resolveMaterial(planet.id);
+      if (material) {
+        clearTextureFromMaterial(material);
+      }
+      planet.moons.forEach((moon) => {
+        const moonMaterial = resolveMaterial(moon.id);
+        if (moonMaterial) {
+          clearTextureFromMaterial(moonMaterial);
+        }
+      });
+    });
+  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, resolveMaterial]);
 
   useFrame(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
@@ -2884,10 +2916,21 @@ const SystemSurfaceTextureManager: React.FC<{
 
       const cloudShadow = !isGasGiant ? cloudShadowByBodyId.get(bodyId) ?? null : null;
       const shadowKey = cloudShadow
-        ? `shadow:${cloudShadow.strength.toFixed(3)}:${cloudShadow.threshold.toFixed(3)}:${cloudShadow.noiseScale.toFixed(2)}`
+        ? [
+            'shadow',
+            cloudShadow.strength.toFixed(3),
+            cloudShadow.threshold.toFixed(3),
+            cloudShadow.softness.toFixed(3),
+            cloudShadow.noiseScale.toFixed(2),
+            cloudShadow.bandStrength.toFixed(3),
+            cloudShadow.bandFrequency.toFixed(2),
+            cloudShadow.bandOffset.toFixed(3),
+            cloudShadow.seed.toString(10),
+            cloudShadow.seed2.toString(10)
+          ].join(':')
         : 'shadow:none';
       const key = isGasGiant
-        ? buildGasGiantTextureKey(bodyId, resolution)
+        ? buildGasGiantTextureKey(bodyId, planetType, resolution)
         : `${buildTextureKey(bodyId, descriptor as PlanetSurfaceDescriptor, resolution)}|${shadowKey}`;
       desiredKeyByBodyIdRef.current.set(bodyId, key);
       touchKey(key);
@@ -2924,11 +2967,13 @@ const SystemSurfaceTextureManager: React.FC<{
       const worker = workerRef.current;
       if (!worker) return;
 
-      inFlightRef.current.set(key, { bodyId });
+      const requestEpoch = requestEpochRef.current;
+      inFlightRef.current.set(key, { bodyId, epoch: requestEpoch });
       worker.requestSurfaceTexture(workerRequest, resolution)
         .then((result: SurfaceTextureResult | null) => {
           inFlightRef.current.delete(key);
           if (!result) return;
+          if (requestEpoch !== requestEpochRef.current) return;
 
           const colorTexture = createDataTexture(result.rgba, result.width, result.height, true);
           const normalTexture = result.normalRgba
