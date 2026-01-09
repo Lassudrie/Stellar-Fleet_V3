@@ -66,13 +66,10 @@ import {
   StarSystem,
   StarSystemAstro
 } from '../../../shared/shared';
-import { calculateFleetPower } from '../../../engine/world';
 import { shortId, sorted } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import { useFleetName } from '../../context/FleetNames';
 import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';
-import SystemFleetInfoPanel from '../ui/SystemFleetInfoPanel';
-import SystemStationInfoPanel from '../ui/SystemStationInfoPanel';
 import {
   getSystemFleets,
   hashStringToAngle,
@@ -102,6 +99,7 @@ interface SystemView3DProps {
   scaleFactor?: number;
   showBodyLabels?: boolean;
   onOpenSurfaceView?: (bodyId: string) => void;
+  onBack?: () => void;
 }
 
 const KM_PER_AU = 149_597_870.7;
@@ -202,6 +200,8 @@ const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
 const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
 const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
+const SURFACE_TEXTURE_UPSHIFT = 1.18;
+const SURFACE_TEXTURE_DOWNSHIFT = 0.84;
 const SURFACE_NORMAL_SCALE = 0.85;
 const SURFACE_AO_INTENSITY = 0.6;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
@@ -211,12 +211,51 @@ const DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
 
-const pickSurfaceTextureResolution = (diameterPx: number, preferUltra: boolean): SurfaceTextureResolution | null => {
-  if (!Number.isFinite(diameterPx) || diameterPx < SURFACE_TEXTURE_MIN_DIAMETER_PX) return null;
-  if (preferUltra && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX) return { width: 2048, height: 1024 };
-  if (diameterPx >= SURFACE_TEXTURE_HIGH_DIAMETER_PX) return { width: 1024, height: 512 };
-  if (diameterPx >= SURFACE_TEXTURE_MED_DIAMETER_PX) return { width: 512, height: 256 };
-  return { width: 256, height: 128 };
+const SURFACE_TEXTURE_RESOLUTIONS: Array<SurfaceTextureResolution & { minDiameter: number }> = [
+  { width: 256, height: 128, minDiameter: SURFACE_TEXTURE_MIN_DIAMETER_PX },
+  { width: 512, height: 256, minDiameter: SURFACE_TEXTURE_MED_DIAMETER_PX },
+  { width: 1024, height: 512, minDiameter: SURFACE_TEXTURE_HIGH_DIAMETER_PX },
+  { width: 2048, height: 1024, minDiameter: SURFACE_TEXTURE_ULTRA_DIAMETER_PX }
+];
+
+const getSurfaceResolutionIndex = (resolution: SurfaceTextureResolution | null): number => {
+  if (!resolution) return -1;
+  for (let i = 0; i < SURFACE_TEXTURE_RESOLUTIONS.length; i += 1) {
+    const candidate = SURFACE_TEXTURE_RESOLUTIONS[i];
+    if (candidate.width === resolution.width && candidate.height === resolution.height) return i;
+  }
+  return -1;
+};
+
+const pickSurfaceTextureResolution = (
+  diameterPx: number,
+  preferUltra: boolean,
+  lastResolution: SurfaceTextureResolution | null
+): SurfaceTextureResolution | null => {
+  if (!Number.isFinite(diameterPx) || diameterPx <= 0) return null;
+  const maxIndex = preferUltra ? SURFACE_TEXTURE_RESOLUTIONS.length - 1 : SURFACE_TEXTURE_RESOLUTIONS.length - 2;
+  let targetIndex = 0;
+  for (let i = 0; i <= maxIndex; i += 1) {
+    if (diameterPx >= SURFACE_TEXTURE_RESOLUTIONS[i].minDiameter) {
+      targetIndex = i;
+    }
+  }
+  const lastIndexRaw = getSurfaceResolutionIndex(lastResolution);
+  if (lastIndexRaw >= 0) {
+    const lastIndex = Math.min(lastIndexRaw, maxIndex);
+    const upIndex = Math.min(lastIndex + 1, maxIndex);
+    const downIndex = Math.max(lastIndex - 1, 0);
+    const upThreshold = SURFACE_TEXTURE_RESOLUTIONS[upIndex].minDiameter * SURFACE_TEXTURE_UPSHIFT;
+    const downThreshold = SURFACE_TEXTURE_RESOLUTIONS[lastIndex].minDiameter * SURFACE_TEXTURE_DOWNSHIFT;
+    if (lastIndex < maxIndex && diameterPx >= upThreshold) {
+      return SURFACE_TEXTURE_RESOLUTIONS[upIndex];
+    }
+    if (lastIndex > 0 && diameterPx < downThreshold) {
+      return SURFACE_TEXTURE_RESOLUTIONS[downIndex];
+    }
+    return SURFACE_TEXTURE_RESOLUTIONS[lastIndex];
+  }
+  return SURFACE_TEXTURE_RESOLUTIONS[targetIndex];
 };
 
 const applyDayNightTerminator = (material: MeshStandardMaterial) => {
@@ -363,6 +402,18 @@ type BodyLabelTarget = {
     position: [number, number, number];
     radius: number;
   };
+};
+
+type BodyContextMenuState = {
+  bodyId: string;
+  position: { x: number; y: number };
+};
+
+type BodyListItem = {
+  id: string;
+  name: string;
+  kind: 'star' | 'planet' | 'moon';
+  children?: BodyListItem[];
 };
 
 type CameraSphericalState = {
@@ -1666,6 +1717,9 @@ interface MoonOrbitGroupProps {
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   spinReferenceRadius: number;
+  onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onPressEnd: () => void;
+  onPressCancel: () => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
   onSelect: (bodyId: string) => void;
@@ -1680,6 +1734,9 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   resolveAtmosphereBundle,
   orbitThickness,
   spinReferenceRadius,
+  onPressStart,
+  onPressEnd,
+  onPressCancel,
   onFocus,
   onHover,
   onBlur,
@@ -1771,16 +1828,22 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
               onFocus(moon.id);
             }}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              if (event.pointerType !== 'touch') return;
               const now = performance.now();
-              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+              if (event.pointerType === 'touch' && now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
                 lastTouchRef.current = 0;
                 event.stopPropagation();
                 event.nativeEvent.preventDefault();
+                onPressCancel();
                 onFocus(moon.id);
-              } else {
+                return;
+              }
+              if (event.pointerType === 'touch') {
                 lastTouchRef.current = now;
               }
+              onPressStart(moon.id, event);
+            }}
+            onPointerUp={() => {
+              onPressEnd();
             }}
             onPointerOver={(event) => {
               event.stopPropagation();
@@ -1788,6 +1851,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             }}
             onPointerOut={(event) => {
               event.stopPropagation();
+              onPressCancel();
               onBlur(moon.id);
             }}
             onClick={(event) => {
@@ -1859,6 +1923,9 @@ interface PlanetOrbitGroupProps {
   orbitThickness: number;
   spinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onPressEnd: () => void;
+  onPressCancel: () => void;
   onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
@@ -1877,6 +1944,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   orbitThickness,
   spinReferenceRadius,
   moonSpinReferenceRadius,
+  onPressStart,
+  onPressEnd,
+  onPressCancel,
   onFocus,
   onHover,
   onBlur,
@@ -1971,16 +2041,22 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               onFocus(planet.id);
             }}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              if (event.pointerType !== 'touch') return;
               const now = performance.now();
-              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+              if (event.pointerType === 'touch' && now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
                 lastTouchRef.current = 0;
                 event.stopPropagation();
                 event.nativeEvent.preventDefault();
+                onPressCancel();
                 onFocus(planet.id);
-              } else {
+                return;
+              }
+              if (event.pointerType === 'touch') {
                 lastTouchRef.current = now;
               }
+              onPressStart(planet.id, event);
+            }}
+            onPointerUp={() => {
+              onPressEnd();
             }}
             onPointerOver={(event) => {
               event.stopPropagation();
@@ -1988,6 +2064,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             }}
             onPointerOut={(event) => {
               event.stopPropagation();
+              onPressCancel();
               onBlur(planet.id);
             }}
             onClick={(event) => {
@@ -2053,6 +2130,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             resolveAtmosphereBundle={resolveAtmosphereBundle}
             orbitThickness={orbitThickness}
             spinReferenceRadius={moonSpinReferenceRadius}
+            onPressStart={onPressStart}
+            onPressEnd={onPressEnd}
+            onPressCancel={onPressCancel}
             onFocus={onFocus}
             onHover={onHover}
             onBlur={onBlur}
@@ -2079,6 +2159,9 @@ interface SystemCelestialLayerProps {
   starSpinReferenceRadius: number;
   planetSpinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onBodyPressEnd: () => void;
+  onBodyPressCancel: () => void;
   onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
   onBlurBody: (bodyId: string) => void;
@@ -2100,6 +2183,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   starSpinReferenceRadius,
   planetSpinReferenceRadius,
   moonSpinReferenceRadius,
+  onBodyPressStart,
+  onBodyPressEnd,
+  onBodyPressCancel,
   onFocusBody,
   onHoverBody,
   onBlurBody,
@@ -2141,6 +2227,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           orbitThickness={orbitThickness}
           spinReferenceRadius={planetSpinReferenceRadius}
           moonSpinReferenceRadius={moonSpinReferenceRadius}
+          onPressStart={onBodyPressStart}
+          onPressEnd={onBodyPressEnd}
+          onPressCancel={onBodyPressCancel}
           onFocus={onFocusBody}
           onHover={onHoverBody}
           onBlur={onBlurBody}
@@ -2732,6 +2821,7 @@ const SystemSurfaceTextureManager: React.FC<{
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
   const inFlightRef = useRef<Map<string, { bodyId: string; epoch: number }>>(new Map());
   const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
+  const lastResolutionByBodyIdRef = useRef<Map<string, SurfaceTextureResolution>>(new Map());
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
@@ -3010,6 +3100,7 @@ const SystemSurfaceTextureManager: React.FC<{
     cacheLastUsedRef.current.clear();
     inFlightRef.current.clear();
     desiredKeyByBodyIdRef.current.clear();
+    lastResolutionByBodyIdRef.current.clear();
 
     planetsRef.current.forEach((planet) => {
       const material = resolveMaterial(planet.id);
@@ -3121,23 +3212,34 @@ const SystemSurfaceTextureManager: React.FC<{
       if (!metrics) return;
       const { diameterPx, isOnScreen } = metrics;
 
-      let resolution = pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId));
+      const lastResolution = lastResolutionByBodyIdRef.current.get(bodyId) ?? null;
+      let resolution = isOnScreen
+        ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution)
+        : null;
+      if (!resolution && shouldForceLowRes(bodyId)) {
+        resolution = lastResolution ?? SURFACE_TEXTURE_RESOLUTIONS[0];
+      }
       if (lowSpec && resolution && resolution.width > 1024) {
         resolution = { width: 1024, height: 512 };
       }
-      if (!resolution && isOnScreen && !lowSpec) {
-        resolution = { width: 256, height: 128 };
-      }
-      if (!resolution && shouldForceLowRes(bodyId)) {
-        resolution = { width: 256, height: 128 };
+      if (resolution) {
+        lastResolutionByBodyIdRef.current.set(bodyId, resolution);
+      } else {
+        lastResolutionByBodyIdRef.current.delete(bodyId);
       }
       if (!resolution) {
         desiredKeyByBodyIdRef.current.set(bodyId, null);
         const material = resolveMaterial(bodyId);
-        if (material && material.userData.surfaceTextureKey) {
+        if (!isOnScreen && material && material.userData.surfaceTextureKey) {
           clearTextureFromMaterial(material);
         }
         return;
+      }
+
+      const material = resolveMaterial(bodyId);
+      const activeKey = material?.userData.surfaceTextureKey;
+      if (activeKey) {
+        touchKey(activeKey);
       }
 
       const cloudShadow = !isGasGiant ? cloudShadowByBodyId.get(bodyId) ?? null : null;
@@ -3162,7 +3264,6 @@ const SystemSurfaceTextureManager: React.FC<{
       touchKey(key);
 
       const cachedBundle = cacheRef.current.get(key) ?? null;
-      const material = resolveMaterial(bodyId);
       if (material && cachedBundle) {
         applyTextureToMaterial(material, key, cachedBundle);
       }
@@ -3312,9 +3413,16 @@ const createBodyLabelState = (
   const fadeStart = Math.max(target.radius * (target.kind === 'planet' ? 28 : 22), baseScale * 5);
   const fadeEnd = fadeStart * 1.9;
   const distanceFade = MathUtils.clamp(1 - (distance - fadeStart) / (fadeEnd - fadeStart), 0, 1);
+  const nearFadeStart = target.radius * (target.kind === 'planet' ? LABEL_NEAR_FADE_START_PLANET : LABEL_NEAR_FADE_START_MOON);
+  const nearFadeEnd = target.radius * (target.kind === 'planet' ? LABEL_NEAR_FADE_END_PLANET : LABEL_NEAR_FADE_END_MOON);
+  const nearFade = MathUtils.clamp(
+    (distance - nearFadeEnd) / Math.max(nearFadeStart - nearFadeEnd, 0.001),
+    0,
+    1
+  );
   const minOpacity = target.kind === 'planet' ? 0.35 : 0.18;
   const maxOpacity = target.kind === 'planet' ? 1 : 0.88;
-  let opacity = MathUtils.lerp(minOpacity, maxOpacity, distanceFade);
+  let opacity = MathUtils.lerp(minOpacity, maxOpacity, distanceFade) * nearFade;
 
   if (target.parent) {
     parentWorldPosition.set(...target.parent.position);
@@ -3334,6 +3442,13 @@ const createBodyLabelState = (
 };
 
 const LABEL_RENDER_ORDER = 10;
+const LABEL_NEAR_FADE_START_PLANET = 9;
+const LABEL_NEAR_FADE_END_PLANET = 4.5;
+const LABEL_NEAR_FADE_START_MOON = 8;
+const LABEL_NEAR_FADE_END_MOON = 4;
+const BODY_CONTEXT_MENU_OFFSET = 12;
+const BODY_CONTEXT_MENU_PADDING = 10;
+const LONG_PRESS_DURATION_MS = 420;
 
 const applyMaterialOpacity = (material: Material | Material[], opacity: number) => {
   const materials = Array.isArray(material) ? material : [material];
@@ -4053,15 +4168,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   day = 0,
   selectedFleetId = null,
   onSelectFleet,
-  onInspectFleet,
   initialCameraState,
   onCameraStateChange,
   scaleFactor = 1,
   showBodyLabels = true,
-  onOpenSurfaceView
+  onOpenSurfaceView,
+  onBack
 }) => {
   const { t } = useI18n();
-  const getFleetName = useFleetName();
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
   const orbitThickness = ORBIT_THICKNESS * clampedScale;
@@ -4625,11 +4739,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     [stations, starSystem.id]
   );
   const fleetById = useMemo(() => new Map(systemFleets.map((fleet) => [fleet.id, fleet])), [systemFleets]);
-  const stationById = useMemo(() => new Map(systemStations.map((station) => [station.id, station])), [systemStations]);
   const factionById = useMemo(() => new Map(factions.map((faction) => [faction.id, faction])), [factions]);
 
   const [hoveredObjectId, setHoveredObjectId] = useState<SystemObjectId | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<SystemObjectId | null>(null);
+  const [bodyContextMenu, setBodyContextMenu] = useState<BodyContextMenuState | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [infoBodyId, setInfoBodyId] = useState<string | null>(null);
+  const [isBodyListOpen, setIsBodyListOpen] = useState(false);
+  const longPressTimerRef = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (selectedFleetId && fleetById.has(selectedFleetId)) {
@@ -4653,22 +4773,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const parsed = parseObjectId(hoveredObjectId);
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
-
-  const displayedObject = useMemo(
-    () => parseObjectId(selectedObjectId ?? hoveredObjectId),
-    [hoveredObjectId, selectedObjectId]
-  );
-  const displayedBody = displayedObject?.kind === 'body' ? bodyInfoMap[displayedObject.id] : undefined;
-  const displayedFleet = displayedObject?.kind === 'fleet' ? fleetById.get(displayedObject.id) : undefined;
-  const displayedStation = displayedObject?.kind === 'station' ? stationById.get(displayedObject.id) : undefined;
-  const displayedFleetName = displayedFleet ? getFleetName(displayedFleet.id) : '';
-  const displayedFleetFaction = displayedFleet ? factionById.get(displayedFleet.factionId) : undefined;
-  const displayedStationFaction = displayedStation ? factionById.get(displayedStation.factionId) : undefined;
-  const displayedFleetPower = displayedFleet ? calculateFleetPower(displayedFleet) : undefined;
-  const displayedStationName = displayedStation
-    ? (displayedStation.name ?? t('systemView.stationInfo.unnamedStation', { code: shortId(displayedStation.id) }))
-    : '';
-  const isSelectionActive = Boolean(selectedObjectId);
+  const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
 
   const handleHoverBody = useCallback((bodyId: string) => {
     setHoveredObjectId(makeObjectId('body', bodyId));
@@ -4678,7 +4783,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setHoveredObjectId(prev => (prev === objectId ? null : prev));
   }, []);
   const handleSelectBody = useCallback((bodyId: string) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     setSelectedObjectId(makeObjectId('body', bodyId));
+    setBodyContextMenu(null);
     onSelectFleet?.(null);
   }, [onSelectFleet]);
   const handleHoverObject = useCallback((objectId: SystemObjectId) => {
@@ -4688,7 +4798,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setHoveredObjectId(prev => (prev === objectId ? null : prev));
   }, []);
   const handleSelectObject = useCallback((objectId: SystemObjectId) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     setSelectedObjectId(objectId);
+    setBodyContextMenu(null);
     const parsed = parseObjectId(objectId);
     if (parsed?.kind === 'fleet') {
       onSelectFleet?.(parsed.id);
@@ -4696,17 +4811,79 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       onSelectFleet?.(null);
     }
   }, [onSelectFleet]);
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearLongPressTimer(), [clearLongPressTimer]);
+  const openBodyContextMenu = useCallback((bodyId: string, position: { x: number; y: number }) => {
+    const body = bodyInfoMap[bodyId];
+    if (!body || body.bodyType === 'star') return;
+    setBodyContextMenu({ bodyId, position });
+    setContextMenuPosition(position);
+    setInfoBodyId(null);
+    setSelectedObjectId(makeObjectId('body', bodyId));
+    onSelectFleet?.(null);
+  }, [bodyInfoMap, onSelectFleet]);
+  const closeBodyContextMenu = useCallback(() => {
+    setBodyContextMenu(null);
+    suppressClickRef.current = false;
+  }, []);
+  const handleBodyPressStart = useCallback((bodyId: string, event: ThreeEvent<PointerEvent>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    clearLongPressTimer();
+    suppressClickRef.current = false;
+    const position = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      suppressClickRef.current = true;
+      openBodyContextMenu(bodyId, position);
+    }, LONG_PRESS_DURATION_MS);
+  }, [clearLongPressTimer, openBodyContextMenu]);
+  const handleBodyPressEnd = useCallback(() => {
+    clearLongPressTimer();
+  }, [clearLongPressTimer]);
+  const handleBodyPressCancel = useCallback(() => {
+    clearLongPressTimer();
+  }, [clearLongPressTimer]);
+  useLayoutEffect(() => {
+    if (!bodyContextMenu || !contextMenuRef.current) return;
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const desiredX = bodyContextMenu.position.x + BODY_CONTEXT_MENU_OFFSET;
+    const desiredY = bodyContextMenu.position.y + BODY_CONTEXT_MENU_OFFSET;
+    const x = Math.max(BODY_CONTEXT_MENU_PADDING, Math.min(desiredX, viewportWidth - rect.width - BODY_CONTEXT_MENU_PADDING));
+    const y = Math.max(BODY_CONTEXT_MENU_PADDING, Math.min(desiredY, viewportHeight - rect.height - BODY_CONTEXT_MENU_PADDING));
+    setContextMenuPosition({ x, y });
+  }, [bodyContextMenu]);
+  const contextMenuBody = bodyContextMenu ? bodyInfoMap[bodyContextMenu.bodyId] : null;
+  const contextMenuSurfaceTarget = contextMenuBody?.surfaceBodyId ?? contextMenuBody?.id ?? null;
+  const canViewSurface = Boolean(
+    onOpenSurfaceView
+    && contextMenuBody
+    && contextMenuBody.bodyType !== 'star'
+    && (contextMenuBody.isSolid ?? true)
+  );
+  useEffect(() => {
+    if (!bodyContextMenu && !infoBodyId) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      closeBodyContextMenu();
+      setInfoBodyId(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bodyContextMenu, closeBodyContextMenu, infoBodyId]);
   const getFactionColor = useCallback(
     (id: string) => factionById.get(id)?.color ?? '#94a3b8',
     [factionById]
   );
-  const clearSelection = useCallback(() => {
-    setSelectedObjectId(null);
-    onSelectFleet?.(null);
-  }, [onSelectFleet]);
   useEffect(() => {
     setHoveredObjectId(null);
     setSelectedObjectId(null);
+    setIsBodyListOpen(false);
   }, [starSystem.id]);
   const fleetIconScale = 0.45 * clampedScale;
   const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
@@ -4730,44 +4907,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     yOffset: eclipticEpsilon,
     rotationSpeed: 0.12
   }), [eclipticEpsilon, fleetRingBase, fleetRingSpacing]);
-  const stationIconScale = 0.55 * clampedScale;
-  const fleetLayoutsForFocus = useMemo(
-    () => layoutTacticalRing(systemFleets, fleetLayoutConfig, day),
-    [day, fleetLayoutConfig, systemFleets]
-  );
-  const fleetPositionById = useMemo(
-    () => new Map(fleetLayoutsForFocus.map(layout => [layout.entity.id, layout.position])),
-    [fleetLayoutsForFocus]
-  );
-  const stationPositionById = useMemo(() => {
-    const orderedStations = sorted(systemStations, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
-    const slotCapacity = 8;
-    const stationSpacing = Math.max(stationIconScale * 2.6, clampedScale * 0.9);
-    const stationYOffset = stationIconScale * 0.3;
-
-    return new Map(
-      orderedStations.map((station, index) => {
-        const anchorId = station.anchorBodyId ?? starBodyId;
-        const anchorPosition = bodyWorldPositions[anchorId] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
-        const anchorRadius = bodyRadii[anchorId] ?? starRadius;
-        const baseRadius = Math.max(anchorRadius * 2.6, stationIconScale * 2.4);
-        const slotIndex = typeof station.slotIndex === 'number' ? station.slotIndex : index;
-        const ringIndex = typeof station.slotIndex === 'number'
-          ? Math.floor(slotIndex / slotCapacity)
-          : 0;
-        const angle = typeof station.slotIndex === 'number'
-          ? ((slotIndex % slotCapacity) / slotCapacity) * Math.PI * 2
-          : hashStringToAngle(station.id);
-        const radius = baseRadius + ringIndex * stationSpacing;
-        const position: [number, number, number] = [
-          anchorPosition[0] + Math.cos(angle) * radius,
-          anchorPosition[1] + stationYOffset,
-          anchorPosition[2] + Math.sin(angle) * radius
-        ];
-        return [station.id, position] as const;
-      })
-    );
-  }, [bodyRadii, bodyWorldPositions, clampedScale, starBodyId, starRadius, stationIconScale, systemStations]);
   const maxOrbitRadius = useMemo(() => {
     const starExtent = starModels.reduce((max, star) => {
       const [x, y, z] = star.position;
@@ -4886,6 +5025,24 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     return labels;
   }, [bodyInfoMap, bodyRadii, bodyWorldPositions, planets]);
+  const bodyListItems = useMemo<BodyListItem[]>(() => {
+    const planetItems: BodyListItem[] = planets.map((planet) => ({
+      id: planet.id,
+      name: bodyInfoMap[planet.id]?.name ?? planet.id,
+      kind: 'planet',
+      children: planet.moons.map((moon) => ({
+        id: moon.id,
+        name: bodyInfoMap[moon.id]?.name ?? moon.id,
+        kind: 'moon'
+      }))
+    }));
+    return starModels.map((star, index) => ({
+      id: star.id,
+      name: bodyInfoMap[star.id]?.name ?? star.id,
+      kind: 'star',
+      children: index === 0 ? planetItems : undefined
+    }));
+  }, [bodyInfoMap, planets, starModels]);
   const requestFocusOnPoint = useCallback((
     position: [number, number, number],
     radius: number,
@@ -4907,28 +5064,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const radius = bodyRadii[bodyId] ?? focusDistanceFloor;
     requestFocusOnPoint(position, radius, bodyId);
   }, [bodyRadii, bodyWorldPositions, focusDistanceFloor, requestFocusOnPoint]);
-  const handleResetCamera = useCallback(() => {
-    const anchorPosition = bodyWorldPositions[starBodyId] ?? [0, 0, 0];
-    const resetDistance = Math.min(Math.max(baseCameraDistance, focusDistanceFloor * 3), cameraMaxDistance * 0.8);
-    focusRequestRef.current = {
-      target: new Vector3(...anchorPosition),
-      distance: resetDistance
-    };
-    setAnchoredBodyId(starBodyId);
-  }, [baseCameraDistance, bodyWorldPositions, cameraMaxDistance, focusDistanceFloor, starBodyId]);
-  const handleCenterBody = useCallback((bodyId: string) => {
+  const handleNavigateToBody = useCallback((bodyId: string) => {
+    suppressClickRef.current = false;
+    setSelectedObjectId(makeObjectId('body', bodyId));
+    setBodyContextMenu(null);
+    onSelectFleet?.(null);
     requestFocusOnBody(bodyId);
-  }, [requestFocusOnBody]);
-  const handleCenterFleet = useCallback((fleetId: string) => {
-    const position = fleetPositionById.get(fleetId);
-    if (!position) return;
-    requestFocusOnPoint(position, fleetIconScale * 6);
-  }, [fleetIconScale, fleetPositionById, requestFocusOnPoint]);
-  const handleCenterStation = useCallback((stationId: string) => {
-    const position = stationPositionById.get(stationId);
-    if (!position) return;
-    requestFocusOnPoint(position, stationIconScale * 6);
-  }, [requestFocusOnPoint, stationIconScale, stationPositionById]);
+  }, [onSelectFleet, requestFocusOnBody]);
   const initialCameraPosition = useMemo<[number, number, number]>(() => (
     positionFromSpherical(cameraInitialSpherical, anchoredTarget)
   ), [
@@ -4992,6 +5134,33 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return [ambientLightRef.current, starLightRef.current]
       .filter(Boolean) as Object3D[];
   }, [bloomLightsReady]);
+  const renderBodyRow = (item: BodyListItem, depth: number) => {
+    const isSelected = selectedBodyId === item.id;
+    const bodyTypeLabel = t(`systemView.bodyInfo.bodyType.${item.kind}`);
+    const dotClass = item.kind === 'star'
+      ? 'bg-amber-400'
+      : item.kind === 'planet'
+        ? 'bg-sky-400'
+        : 'bg-slate-400';
+    const paddingLeft = 10 + depth * 14;
+
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => handleNavigateToBody(item.id)}
+        className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm transition ${
+          isSelected ? 'bg-slate-700/80 text-white' : 'text-slate-200 hover:bg-slate-700/60 hover:text-white'
+        }`}
+        style={{ paddingLeft }}
+        aria-pressed={isSelected}
+      >
+        <span className={`h-2 w-2 flex-none rounded-full ${dotClass}`} />
+        <span className="flex-1 truncate">{item.name}</span>
+        <span className="text-[10px] uppercase tracking-wide text-slate-500">{bodyTypeLabel}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="relative w-full h-full bg-black">
@@ -5112,6 +5281,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 starSpinReferenceRadius={starSpinReferenceRadius}
                 planetSpinReferenceRadius={planetSpinReferenceRadius}
                 moonSpinReferenceRadius={moonSpinReferenceRadius}
+                onBodyPressStart={handleBodyPressStart}
+                onBodyPressEnd={handleBodyPressEnd}
+                onBodyPressCancel={handleBodyPressCancel}
                 onFocusBody={requestFocusOnBody}
                 onHoverBody={handleHoverBody}
                 onBlurBody={handleBlurBody}
@@ -5163,57 +5335,133 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           )}
         </Selection>
       </Canvas>
-      <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
-        <div className="pointer-events-auto flex gap-2">
+      {onBack && (
+        <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
           <button
             type="button"
-            onClick={handleResetCamera}
-            className="rounded border border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-500 hover:bg-slate-700"
+            onClick={onBack}
+            className="pointer-events-auto rounded-full border border-slate-700 bg-slate-900/80 p-2 text-white shadow transition hover:border-slate-400 hover:bg-slate-800"
+            aria-label={t('systemView.backToGalaxy')}
           >
-            {t('systemView.actions.resetCamera')}
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+              <path
+                fillRule="evenodd"
+                d="M12.78 4.22a.75.75 0 010 1.06L7.06 11H20a.75.75 0 010 1.5H7.06l5.72 5.72a.75.75 0 11-1.06 1.06l-7-7a.75.75 0 010-1.06l7-7a.75.75 0 011.06 0z"
+                clipRule="evenodd"
+              />
+            </svg>
           </button>
         </div>
-      </div>
-      <div className="pointer-events-none absolute inset-0 flex items-end justify-end p-4">
-        <div className="pointer-events-auto w-80 max-w-full">
-          {displayedBody ? (
-            <SystemBodyInfoPanel
-              body={displayedBody}
-              isSelected={isSelectionActive}
-              onClearSelection={isSelectionActive ? clearSelection : undefined}
-              onCenter={() => handleCenterBody(displayedBody.id)}
-              onOpenSurfaceView={onOpenSurfaceView}
-            />
-          ) : displayedFleet ? (
-            <SystemFleetInfoPanel
-              fleet={displayedFleet}
-              fleetName={displayedFleetName}
-              factionName={displayedFleetFaction?.name ?? t('systemView.fleetInfo.unknownFaction')}
-              factionColor={displayedFleetFaction?.color}
-              power={displayedFleetPower}
-              isSelected={isSelectionActive}
-              onClearSelection={isSelectionActive ? clearSelection : undefined}
-              onCenter={() => handleCenterFleet(displayedFleet.id)}
-              onInspect={onInspectFleet ? () => onInspectFleet(displayedFleet.id) : undefined}
-            />
-          ) : displayedStation ? (
-            <SystemStationInfoPanel
-              station={displayedStation}
-              stationName={displayedStationName}
-              factionName={displayedStationFaction?.name ?? t('systemView.fleetInfo.unknownFaction')}
-              factionColor={displayedStationFaction?.color}
-              isSelected={isSelectionActive}
-              onClearSelection={isSelectionActive ? clearSelection : undefined}
-              onCenter={() => handleCenterStation(displayedStation.id)}
-            />
-          ) : (
-            <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-200 shadow-lg">
-              <div className="text-xs uppercase tracking-wide text-slate-400">{t('systemView.objectInfo.title')}</div>
-              <div className="mt-2 text-slate-300">{t('systemView.objectInfo.hoverHint')}</div>
+      )}
+      <div className="pointer-events-none absolute inset-0 z-30">
+        <div className="pointer-events-auto absolute left-4 top-16">
+          {isBodyListOpen ? (
+            <div className="w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-700 bg-slate-900/90 shadow-2xl backdrop-blur">
+              <div className="flex items-center justify-between border-b border-slate-700 px-3 py-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                  {t('systemView.bodyList.title')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsBodyListOpen(false)}
+                  className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-200 transition hover:border-slate-500 hover:bg-slate-700"
+                  aria-label={t('systemView.bodyList.close')}
+                >
+                  {t('systemView.bodyList.close')}
+                </button>
+              </div>
+              <div className="max-h-[65vh] overflow-y-auto px-2 py-2">
+                {bodyListItems.map((star) => (
+                  <div key={star.id} className="space-y-1">
+                    {renderBodyRow(star, 0)}
+                    {star.children?.map((planet) => (
+                      <div key={planet.id} className="space-y-1">
+                        {renderBodyRow(planet, 1)}
+                        {planet.children?.map((moon) => (
+                          <div key={moon.id}>{renderBodyRow(moon, 2)}</div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsBodyListOpen(true)}
+              className="rounded-full border border-slate-700 bg-slate-900/85 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow transition hover:border-slate-500 hover:bg-slate-800"
+              aria-label={t('systemView.bodyList.open')}
+            >
+              {t('systemView.bodyList.open')}
+            </button>
           )}
         </div>
       </div>
+      {bodyContextMenu && contextMenuBody && (contextMenuPosition ?? bodyContextMenu.position) && (
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            className="pointer-events-auto absolute inset-0"
+            onPointerDown={closeBodyContextMenu}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              closeBodyContextMenu();
+            }}
+          />
+          <div
+            ref={contextMenuRef}
+            className="pointer-events-auto fixed z-40 min-w-[180px] rounded border border-slate-700 bg-slate-900/95 p-2 text-sm text-white shadow-2xl backdrop-blur"
+            style={{
+              left: (contextMenuPosition ?? bodyContextMenu.position).x,
+              top: (contextMenuPosition ?? bodyContextMenu.position).y
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {contextMenuBody.name}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setInfoBodyId(contextMenuBody.id);
+                closeBodyContextMenu();
+              }}
+              className="w-full rounded px-2 py-2 text-left font-semibold text-slate-200 transition hover:bg-slate-700/60 hover:text-white"
+            >
+              {t('systemView.bodyInfo.title')}
+            </button>
+            {canViewSurface && contextMenuSurfaceTarget && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenSurfaceView?.(contextMenuSurfaceTarget);
+                  closeBodyContextMenu();
+                }}
+                className="mt-1 w-full rounded px-2 py-2 text-left font-semibold text-emerald-200 transition hover:bg-emerald-700/30 hover:text-white"
+              >
+                {t('systemView.bodyInfo.viewSurface')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {infoBody && (
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            className="pointer-events-auto absolute inset-0"
+            onPointerDown={() => setInfoBodyId(null)}
+          />
+          <div
+            className="pointer-events-auto absolute right-4 top-4 w-80 max-w-[calc(100%-2rem)]"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <SystemBodyInfoPanel
+              body={infoBody}
+              isSelected
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

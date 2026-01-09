@@ -1413,50 +1413,9 @@ useEffect(() => {
                   onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
                   scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
                   onOpenSurfaceView={(bodyId) => handleOpenSurfaceView(bodyId, { systemHint: systemViewSystem, returnTo: 'SYSTEM_VIEW' })}
+                  onBack={handleReturnToGalaxy}
                 />
             </FleetNameProvider>
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
-                <div className="pointer-events-auto m-4 max-w-xl rounded-lg border border-slate-700 bg-slate-900/70 p-4 backdrop-blur">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                        {t('systemView.currentSystem')}
-                    </p>
-                    <div className="mt-1 flex items-center justify-between gap-4">
-                        <div>
-                            <div className="text-2xl font-bold">{systemViewSystem.name}</div>
-                            <div className="text-sm text-slate-300">
-                                {systemViewSystem.astro ? t('systemView.astroLoaded') : t('systemView.noAstro')}
-                            </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            {systemViewSystem.planets.some(planet => planet.isSolid) && (
-                                <button
-                                    onClick={() => handleOpenSurfaceView(
-                                        systemViewSystem.planets.find(planet => planet.isSolid)?.id ?? null,
-                                        { systemHint: systemViewSystem, returnTo: 'SYSTEM_VIEW' }
-                                    )}
-                                    className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
-                                >
-                                    {t('systemView.openSurface')}
-                                </button>
-                            )}
-                            <button
-                                onClick={handleReturnToGalaxy}
-                                className="rounded border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white shadow transition hover:border-slate-400 hover:bg-slate-700"
-                            >
-                                {t('systemView.backToGalaxy')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div className="pointer-events-auto m-4 self-start">
-                    <button
-                        onClick={handleReturnToGalaxy}
-                        className="rounded-full bg-slate-800/80 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg ring-1 ring-slate-600 transition hover:bg-slate-700"
-                    >
-                        {t('systemView.backToGalaxy')}
-                    </button>
-                </div>
-            </div>
             {transitionOverlayElement}
         </div>
       );
