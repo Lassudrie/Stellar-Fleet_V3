@@ -8,6 +8,7 @@ import {
   ACESFilmicToneMapping,
   AmbientLight,
   BackSide,
+  BufferGeometry,
   BufferAttribute,
   Camera,
   CanvasTexture,
@@ -35,6 +36,7 @@ import {
   Object3D,
   PerspectiveCamera,
   PointLight,
+  PointsMaterial,
   RepeatWrapping,
   RingGeometry,
   SRGBColorSpace,
@@ -114,11 +116,12 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
-const STARFIELD_TEXTURE_MIN_SIZE = 2048;
-const STARFIELD_TEXTURE_MAX_SIZE = 4096;
-const STARFIELD_STAR_DENSITY = 0.0011;
+const STARFIELD_BACKDROP_SIZE = 1024;
+const STARFIELD_POINT_COUNT = 3200;
+const STARFIELD_POINT_BRIGHT_FRACTION = 0.12;
+const STARFIELD_POINT_SIZE_DIM = 1.15;
+const STARFIELD_POINT_SIZE_BRIGHT = 2.1;
 const STARFIELD_NEBULA_LAYERS = 4;
-const STARFIELD_EDGE_WRAP = 0.02;
 const STARFIELD_BASE_COLOR = '#04060c';
 const BODY_SPIN_SPEED_MIN = 0.0035;
 const BODY_SPIN_SPEED_MAX = 0.011;
@@ -181,15 +184,6 @@ const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
 const DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
-
-const pickStarfieldTextureSize = (width: number, height: number, pixelRatio: number): number => {
-  const target = Math.max(width, height) * Math.max(pixelRatio, 1) * 1.1;
-  let size = 256;
-  while (size < target) {
-    size *= 2;
-  }
-  return MathUtils.clamp(size, STARFIELD_TEXTURE_MIN_SIZE, STARFIELD_TEXTURE_MAX_SIZE);
-};
 
 const pickSurfaceTextureResolution = (diameterPx: number, preferUltra: boolean): SurfaceTextureResolution | null => {
   if (!Number.isFinite(diameterPx) || diameterPx < SURFACE_TEXTURE_MIN_DIAMETER_PX) return null;
@@ -664,22 +658,22 @@ const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): Canva
   return texture;
 };
 
-const createStarfieldTexture = (seedKey: string, tintColor: string, textureSize: number): CanvasTexture => {
+const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTexture => {
   const canvas = document.createElement('canvas');
-  const size = Math.max(256, Math.floor(textureSize));
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = STARFIELD_BACKDROP_SIZE;
+  canvas.height = STARFIELD_BACKDROP_SIZE;
   const context = canvas.getContext('2d');
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
-  texture.generateMipmaps = true;
-  texture.minFilter = LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = LinearFilter;
   texture.magFilter = LinearFilter;
 
   if (!context) {
     return texture;
   }
   context.imageSmoothingEnabled = false;
+  const size = STARFIELD_BACKDROP_SIZE;
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
   const rand = createSeededRandom(seed);
   const base = new Color(STARFIELD_BASE_COLOR);
@@ -707,42 +701,71 @@ const createStarfieldTexture = (seedKey: string, tintColor: string, textureSize:
   }
   context.globalCompositeOperation = 'source-over';
 
-  const starCount = Math.round(size * size * STARFIELD_STAR_DENSITY);
-  const wrapMargin = size * STARFIELD_EDGE_WRAP;
-  const baseStar = new Color('#ffffff');
-
-  const drawStar = (x: number, y: number, radius: number, color: string) => {
-    const size = Math.max(1, Math.round(radius));
-    const half = Math.floor(size / 2);
-    const xi = Math.round(x);
-    const yi = Math.round(y);
-    context.fillStyle = color;
-    context.fillRect(xi - half, yi - half, size, size);
-  };
-
-  for (let i = 0; i < starCount; i += 1) {
-    const x = rand() * size;
-    const y = rand() * size;
-    const isBright = rand() > 0.88;
-    const radius = isBright ? 1 + rand() * 1.6 : 0.45 + rand() * 0.8;
-    const alpha = isBright ? 0.55 + rand() * 0.3 : 0.15 + rand() * 0.35;
-    const starColor = baseStar.clone().lerp(tint, rand() * 0.25);
-    const color = toRgbaString(starColor, alpha);
-
-    drawStar(x, y, radius, color);
-
-    if (x < wrapMargin) drawStar(x + size, y, radius, color);
-    if (x > size - wrapMargin) drawStar(x - size, y, radius, color);
-    if (y < wrapMargin) drawStar(x, y + size, radius, color);
-    if (y > size - wrapMargin) drawStar(x, y - size, radius, color);
-    if (x < wrapMargin && y < wrapMargin) drawStar(x + size, y + size, radius, color);
-    if (x < wrapMargin && y > size - wrapMargin) drawStar(x + size, y - size, radius, color);
-    if (x > size - wrapMargin && y < wrapMargin) drawStar(x - size, y + size, radius, color);
-    if (x > size - wrapMargin && y > size - wrapMargin) drawStar(x - size, y - size, radius, color);
-  }
-
   texture.needsUpdate = true;
   return texture;
+};
+
+type StarfieldPointsData = {
+  dimPositions: Float32Array;
+  dimColors: Float32Array;
+  brightPositions: Float32Array;
+  brightColors: Float32Array;
+};
+
+const createStarfieldPointsData = (seedKey: string, tintColor: string): StarfieldPointsData => {
+  const seed = Math.floor(hashStringToUnit(`${seedKey}-points`) * 0xffffffff);
+  const rand = createSeededRandom(seed);
+  const brightCount = Math.max(1, Math.round(STARFIELD_POINT_COUNT * STARFIELD_POINT_BRIGHT_FRACTION));
+  const dimCount = Math.max(0, STARFIELD_POINT_COUNT - brightCount);
+  const baseStar = new Color('#ffffff');
+  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.25);
+
+  const makeBuffers = (count: number) => ({
+    positions: new Float32Array(count * 3),
+    colors: new Float32Array(count * 3)
+  });
+  const dim = makeBuffers(dimCount);
+  const bright = makeBuffers(brightCount);
+
+  const fill = (
+    target: { positions: Float32Array; colors: Float32Array },
+    minIntensity: number,
+    maxIntensity: number
+  ) => {
+    for (let i = 0; i < target.positions.length; i += 3) {
+      const u = rand();
+      const v = rand();
+      const theta = u * Math.PI * 2;
+      const phi = Math.acos(2 * v - 1);
+      const sinPhi = Math.sin(phi);
+      const radius = 0.92 + rand() * 0.08;
+      const x = Math.cos(theta) * sinPhi * radius;
+      const y = Math.cos(phi) * radius;
+      const z = Math.sin(theta) * sinPhi * radius;
+      target.positions[i] = x;
+      target.positions[i + 1] = y;
+      target.positions[i + 2] = z;
+
+      const tintMix = rand() * 0.35;
+      const intensity = MathUtils.lerp(minIntensity, maxIntensity, Math.pow(rand(), 1.4));
+      const r = MathUtils.lerp(baseStar.r, tint.r, tintMix) * intensity;
+      const g = MathUtils.lerp(baseStar.g, tint.g, tintMix) * intensity;
+      const b = MathUtils.lerp(baseStar.b, tint.b, tintMix) * intensity;
+      target.colors[i] = r;
+      target.colors[i + 1] = g;
+      target.colors[i + 2] = b;
+    }
+  };
+
+  fill(dim, 0.25, 0.6);
+  fill(bright, 0.65, 1.1);
+
+  return {
+    dimPositions: dim.positions,
+    dimColors: dim.colors,
+    brightPositions: bright.positions,
+    brightColors: bright.colors
+  };
 };
 
 const createStarGlowTexture = (tintColor: string): CanvasTexture => {
@@ -1132,50 +1155,79 @@ type SystemStarfieldProps = {
 };
 
 const SystemStarfield: React.FC<SystemStarfieldProps> = ({ radius, seedKey, tintColor }) => {
-  const meshRef = useRef<Mesh>(null);
-  const { camera, gl, size } = useThree();
-  const pixelRatio = useMemo(() => {
-    try {
-      return gl.getPixelRatio?.() ?? 1;
-    } catch {
-      return 1;
-    }
-  }, [gl]);
-  const textureSize = useMemo(
-    () => pickStarfieldTextureSize(size.width, size.height, pixelRatio),
-    [pixelRatio, size.height, size.width]
-  );
-  const texture = useMemo(
-    () => createStarfieldTexture(seedKey, tintColor, textureSize),
-    [seedKey, textureSize, tintColor]
-  );
-  const maxAnisotropy = useMemo(() => {
-    try {
-      return gl.capabilities.getMaxAnisotropy?.() ?? 1;
-    } catch {
-      return 1;
-    }
-  }, [gl]);
+  const groupRef = useRef<Group>(null);
+  const { camera } = useThree();
+  const texture = useMemo(() => createStarfieldTexture(seedKey, tintColor), [seedKey, tintColor]);
+  const starGeometries = useMemo(() => {
+    const data = createStarfieldPointsData(seedKey, tintColor);
+    const dimGeometry = new BufferGeometry();
+    dimGeometry.setAttribute('position', new BufferAttribute(data.dimPositions, 3));
+    dimGeometry.setAttribute('color', new BufferAttribute(data.dimColors, 3));
+    const brightGeometry = new BufferGeometry();
+    brightGeometry.setAttribute('position', new BufferAttribute(data.brightPositions, 3));
+    brightGeometry.setAttribute('color', new BufferAttribute(data.brightColors, 3));
+    return { dimGeometry, brightGeometry };
+  }, [seedKey, tintColor]);
+  const dimMaterial = useMemo(() => new PointsMaterial({
+    size: STARFIELD_POINT_SIZE_DIM,
+    sizeAttenuation: false,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    toneMapped: false
+  }), []);
+  const brightMaterial = useMemo(() => new PointsMaterial({
+    size: STARFIELD_POINT_SIZE_BRIGHT,
+    sizeAttenuation: false,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+    toneMapped: false
+  }), []);
 
   useFrame(() => {
-    if (meshRef.current) {
-      meshRef.current.position.copy(camera.position);
+    if (groupRef.current) {
+      groupRef.current.position.copy(camera.position);
     }
   });
 
   useEffect(() => {
-    texture.anisotropy = Math.min(8, Math.max(1, maxAnisotropy));
-    texture.needsUpdate = true;
     return () => {
       texture.dispose();
+      starGeometries.dimGeometry.dispose();
+      starGeometries.brightGeometry.dispose();
+      dimMaterial.dispose();
+      brightMaterial.dispose();
     };
-  }, [maxAnisotropy, texture]);
+  }, [brightMaterial, dimMaterial, starGeometries, texture]);
+
+  const starScale = radius * 0.98;
 
   return (
-    <mesh ref={meshRef} frustumCulled={false} renderOrder={-20} raycast={() => null}>
-      <sphereGeometry args={[radius, 48, 32]} />
-      <meshBasicMaterial map={texture} side={BackSide} depthWrite={false} toneMapped={false} />
-    </mesh>
+    <group ref={groupRef} frustumCulled={false} renderOrder={-20} raycast={() => null}>
+      <mesh renderOrder={-20} raycast={() => null}>
+        <sphereGeometry args={[radius, 48, 32]} />
+        <meshBasicMaterial map={texture} side={BackSide} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <points
+        geometry={starGeometries.dimGeometry}
+        material={dimMaterial}
+        scale={[starScale, starScale, starScale]}
+        renderOrder={-19}
+        frustumCulled={false}
+        raycast={() => null}
+      />
+      <points
+        geometry={starGeometries.brightGeometry}
+        material={brightMaterial}
+        scale={[starScale, starScale, starScale]}
+        renderOrder={-18}
+        frustumCulled={false}
+        raycast={() => null}
+      />
+    </group>
   );
 };
 
