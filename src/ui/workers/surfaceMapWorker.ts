@@ -13,6 +13,8 @@ export interface SurfaceMapWorkerRequest {
   bodyId: string;
   state: SurfaceMapWorkerState;
   cloudShadow?: CloudShadowSettings | null;
+  textureOptions?: SurfaceTextureOptions | null;
+  allowSync?: boolean;
 }
 
 export type CloudShadowSettings = {
@@ -25,6 +27,12 @@ export type CloudShadowSettings = {
   bandStrength: number;
   bandFrequency: number;
   bandOffset: number;
+};
+
+export type SurfaceTextureOptions = {
+  includeNormalMap?: boolean;
+  includeAoMap?: boolean;
+  includeRoughnessMap?: boolean;
 };
 
 export type SurfaceTextureResolution = { width: number; height: number };
@@ -394,20 +402,24 @@ const getTile = (tiles: PlanetSurfaceTile[], w: number, q: number, r: number): P
 const renderSurfaceTexture = (
   map: PlanetSurfaceMap,
   resolution: SurfaceTextureResolution,
-  cloudShadow?: CloudShadowSettings | null
+  cloudShadow?: CloudShadowSettings | null,
+  textureOptions?: SurfaceTextureOptions | null
 ): {
   rgba: Uint8Array;
   normalRgba: Uint8Array | null;
   aoRgba: Uint8Array | null;
-  roughnessRgba: Uint8Array;
+  roughnessRgba: Uint8Array | null;
 } => {
   const { w, h, wrapX } = map.descriptor.config;
   const seed = map.descriptor.seed >>> 0;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
-  const roughnessRgba = new Uint8Array(width * height * 4);
-  const heightField = new Float32Array(width * height);
+  const includeNormalMap = textureOptions?.includeNormalMap ?? true;
+  const includeAoMap = textureOptions?.includeAoMap ?? true;
+  const includeRoughnessMap = textureOptions?.includeRoughnessMap ?? true;
+  const roughnessRgba = includeRoughnessMap ? new Uint8Array(width * height * 4) : null;
+  const heightField = (includeNormalMap || includeAoMap) ? new Float32Array(width * height) : null;
 
   const { min: elevMin, max: elevMax } = computeElevRange(map.tiles);
   const elevRange = Math.max(1, elevMax - elevMin);
@@ -545,18 +557,21 @@ const renderSurfaceTexture = (
         }
       }
 
-      const rough00 = biomeRoughness(t00.biome);
-      const rough10 = biomeRoughness(t10.biome);
-      const rough01 = biomeRoughness(t01.biome);
-      const rough11 = biomeRoughness(t11.biome);
-      let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
-      const dryness = clamp01(1 - moistNorm);
-      landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
-      landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
-      landRoughness = clamp01(landRoughness);
+      let roughness = 0;
+      if (roughnessRgba) {
+        const rough00 = biomeRoughness(t00.biome);
+        const rough10 = biomeRoughness(t10.biome);
+        const rough01 = biomeRoughness(t01.biome);
+        const rough11 = biomeRoughness(t11.biome);
+        let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
+        const dryness = clamp01(1 - moistNorm);
+        landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
+        landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
+        landRoughness = clamp01(landRoughness);
 
-      const waterRoughness = clamp01(0.08 + shallow * 0.09 + (macroNoise - 0.5) * 0.02);
-      const roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+        const waterRoughness = clamp01(0.08 + shallow * 0.09 + (macroNoise - 0.5) * 0.02);
+        roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+      }
 
       rLin *= shade;
       gLin *= shade;
@@ -575,29 +590,36 @@ const renderSurfaceTexture = (
       rgba[idx + 1] = gg;
       rgba[idx + 2] = bb;
       rgba[idx + 3] = 255;
-      const roughByte = Math.round(roughness * 255);
-      roughnessRgba[idx] = roughByte;
-      roughnessRgba[idx + 1] = roughByte;
-      roughnessRgba[idx + 2] = roughByte;
-      roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
-      heightField[y * width + x] = heightNorm;
+      if (roughnessRgba) {
+        const roughByte = Math.round(roughness * 255);
+        roughnessRgba[idx] = roughByte;
+        roughnessRgba[idx + 1] = roughByte;
+        roughnessRgba[idx + 2] = roughByte;
+        roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
+      }
+      if (heightField) {
+        heightField[y * width + x] = heightNorm;
+      }
     }
   }
 
-  const shouldComputeRelief = width >= 256 && height >= 128;
+  const shouldComputeRelief = Boolean(heightField) && width >= 256 && height >= 128;
   if (!shouldComputeRelief) {
     if (useWrap) {
       blendSeamColumns(rgba, width, height);
-      blendSeamColumns(roughnessRgba, width, height);
+      if (roughnessRgba) {
+        blendSeamColumns(roughnessRgba, width, height);
+      }
     }
     return { rgba, normalRgba: null, aoRgba: null, roughnessRgba };
   }
 
-  const normalRgba = new Uint8Array(width * height * 4);
-  const aoRgba = new Uint8Array(width * height * 4);
+  const normalRgba = includeNormalMap ? new Uint8Array(width * height * 4) : null;
+  const aoRgba = includeAoMap ? new Uint8Array(width * height * 4) : null;
   const heightScale = Math.min(1.6, Math.max(0.55, elevRange / 1200));
   const normalStrength = 1.1 * heightScale;
   const aoStrength = 1.5 * heightScale;
+  const heightFieldData = heightField as Float32Array;
 
   for (let y = 0; y < height; y += 1) {
     const v = (y + 0.5) / height;
@@ -617,11 +639,11 @@ const renderSurfaceTexture = (
       const x1 = useWrap ? (x === width - 1 ? 0 : x + 1) : Math.min(width - 1, x + 1);
 
       const idx = row + x;
-      const hC = heightField[idx];
-      const hL = heightField[row + x0];
-      const hR = heightField[row + x1];
-      const hU = heightField[row0 + x];
-      const hD = heightField[row1 + x];
+      const hC = heightFieldData[idx];
+      const hL = heightFieldData[row + x0];
+      const hR = heightFieldData[row + x1];
+      const hU = heightFieldData[row0 + x];
+      const hD = heightFieldData[row1 + x];
 
       const dx = hR - hL;
       const dy = hD - hU;
@@ -634,34 +656,44 @@ const renderSurfaceTexture = (
       nz *= invLen;
 
       const nIdx = idx * 4;
-      normalRgba[nIdx] = Math.round((nx * 0.5 + 0.5) * 255);
-      normalRgba[nIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
-      normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
-      normalRgba[nIdx + 3] = 255;
+      if (normalRgba) {
+        normalRgba[nIdx] = Math.round((nx * 0.5 + 0.5) * 255);
+        normalRgba[nIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+        normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+        normalRgba[nIdx + 3] = 255;
+      }
 
-      const hUL = heightField[row0 + x0];
-      const hUR = heightField[row0 + x1];
-      const hDL = heightField[row1 + x0];
-      const hDR = heightField[row1 + x1];
+      const hUL = heightFieldData[row0 + x0];
+      const hUR = heightFieldData[row0 + x1];
+      const hDL = heightFieldData[row1 + x0];
+      const hDR = heightFieldData[row1 + x1];
       const neighborAvg = (hL + hR + hU + hD + hUL + hUR + hDL + hDR) / 8;
       const concavity = Math.max(0, neighborAvg - hC);
       const waterFactor = hC < seaLevelNorm ? 0.55 : 1;
       let ao = 1 - concavity * (2.1 * rowAoStrength) * waterFactor;
       ao = Math.min(1, Math.max(0.6, ao));
 
-      const aoByte = Math.round(ao * 255);
-      aoRgba[nIdx] = aoByte;
-      aoRgba[nIdx + 1] = aoByte;
-      aoRgba[nIdx + 2] = aoByte;
-      aoRgba[nIdx + 3] = 255;
+      if (aoRgba) {
+        const aoByte = Math.round(ao * 255);
+        aoRgba[nIdx] = aoByte;
+        aoRgba[nIdx + 1] = aoByte;
+        aoRgba[nIdx + 2] = aoByte;
+        aoRgba[nIdx + 3] = 255;
+      }
     }
   }
 
   if (useWrap) {
     blendSeamColumns(rgba, width, height);
-    blendSeamColumns(roughnessRgba, width, height);
-    blendSeamColumns(aoRgba, width, height);
-    blendSeamNormals(normalRgba, width, height);
+    if (roughnessRgba) {
+      blendSeamColumns(roughnessRgba, width, height);
+    }
+    if (aoRgba) {
+      blendSeamColumns(aoRgba, width, height);
+    }
+    if (normalRgba) {
+      blendSeamNormals(normalRgba, width, height);
+    }
   }
 
   return { rgba, normalRgba, aoRgba, roughnessRgba };
@@ -719,7 +751,8 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
       const { rgba, normalRgba, aoRgba, roughnessRgba } = renderSurfaceTexture(
         map,
         payload.resolution,
-        payload.cloudShadow ?? null
+        payload.cloudShadow ?? null,
+        payload.textureOptions ?? null
       );
       const transfer: Transferable[] = [rgba.buffer];
       if (normalRgba) transfer.push(normalRgba.buffer);

@@ -2596,6 +2596,7 @@ const SystemSurfaceTextureManager: React.FC<{
   bodyRadii: Record<string, number>;
   selectedBodyId: string | null;
   hoveredBodyId: string | null;
+  lowSpec: boolean;
   cloudShadowStrengthScale: number;
   resolveMaterial: (bodyId: string) => MeshStandardMaterial | null;
 }> = ({
@@ -2608,6 +2609,7 @@ const SystemSurfaceTextureManager: React.FC<{
   bodyRadii,
   selectedBodyId,
   hoveredBodyId,
+  lowSpec,
   cloudShadowStrengthScale,
   resolveMaterial
 }) => {
@@ -2626,6 +2628,17 @@ const SystemSurfaceTextureManager: React.FC<{
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
+  const maxCacheEntries = lowSpec ? 4 : SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
+  const maxInflight = lowSpec ? 1 : SURFACE_TEXTURE_MAX_INFLIGHT;
+  const textureOptions = useMemo(() => (
+    lowSpec
+      ? {
+        includeNormalMap: false,
+        includeAoMap: false,
+        includeRoughnessMap: false
+      }
+      : null
+  ), [lowSpec]);
   const scratch = useMemo(() => ({
     world: new Vector3(),
     view: new Vector3(),
@@ -2645,18 +2658,19 @@ const SystemSurfaceTextureManager: React.FC<{
     }
     texture.wrapS = RepeatWrapping;
     texture.wrapT = ClampToEdgeWrapping;
-    texture.minFilter = LinearMipmapLinearFilter;
+    const useMipmaps = !lowSpec;
+    texture.minFilter = useMipmaps ? LinearMipmapLinearFilter : LinearFilter;
     texture.magFilter = LinearFilter;
-    texture.generateMipmaps = true;
-    texture.anisotropy = Math.min(16, Math.max(1, maxAnisotropy));
+    texture.generateMipmaps = useMipmaps;
+    texture.anisotropy = useMipmaps ? Math.min(8, Math.max(1, maxAnisotropy)) : 1;
     texture.flipY = true;
     texture.needsUpdate = true;
     return texture;
-  }, [maxAnisotropy]);
+  }, [lowSpec, maxAnisotropy]);
 
   const cloudShadowByBodyId = useMemo(() => {
     const map = new Map<string, CloudShadowSettings>();
-    if (cloudShadowStrengthScale <= 0) return map;
+    if (cloudShadowStrengthScale <= 0 || lowSpec) return map;
 
     const addShadow = (
       body: { id: string; atmosphere?: AtmosphereType; airMassIndex?: number; pressureBar?: number; temperatureK?: number },
@@ -2721,7 +2735,7 @@ const SystemSurfaceTextureManager: React.FC<{
     });
 
     return map;
-  }, [cloudShadowStrengthScale, planets]);
+  }, [cloudShadowStrengthScale, lowSpec, planets]);
 
   useEffect(() => {
     requestStateRef.current = ({
@@ -2792,14 +2806,17 @@ const SystemSurfaceTextureManager: React.FC<{
     const seedKey = `${bodyId}|${astroKey}|${resolution.width}x${resolution.height}`;
     const data = createGasGiantTextureData(seedKey, baseColor, resolution.width, resolution.height, isIceGiant);
     const colorTexture = createDataTexture(data.color, resolution.width, resolution.height, true);
-    const roughnessTexture = createDataTexture(data.roughness, resolution.width, resolution.height, false);
+    const includeRoughness = textureOptions?.includeRoughnessMap ?? true;
+    const roughnessTexture = includeRoughness
+      ? createDataTexture(data.roughness, resolution.width, resolution.height, false)
+      : null;
     return {
       color: colorTexture,
       normal: null,
       ao: null,
       roughness: roughnessTexture
     };
-  }, [astroKey, createDataTexture]);
+  }, [astroKey, createDataTexture, textureOptions]);
 
   const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, bundle: SurfaceTextureBundle) => {
     let needsUpdate = false;
@@ -2895,7 +2912,7 @@ const SystemSurfaceTextureManager: React.FC<{
         }
       });
     });
-  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, resolveMaterial]);
+  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, lowSpec, resolveMaterial]);
 
   useFrame(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
@@ -2974,7 +2991,7 @@ const SystemSurfaceTextureManager: React.FC<{
     });
 
     const preferUltraBodyId = selectedBodyId ?? closeUpBodyId;
-    const shouldPreferUltra = (bodyId: string) => bodyId === preferUltraBodyId;
+    const shouldPreferUltra = (bodyId: string) => !lowSpec && bodyId === preferUltraBodyId;
 
     const touchKey = (key: string) => {
       cacheLastUsedRef.current.set(key, now);
@@ -2994,7 +3011,10 @@ const SystemSurfaceTextureManager: React.FC<{
       const { diameterPx, isOnScreen } = metrics;
 
       let resolution = pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId));
-      if (!resolution && isOnScreen) {
+      if (lowSpec && resolution && resolution.width > 1024) {
+        resolution = { width: 1024, height: 512 };
+      }
+      if (!resolution && isOnScreen && !lowSpec) {
         resolution = { width: 256, height: 128 };
       }
       if (!resolution && shouldForceLowRes(bodyId)) {
@@ -3050,7 +3070,7 @@ const SystemSurfaceTextureManager: React.FC<{
       }
 
       if (inFlightRef.current.has(key)) return;
-      if (inFlightRef.current.size >= SURFACE_TEXTURE_MAX_INFLIGHT) return;
+      if (inFlightRef.current.size >= maxInflight) return;
 
       const state = requestStateRef.current;
       if (!state) return;
@@ -3058,6 +3078,12 @@ const SystemSurfaceTextureManager: React.FC<{
       if (!workerRequest) return;
       if (cloudShadow) {
         workerRequest.cloudShadow = cloudShadow;
+      }
+      if (textureOptions) {
+        workerRequest.textureOptions = textureOptions;
+      }
+      if (lowSpec) {
+        workerRequest.allowSync = false;
       }
       const worker = workerRef.current;
       if (!worker) return;
@@ -3101,7 +3127,7 @@ const SystemSurfaceTextureManager: React.FC<{
       planet.moons.forEach(moon => updateBody(moon.id));
     });
 
-    if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) return;
+    if (cacheRef.current.size <= maxCacheEntries) return;
 
     const keys = Array.from(cacheRef.current.keys());
     // Manual stable sort to avoid in-place .sort() lint rule.
@@ -3117,7 +3143,7 @@ const SystemSurfaceTextureManager: React.FC<{
     }
 
     for (const key of keys) {
-      if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) break;
+      if (cacheRef.current.size <= maxCacheEntries) break;
       if (activeKeys.has(key)) continue;
       if (inFlightRef.current.has(key)) continue;
       const bundle = cacheRef.current.get(key);
@@ -4781,6 +4807,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
+  const lowSpec = prefersTouchFallback;
+  const enablePostFX = !lowSpec;
+  const enableShadows = !lowSpec;
+  const enableAntialias = !lowSpec;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
   const toneMappingExposure = prefersTouchFallback ? 1.05 : 1.12;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
@@ -4802,15 +4832,23 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const ambientLightRef = useRef<AmbientLight>(null);
   const hemisphereLightRef = useRef<HemisphereLight>(null);
   const starLightRef = useRef<PointLight>(null);
-  const bloomLights = useMemo(
-    () => [ambientLightRef, hemisphereLightRef, starLightRef],
-    [ambientLightRef, hemisphereLightRef, starLightRef]
-  );
+  const [bloomLightsReady, setBloomLightsReady] = useState(false);
+  useEffect(() => {
+    if (bloomLightsReady) return;
+    if (ambientLightRef.current && hemisphereLightRef.current && starLightRef.current) {
+      setBloomLightsReady(true);
+    }
+  }, [bloomLightsReady]);
+  const bloomLights = useMemo(() => {
+    if (!bloomLightsReady) return [];
+    return [ambientLightRef.current, hemisphereLightRef.current, starLightRef.current]
+      .filter(Boolean) as Object3D[];
+  }, [bloomLightsReady]);
 
   return (
     <div className="relative w-full h-full bg-black">
         <Canvas
-          shadows
+          shadows={enableShadows}
         onCreated={({ gl }) => {
           gl.shadowMap.type = PCFSoftShadowMap;
           gl.outputColorSpace = SRGBColorSpace;
@@ -4818,7 +4856,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           gl.toneMappingExposure = toneMappingExposure;
         }}
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{ antialias: enableAntialias, powerPreference: lowSpec ? 'low-power' : 'high-performance' }}
         dpr={[1, maxDpr]}
       >
         <color attach="background" args={['#000000']} />
@@ -4847,7 +4885,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           distance={starLightDistance}
           decay={2}
           color={starLightColor}
-          castShadow
+          castShadow={enableShadows}
           shadow-mapSize={[shadowMapSize, shadowMapSize]}
           shadow-camera-near={shadowCameraNear}
           shadow-camera-far={shadowCameraFar}
@@ -4883,6 +4921,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 bodyRadii={bodyRadii}
                 selectedBodyId={selectedBodyId}
                 hoveredBodyId={hoveredBodyId}
+                lowSpec={lowSpec}
                 cloudShadowStrengthScale={cloudShadowStrengthScale}
                 resolveMaterial={resolveBodyMaterial}
               />
@@ -4931,18 +4970,22 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               )}
             </SystemRoot>
           </Select>
-          <EffectComposer enableNormalPass={false}>
-            <SMAA />
-            <SelectiveBloom
-              intensity={bloomIntensity}
-              mipmapBlur={!prefersTouchFallback}
-              radius={bloomRadius}
-              luminanceThreshold={bloomThreshold}
-              luminanceSmoothing={bloomSmoothing}
-              lights={bloomLights}
-            />
-            <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
-          </EffectComposer>
+          {enablePostFX && (
+            <EffectComposer enableNormalPass={false}>
+              <SMAA />
+              {bloomLightsReady && (
+                <SelectiveBloom
+                  intensity={bloomIntensity}
+                  mipmapBlur={!prefersTouchFallback}
+                  radius={bloomRadius}
+                  luminanceThreshold={bloomThreshold}
+                  luminanceSmoothing={bloomSmoothing}
+                  lights={bloomLights}
+                />
+              )}
+              <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
+            </EffectComposer>
+          )}
         </Selection>
       </Canvas>
       <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">

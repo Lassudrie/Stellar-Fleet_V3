@@ -15,7 +15,7 @@ import type {
   BootstrapProgressDetail
 } from './surfaceMapWorker';
 
-export type { CloudShadowSettings } from './surfaceMapWorker';
+export type { CloudShadowSettings, SurfaceTextureOptions } from './surfaceMapWorker';
 
 const canUseWorker = typeof window !== 'undefined' && typeof Worker !== 'undefined';
 
@@ -90,6 +90,9 @@ export class SurfaceMapWorkerClient {
     resolution: SurfaceTextureResolution
   ): Promise<SurfaceTextureResult | null> {
     if (!this.worker) {
+      if (request.allowSync === false) {
+        return Promise.resolve(null);
+      }
       return Promise.resolve(this.generateTextureSync(request, resolution));
     }
 
@@ -170,6 +173,9 @@ export class SurfaceMapWorkerClient {
     const seed = map.descriptor.seed >>> 0;
     const width = Math.max(1, Math.floor(resolution.width));
     const height = Math.max(1, Math.floor(resolution.height));
+    const includeNormalMap = request.textureOptions?.includeNormalMap ?? true;
+    const includeAoMap = request.textureOptions?.includeAoMap ?? true;
+    const includeRoughnessMap = request.textureOptions?.includeRoughnessMap ?? true;
     const heightField = new Float32Array(width * height);
 
     const biomeColors: Record<Biome, string> = {
@@ -581,7 +587,14 @@ export class SurfaceMapWorkerClient {
         blendSeamColumns(rgba, width, height);
         blendSeamColumns(roughnessRgba, width, height);
       }
-      return { width, height, rgba, normalRgba: null, aoRgba: null, roughnessRgba };
+      return {
+        width,
+        height,
+        rgba,
+        normalRgba: null,
+        aoRgba: null,
+        roughnessRgba: includeRoughnessMap ? roughnessRgba : null
+      };
     }
 
     const normalRgba = new Uint8Array(width * height * 4);
@@ -655,7 +668,14 @@ export class SurfaceMapWorkerClient {
       blendSeamNormals(normalRgba, width, height);
     }
 
-    return { width, height, rgba, normalRgba, aoRgba, roughnessRgba };
+    return {
+      width,
+      height,
+      rgba,
+      normalRgba: includeNormalMap ? normalRgba : null,
+      aoRgba: includeAoMap ? aoRgba : null,
+      roughnessRgba: includeRoughnessMap ? roughnessRgba : null
+    };
   }
 }
 
