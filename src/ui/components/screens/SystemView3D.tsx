@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Billboard, OrbitControls, Text } from '@react-three/drei';
+import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import {
   AdditiveBlending,
+  ACESFilmicToneMapping,
   BackSide,
   BufferAttribute,
   Camera,
@@ -13,6 +15,7 @@ import {
   ConeGeometry,
   PCFSoftShadowMap,
   CylinderGeometry,
+  DirectionalLight,
   DataTexture,
   Euler,
   FrontSide,
@@ -75,7 +78,7 @@ import {
   type TacticalRingConfig,
   type SystemObjectId
 } from './systemViewLayout';
-import { SurfaceMapWorkerClient, buildSurfaceMapWorkerRequest, type SurfaceTextureResult } from '../../workers';
+import { SurfaceMapWorkerClient, buildSurfaceMapWorkerRequest, type CloudShadowSettings, type SurfaceTextureResult } from '../../workers';
 
 interface SystemView3DProps {
   starSystem: StarSystem;
@@ -107,6 +110,17 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
+const STARFIELD_TEXTURE_SIZE = 1024;
+const STARFIELD_STAR_DENSITY = 0.0011;
+const STARFIELD_NEBULA_LAYERS = 4;
+const STARFIELD_EDGE_WRAP = 0.02;
+const STARFIELD_BASE_COLOR = '#04060c';
+const BODY_SPIN_SPEED_MIN = 0.0035;
+const BODY_SPIN_SPEED_MAX = 0.011;
+const CLOUD_SPIN_MULTIPLIER_MIN = 1.2;
+const CLOUD_SPIN_MULTIPLIER_MAX = 1.6;
+const CLOUD_NOISE_SPEED_MIN = 0.015;
+const CLOUD_NOISE_SPEED_MAX = 0.045;
 const LENS_FLARE_TEXTURE_SIZE = 128;
 const LENS_FLARE_BASE_STRENGTH = 0.55;
 const LENS_FLARE_CENTER_FADE_START = 0.08;
@@ -452,6 +466,119 @@ const toRgbaString = (color: Color, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  if (edge0 === edge1) return x < edge0 ? 0 : 1;
+  const t = MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+const linearToSrgb = (value: number): number => {
+  if (value <= 0.0031308) return 12.92 * value;
+  return 1.055 * Math.pow(value, 1 / 2.4) - 0.055;
+};
+
+const linearToSrgbByte = (value: number): number =>
+  Math.round(MathUtils.clamp(linearToSrgb(value), 0, 1) * 255);
+
+const createGasGiantTextureData = (
+  seedKey: string,
+  baseColor: string,
+  width: number,
+  height: number,
+  isIceGiant: boolean
+): { color: Uint8Array; roughness: Uint8Array } => {
+  const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
+  const rand = createSeededRandom(seed);
+  const base = new Color(baseColor);
+  const light = base.clone().lerp(new Color('#ffffff'), 0.18 + rand() * 0.2);
+  const dark = base.clone().lerp(new Color('#0b1020'), 0.22 + rand() * 0.22);
+  const accent = base.clone().lerp(new Color(isIceGiant ? '#e0f2fe' : '#fcd34d'), 0.2 + rand() * 0.3);
+
+  const bandFreq = 5 + Math.floor(rand() * 7);
+  const bandJitter = 0.2 + rand() * 0.35;
+  const bandContrast = 0.12 + rand() * 0.18;
+  const lonFreq = 1.6 + rand() * 2.8;
+  const lonStrength = 0.05 + rand() * 0.09;
+  const vortexU = rand();
+  const vortexV = 0.25 + rand() * 0.5;
+  const vortexRadius = 0.08 + rand() * 0.12;
+  const vortexStrength = 0.18 + rand() * 0.2;
+  const vortexTwist = 4.5 + rand() * 3.5;
+  const roughBase = isIceGiant ? 0.52 : 0.38;
+  const roughVar = isIceGiant ? 0.16 : 0.12;
+
+  const rowOffsets = new Float32Array(height);
+  for (let y = 0; y < height; y += 1) {
+    rowOffsets[y] = (rand() - 0.5) * bandJitter;
+  }
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (let y = 0; y < height; y += 1) {
+      const prev = rowOffsets[y === 0 ? 0 : y - 1];
+      const next = rowOffsets[y === height - 1 ? height - 1 : y + 1];
+      rowOffsets[y] = (rowOffsets[y] + prev + next) / 3;
+    }
+  }
+
+  const color = new Uint8Array(width * height * 4);
+  const roughness = new Uint8Array(width * height * 4);
+  const twoPi = Math.PI * 2;
+
+  for (let y = 0; y < height; y += 1) {
+    const v = (y + 0.5) / height;
+    const lat = (v - 0.5) * Math.PI;
+    const latSin = Math.sin(lat);
+    const latNorm = Math.abs(v - 0.5) * 2;
+    const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+    const detailFactor = MathUtils.lerp(0.4, 1, poleBlend);
+    const bandBase = Math.sin(latSin * bandFreq + rowOffsets[y]);
+    const bandValue = 0.5 + 0.5 * bandBase;
+
+    for (let x = 0; x < width; x += 1) {
+      const u = (x + 0.5) / width;
+      const uAngle = u * twoPi;
+      const lonNoise = Math.sin(uAngle * lonFreq + lat * 2.1) * lonStrength;
+      let band = bandValue + lonNoise * detailFactor;
+
+      const dx = Math.min(Math.abs(u - vortexU), 1 - Math.abs(u - vortexU));
+      const dy = v - vortexV;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < vortexRadius) {
+        const swirl = Math.sin((dist / vortexRadius) * Math.PI * vortexTwist + uAngle * 2.3);
+        band += swirl * (1 - dist / vortexRadius) * vortexStrength;
+      }
+
+      band = MathUtils.clamp(0.5 + (band - 0.5) * (1 + bandContrast * detailFactor), 0, 1);
+      const highlight = MathUtils.clamp((band - 0.65) * 1.2, 0, 0.3);
+
+      let r = MathUtils.lerp(dark.r, light.r, band);
+      let g = MathUtils.lerp(dark.g, light.g, band);
+      let b = MathUtils.lerp(dark.b, light.b, band);
+
+      if (highlight > 0) {
+        r = MathUtils.lerp(r, accent.r, highlight);
+        g = MathUtils.lerp(g, accent.g, highlight);
+        b = MathUtils.lerp(b, accent.b, highlight);
+      }
+
+      const idx = (y * width + x) * 4;
+      color[idx] = linearToSrgbByte(r);
+      color[idx + 1] = linearToSrgbByte(g);
+      color[idx + 2] = linearToSrgbByte(b);
+      color[idx + 3] = 255;
+
+      const roughNoise = Math.sin(uAngle * (lonFreq * 0.7) + lat * 1.7) * 0.05;
+      const rough = MathUtils.clamp(roughBase + (0.5 - band) * roughVar + roughNoise, 0.2, 0.95);
+      const roughByte = Math.round(rough * 255);
+      roughness[idx] = roughByte;
+      roughness[idx + 1] = roughByte;
+      roughness[idx + 2] = roughByte;
+      roughness[idx + 3] = 255;
+    }
+  }
+
+  return { color, roughness };
+};
+
 const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): CanvasTexture => {
   const canvas = document.createElement('canvas');
   canvas.width = STAR_TEXTURE_SIZE;
@@ -518,6 +645,84 @@ const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): Canva
   }
 
   context.globalAlpha = 1;
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = STARFIELD_TEXTURE_SIZE;
+  canvas.height = STARFIELD_TEXTURE_SIZE;
+  const context = canvas.getContext('2d');
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+
+  if (!context) {
+    return texture;
+  }
+
+  const size = STARFIELD_TEXTURE_SIZE;
+  const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
+  const rand = createSeededRandom(seed);
+  const base = new Color(STARFIELD_BASE_COLOR);
+  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.7);
+
+  const gradient = context.createLinearGradient(0, 0, 0, size);
+  gradient.addColorStop(0, base.clone().lerp(tint, 0.2).getStyle());
+  gradient.addColorStop(0.55, base.getStyle());
+  gradient.addColorStop(1, base.clone().lerp(tint, 0.35).getStyle());
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+
+  context.globalCompositeOperation = 'screen';
+  for (let i = 0; i < STARFIELD_NEBULA_LAYERS; i += 1) {
+    const radius = size * (0.18 + rand() * 0.32);
+    const x = rand() * size;
+    const y = rand() * size;
+    const strength = 0.04 + rand() * 0.07;
+    const nebula = base.clone().lerp(tint, 0.35 + rand() * 0.45);
+    const cloud = context.createRadialGradient(x, y, 0, x, y, radius);
+    cloud.addColorStop(0, toRgbaString(nebula, strength));
+    cloud.addColorStop(1, toRgbaString(nebula, 0));
+    context.fillStyle = cloud;
+    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  context.globalCompositeOperation = 'source-over';
+
+  const starCount = Math.round(size * size * STARFIELD_STAR_DENSITY);
+  const wrapMargin = size * STARFIELD_EDGE_WRAP;
+  const baseStar = new Color('#ffffff');
+
+  const drawStar = (x: number, y: number, radius: number, color: string) => {
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  };
+
+  for (let i = 0; i < starCount; i += 1) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const isBright = rand() > 0.88;
+    const radius = isBright ? 1 + rand() * 1.6 : 0.45 + rand() * 0.8;
+    const alpha = isBright ? 0.55 + rand() * 0.3 : 0.15 + rand() * 0.35;
+    const starColor = baseStar.clone().lerp(tint, rand() * 0.25);
+    const color = toRgbaString(starColor, alpha);
+
+    drawStar(x, y, radius, color);
+
+    if (x < wrapMargin) drawStar(x + size, y, radius, color);
+    if (x > size - wrapMargin) drawStar(x - size, y, radius, color);
+    if (y < wrapMargin) drawStar(x, y + size, radius, color);
+    if (y > size - wrapMargin) drawStar(x, y - size, radius, color);
+    if (x < wrapMargin && y < wrapMargin) drawStar(x + size, y + size, radius, color);
+    if (x < wrapMargin && y > size - wrapMargin) drawStar(x + size, y - size, radius, color);
+    if (x > size - wrapMargin && y < wrapMargin) drawStar(x - size, y + size, radius, color);
+    if (x > size - wrapMargin && y > size - wrapMargin) drawStar(x - size, y - size, radius, color);
+  }
+
   texture.needsUpdate = true;
   return texture;
 };
@@ -902,6 +1107,81 @@ const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </group>
 );
 
+type SystemStarfieldProps = {
+  radius: number;
+  seedKey: string;
+  tintColor: string;
+};
+
+const SystemStarfield: React.FC<SystemStarfieldProps> = ({ radius, seedKey, tintColor }) => {
+  const meshRef = useRef<Mesh>(null);
+  const { camera } = useThree();
+  const texture = useMemo(() => createStarfieldTexture(seedKey, tintColor), [seedKey, tintColor]);
+
+  useFrame(() => {
+    if (meshRef.current) {
+      meshRef.current.position.copy(camera.position);
+    }
+  });
+
+  useEffect(() => () => {
+    texture.dispose();
+  }, [texture]);
+
+  return (
+    <mesh ref={meshRef} frustumCulled={false} renderOrder={-20} raycast={() => null}>
+      <sphereGeometry args={[radius, 48, 32]} />
+      <meshBasicMaterial map={texture} side={BackSide} depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+};
+
+type SystemRimLightProps = {
+  intensity: number;
+  color: string;
+  distance: number;
+  target: [number, number, number];
+};
+
+const SystemRimLight: React.FC<SystemRimLightProps> = ({ intensity, color, distance, target }) => {
+  const lightRef = useRef<DirectionalLight>(null);
+  const targetObject = useMemo(() => new Object3D(), []);
+  const { camera } = useThree();
+  const targetVec = useMemo(() => new Vector3(), []);
+  const viewDir = useMemo(() => new Vector3(), []);
+  const rightDir = useMemo(() => new Vector3(), []);
+  const upDir = useMemo(() => new Vector3(), []);
+
+  useEffect(() => {
+    if (lightRef.current) {
+      lightRef.current.target = targetObject;
+    }
+  }, [targetObject]);
+
+  useFrame(() => {
+    const light = lightRef.current;
+    if (!light) return;
+    targetVec.set(target[0], target[1], target[2]);
+    viewDir.copy(targetVec).sub(camera.position).normalize();
+    rightDir.crossVectors(viewDir, camera.up).normalize();
+    upDir.copy(camera.up).normalize();
+    light.position
+      .copy(targetVec)
+      .addScaledVector(viewDir, distance)
+      .addScaledVector(rightDir, distance * 0.08)
+      .addScaledVector(upDir, distance * 0.04);
+    targetObject.position.copy(targetVec);
+    targetObject.updateMatrixWorld();
+  });
+
+  return (
+    <>
+      <directionalLight ref={lightRef} intensity={intensity} color={color} castShadow={false} />
+      <primitive object={targetObject} raycast={() => null} />
+    </>
+  );
+};
+
 type FleetRingBaseOptions = {
   starRadius: number;
   focusDistanceFloor: number;
@@ -1262,6 +1542,26 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   const atmosphereBundle = moon.atmosphere && moon.atmosphere !== 'None'
     ? resolveAtmosphereBundle(moon)
     : null;
+  const spinSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${moon.id}-spin`);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed);
+  }, [moon.id]);
+  const cloudSpinSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${moon.id}-cloud-spin`);
+    const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
+    return spinSpeed * multiplier;
+  }, [moon.id, spinSpeed]);
+  const cloudNoiseSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${moon.id}-cloud-noise`);
+    return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
+  }, [moon.id]);
+  const spinGroupRef = useRef<Group>(null);
+
+  useFrame((_, delta) => {
+    if (spinGroupRef.current) {
+      spinGroupRef.current.rotation.y += delta * spinSpeed;
+    }
+  });
 
   return (
     <group>
@@ -1276,89 +1576,91 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
         raycast={() => null}
         renderOrder={1}
       />
-      <mesh
-        geometry={moonGeometry}
-        material={hitboxMaterial}
-        position={moonPosition}
-        scale={moonHitboxScale}
-        castShadow={false}
-        receiveShadow={false}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onFocus(moon.id);
-        }}
-        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-          if (event.pointerType !== 'touch') return;
-          const now = performance.now();
-          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-            lastTouchRef.current = 0;
-            event.stopPropagation();
-            event.nativeEvent.preventDefault();
-            onFocus(moon.id);
-          } else {
-            lastTouchRef.current = now;
-          }
-        }}
-        onPointerOver={(event) => {
-          event.stopPropagation();
-          onHover(moon.id);
-        }}
-        onPointerOut={(event) => {
-          event.stopPropagation();
-          onBlur(moon.id);
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(moon.id);
-        }}
-        frustumCulled
-      />
-      <mesh
-        geometry={moonGeometry}
-        material={moonMaterial}
-        position={moonPosition}
-        scale={moonScale}
-        castShadow
-        receiveShadow
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onFocus(moon.id);
-        }}
-        onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-          if (event.pointerType !== 'touch') return;
-          const now = performance.now();
-          if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-            lastTouchRef.current = 0;
-            event.stopPropagation();
-            event.nativeEvent.preventDefault();
-            onFocus(moon.id);
-          } else {
-            lastTouchRef.current = now;
-          }
-        }}
-        onPointerOver={(event) => {
-          event.stopPropagation();
-          onHover(moon.id);
-        }}
-        onPointerOut={(event) => {
-          event.stopPropagation();
-          onBlur(moon.id);
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(moon.id);
-        }}
-        frustumCulled
-      />
-      {atmosphereBundle && (
-        <group position={moonPosition}>
-          <AtmosphereStack
+      <group position={moonPosition}>
+        <group ref={spinGroupRef}>
+          <mesh
             geometry={moonGeometry}
-            radius={moon.radius}
-            bundle={atmosphereBundle}
+            material={hitboxMaterial}
+            scale={moonHitboxScale}
+            castShadow={false}
+            receiveShadow={false}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onFocus(moon.id);
+            }}
+            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              if (event.pointerType !== 'touch') return;
+              const now = performance.now();
+              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                lastTouchRef.current = 0;
+                event.stopPropagation();
+                event.nativeEvent.preventDefault();
+                onFocus(moon.id);
+              } else {
+                lastTouchRef.current = now;
+              }
+            }}
+            onPointerOver={(event) => {
+              event.stopPropagation();
+              onHover(moon.id);
+            }}
+            onPointerOut={(event) => {
+              event.stopPropagation();
+              onBlur(moon.id);
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(moon.id);
+            }}
+            frustumCulled
           />
+          <mesh
+            geometry={moonGeometry}
+            material={moonMaterial}
+            scale={moonScale}
+            castShadow
+            receiveShadow
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onFocus(moon.id);
+            }}
+            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              if (event.pointerType !== 'touch') return;
+              const now = performance.now();
+              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                lastTouchRef.current = 0;
+                event.stopPropagation();
+                event.nativeEvent.preventDefault();
+                onFocus(moon.id);
+              } else {
+                lastTouchRef.current = now;
+              }
+            }}
+            onPointerOver={(event) => {
+              event.stopPropagation();
+              onHover(moon.id);
+            }}
+            onPointerOut={(event) => {
+              event.stopPropagation();
+              onBlur(moon.id);
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(moon.id);
+            }}
+            frustumCulled
+          />
+          {atmosphereBundle && (
+            <AtmosphereStack
+              geometry={moonGeometry}
+              radius={moon.radius}
+              bundle={atmosphereBundle}
+              cloudSpinSpeed={cloudSpinSpeed}
+              cloudNoiseSpeed={cloudNoiseSpeed}
+            />
+          )}
         </group>
-      )}
+      </group>
     </group>
   );
 };
@@ -1430,6 +1732,26 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   const atmosphereBundle = planet.atmosphere && planet.atmosphere !== 'None'
     ? resolveAtmosphereBundle(planet)
     : null;
+  const spinSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${planet.id}-spin`);
+    return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed);
+  }, [planet.id]);
+  const cloudSpinSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${planet.id}-cloud-spin`);
+    const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
+    return spinSpeed * multiplier;
+  }, [planet.id, spinSpeed]);
+  const cloudNoiseSpeed = useMemo(() => {
+    const seed = hashStringToUnit(`${planet.id}-cloud-noise`);
+    return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
+  }, [planet.id]);
+  const spinGroupRef = useRef<Group>(null);
+
+  useFrame((_, delta) => {
+    if (spinGroupRef.current) {
+      spinGroupRef.current.rotation.y += delta * spinSpeed;
+    }
+  });
 
   return (
     <group>
@@ -1445,85 +1767,89 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
         renderOrder={1}
       />
       <group position={planetPosition}>
-        <mesh
-          geometry={planetGeometry}
-          material={hitboxMaterial}
-          scale={planetHitboxScale}
-          castShadow={false}
-          receiveShadow={false}
-          onDoubleClick={(event) => {
-            event.stopPropagation();
-            onFocus(planet.id);
-          }}
-          onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-            if (event.pointerType !== 'touch') return;
-            const now = performance.now();
-            if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-              lastTouchRef.current = 0;
-              event.stopPropagation();
-              event.nativeEvent.preventDefault();
-              onFocus(planet.id);
-            } else {
-              lastTouchRef.current = now;
-            }
-          }}
-          onPointerOver={(event) => {
-            event.stopPropagation();
-            onHover(planet.id);
-          }}
-          onPointerOut={(event) => {
-            event.stopPropagation();
-            onBlur(planet.id);
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelect(planet.id);
-          }}
-          frustumCulled
-        />
-        <mesh
-          geometry={planetGeometry}
-          material={planetMaterial}
-          scale={planetScale}
-          castShadow
-          receiveShadow
-          onDoubleClick={(event) => {
-            event.stopPropagation();
-            onFocus(planet.id);
-          }}
-          onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-            if (event.pointerType !== 'touch') return;
-            const now = performance.now();
-            if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-              lastTouchRef.current = 0;
-              event.stopPropagation();
-              event.nativeEvent.preventDefault();
-              onFocus(planet.id);
-            } else {
-              lastTouchRef.current = now;
-            }
-          }}
-          onPointerOver={(event) => {
-            event.stopPropagation();
-            onHover(planet.id);
-          }}
-          onPointerOut={(event) => {
-            event.stopPropagation();
-            onBlur(planet.id);
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelect(planet.id);
-          }}
-          frustumCulled
-        />
-        {atmosphereBundle && (
-          <AtmosphereStack
+        <group ref={spinGroupRef}>
+          <mesh
             geometry={planetGeometry}
-            radius={planet.radius}
-            bundle={atmosphereBundle}
+            material={hitboxMaterial}
+            scale={planetHitboxScale}
+            castShadow={false}
+            receiveShadow={false}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onFocus(planet.id);
+            }}
+            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              if (event.pointerType !== 'touch') return;
+              const now = performance.now();
+              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                lastTouchRef.current = 0;
+                event.stopPropagation();
+                event.nativeEvent.preventDefault();
+                onFocus(planet.id);
+              } else {
+                lastTouchRef.current = now;
+              }
+            }}
+            onPointerOver={(event) => {
+              event.stopPropagation();
+              onHover(planet.id);
+            }}
+            onPointerOut={(event) => {
+              event.stopPropagation();
+              onBlur(planet.id);
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(planet.id);
+            }}
+            frustumCulled
           />
-        )}
+          <mesh
+            geometry={planetGeometry}
+            material={planetMaterial}
+            scale={planetScale}
+            castShadow
+            receiveShadow
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onFocus(planet.id);
+            }}
+            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              if (event.pointerType !== 'touch') return;
+              const now = performance.now();
+              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
+                lastTouchRef.current = 0;
+                event.stopPropagation();
+                event.nativeEvent.preventDefault();
+                onFocus(planet.id);
+              } else {
+                lastTouchRef.current = now;
+              }
+            }}
+            onPointerOver={(event) => {
+              event.stopPropagation();
+              onHover(planet.id);
+            }}
+            onPointerOut={(event) => {
+              event.stopPropagation();
+              onBlur(planet.id);
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(planet.id);
+            }}
+            frustumCulled
+          />
+          {atmosphereBundle && (
+            <AtmosphereStack
+              geometry={planetGeometry}
+              radius={planet.radius}
+              bundle={atmosphereBundle}
+              cloudSpinSpeed={cloudSpinSpeed}
+              cloudNoiseSpeed={cloudNoiseSpeed}
+            />
+          )}
+        </group>
         {planet.moons.map(moon => (
           <MoonOrbitGroup
             key={moon.id}
@@ -1914,15 +2240,23 @@ const createAtmosphereLayerMaterial = (params: {
         float daylight = mix(uNightMin, 1.0, day);
 
         float nv = clamp(dot(N, V), 0.0, 1.0);
-        float limb = pow(1.0 - nv, uRimPower);
-        float depth = limb * uDensity;
+        float opticalDepth = clamp(1.0 - nv, 0.0, 1.0);
+        float density = 1.0 - exp(-uDensity * opticalDepth * 2.2);
+        float limb = pow(opticalDepth, uRimPower);
+        float depth = limb * density;
 
-        float rayleigh = depth;
-        float miePhase = pow(max(dot(V, L), 0.0), uMiePower);
+        float cosTheta = clamp(dot(V, L), -1.0, 1.0);
+        float rayleighPhase = 0.75 * (1.0 + cosTheta * cosTheta);
+        float g = clamp(0.2 + uMiePower * 0.04, 0.35, 0.8);
+        float g2 = g * g;
+        float miePhase = (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * cosTheta, 0.0001), 1.5);
+        miePhase *= 0.35;
+        float rayleigh = depth * rayleighPhase;
         float mie = miePhase * depth * uMieStrength;
 
         float terminatorBand = 1.0 - smoothstep(0.0, uTerminatorSoftness * 2.5, abs(mu));
-        float sunset = terminatorBand * depth * uSunsetStrength;
+        float twilight = terminatorBand * (0.35 + 0.65 * rayleighPhase);
+        float sunset = twilight * depth * uSunsetStrength;
 
         float scatter = rayleigh + mie + sunset;
         if (scatter <= 0.00001) discard;
@@ -1976,7 +2310,8 @@ const createCloudLayerMaterial = (params: {
       uRimPower: { value: params.rimPower },
       uRimStrength: { value: params.rimStrength },
       uNightMin: { value: params.nightMin },
-      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
+      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS },
+      uTime: { value: 0 }
     },
     vertexShader: `
       varying vec3 vWorldPosition;
@@ -2005,6 +2340,7 @@ const createCloudLayerMaterial = (params: {
       uniform float uRimStrength;
       uniform float uNightMin;
       uniform float uTerminatorSoftness;
+      uniform float uTime;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
 
@@ -2058,11 +2394,12 @@ const createCloudLayerMaterial = (params: {
         float daylight = mix(uNightMin, 1.0, day);
 
         vec3 seedVec = vec3(uSeed * 11.0, uSeed2 * 17.0, uSeed * 23.0);
-        float n1 = fbm(N * uNoiseScale + seedVec);
-        float n2 = fbm(N * (uNoiseScale * 1.9) + vec3(uSeed2 * 31.0, uSeed * 37.0, uSeed2 * 41.0));
+        vec3 drift = vec3(uTime * 0.08, uTime * 0.04, uTime * 0.06);
+        float n1 = fbm(N * uNoiseScale + seedVec + drift);
+        float n2 = fbm(N * (uNoiseScale * 1.9) + vec3(uSeed2 * 31.0, uSeed * 37.0, uSeed2 * 41.0) + drift * 1.4);
         float field = mix(n1, n2, 0.35);
 
-        float stripe = 0.5 + 0.5 * sin((N.y + uBandOffset) * uBandFrequency);
+        float stripe = 0.5 + 0.5 * sin((N.y + uBandOffset + uTime * 0.02) * uBandFrequency);
         float band = smoothstep(0.25, 0.78, stripe);
         field *= mix(1.0, band, clamp(uBandStrength, 0.0, 1.0));
 
@@ -2087,10 +2424,33 @@ const AtmosphereStack: React.FC<{
   geometry: SphereGeometry;
   radius: number;
   bundle: AtmosphereLayerBundle;
-}> = ({ geometry, radius, bundle }) => {
+  cloudSpinSpeed?: number;
+  cloudNoiseSpeed?: number;
+}> = ({ geometry, radius, bundle, cloudSpinSpeed, cloudNoiseSpeed }) => {
   const cloudRadius = bundle.clouds ? radius * bundle.clouds.scale : 0;
   const lowerRadius = radius * bundle.lower.scale;
   const hazeRadius = radius * bundle.haze.scale;
+  const cloudMeshRef = useRef<Mesh>(null);
+  const cloudTimeRef = useRef(0);
+
+  useEffect(() => {
+    cloudTimeRef.current = 0;
+    if (bundle.clouds?.material.uniforms.uTime) {
+      bundle.clouds.material.uniforms.uTime.value = 0;
+    }
+  }, [bundle.clouds?.material]);
+
+  useFrame((_, delta) => {
+    if (!bundle.clouds) return;
+    if (cloudMeshRef.current && typeof cloudSpinSpeed === 'number') {
+      cloudMeshRef.current.rotation.y += delta * cloudSpinSpeed;
+    }
+    if (bundle.clouds.material.uniforms.uTime) {
+      const speed = cloudNoiseSpeed ?? CLOUD_NOISE_SPEED_MIN;
+      cloudTimeRef.current += delta * speed;
+      bundle.clouds.material.uniforms.uTime.value = cloudTimeRef.current;
+    }
+  });
 
   return (
     <group raycast={() => null}>
@@ -2104,6 +2464,7 @@ const AtmosphereStack: React.FC<{
           frustumCulled
           raycast={() => null}
           renderOrder={3.5}
+          ref={cloudMeshRef}
         />
       )}
       <mesh
@@ -2140,6 +2501,7 @@ const SystemSurfaceTextureManager: React.FC<{
   bodyRadii: Record<string, number>;
   selectedBodyId: string | null;
   hoveredBodyId: string | null;
+  cloudShadowStrengthScale: number;
   resolveMaterial: (bodyId: string) => MeshStandardMaterial | null;
 }> = ({
   starSystem,
@@ -2151,6 +2513,7 @@ const SystemSurfaceTextureManager: React.FC<{
   bodyRadii,
   selectedBodyId,
   hoveredBodyId,
+  cloudShadowStrengthScale,
   resolveMaterial
 }) => {
   const { camera, gl, size } = useThree();
@@ -2159,6 +2522,7 @@ const SystemSurfaceTextureManager: React.FC<{
     color: DataTexture;
     normal: DataTexture | null;
     ao: DataTexture | null;
+    roughness: DataTexture | null;
   };
   const cacheRef = useRef<Map<string, SurfaceTextureBundle>>(new Map());
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
@@ -2193,6 +2557,75 @@ const SystemSurfaceTextureManager: React.FC<{
     return texture;
   }, [maxAnisotropy]);
 
+  const cloudShadowByBodyId = useMemo(() => {
+    const map = new Map<string, CloudShadowSettings>();
+    if (cloudShadowStrengthScale <= 0) return map;
+
+    const addShadow = (
+      body: { id: string; atmosphere?: AtmosphereType; airMassIndex?: number; pressureBar?: number; temperatureK?: number },
+      isSolid: boolean
+    ) => {
+      if (!isSolid) return;
+      const atmosphere = body.atmosphere;
+      if (!atmosphere || atmosphere === 'None') return;
+
+      const style = ATMOSPHERE_STYLE[atmosphere];
+      const cloudStyle = style.clouds;
+      if (!cloudStyle) return;
+
+      const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
+      const temperatureK = typeof body.temperatureK === 'number' && Number.isFinite(body.temperatureK)
+        ? body.temperatureK
+        : (atmosphere === 'H2He' ? 140 : 288);
+
+      let cloudiness = 0;
+      switch (atmosphere) {
+        case 'Earthlike': {
+          const tempSuitability = MathUtils.clamp(1 - Math.abs(temperatureK - 288) / 170, 0, 1);
+          cloudiness = MathUtils.clamp(0.15 + airMass * 0.75 * tempSuitability, 0, 1);
+          break;
+        }
+        case 'CO2': {
+          cloudiness = MathUtils.clamp(0.1 + airMass * 0.65, 0, 1);
+          break;
+        }
+        case 'H2He': {
+          cloudiness = MathUtils.clamp(0.6 + airMass * 0.4, 0, 1);
+          break;
+        }
+        default:
+          cloudiness = 0;
+      }
+
+      if (cloudiness <= 0.08) return;
+
+      const seed = Math.floor(hashStringToUnit(`${body.id}|cloud_shadow_seed`) * 0xffffffff);
+      const seed2 = Math.floor(hashStringToUnit(`${body.id}|cloud_shadow_seed2`) * 0xffffffff);
+      const bandOffset = hashStringToUnit(`${body.id}|cloud_shadow_band_offset`) * Math.PI * 2;
+      const strength = MathUtils.clamp((0.08 + cloudiness * 0.28) * cloudShadowStrengthScale, 0.02, 0.35 * cloudShadowStrengthScale);
+      if (strength <= 0.01) return;
+
+      map.set(body.id, {
+        strength,
+        noiseScale: Math.max(2, cloudStyle.noiseScale * 2),
+        threshold: MathUtils.clamp(cloudStyle.threshold - cloudiness * 0.1, 0.2, 0.9),
+        softness: MathUtils.clamp(cloudStyle.softness * 1.35, 0.03, 0.25),
+        seed,
+        seed2,
+        bandStrength: cloudStyle.bandStrength,
+        bandFrequency: cloudStyle.bandFrequency,
+        bandOffset
+      });
+    };
+
+    planets.forEach((planet) => {
+      addShadow(planet, planet.isSolid ?? true);
+      planet.moons.forEach(moon => addShadow(moon, moon.isSolid ?? true));
+    });
+
+    return map;
+  }, [cloudShadowStrengthScale, planets]);
+
   useEffect(() => {
     requestStateRef.current = ({
       systems: [starSystem],
@@ -2204,6 +2637,7 @@ const SystemSurfaceTextureManager: React.FC<{
     bundle.color.dispose();
     bundle.normal?.dispose();
     bundle.ao?.dispose();
+    bundle.roughness?.dispose();
   }, []);
 
   useEffect(() => {
@@ -2239,6 +2673,29 @@ const SystemSurfaceTextureManager: React.FC<{
     ].join('|');
   }, [astroKey, ownerKeyByBodyId]);
 
+  const buildGasGiantTextureKey = useCallback((bodyId: string, resolution: SurfaceTextureResolution): string => (
+    ['gas', bodyId, astroKey, resolution.width, resolution.height].join('|')
+  ), [astroKey]);
+
+  const buildGasGiantBundle = useCallback((
+    bodyId: string,
+    planetType: PlanetType | null,
+    resolution: SurfaceTextureResolution
+  ): SurfaceTextureBundle => {
+    const baseColor = planetType ? PLANET_TYPE_COLORS[planetType] : '#cbd5e1';
+    const isIceGiant = planetType === 'IceGiant';
+    const seedKey = `${bodyId}|${astroKey}|${resolution.width}x${resolution.height}`;
+    const data = createGasGiantTextureData(seedKey, baseColor, resolution.width, resolution.height, isIceGiant);
+    const colorTexture = createDataTexture(data.color, resolution.width, resolution.height, true);
+    const roughnessTexture = createDataTexture(data.roughness, resolution.width, resolution.height, false);
+    return {
+      color: colorTexture,
+      normal: null,
+      ao: null,
+      roughness: roughnessTexture
+    };
+  }, [astroKey, createDataTexture]);
+
   const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, bundle: SurfaceTextureBundle) => {
     let needsUpdate = false;
     if (material.map !== bundle.color) {
@@ -2256,12 +2713,26 @@ const SystemSurfaceTextureManager: React.FC<{
       material.aoMap = nextAo;
       needsUpdate = true;
     }
+    const nextRoughness = bundle.roughness ?? null;
+    if (material.roughnessMap !== nextRoughness) {
+      material.roughnessMap = nextRoughness;
+      needsUpdate = true;
+    }
+    const baseRoughness = typeof material.userData.baseRoughness === 'number'
+      ? material.userData.baseRoughness
+      : material.roughness;
+    if (nextRoughness) {
+      material.roughness = 1;
+    } else if (material.roughness !== baseRoughness) {
+      material.roughness = baseRoughness;
+    }
     if (needsUpdate) {
       material.needsUpdate = true;
     }
     material.userData.surfaceTextureKey = key;
     material.userData.surfaceNormalTextureKey = nextNormal ? key : null;
     material.userData.surfaceAoTextureKey = nextAo ? key : null;
+    material.userData.surfaceRoughnessTextureKey = nextRoughness ? key : null;
   }, []);
 
   const clearTextureFromMaterial = useCallback((material: MeshStandardMaterial) => {
@@ -2278,6 +2749,10 @@ const SystemSurfaceTextureManager: React.FC<{
       material.aoMap = null;
       needsUpdate = true;
     }
+    if (material.roughnessMap) {
+      material.roughnessMap = null;
+      needsUpdate = true;
+    }
     if (needsUpdate) {
       material.needsUpdate = true;
     }
@@ -2285,14 +2760,22 @@ const SystemSurfaceTextureManager: React.FC<{
     if (baseColor) {
       material.color.set(baseColor);
     }
+    const baseRoughness = typeof material.userData.baseRoughness === 'number' ? material.userData.baseRoughness : null;
+    if (typeof baseRoughness === 'number') {
+      material.roughness = baseRoughness;
+    }
     material.userData.surfaceTextureKey = null;
     material.userData.surfaceNormalTextureKey = null;
     material.userData.surfaceAoTextureKey = null;
+    material.userData.surfaceRoughnessTextureKey = null;
   }, []);
 
   useFrame(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
-    if (!planetSurfaceDescriptorsByBodyId) return;
+    if (!planetSurfaceDescriptorsByBodyId) {
+      const hasGasGiant = planets.some(planet => planet.type === 'GasGiant' || planet.type === 'IceGiant');
+      if (!hasGasGiant) return;
+    }
 
     camera.updateMatrixWorld();
 
@@ -2312,18 +2795,13 @@ const SystemSurfaceTextureManager: React.FC<{
     const pixelsPerWorldUnitAtZ1 = renderHeightPx / (2 * Math.tan(cameraFovRad / 2));
 
     const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
-    const shouldPreferUltra = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
+    const bodyMetricsById = new Map<string, { diameterPx: number; isOnScreen: boolean }>();
+    const bodyInfoById = new Map<string, { isSolid: boolean; isGasGiant: boolean; planetType: PlanetType | null }>();
+    let closeUpBodyId: string | null = null;
+    let closeUpDiameter = 0;
 
-    const touchKey = (key: string) => {
-      cacheLastUsedRef.current.set(key, now);
-      activeKeys.add(key);
-    };
-
-    const updateBody = (bodyId: string, isSolid: boolean) => {
-      const descriptor = planetSurfaceDescriptorsByBodyId[bodyId];
-      if (!descriptor) return;
-      if (!isSolid) return;
-
+    const recordBodyMetrics = (bodyId: string, canRender: boolean) => {
+      if (!canRender) return;
       const worldPos = bodyWorldPositions[bodyId];
       const radius = bodyRadii[bodyId];
       if (!worldPos || typeof radius !== 'number') return;
@@ -2345,10 +2823,48 @@ const SystemSurfaceTextureManager: React.FC<{
         && Math.abs(scratch.ndc.x) <= 1 + screenMargin + ndcRadiusX
         && Math.abs(scratch.ndc.y) <= 1 + screenMargin + ndcRadiusY;
 
-      let diameterPx = 0;
-      if (isOnScreen) {
-        diameterPx = pixelRadius * 2;
+      const diameterPx = isOnScreen ? pixelRadius * 2 : 0;
+      bodyMetricsById.set(bodyId, { diameterPx, isOnScreen });
+
+      if (isOnScreen && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX && diameterPx > closeUpDiameter) {
+        closeUpDiameter = diameterPx;
+        closeUpBodyId = bodyId;
       }
+    };
+
+    planets.forEach((planet) => {
+      const isGasGiant = planet.type === 'GasGiant' || planet.type === 'IceGiant';
+      const isSolid = planet.isSolid ?? true;
+      bodyInfoById.set(planet.id, { isSolid, isGasGiant, planetType: planet.type });
+      const planetHasDescriptor = Boolean(planetSurfaceDescriptorsByBodyId?.[planet.id]);
+      recordBodyMetrics(planet.id, isGasGiant || (isSolid && planetHasDescriptor));
+      planet.moons.forEach((moon) => {
+        const moonSolid = moon.isSolid ?? true;
+        bodyInfoById.set(moon.id, { isSolid: moonSolid, isGasGiant: false, planetType: null });
+        const moonHasDescriptor = Boolean(planetSurfaceDescriptorsByBodyId?.[moon.id]);
+        recordBodyMetrics(moon.id, moonSolid && moonHasDescriptor);
+      });
+    });
+
+    const preferUltraBodyId = selectedBodyId ?? closeUpBodyId;
+    const shouldPreferUltra = (bodyId: string) => bodyId === preferUltraBodyId;
+
+    const touchKey = (key: string) => {
+      cacheLastUsedRef.current.set(key, now);
+      activeKeys.add(key);
+    };
+
+    const updateBody = (bodyId: string) => {
+      const bodyInfo = bodyInfoById.get(bodyId);
+      if (!bodyInfo) return;
+      const { isSolid, isGasGiant, planetType } = bodyInfo;
+      const descriptor = planetSurfaceDescriptorsByBodyId?.[bodyId];
+      if (!descriptor && !isGasGiant) return;
+      if (!isSolid && !isGasGiant) return;
+
+      const metrics = bodyMetricsById.get(bodyId);
+      if (!metrics) return;
+      const { diameterPx, isOnScreen } = metrics;
 
       let resolution = pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId));
       if (!resolution && isOnScreen) {
@@ -2366,7 +2882,13 @@ const SystemSurfaceTextureManager: React.FC<{
         return;
       }
 
-      const key = buildTextureKey(bodyId, descriptor, resolution);
+      const cloudShadow = !isGasGiant ? cloudShadowByBodyId.get(bodyId) ?? null : null;
+      const shadowKey = cloudShadow
+        ? `shadow:${cloudShadow.strength.toFixed(3)}:${cloudShadow.threshold.toFixed(3)}:${cloudShadow.noiseScale.toFixed(2)}`
+        : 'shadow:none';
+      const key = isGasGiant
+        ? buildGasGiantTextureKey(bodyId, resolution)
+        : `${buildTextureKey(bodyId, descriptor as PlanetSurfaceDescriptor, resolution)}|${shadowKey}`;
       desiredKeyByBodyIdRef.current.set(bodyId, key);
       touchKey(key);
 
@@ -2377,6 +2899,18 @@ const SystemSurfaceTextureManager: React.FC<{
       }
 
       if (cachedBundle) return;
+      if (isGasGiant) {
+        const bundle = buildGasGiantBundle(bodyId, planetType, resolution);
+        cacheRef.current.set(key, bundle);
+        cacheLastUsedRef.current.set(key, performance.now());
+        const desiredKey = desiredKeyByBodyIdRef.current.get(bodyId);
+        if (desiredKey !== key) return;
+        const mat = resolveMaterial(bodyId);
+        if (!mat) return;
+        applyTextureToMaterial(mat, key, bundle);
+        return;
+      }
+
       if (inFlightRef.current.has(key)) return;
       if (inFlightRef.current.size >= SURFACE_TEXTURE_MAX_INFLIGHT) return;
 
@@ -2384,6 +2918,9 @@ const SystemSurfaceTextureManager: React.FC<{
       if (!state) return;
       const workerRequest = buildSurfaceMapWorkerRequest(state, bodyId);
       if (!workerRequest) return;
+      if (cloudShadow) {
+        workerRequest.cloudShadow = cloudShadow;
+      }
       const worker = workerRef.current;
       if (!worker) return;
 
@@ -2400,7 +2937,10 @@ const SystemSurfaceTextureManager: React.FC<{
           const aoTexture = result.aoRgba
             ? createDataTexture(result.aoRgba, result.width, result.height, false)
             : null;
-          const bundle = { color: colorTexture, normal: normalTexture, ao: aoTexture };
+          const roughnessTexture = result.roughnessRgba
+            ? createDataTexture(result.roughnessRgba, result.width, result.height, false)
+            : null;
+          const bundle = { color: colorTexture, normal: normalTexture, ao: aoTexture, roughness: roughnessTexture };
 
           cacheRef.current.set(key, bundle);
           cacheLastUsedRef.current.set(key, performance.now());
@@ -2417,8 +2957,8 @@ const SystemSurfaceTextureManager: React.FC<{
     };
 
     planets.forEach((planet) => {
-      updateBody(planet.id, planet.isSolid ?? true);
-      planet.moons.forEach(moon => updateBody(moon.id, moon.isSolid ?? true));
+      updateBody(planet.id);
+      planet.moons.forEach(moon => updateBody(moon.id));
     });
 
     if (cacheRef.current.size <= SURFACE_TEXTURE_MAX_CACHE_ENTRIES) return;
@@ -3475,6 +4015,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const resolveAtmosphereBundle = useCallback((body: OrbitingPlanet | OrbitingMoon): AtmosphereLayerBundle | null => {
     const atmosphere = body.atmosphere;
     if (!atmosphere || atmosphere === 'None') return null;
+    const isGasGiant = body.type === 'GasGiant' || body.type === 'IceGiant';
 
     const style = ATMOSPHERE_STYLE[atmosphere];
     const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
@@ -3505,14 +4046,26 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           cloudiness = 0;
       }
 
+      if (isGasGiant) {
+        cloudiness = MathUtils.clamp(cloudiness + 0.18, 0, 1);
+      }
+
       if (cloudiness > 0.08) {
         const seed = hashStringToUnit(`${body.id}|cloud_seed`);
         const seed2 = hashStringToUnit(`${body.id}|cloud_seed2`);
         const bandOffset = hashStringToUnit(`${body.id}|cloud_band_offset`) * Math.PI * 2;
 
-        const threshold = MathUtils.clamp(cloudStyle.threshold - cloudiness * 0.14, 0.22, 0.9);
-        const opacity = MathUtils.clamp(cloudStyle.opacity * MathUtils.lerp(0.65, 1.05, cloudiness), 0, 0.95);
-        const altitude = cloudStyle.baseAltitude * MathUtils.lerp(0.85, 1.25, airMass);
+        const threshold = MathUtils.clamp(
+          cloudStyle.threshold - cloudiness * 0.14 - (isGasGiant ? 0.06 : 0),
+          0.18,
+          0.9
+        );
+        const opacity = MathUtils.clamp(
+          cloudStyle.opacity * MathUtils.lerp(0.65, 1.05, cloudiness) * (isGasGiant ? 1.25 : 1),
+          0,
+          0.98
+        );
+        const altitude = cloudStyle.baseAltitude * MathUtils.lerp(0.85, 1.25, airMass) * (isGasGiant ? 1.6 : 1);
         const cloudScale = 1 + altitude;
         cloudsKey = `cloud:${cloudScale.toFixed(4)}:${threshold.toFixed(3)}:${opacity.toFixed(3)}`;
 
@@ -3611,6 +4164,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.userData.baseColor = baseColor;
+    material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
     applyDayNightTerminator(material);
@@ -3627,6 +4181,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.userData.baseColor = baseColor;
+    material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
     material.color.set(baseColor);
     applyDayNightTerminator(material);
@@ -3973,6 +4528,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const cameraNear = cameraZoomConstraints.isStarAnchor
     ? Math.max(0.05, Math.min(cameraMinDistance * 0.25, cameraFar / 2000))
     : Math.max(0.001 * clampedScale, Math.min(cameraZoomConstraints.surfaceClearance * 0.5, cameraFar / 20000));
+  const starfieldRadius = Math.max(cameraFar * 0.9, maxOrbitRadius * 4);
   const focusRequestRef = useRef<FocusRequest | null>(null);
   const anchoredTarget = useMemo<[number, number, number]>(() => {
     return bodyWorldPositions[anchoredBodyId ?? ''] ?? bodyWorldPositions[starBodyId] ?? [0, 0, 0];
@@ -4090,13 +4646,28 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
+  const bloomIntensity = prefersTouchFallback ? 0.4 : 0.75;
+  const bloomThreshold = prefersTouchFallback ? 0.32 : 0.26;
+  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.6;
+  const bloomRadius = prefersTouchFallback ? 0.2 : 0.38;
+  const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
+  const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
+  const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
+  const rimLightIntensity = prefersTouchFallback ? 0.12 : 0.18;
+  const rimLightDistance = Math.max(cameraFar * 0.8, maxOrbitRadius * 3.2);
+  const rimLightColor = useMemo(
+    () => new Color('#e6ecff').lerp(new Color(starTintColor), 0.3).getStyle(),
+    [starTintColor]
+  );
 
   return (
     <div className="relative w-full h-full bg-black">
-      <Canvas
-        shadows
+        <Canvas
+          shadows
         onCreated={({ gl }) => {
           gl.shadowMap.type = PCFSoftShadowMap;
+          gl.outputColorSpace = SRGBColorSpace;
+          gl.toneMapping = ACESFilmicToneMapping;
           gl.toneMappingExposure = toneMappingExposure;
         }}
         camera={{ position: initialCameraPosition, fov: 55, near: cameraNear, far: cameraFar }}
@@ -4104,6 +4675,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         dpr={[1, maxDpr]}
       >
         <color attach="background" args={['#000000']} />
+        <SystemStarfield
+          radius={starfieldRadius}
+          seedKey={`${starSystem.id}-${astroKey}-starfield`}
+          tintColor={starTintColor}
+        />
+        <SystemRimLight
+          intensity={rimLightIntensity}
+          color={rimLightColor}
+          distance={rimLightDistance}
+          target={anchoredTarget}
+        />
         <ambientLight intensity={ambientLightIntensity} color={ambientLightColor} />
         <hemisphereLight
           intensity={hemisphereLightIntensity}
@@ -4150,6 +4732,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             bodyRadii={bodyRadii}
             selectedBodyId={selectedBodyId}
             hoveredBodyId={hoveredBodyId}
+            cloudShadowStrengthScale={cloudShadowStrengthScale}
             resolveMaterial={resolveBodyMaterial}
           />
           <SystemCelestialLayer
@@ -4196,6 +4779,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             />
           )}
         </SystemRoot>
+        <EffectComposer enableNormalPass={false}>
+          <SMAA />
+          <Bloom
+            intensity={bloomIntensity}
+            mipmapBlur={!prefersTouchFallback}
+            radius={bloomRadius}
+            luminanceThreshold={bloomThreshold}
+            luminanceSmoothing={bloomSmoothing}
+          />
+          <Vignette offset={vignetteOffset} darkness={vignetteDarkness} />
+        </EffectComposer>
       </Canvas>
       <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
         <div className="pointer-events-auto flex gap-2">

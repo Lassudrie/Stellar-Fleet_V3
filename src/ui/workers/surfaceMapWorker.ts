@@ -12,7 +12,20 @@ export interface SurfaceMapWorkerState {
 export interface SurfaceMapWorkerRequest {
   bodyId: string;
   state: SurfaceMapWorkerState;
+  cloudShadow?: CloudShadowSettings | null;
 }
+
+export type CloudShadowSettings = {
+  strength: number;
+  noiseScale: number;
+  threshold: number;
+  softness: number;
+  seed: number;
+  seed2: number;
+  bandStrength: number;
+  bandFrequency: number;
+  bandOffset: number;
+};
 
 export type SurfaceTextureResolution = { width: number; height: number };
 
@@ -39,6 +52,7 @@ export interface SurfaceTextureWorkerResponseMessage {
     rgba: Uint8Array | null;
     normalRgba?: Uint8Array | null;
     aoRgba?: Uint8Array | null;
+    roughnessRgba?: Uint8Array | null;
     error?: string;
   };
 }
@@ -162,6 +176,12 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  if (edge0 === edge1) return x < edge0 ? 0 : 1;
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+};
+
 const hexToRgb8 = (hex: string): { r: number; g: number; b: number } => {
   const raw = hex.startsWith('#') ? hex.slice(1) : hex;
   const int = Number.parseInt(raw, 16);
@@ -235,6 +255,49 @@ const valueNoise2D = (x: number, y: number, seed: number, wrapPeriodX?: number):
   return lerp(nx0, nx1, sy);
 };
 
+const blendSeamColumns = (buffer: Uint8Array, width: number, height: number): void => {
+  if (width < 2) return;
+  for (let y = 0; y < height; y += 1) {
+    const left = (y * width) * 4;
+    const right = (y * width + (width - 1)) * 4;
+    for (let c = 0; c < 4; c += 1) {
+      const avg = Math.round((buffer[left + c] + buffer[right + c]) * 0.5);
+      buffer[left + c] = avg;
+      buffer[right + c] = avg;
+    }
+  }
+};
+
+const blendSeamNormals = (buffer: Uint8Array, width: number, height: number): void => {
+  if (width < 2) return;
+  for (let y = 0; y < height; y += 1) {
+    const left = (y * width) * 4;
+    const right = (y * width + (width - 1)) * 4;
+    const nxL = buffer[left] / 255 * 2 - 1;
+    const nyL = buffer[left + 1] / 255 * 2 - 1;
+    const nzL = buffer[left + 2] / 255 * 2 - 1;
+    const nxR = buffer[right] / 255 * 2 - 1;
+    const nyR = buffer[right + 1] / 255 * 2 - 1;
+    const nzR = buffer[right + 2] / 255 * 2 - 1;
+    let nx = (nxL + nxR) * 0.5;
+    let ny = (nyL + nyR) * 0.5;
+    let nz = (nzL + nzR) * 0.5;
+    const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+    nx *= invLen;
+    ny *= invLen;
+    nz *= invLen;
+    const r = Math.round((nx * 0.5 + 0.5) * 255);
+    const g = Math.round((ny * 0.5 + 0.5) * 255);
+    const b = Math.round((nz * 0.5 + 0.5) * 255);
+    buffer[left] = r;
+    buffer[left + 1] = g;
+    buffer[left + 2] = b;
+    buffer[right] = r;
+    buffer[right + 1] = g;
+    buffer[right + 2] = b;
+  }
+};
+
 const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
 
 const biomeNoiseAmplitude = (biome: Biome): { macro: number; micro: number } => {
@@ -268,20 +331,82 @@ const biomeNoiseAmplitude = (biome: Biome): { macro: number; micro: number } => 
   }
 };
 
+const biomeRoughness = (biome: Biome): number => {
+  switch (biome) {
+    case 'ocean':
+      return 0.1;
+    case 'coast':
+      return 0.22;
+    case 'lake':
+      return 0.12;
+    case 'ice':
+      return 0.45;
+    case 'fractured_ice':
+      return 0.5;
+    case 'dusty_ice':
+      return 0.55;
+    case 'cryovolcanic':
+      return 0.6;
+    case 'tundra':
+      return 0.65;
+    case 'taiga':
+      return 0.6;
+    case 'grassland':
+      return 0.55;
+    case 'forest':
+      return 0.5;
+    case 'rainforest':
+      return 0.45;
+    case 'desert':
+      return 0.8;
+    case 'ash_desert':
+      return 0.85;
+    case 'thermal_polygons':
+      return 0.78;
+    case 'lava_flats':
+    case 'volcanic':
+      return 0.7;
+    case 'vitrified':
+      return 0.68;
+    case 'oxidized':
+      return 0.72;
+    case 'compressed_plateau':
+      return 0.72;
+    case 'chemical_erosion':
+      return 0.68;
+    case 'fossil_basin':
+      return 0.7;
+    case 'rocky':
+      return 0.82;
+    case 'mountain':
+      return 0.88;
+    case 'cratered':
+      return 0.85;
+    default:
+      return 0.7;
+  }
+};
+
 const getTile = (tiles: PlanetSurfaceTile[], w: number, q: number, r: number): PlanetSurfaceTile => {
   return tiles[r * w + q];
 };
 
-const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureResolution): {
+const renderSurfaceTexture = (
+  map: PlanetSurfaceMap,
+  resolution: SurfaceTextureResolution,
+  cloudShadow?: CloudShadowSettings | null
+): {
   rgba: Uint8Array;
   normalRgba: Uint8Array | null;
   aoRgba: Uint8Array | null;
+  roughnessRgba: Uint8Array;
 } => {
   const { w, h, wrapX } = map.descriptor.config;
   const seed = map.descriptor.seed >>> 0;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
+  const roughnessRgba = new Uint8Array(width * height * 4);
   const heightField = new Float32Array(width * height);
 
   const { min: elevMin, max: elevMax } = computeElevRange(map.tiles);
@@ -295,9 +420,15 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
   const macroNoiseScaleY = 6;
   const microNoiseScaleX = 96;
   const microNoiseScaleY = 48;
+  const cloudShadowConfig = cloudShadow && cloudShadow.strength > 0 ? cloudShadow : null;
+  const cloudNoiseScaleX = cloudShadowConfig ? Math.max(2, Math.round(cloudShadowConfig.noiseScale)) : 0;
+  const cloudNoiseScaleY = cloudShadowConfig ? Math.max(1, Math.round(cloudNoiseScaleX * 0.6)) : 0;
 
   for (let y = 0; y < height; y += 1) {
     const v = (y + 0.5) / height; // 0..1
+    const latNorm = Math.abs(v - 0.5) * 2;
+    const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+    const detailFactor = lerp(0.35, 1, poleBlend);
     const rFloat = v * (h - 1);
     const r0 = Math.max(0, Math.min(h - 1, Math.floor(rFloat)));
     const r1 = Math.min(r0 + 1, h - 1);
@@ -360,16 +491,17 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       const slopeNorm = Math.sqrt(dElevDq * dElevDq + dElevDr * dElevDr) / elevRange;
 
       const slopeShade = Math.max(0.82, 1 - slopeNorm * 1.35);
+      const poleSlopeShade = lerp(1, slopeShade, detailFactor);
       const altNorm = (elev - seaLevel) / elevRange;
       const altShade = 1 + Math.max(-0.06, Math.min(0.09, altNorm * 0.12));
-      const shade = slopeShade * altShade;
+      const shade = poleSlopeShade * altShade;
 
       const amp00 = biomeNoiseAmplitude(t00.biome);
       const amp10 = biomeNoiseAmplitude(t10.biome);
       const amp01 = biomeNoiseAmplitude(t01.biome);
       const amp11 = biomeNoiseAmplitude(t11.biome);
-      const macroAmp = amp00.macro * w00 + amp10.macro * w10 + amp01.macro * w01 + amp11.macro * w11;
-      const microAmp = amp00.micro * w00 + amp10.micro * w10 + amp01.micro * w01 + amp11.micro * w11;
+      const macroAmp = (amp00.macro * w00 + amp10.macro * w10 + amp01.macro * w01 + amp11.macro * w11) * detailFactor;
+      const microAmp = (amp00.micro * w00 + amp10.micro * w10 + amp01.micro * w01 + amp11.micro * w11) * detailFactor;
 
       const macroNoise = valueNoise2D(u * macroNoiseScaleX, v * macroNoiseScaleY, seed + 1013, useWrap ? macroNoiseScaleX : undefined);
       const microNoise = valueNoise2D(u * microNoiseScaleX, v * microNoiseScaleY, seed + 2017, useWrap ? microNoiseScaleX : undefined);
@@ -392,13 +524,47 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       const shallow = 1 - clamp01(waterDepth * 2.4);
       const waterShade = 1 + waterWeight * (shallow * 0.08 - waterDepth * 0.22);
 
+      let cloudShadowFactor = 1;
+      if (cloudShadowConfig) {
+        const shadowStrength = cloudShadowConfig.strength * detailFactor;
+        if (shadowStrength > 0.001) {
+          const shadowX = u * cloudNoiseScaleX;
+          const shadowY = v * cloudNoiseScaleY;
+          const wrapPeriod = useWrap ? cloudNoiseScaleX : undefined;
+          const n1 = valueNoise2D(shadowX, shadowY, cloudShadowConfig.seed, wrapPeriod);
+          const n2 = valueNoise2D(shadowX * 1.9, shadowY * 1.9, cloudShadowConfig.seed2, wrapPeriod ? wrapPeriod * 2 : undefined);
+          let field = lerp(n1, n2, 0.35);
+          if (cloudShadowConfig.bandStrength > 0 && cloudShadowConfig.bandFrequency > 0) {
+            const lat = Math.sin((v - 0.5) * Math.PI);
+            const stripe = 0.5 + 0.5 * Math.sin((lat + cloudShadowConfig.bandOffset) * cloudShadowConfig.bandFrequency);
+            const band = smoothstep(0.25, 0.78, stripe);
+            field *= lerp(1, band, clamp01(cloudShadowConfig.bandStrength));
+          }
+          const shadow = smoothstep(cloudShadowConfig.threshold, cloudShadowConfig.threshold + cloudShadowConfig.softness, field);
+          cloudShadowFactor = 1 - shadowStrength * shadow;
+        }
+      }
+
+      const rough00 = biomeRoughness(t00.biome);
+      const rough10 = biomeRoughness(t10.biome);
+      const rough01 = biomeRoughness(t01.biome);
+      const rough11 = biomeRoughness(t11.biome);
+      let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
+      const dryness = clamp01(1 - moistNorm);
+      landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
+      landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
+      landRoughness = clamp01(landRoughness);
+
+      const waterRoughness = clamp01(0.08 + shallow * 0.09 + (macroNoise - 0.5) * 0.02);
+      const roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+
       rLin *= shade;
       gLin *= shade;
       bLin *= shade;
 
-      rLin *= noiseShade * climateShade * waterShade;
-      gLin *= noiseShade * climateShade * waterShade;
-      bLin *= noiseShade * climateShade * waterShade;
+      rLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
+      gLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
+      bLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
 
       const rr = Math.round(clamp01(linearToSrgb(Math.max(0, rLin))) * 255);
       const gg = Math.round(clamp01(linearToSrgb(Math.max(0, gLin))) * 255);
@@ -409,13 +575,22 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       rgba[idx + 1] = gg;
       rgba[idx + 2] = bb;
       rgba[idx + 3] = 255;
+      const roughByte = Math.round(roughness * 255);
+      roughnessRgba[idx] = roughByte;
+      roughnessRgba[idx + 1] = roughByte;
+      roughnessRgba[idx + 2] = roughByte;
+      roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
       heightField[y * width + x] = heightNorm;
     }
   }
 
   const shouldComputeRelief = width >= 256 && height >= 128;
   if (!shouldComputeRelief) {
-    return { rgba, normalRgba: null, aoRgba: null };
+    if (useWrap) {
+      blendSeamColumns(rgba, width, height);
+      blendSeamColumns(roughnessRgba, width, height);
+    }
+    return { rgba, normalRgba: null, aoRgba: null, roughnessRgba };
   }
 
   const normalRgba = new Uint8Array(width * height * 4);
@@ -425,6 +600,12 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
   const aoStrength = 1.5 * heightScale;
 
   for (let y = 0; y < height; y += 1) {
+    const v = (y + 0.5) / height;
+    const latNorm = Math.abs(v - 0.5) * 2;
+    const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+    const detailFactor = lerp(0.35, 1, poleBlend);
+    const rowNormalStrength = normalStrength * detailFactor;
+    const rowAoStrength = aoStrength * detailFactor;
     const y0 = y > 0 ? y - 1 : 0;
     const y1 = y < height - 1 ? y + 1 : height - 1;
     const row = y * width;
@@ -444,8 +625,8 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
 
       const dx = hR - hL;
       const dy = hD - hU;
-      let nx = -dx * normalStrength;
-      let ny = -dy * normalStrength;
+      let nx = -dx * rowNormalStrength;
+      let ny = -dy * rowNormalStrength;
       let nz = 1.0;
       const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       nx *= invLen;
@@ -465,7 +646,7 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
       const neighborAvg = (hL + hR + hU + hD + hUL + hUR + hDL + hDR) / 8;
       const concavity = Math.max(0, neighborAvg - hC);
       const waterFactor = hC < seaLevelNorm ? 0.55 : 1;
-      let ao = 1 - concavity * (2.1 * aoStrength) * waterFactor;
+      let ao = 1 - concavity * (2.1 * rowAoStrength) * waterFactor;
       ao = Math.min(1, Math.max(0.6, ao));
 
       const aoByte = Math.round(ao * 255);
@@ -476,7 +657,14 @@ const renderSurfaceTexture = (map: PlanetSurfaceMap, resolution: SurfaceTextureR
     }
   }
 
-  return { rgba, normalRgba, aoRgba };
+  if (useWrap) {
+    blendSeamColumns(rgba, width, height);
+    blendSeamColumns(roughnessRgba, width, height);
+    blendSeamColumns(aoRgba, width, height);
+    blendSeamNormals(normalRgba, width, height);
+  }
+
+  return { rgba, normalRgba, aoRgba, roughnessRgba };
 };
 
 self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
@@ -521,16 +709,22 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
             height: payload.resolution.height,
             rgba: null,
             normalRgba: null,
-            aoRgba: null
+            aoRgba: null,
+            roughnessRgba: null
           }
         });
         return;
       }
 
-      const { rgba, normalRgba, aoRgba } = renderSurfaceTexture(map, payload.resolution);
+      const { rgba, normalRgba, aoRgba, roughnessRgba } = renderSurfaceTexture(
+        map,
+        payload.resolution,
+        payload.cloudShadow ?? null
+      );
       const transfer: Transferable[] = [rgba.buffer];
       if (normalRgba) transfer.push(normalRgba.buffer);
       if (aoRgba) transfer.push(aoRgba.buffer);
+      if (roughnessRgba) transfer.push(roughnessRgba.buffer);
       postResponse(
         {
           kind: 'surfaceTexture',
@@ -541,7 +735,8 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
             height: payload.resolution.height,
             rgba,
             normalRgba,
-            aoRgba
+            aoRgba,
+            roughnessRgba
           }
         },
         transfer
@@ -558,6 +753,7 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
           rgba: null,
           normalRgba: null,
           aoRgba: null,
+          roughnessRgba: null,
           error: errorMessage
         }
       });
