@@ -2,8 +2,13 @@ import { distSq } from './math/vec3';
 
 type PositionedEntity = { position: { x: number; y: number; z: number } };
 
+// Packed integer key constants
+// Supports cell coordinates within +/- 5,000,000 on Z axis and +/- 50,000,000 on X axis
+const KEY_STRIDE = 10_000_000;
+const KEY_OFFSET = 5_000_000;
+
 export class SpatialIndex<T extends PositionedEntity> {
-  private readonly buckets = new Map<string, T[]>();
+  private readonly buckets = new Map<number, T[]>();
   private readonly cellSize: number;
   private readonly minCell: { x: number; z: number } = { x: Infinity, z: Infinity };
   private readonly maxCell: { x: number; z: number } = { x: -Infinity, z: -Infinity };
@@ -42,17 +47,34 @@ export class SpatialIndex<T extends PositionedEntity> {
   }
 
   private getKey(x: number, z: number) {
-    return `${x}:${z}`;
+    return (x + KEY_OFFSET) * KEY_STRIDE + (z + KEY_OFFSET);
   }
 
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
+  private forEachCellInSquare(center: { x: number; z: number }, cellRadius: number, callback: (x: number, z: number) => void) {
     for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
       for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
+        callback(x, z);
       }
     }
-    return cells;
+  }
+
+  private forEachCellInRing(center: { x: number; z: number }, radius: number, callback: (x: number, z: number) => void) {
+    if (radius === 0) {
+      callback(center.x, center.z);
+      return;
+    }
+
+    // Top and Bottom rows
+    for (let x = center.x - radius; x <= center.x + radius; x++) {
+      callback(x, center.z - radius);
+      callback(x, center.z + radius);
+    }
+
+    // Left and Right sides (excluding corners already handled)
+    for (let z = center.z - radius + 1; z <= center.z + radius - 1; z++) {
+      callback(center.x - radius, z);
+      callback(center.x + radius, z);
+    }
   }
 
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
@@ -96,15 +118,15 @@ export class SpatialIndex<T extends PositionedEntity> {
     const maxDistanceSq = maxDistance * maxDistance;
     const candidates: T[] = [];
 
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+    this.forEachCellInSquare(center, cellRadius, (cx, cz) => {
+      const bucket = this.buckets.get(this.getKey(cx, cz));
       if (!bucket) return;
 
-      bucket.forEach(item => {
+      for (const item of bucket) {
         if (distSq(item.position, position) <= maxDistanceSq) {
           candidates.push(item);
         }
-      });
+      }
     });
 
     return candidates;
@@ -128,30 +150,36 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+      this.forEachCellInRing(center, cellRadius, (cx, cz) => {
+        const bucket = this.buckets.get(this.getKey(cx, cz));
         if (!bucket) return;
 
-        bucket.forEach(item => {
+        for (const item of bucket) {
           if (predicate && !predicate(item)) return;
           const distanceSq = distSq(item.position, position);
           if (distanceSq < bestDistanceSq) {
             bestDistanceSq = distanceSq;
             bestItem = item;
           }
-        });
+        }
       });
 
       if (bestItem) {
+        // We found something in this ring (or previous rings).
+        // Check if it's possible for something closer to exist in the next ring.
+        // The nearest point in the next ring (cellRadius + 1) is at least (cellRadius * cellSize) distance away?
+        // Wait, current logic:
         const bounds = this.getSearchBounds(center, cellRadius);
+        // Distance to the edge of the current square search area.
         const minBoundary = Math.min(
           position.x - bounds.minX,
           bounds.maxX - position.x,
           position.z - bounds.minZ,
           bounds.maxZ - position.z
         );
+
+        // If the best item found so far is closer than the edge of the current search box,
+        // then nothing outside this box can be closer.
         if (minBoundary > 0 && bestDistanceSq <= minBoundary * minBoundary) {
           break;
         }
