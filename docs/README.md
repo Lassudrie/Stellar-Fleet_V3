@@ -16,7 +16,7 @@ Détail des règles du jeu et des mécaniques.
 Conception technique et contraintes critiques.
 - **[Architecture Système](architecture/system-design.md)** : Architecture globale, séparation Moteur/UI/Rendu, Stack technique.
 - **[Déterminisme & Gestion d'État](architecture/determinism-and-state.md)** : Le cœur du moteur. Gestion de la RNG, Immutabilité, Sérialisation.
-- Générateur de surface planétaire : `src/engine/worldgen/planetSurfaceGenerator.ts` (v4 par défaut : macro-continents + rotation/warp + jitter côtier, océans par composante, nettoyage micro-îles; v1/v2 legacy via `scenario.generation.surfaceGeneratorVersion`).
+- Générateur de surface planétaire : `src/engine/worldgen/planetSurfaceGenerator.ts` (v5 par défaut : macro-continents + rotation/warp + jitter côtier, océans par composante, nettoyage micro-îles; v1/v2 legacy via `scenario.generation.surfaceGeneratorVersion`).
 
 ### 3. Données & API (`data/`)
 Structure des données.

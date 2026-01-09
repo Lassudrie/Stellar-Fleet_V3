@@ -171,9 +171,9 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
   - ou maintenir la compat bit-for-bit (rarement souhaitable).
 
 ### Implémentation actuelle (repo)
-- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v4 par défaut).
+- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v5 par défaut).
 - Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
-- Spécificités v4 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
+- Spécificités v4/v5 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
 
 ## 5. Pipeline de génération (cohérence environnementale)
 
@@ -185,6 +185,7 @@ Le pipeline standard produit trois champs continus puis discrétise :
 
 Validation hydrologie/climat (avant biomes et rivières) :
 - Pas d’hydrosphère liquide si atmosphère absente ou pression < seuil (≈ 0.08 bar) → aucune eau de surface, pas de rivières.
+- Si la température moyenne dépasse le point d’ébullition (≈ 100°C), pas d’hydrosphère liquide → aucune eau de surface, pas de rivières.
 - Si la température moyenne est sous le point de congélation effectif (fonction de la pression), l’eau de surface est figée → biomes d’eau gelés, rivières désactivées.
 - Le relief est modulé par la gravité (amplitude), l’activité tectonique (structures majeures) et l’érosion (atmosphère/hydrosphère/glaces).
 

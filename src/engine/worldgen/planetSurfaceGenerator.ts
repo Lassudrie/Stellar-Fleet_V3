@@ -613,14 +613,20 @@ const pickSurfaceClass = (params: {
 const MIN_LIQUID_WATER_PRESSURE_BAR = 0.08;
 const FREEZE_POINT_BASE_K = 273.15;
 const FREEZE_POINT_MIN_PRESSURE_K = 276;
+const BOILING_POINT_K = 373.15;
 
 const computeEffectiveFreezingPointK = (pressureBar: number): number => {
   const normalized = clamp01((pressureBar - MIN_LIQUID_WATER_PRESSURE_BAR) / (1 - MIN_LIQUID_WATER_PRESSURE_BAR));
   return FREEZE_POINT_MIN_PRESSURE_K + (FREEZE_POINT_BASE_K - FREEZE_POINT_MIN_PRESSURE_K) * normalized;
 };
 
-const computeLiquidWaterPotential = (pressureBar: number | undefined, climateK: number): number => {
+const computeLiquidWaterPotential = (
+  pressureBar: number | undefined,
+  climateK: number,
+  maxLiquidWaterK?: number
+): number => {
   if (!isFiniteNumber(pressureBar) || pressureBar < MIN_LIQUID_WATER_PRESSURE_BAR) return 0;
+  if (isFiniteNumber(maxLiquidWaterK) && climateK > maxLiquidWaterK) return 0;
   const freezePointK = computeEffectiveFreezingPointK(pressureBar);
   return clamp01((climateK - freezePointK + 12) / 28);
 };
@@ -648,13 +654,14 @@ const computeErosionIndex = (params: {
   waterFraction: number;
   climateK: number;
   pressureBar?: number;
+  maxLiquidWaterK?: number;
 }): number => {
   const airMass = clamp01(params.airMassIndex);
   if (airMass < AIRLESS_AIRMASS_INDEX) return clamp01(0.02 + 0.15 * params.waterFraction);
   const pressure = isFiniteNumber(params.pressureBar) ? params.pressureBar : 0;
   const freezePointK =
     pressure >= MIN_LIQUID_WATER_PRESSURE_BAR ? computeEffectiveFreezingPointK(pressure) : FREEZE_POINT_BASE_K;
-  const liquidPotential = computeLiquidWaterPotential(pressure, params.climateK);
+  const liquidPotential = computeLiquidWaterPotential(pressure, params.climateK, params.maxLiquidWaterK);
   const icePotential = clamp01((freezePointK - params.climateK + 8) / 28);
   const windErosion = airMass * (params.climateK > 305 ? 1 : 0.7);
   const waterErosion = clamp01(params.waterFraction) * (0.2 + 0.8 * liquidPotential);
@@ -668,9 +675,11 @@ const computeWaterFraction = (params: {
   climateK: number;
   albedo: number;
   airMassIndex: number;
+  maxLiquidWaterK?: number;
 }): number => {
   const { pressureBar, climateK, albedo, airMassIndex } = params;
   const p = typeof pressureBar === 'number' && Number.isFinite(pressureBar) ? pressureBar : undefined;
+  if (isFiniteNumber(params.maxLiquidWaterK) && climateK > params.maxLiquidWaterK) return 0;
   if (airMassIndex < AIRLESS_AIRMASS_INDEX) return 0.02;
 
   // Basic habitability window heuristic; keep it smooth and deterministic.
@@ -694,7 +703,10 @@ const computeWaterFraction = (params: {
   return clamp01(final);
 };
 
-export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams => {
+export const deriveSurfaceParamsFromPlanet = (
+  planet: PlanetData,
+  options?: { maxLiquidWaterK?: number }
+): SurfaceParams => {
   const { climateK, greenhouseK, airMassIndex } = resolveClimateSnapshot({
     climateK: planet.climateK,
     greenhouseK: planet.greenhouseK,
@@ -703,6 +715,7 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
     teqK: planet.teqK,
     atmosphere: planet.atmosphere
   });
+  const maxLiquidWaterK = options?.maxLiquidWaterK;
   const density = atmosphereDensityFactor(planet.atmosphere, airMassIndex);
   const { surfaceClass, surfaceClassReason } = pickSurfaceClass({
     climateK,
@@ -715,7 +728,8 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
     pressureBar: planet.pressureBar,
     climateK,
     albedo: planet.albedo,
-    airMassIndex
+    airMassIndex,
+    maxLiquidWaterK
   });
 
   const typeBias = planet.type === 'Terrestrial'
@@ -734,7 +748,8 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
     airMassIndex,
     waterFraction,
     climateK,
-    pressureBar: planet.pressureBar
+    pressureBar: planet.pressureBar,
+    maxLiquidWaterK
   });
   const reliefBase = 1 / Math.sqrt(Math.max(0.15, planet.gravityG));
   const reliefScale = clampRange(reliefBase * (0.75 + 0.6 * tectonicsIndex) * (1 - 0.35 * erosionIndex), 0.4, 2.4);
@@ -742,7 +757,7 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
   const craterIntensity = clamp01(craterBase * (1 - 0.55 * erosionIndex));
   const heatBoost = clamp01((climateK - 300) / 120);
   const volcanismIndex = clamp01(0.08 + 0.55 * tectonicsIndex + 0.2 * heatBoost);
-  const liquidPotential = computeLiquidWaterPotential(planet.pressureBar, climateK);
+  const liquidPotential = computeLiquidWaterPotential(planet.pressureBar, climateK, maxLiquidWaterK);
   const humidityFactor =
     clamp01(0.12 + 0.88 * density) *
     clamp01(0.2 + 0.8 * waterFraction) *
@@ -770,7 +785,10 @@ export const deriveSurfaceParamsFromPlanet = (planet: PlanetData): SurfaceParams
   };
 };
 
-export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
+export const deriveSurfaceParamsFromMoon = (
+  moon: MoonData,
+  options?: { maxLiquidWaterK?: number }
+): SurfaceParams => {
   // Moons share similar heuristics, but allow tidal heating to drive volcanism.
   const { climateK, greenhouseK, airMassIndex } = resolveClimateSnapshot({
     climateK: moon.climateK,
@@ -781,6 +799,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     tidalBonusK: moon.tidalBonusK,
     atmosphere: moon.atmosphere as AtmosphereType
   });
+  const maxLiquidWaterK = options?.maxLiquidWaterK;
   const density = atmosphereDensityFactor(moon.atmosphere as AtmosphereType, airMassIndex);
   const { surfaceClass, surfaceClassReason } = pickSurfaceClass({
     climateK,
@@ -793,7 +812,8 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     pressureBar: moon.pressureBar,
     climateK,
     albedo: moon.albedo,
-    airMassIndex
+    airMassIndex,
+    maxLiquidWaterK
   });
 
   const tidal = typeof moon.tidalBonusK === 'number' && Number.isFinite(moon.tidalBonusK) ? moon.tidalBonusK : 0;
@@ -816,7 +836,8 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
     airMassIndex,
     waterFraction,
     climateK,
-    pressureBar: moon.pressureBar
+    pressureBar: moon.pressureBar,
+    maxLiquidWaterK
   });
   const reliefBase = 1 / Math.sqrt(Math.max(0.15, moon.gravityG));
   const reliefScale = clampRange(reliefBase * (0.72 + 0.58 * tectonicsIndex) * (1 - 0.35 * erosionIndex), 0.45, 2.6);
@@ -824,7 +845,7 @@ export const deriveSurfaceParamsFromMoon = (moon: MoonData): SurfaceParams => {
   const craterIntensity = clamp01(craterBase * (1 - 0.55 * erosionIndex));
   const tidalBoost = clamp01(tidal / 250);
   const volcanismIndex = clamp01(0.06 + 0.4 * tectonicsIndex + 0.5 * tidalBoost);
-  const liquidPotential = computeLiquidWaterPotential(moon.pressureBar, climateK);
+  const liquidPotential = computeLiquidWaterPotential(moon.pressureBar, climateK, maxLiquidWaterK);
   const humidityFactor =
     clamp01(0.1 + 0.9 * density) *
     clamp01(0.2 + 0.8 * waterFraction) *
@@ -872,9 +893,11 @@ const resolveHydrologyMode = (params: {
   atmosphere?: AtmosphereType;
   pressureBar?: number;
   baseT0K: number;
+  maxLiquidWaterK?: number;
 }): HydrologyMode => {
   if (!params.atmosphere || params.atmosphere === 'None') return 'none';
   if (!isFiniteNumber(params.pressureBar) || params.pressureBar < MIN_LIQUID_WATER_PRESSURE_BAR) return 'none';
+  if (isFiniteNumber(params.maxLiquidWaterK) && params.baseT0K > params.maxLiquidWaterK) return 'none';
   const freezePointK = computeEffectiveFreezingPointK(params.pressureBar);
   return params.baseT0K < freezePointK ? 'frozen' : 'liquid';
 };
@@ -889,29 +912,37 @@ const resolveSurfaceInputs = (params: {
   descriptor: PlanetSurfaceDescriptor;
   planetData?: PlanetData;
   moonData?: MoonData;
-}): { env: SurfaceParams; baseT0K: number; albedo?: number; atmosphere?: AtmosphereType; pressureBar?: number } => {
+}): {
+  env: SurfaceParams;
+  baseT0K: number;
+  albedo?: number;
+  atmosphere?: AtmosphereType;
+  pressureBar?: number;
+  maxLiquidWaterK?: number;
+} => {
   const isMoon = params.descriptor.astroRef.moonIndex !== undefined;
   const preferredMoon = isMoon ? params.moonData : undefined;
   const preferredPlanet = !isMoon ? params.planetData : undefined;
   const fallbackMoon = preferredMoon ?? params.moonData;
   const fallbackPlanet = preferredPlanet ?? params.planetData;
   const climateSource = preferredMoon ?? preferredPlanet ?? fallbackMoon ?? fallbackPlanet;
+  const maxLiquidWaterK = params.descriptor.config?.generatorVersion >= 5 ? BOILING_POINT_K : undefined;
 
   const env: SurfaceParams = preferredMoon
-    ? deriveSurfaceParamsFromMoon(preferredMoon)
+    ? deriveSurfaceParamsFromMoon(preferredMoon, { maxLiquidWaterK })
     : preferredPlanet
-    ? deriveSurfaceParamsFromPlanet(preferredPlanet)
+    ? deriveSurfaceParamsFromPlanet(preferredPlanet, { maxLiquidWaterK })
     : fallbackMoon
-    ? deriveSurfaceParamsFromMoon(fallbackMoon)
+    ? deriveSurfaceParamsFromMoon(fallbackMoon, { maxLiquidWaterK })
     : fallbackPlanet
-    ? deriveSurfaceParamsFromPlanet(fallbackPlanet)
+    ? deriveSurfaceParamsFromPlanet(fallbackPlanet, { maxLiquidWaterK })
     : FALLBACK_SURFACE_PARAMS;
   const baseT0K = climateSource?.climateK ?? climateSource?.temperatureK ?? 220;
   const albedo = climateSource?.albedo;
   const atmosphere = climateSource?.atmosphere as AtmosphereType | undefined;
   const pressureBar = climateSource?.pressureBar;
 
-  return { env, baseT0K, albedo, atmosphere, pressureBar };
+  return { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK };
 };
 
 const classifyLandBiome = (params: {
@@ -1013,7 +1044,7 @@ const classifyLandBiome = (params: {
 // Descriptor (was: planetSurface/descriptor.ts)
 // ==========================================
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 4;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 5;
 
 const clampInt = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, Math.round(x)));
 
@@ -2012,8 +2043,8 @@ const generateSurfaceMapV2 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
-  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K, maxLiquidWaterK });
   const envHydrology: SurfaceParams =
     hydrologyMode === 'liquid'
       ? env
@@ -2183,8 +2214,8 @@ const generateSurfaceMapV3 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
-  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K, maxLiquidWaterK });
   const envHydrology: SurfaceParams =
     hydrologyMode === 'liquid'
       ? env
@@ -2385,8 +2416,8 @@ const generateSurfaceMapV4 = (params: {
   const { w, h, wrapX } = descriptor.config;
   const n = w * h;
 
-  const { env, baseT0K, albedo, atmosphere, pressureBar } = resolveSurfaceInputs(params);
-  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K });
+  const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K, maxLiquidWaterK });
   const envHydrology: SurfaceParams =
     hydrologyMode === 'liquid'
       ? env

@@ -3434,6 +3434,7 @@ const engine_isWaterBiome = (biome: string): boolean => biome === 'ocean' || bio
 const ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR = 0.08;
 const ENGINE_FREEZE_POINT_BASE_K = 273.15;
 const ENGINE_FREEZE_POINT_MIN_PRESSURE_K = 276;
+const ENGINE_BOILING_POINT_K = 373.15;
 
 const engine_computeEffectiveFreezingPointK = (pressureBar: number): number => {
   const normalized = Math.max(
@@ -3443,10 +3444,15 @@ const engine_computeEffectiveFreezingPointK = (pressureBar: number): number => {
   return ENGINE_FREEZE_POINT_MIN_PRESSURE_K + (ENGINE_FREEZE_POINT_BASE_K - ENGINE_FREEZE_POINT_MIN_PRESSURE_K) * normalized;
 };
 
-const engine_resolveHydrologyMode = (planetData: PlanetData): 'none' | 'frozen' | 'liquid' => {
+const engine_resolveHydrologyMode = (
+  planetData: PlanetData,
+  maxLiquidWaterK?: number
+): 'none' | 'frozen' | 'liquid' => {
   if (planetData.atmosphere === 'None') return 'none';
   if (!engine_isFiniteNumber(planetData.pressureBar) || planetData.pressureBar < ENGINE_MIN_LIQUID_WATER_PRESSURE_BAR) return 'none';
   const climateK = engine_isFiniteNumber(planetData.climateK) ? planetData.climateK : planetData.temperatureK;
+  const liquidCapK = engine_isFiniteNumber(maxLiquidWaterK) ? maxLiquidWaterK : Number.POSITIVE_INFINITY;
+  if (climateK > liquidCapK) return 'none';
   const freezePointK = engine_computeEffectiveFreezingPointK(planetData.pressureBar);
   return climateK < freezePointK ? 'frozen' : 'liquid';
 };
@@ -3595,8 +3601,9 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const params = deriveSurfaceParamsFromPlanet(planetData);
-      const hydrologyMode = engine_resolveHydrologyMode(planetData);
+      const maxLiquidWaterK = descriptor.config.generatorVersion >= 5 ? ENGINE_BOILING_POINT_K : undefined;
+      const params = deriveSurfaceParamsFromPlanet(planetData, { maxLiquidWaterK });
+      const hydrologyMode = engine_resolveHydrologyMode(planetData, maxLiquidWaterK);
       const water =
         hydrologyMode === 'none'
           ? 0
@@ -3698,6 +3705,51 @@ tests.push(
         assert.strictEqual(tile.featureBits & FeatureBits.River, 0, 'Unexpected river on frozen world');
       }
       assert.ok(iceCount > 0, 'Expected some ice tiles on frozen world');
+    }
+  },
+  {
+    name: 'Surface hydrology blocks liquid water on boiling worlds',
+    run: () => {
+      const systemId = 'sys_surface_boiling_rule';
+      const body: PlanetBody = {
+        id: `planet-${systemId}-1`,
+        systemId,
+        name: 'Boiling',
+        bodyType: 'planet',
+        class: 'solid',
+        ownerFactionId: null,
+        size: 1,
+        isSolid: true
+      };
+      const planetData: PlanetData = {
+        type: 'Terrestrial',
+        semiMajorAxisAu: 0.45,
+        eccentricity: 0,
+        orbitInclinationDeg: 0,
+        orbitAscendingNodeDeg: 0,
+        axialTiltDeg: 0,
+        massEarth: 0.9,
+        radiusEarth: 0.95,
+        gravityG: 0.95,
+        albedo: 0.1,
+        teqK: 380,
+        atmosphere: 'Earthlike',
+        pressureBar: 1,
+        greenhouseK: 10,
+        climateK: 385,
+        airMassIndex: 0.6,
+        temperatureK: 385,
+        seasonalDeltaK: 0,
+        moons: []
+      };
+
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: 13, systemId, body, generatorVersion: 5 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      for (const tile of map.tiles) {
+        assert.ok(!engine_isWaterBiome(tile.biome), `Unexpected liquid water biome on boiling world: ${tile.biome}`);
+        assert.strictEqual(tile.featureBits & FeatureBits.River, 0, 'Unexpected river on boiling world');
+      }
     }
   },
   {
@@ -3942,7 +3994,8 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
       ownerFactionId: system.ownerFactionId
     });
 
-    const hydrologyMode = engine_resolveHydrologyMode(planetData);
+    const maxLiquidWaterK = candidateDescriptor.config.generatorVersion >= 5 ? ENGINE_BOILING_POINT_K : undefined;
+    const hydrologyMode = engine_resolveHydrologyMode(planetData, maxLiquidWaterK);
     const hasWater = hydrologyMode === 'liquid' && map.tiles.some(tile => engine_ps_isWater(tile.biome));
     const hasBuildable = map.tiles.some(tile => engine_ps_isBuildable(tile.biome));
     if (hasWater && hasBuildable) {
