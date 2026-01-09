@@ -22,7 +22,6 @@ import {
   Euler,
   FrontSide,
   Group,
-  HemisphereLight,
   InstancedMesh,
   LinearFilter,
   LinearMipmapLinearFilter,
@@ -170,6 +169,18 @@ const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
 const SURFACE_MIPMAP_ANISOTROPY_MOBILE = 4;
 const SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR = 5.5;
 const SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR = 1.06;
+const THERMAL_TINT_COLD = new Color('#8fb8ff');
+const THERMAL_TINT_WARM = new Color('#f3b36a');
+const THERMAL_TINT_HOT = new Color('#e37246');
+const THERMAL_COLD_STRENGTH = 0.5;
+const THERMAL_WARM_STRENGTH = 0.45;
+const THERMAL_HOT_STRENGTH = 0.3;
+const THERMAL_COLD_START_C = -80;
+const THERMAL_COLD_END_C = -5;
+const THERMAL_WARM_START_C = 20;
+const THERMAL_WARM_END_C = 160;
+const THERMAL_HOT_START_C = 220;
+const THERMAL_HOT_END_C = 900;
 
 const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#cbd5e1',
@@ -493,6 +504,37 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
   if (edge0 === edge1) return x < edge0 ? 0 : 1;
   const t = MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+};
+
+const resolveThermalTint = (temperatureK: number | undefined): Color | null => {
+  if (!Number.isFinite(temperatureK)) return null;
+  const tempC = (temperatureK as number) - 273.15;
+  const coldWeight = 1 - smoothstep(THERMAL_COLD_START_C, THERMAL_COLD_END_C, tempC);
+  const warmWeight = smoothstep(THERMAL_WARM_START_C, THERMAL_WARM_END_C, tempC);
+  const hotWeight = smoothstep(THERMAL_HOT_START_C, THERMAL_HOT_END_C, tempC);
+  const tint = new Color('#ffffff');
+  if (coldWeight > 0) {
+    tint.lerp(THERMAL_TINT_COLD, coldWeight * THERMAL_COLD_STRENGTH);
+  }
+  if (warmWeight > 0) {
+    tint.lerp(THERMAL_TINT_WARM, warmWeight * THERMAL_WARM_STRENGTH);
+  }
+  if (hotWeight > 0) {
+    tint.lerp(THERMAL_TINT_HOT, hotWeight * THERMAL_HOT_STRENGTH);
+  }
+  return tint;
+};
+
+const resolveThermalTints = (
+  baseColor: string,
+  temperatureK: number | undefined
+): { baseColor: string; surfaceTint: string } => {
+  const tint = resolveThermalTint(temperatureK);
+  if (!tint) {
+    return { baseColor, surfaceTint: '#ffffff' };
+  }
+  const tintedBase = new Color(baseColor).multiply(tint);
+  return { baseColor: tintedBase.getStyle(), surfaceTint: tint.getStyle() };
 };
 
 const linearToSrgb = (value: number): number => {
@@ -1004,6 +1046,9 @@ const getSpinScaleFromRadius = (
   const eased = Math.pow(ratio, SPIN_SCALE_EXPONENT);
   return MathUtils.clamp(eased, minScale, maxScale);
 };
+
+const getStarLightIntensityForRadius = (radius: number): number =>
+  MathUtils.clamp(MathUtils.clamp(3.5 + radius * 1.6, 3.5, 14) * 35, 45, 260);
 
 const sphericalFromOffset = (offset: Vector3): CameraSphericalState => {
   const spherical = new Spherical().setFromVector3(offset);
@@ -2885,7 +2930,10 @@ const SystemSurfaceTextureManager: React.FC<{
     let needsUpdate = false;
     if (material.map !== bundle.color) {
       material.map = bundle.color;
-      material.color.set('#ffffff');
+      const surfaceTint = typeof material.userData.surfaceTintColor === 'string'
+        ? material.userData.surfaceTintColor
+        : '#ffffff';
+      material.color.set(surfaceTint);
       needsUpdate = true;
     }
     const nextNormal = bundle.normal ?? null;
@@ -4390,15 +4438,26 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const resolvePlanetMaterial = useCallback((planet: OrbitingPlanet): MeshStandardMaterial => {
     const base = planetMaterialMap[planet.type];
     const baseColor = PLANET_TYPE_COLORS[planet.type];
+    const { baseColor: tintedBaseColor, surfaceTint } = resolveThermalTints(baseColor, planet.temperatureK);
     const existing = bodyMaterialByIdRef.current.get(planet.id);
-    if (existing) return existing;
+    if (existing) {
+      existing.userData.baseColor = tintedBaseColor;
+      existing.userData.surfaceTintColor = surfaceTint;
+      if (existing.map) {
+        existing.color.set(surfaceTint);
+      } else {
+        existing.color.set(tintedBaseColor);
+      }
+      return existing;
+    }
     const material = base.clone();
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
-    material.userData.baseColor = baseColor;
+    material.userData.baseColor = tintedBaseColor;
+    material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
-    material.color.set(baseColor);
+    material.color.set(tintedBaseColor);
     applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(planet.id, material);
     return material;
@@ -4407,15 +4466,26 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const resolveMoonMaterial = useCallback((moon: OrbitingMoon): MeshStandardMaterial => {
     const base = moonMaterialMap[moon.type];
     const baseColor = MOON_TYPE_COLORS[moon.type];
+    const { baseColor: tintedBaseColor, surfaceTint } = resolveThermalTints(baseColor, moon.temperatureK);
     const existing = bodyMaterialByIdRef.current.get(moon.id);
-    if (existing) return existing;
+    if (existing) {
+      existing.userData.baseColor = tintedBaseColor;
+      existing.userData.surfaceTintColor = surfaceTint;
+      if (existing.map) {
+        existing.color.set(surfaceTint);
+      } else {
+        existing.color.set(tintedBaseColor);
+      }
+      return existing;
+    }
     const material = base.clone();
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
-    material.userData.baseColor = baseColor;
+    material.userData.baseColor = tintedBaseColor;
+    material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
-    material.color.set(baseColor);
+    material.color.set(tintedBaseColor);
     applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(moon.id, material);
     return material;
@@ -4715,21 +4785,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starExtent);
   }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
-  const ambientLightIntensity = MathUtils.clamp(0.12 + clampedScale * 0.03, 0.1, 0.22);
-  const hemisphereLightIntensity = 0;
+  const ambientLightIntensity = MathUtils.clamp(0.05 + clampedScale * 0.02, 0.05, 0.15);
   const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
-  const starLightIntensity = MathUtils.clamp(MathUtils.clamp(3.5 + starRadius * 1.6, 3.5, 14) * 35, 45, 260);
+  const starLightIntensity = useMemo(() => getStarLightIntensityForRadius(starRadius), [starRadius]);
   const ambientLightColor = useMemo(
     () => new Color(starTintColor).lerp(new Color('#0b1020'), 0.7).getStyle(),
     [starTintColor]
-  );
-  const hemisphereSkyColor = useMemo(
-    () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
-    [starTintColor]
-  );
-  const hemisphereGroundColor = useMemo(
-    () => new Color('#000000').getStyle(),
-    []
   );
   const starLightColor = useMemo(
     () => new Color('#ffffff').lerp(new Color(starTintColor), 0.2).getStyle(),
@@ -4738,6 +4799,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   useEffect(() => {
     sunColorRef.current.set(starLightColor);
   }, [starLightColor]);
+  const companionStarLights = useMemo(() => (
+    starModels.slice(1).map((star) => ({
+      id: star.id,
+      position: star.position,
+      intensity: getStarLightIntensityForRadius(star.radius),
+      color: new Color('#ffffff').lerp(new Color(star.tintColor), 0.2).getStyle()
+    }))
+  ), [starModels]);
   const starIdSet = useMemo(() => new Set(starModels.map(star => star.id)), [starModels]);
   const cameraZoomConstraints = useMemo(() => {
     const anchorId = anchoredBodyId ?? starBodyId;
@@ -4910,18 +4979,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     [starTintColor]
   );
   const ambientLightRef = useRef<AmbientLight>(null);
-  const hemisphereLightRef = useRef<HemisphereLight>(null);
   const starLightRef = useRef<PointLight>(null);
   const [bloomLightsReady, setBloomLightsReady] = useState(false);
   useEffect(() => {
     if (bloomLightsReady) return;
-    if (ambientLightRef.current && hemisphereLightRef.current && starLightRef.current) {
+    if (ambientLightRef.current && starLightRef.current) {
       setBloomLightsReady(true);
     }
   }, [bloomLightsReady]);
   const bloomLights = useMemo(() => {
     if (!bloomLightsReady) return [];
-    return [ambientLightRef.current, hemisphereLightRef.current, starLightRef.current]
+    return [ambientLightRef.current, starLightRef.current]
       .filter(Boolean) as Object3D[];
   }, [bloomLightsReady]);
 
@@ -4971,15 +5039,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           target={anchoredTarget}
         />
         <ambientLight ref={ambientLightRef} intensity={ambientLightIntensity} color={ambientLightColor} />
-        <hemisphereLight
-          ref={hemisphereLightRef}
-          intensity={hemisphereLightIntensity}
-          color={hemisphereSkyColor}
-          groundColor={hemisphereGroundColor}
-        />
         <pointLight
           ref={starLightRef}
-          position={[0, 0, 0]}
+          position={primaryStar?.position ?? [0, 0, 0]}
           intensity={starLightIntensity}
           distance={starLightDistance}
           decay={2}
@@ -4991,6 +5053,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           shadow-bias={-0.00015}
           shadow-normalBias={0.02}
         />
+        {companionStarLights.map((light) => (
+          <pointLight
+            key={light.id}
+            position={light.position}
+            intensity={light.intensity}
+            distance={starLightDistance}
+            decay={2}
+            color={light.color}
+            castShadow={false}
+          />
+        ))}
 
         <SystemCamera
           maxDistance={cameraMaxDistance}
