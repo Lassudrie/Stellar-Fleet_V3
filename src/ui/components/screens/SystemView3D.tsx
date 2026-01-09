@@ -120,6 +120,11 @@ const STARFIELD_POINT_SIZE_DIM = 1.15;
 const STARFIELD_POINT_SIZE_BRIGHT = 2.1;
 const STARFIELD_NEBULA_LAYERS = 4;
 const STARFIELD_BASE_COLOR = '#04060c';
+const STARFIELD_BASE_TINT_STRENGTH = 0.08;
+const STARFIELD_NEBULA_STRENGTH_MIN = 0.015;
+const STARFIELD_NEBULA_STRENGTH_MAX = 0.045;
+const STARFIELD_NEBULA_TINT_MIN = 0.2;
+const STARFIELD_NEBULA_TINT_MAX = 0.45;
 const BODY_SPIN_SPEED_MIN = 0.0035;
 const BODY_SPIN_SPEED_MAX = 0.011;
 const BODY_SPIN_SPEED_MULTIPLIER = 2;
@@ -797,20 +802,21 @@ const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTextu
   const base = new Color(STARFIELD_BASE_COLOR);
   const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.7);
 
-  const gradient = context.createLinearGradient(0, 0, 0, size);
-  gradient.addColorStop(0, base.clone().lerp(tint, 0.2).getStyle());
-  gradient.addColorStop(0.55, base.getStyle());
-  gradient.addColorStop(1, base.clone().lerp(tint, 0.35).getStyle());
-  context.fillStyle = gradient;
+  const background = base.clone().lerp(tint, STARFIELD_BASE_TINT_STRENGTH);
+  context.fillStyle = background.getStyle();
   context.fillRect(0, 0, size, size);
 
-  context.globalCompositeOperation = 'screen';
+  context.globalCompositeOperation = 'source-over';
   for (let i = 0; i < STARFIELD_NEBULA_LAYERS; i += 1) {
     const radius = size * (0.18 + rand() * 0.32);
     const x = rand() * size;
     const y = rand() * size;
-    const strength = 0.04 + rand() * 0.07;
-    const nebula = base.clone().lerp(tint, 0.35 + rand() * 0.45);
+    const strength = STARFIELD_NEBULA_STRENGTH_MIN
+      + rand() * (STARFIELD_NEBULA_STRENGTH_MAX - STARFIELD_NEBULA_STRENGTH_MIN);
+    const nebula = base.clone().lerp(
+      tint,
+      STARFIELD_NEBULA_TINT_MIN + rand() * (STARFIELD_NEBULA_TINT_MAX - STARFIELD_NEBULA_TINT_MIN)
+    );
     const cloud = context.createRadialGradient(x, y, 0, x, y, radius);
     cloud.addColorStop(0, toRgbaString(nebula, strength));
     cloud.addColorStop(1, toRgbaString(nebula, 0));
