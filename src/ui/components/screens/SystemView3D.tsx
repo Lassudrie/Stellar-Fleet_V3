@@ -114,7 +114,8 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
-const STARFIELD_TEXTURE_SIZE = 2048;
+const STARFIELD_TEXTURE_MIN_SIZE = 2048;
+const STARFIELD_TEXTURE_MAX_SIZE = 4096;
 const STARFIELD_STAR_DENSITY = 0.0011;
 const STARFIELD_NEBULA_LAYERS = 4;
 const STARFIELD_EDGE_WRAP = 0.02;
@@ -180,6 +181,15 @@ const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
 const DAY_NIGHT_NIGHT_MIN = 0.12;
 
 type SurfaceTextureResolution = { width: number; height: number };
+
+const pickStarfieldTextureSize = (width: number, height: number, pixelRatio: number): number => {
+  const target = Math.max(width, height) * Math.max(pixelRatio, 1) * 1.1;
+  let size = 256;
+  while (size < target) {
+    size *= 2;
+  }
+  return MathUtils.clamp(size, STARFIELD_TEXTURE_MIN_SIZE, STARFIELD_TEXTURE_MAX_SIZE);
+};
 
 const pickSurfaceTextureResolution = (diameterPx: number, preferUltra: boolean): SurfaceTextureResolution | null => {
   if (!Number.isFinite(diameterPx) || diameterPx < SURFACE_TEXTURE_MIN_DIAMETER_PX) return null;
@@ -654,23 +664,22 @@ const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): Canva
   return texture;
 };
 
-const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTexture => {
+const createStarfieldTexture = (seedKey: string, tintColor: string, textureSize: number): CanvasTexture => {
   const canvas = document.createElement('canvas');
-  canvas.width = STARFIELD_TEXTURE_SIZE;
-  canvas.height = STARFIELD_TEXTURE_SIZE;
+  const size = Math.max(256, Math.floor(textureSize));
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext('2d');
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
-  texture.generateMipmaps = false;
-  texture.minFilter = NearestFilter;
-  texture.magFilter = NearestFilter;
+  texture.generateMipmaps = true;
+  texture.minFilter = LinearMipmapLinearFilter;
+  texture.magFilter = LinearFilter;
 
   if (!context) {
     return texture;
   }
   context.imageSmoothingEnabled = false;
-
-  const size = STARFIELD_TEXTURE_SIZE;
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
   const rand = createSeededRandom(seed);
   const base = new Color(STARFIELD_BASE_COLOR);
@@ -1124,8 +1133,29 @@ type SystemStarfieldProps = {
 
 const SystemStarfield: React.FC<SystemStarfieldProps> = ({ radius, seedKey, tintColor }) => {
   const meshRef = useRef<Mesh>(null);
-  const { camera } = useThree();
-  const texture = useMemo(() => createStarfieldTexture(seedKey, tintColor), [seedKey, tintColor]);
+  const { camera, gl, size } = useThree();
+  const pixelRatio = useMemo(() => {
+    try {
+      return gl.getPixelRatio?.() ?? 1;
+    } catch {
+      return 1;
+    }
+  }, [gl]);
+  const textureSize = useMemo(
+    () => pickStarfieldTextureSize(size.width, size.height, pixelRatio),
+    [pixelRatio, size.height, size.width]
+  );
+  const texture = useMemo(
+    () => createStarfieldTexture(seedKey, tintColor, textureSize),
+    [seedKey, textureSize, tintColor]
+  );
+  const maxAnisotropy = useMemo(() => {
+    try {
+      return gl.capabilities.getMaxAnisotropy?.() ?? 1;
+    } catch {
+      return 1;
+    }
+  }, [gl]);
 
   useFrame(() => {
     if (meshRef.current) {
@@ -1133,9 +1163,13 @@ const SystemStarfield: React.FC<SystemStarfieldProps> = ({ radius, seedKey, tint
     }
   });
 
-  useEffect(() => () => {
-    texture.dispose();
-  }, [texture]);
+  useEffect(() => {
+    texture.anisotropy = Math.min(8, Math.max(1, maxAnisotropy));
+    texture.needsUpdate = true;
+    return () => {
+      texture.dispose();
+    };
+  }, [maxAnisotropy, texture]);
 
   return (
     <mesh ref={meshRef} frustumCulled={false} renderOrder={-20} raycast={() => null}>
