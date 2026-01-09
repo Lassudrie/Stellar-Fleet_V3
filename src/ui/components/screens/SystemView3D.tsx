@@ -416,6 +416,16 @@ type BodyListItem = {
   children?: BodyListItem[];
 };
 
+type LongPressState = {
+  bodyId: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  isTouch: boolean;
+  moveTolerance: number;
+  hasMoved: boolean;
+};
+
 type CameraSphericalState = {
   theta: number;
   phi: number;
@@ -1717,7 +1727,9 @@ interface MoonOrbitGroupProps {
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   spinReferenceRadius: number;
+  hitboxScaleMultiplier: number;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onPressEnd: () => void;
   onPressCancel: () => void;
   onHover: (bodyId: string) => void;
@@ -1734,7 +1746,9 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   resolveAtmosphereBundle,
   orbitThickness,
   spinReferenceRadius,
+  hitboxScaleMultiplier,
   onPressStart,
+  onPressMove,
   onPressEnd,
   onPressCancel,
   onFocus,
@@ -1768,8 +1782,11 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     [moon.orbitAngle, moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg, moon.orbitRadius]
   );
   const moonHitboxScale = useMemo<[number, number, number]>(
-    () => [moon.radius * 2, moon.radius * 2, moon.radius * 2],
-    [moon.radius]
+    () => {
+      const scale = moon.radius * 2 * hitboxScaleMultiplier;
+      return [scale, scale, scale];
+    },
+    [hitboxScaleMultiplier, moon.radius]
   );
   const moonScale = useMemo<[number, number, number]>(() => [moon.radius, moon.radius, moon.radius], [moon.radius]);
   const atmosphereBundle = moon.atmosphere && moon.atmosphere !== 'None'
@@ -1845,13 +1862,20 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             onPointerUp={() => {
               onPressEnd();
             }}
+            onPointerMove={(event) => {
+              event.stopPropagation();
+              onPressMove(event);
+            }}
             onPointerOver={(event) => {
               event.stopPropagation();
               onHover(moon.id);
             }}
             onPointerOut={(event) => {
               event.stopPropagation();
-              onPressCancel();
+              onPressMove(event);
+              if (event.pointerType !== 'touch') {
+                onPressCancel();
+              }
               onBlur(moon.id);
             }}
             onClick={(event) => {
@@ -1923,7 +1947,9 @@ interface PlanetOrbitGroupProps {
   orbitThickness: number;
   spinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  hitboxScaleMultiplier: number;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onPressEnd: () => void;
   onPressCancel: () => void;
   onFocus: (bodyId: string) => void;
@@ -1944,7 +1970,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   orbitThickness,
   spinReferenceRadius,
   moonSpinReferenceRadius,
+  hitboxScaleMultiplier,
   onPressStart,
+  onPressMove,
   onPressEnd,
   onPressCancel,
   onFocus,
@@ -1982,8 +2010,11 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     [planet.radius]
   );
   const planetHitboxScale = useMemo<[number, number, number]>(
-    () => [planet.radius * 1.5, planet.radius * 1.5, planet.radius * 1.5],
-    [planet.radius]
+    () => {
+      const scale = planet.radius * 1.5 * hitboxScaleMultiplier;
+      return [scale, scale, scale];
+    },
+    [hitboxScaleMultiplier, planet.radius]
   );
   const atmosphereBundle = planet.atmosphere && planet.atmosphere !== 'None'
     ? resolveAtmosphereBundle(planet)
@@ -2058,13 +2089,20 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             onPointerUp={() => {
               onPressEnd();
             }}
+            onPointerMove={(event) => {
+              event.stopPropagation();
+              onPressMove(event);
+            }}
             onPointerOver={(event) => {
               event.stopPropagation();
               onHover(planet.id);
             }}
             onPointerOut={(event) => {
               event.stopPropagation();
-              onPressCancel();
+              onPressMove(event);
+              if (event.pointerType !== 'touch') {
+                onPressCancel();
+              }
               onBlur(planet.id);
             }}
             onClick={(event) => {
@@ -2130,7 +2168,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             resolveAtmosphereBundle={resolveAtmosphereBundle}
             orbitThickness={orbitThickness}
             spinReferenceRadius={moonSpinReferenceRadius}
+            hitboxScaleMultiplier={hitboxScaleMultiplier}
             onPressStart={onPressStart}
+            onPressMove={onPressMove}
             onPressEnd={onPressEnd}
             onPressCancel={onPressCancel}
             onFocus={onFocus}
@@ -2159,7 +2199,9 @@ interface SystemCelestialLayerProps {
   starSpinReferenceRadius: number;
   planetSpinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  hitboxScaleMultiplier: number;
   onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
+  onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onBodyPressEnd: () => void;
   onBodyPressCancel: () => void;
   onFocusBody: (bodyId: string) => void;
@@ -2183,7 +2225,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   starSpinReferenceRadius,
   planetSpinReferenceRadius,
   moonSpinReferenceRadius,
+  hitboxScaleMultiplier,
   onBodyPressStart,
+  onBodyPressMove,
   onBodyPressEnd,
   onBodyPressCancel,
   onFocusBody,
@@ -2227,7 +2271,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           orbitThickness={orbitThickness}
           spinReferenceRadius={planetSpinReferenceRadius}
           moonSpinReferenceRadius={moonSpinReferenceRadius}
+          hitboxScaleMultiplier={hitboxScaleMultiplier}
           onPressStart={onBodyPressStart}
+          onPressMove={onBodyPressMove}
           onPressEnd={onBodyPressEnd}
           onPressCancel={onBodyPressCancel}
           onFocus={onFocusBody}
@@ -3449,6 +3495,9 @@ const LABEL_NEAR_FADE_END_MOON = 4;
 const BODY_CONTEXT_MENU_OFFSET = 12;
 const BODY_CONTEXT_MENU_PADDING = 10;
 const LONG_PRESS_DURATION_MS = 420;
+const LONG_PRESS_DURATION_TOUCH_MS = 520;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+const LONG_PRESS_MOVE_TOLERANCE_TOUCH_PX = 18;
 
 const applyMaterialOpacity = (material: Material | Material[], opacity: number) => {
   const materials = Array.isArray(material) ? material : [material];
@@ -4176,6 +4225,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   onBack
 }) => {
   const { t } = useI18n();
+  const prefersTouchFallback = typeof window !== 'undefined' && (
+    (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+    || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+  );
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
   const orbitThickness = ORBIT_THICKNESS * clampedScale;
@@ -4748,6 +4801,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [infoBodyId, setInfoBodyId] = useState<string | null>(null);
   const [isBodyListOpen, setIsBodyListOpen] = useState(false);
   const longPressTimerRef = useRef<number | null>(null);
+  const longPressStateRef = useRef<LongPressState | null>(null);
+  const longPressTriggeredRef = useRef(false);
   const suppressClickRef = useRef(false);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -4774,6 +4829,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
+  const contextMenuOffset = prefersTouchFallback ? 18 : BODY_CONTEXT_MENU_OFFSET;
+  const contextMenuPadding = prefersTouchFallback ? 14 : BODY_CONTEXT_MENU_PADDING;
 
   const handleHoverBody = useCallback((bodyId: string) => {
     setHoveredObjectId(makeObjectId('body', bodyId));
@@ -4835,29 +4892,69 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     clearLongPressTimer();
     suppressClickRef.current = false;
+    longPressTriggeredRef.current = false;
+    const pointerType = event.pointerType || (prefersTouchFallback ? 'touch' : 'mouse');
+    const isTouch = pointerType === 'touch';
+    const moveTolerance = isTouch ? LONG_PRESS_MOVE_TOLERANCE_TOUCH_PX : LONG_PRESS_MOVE_TOLERANCE_PX;
+    const pressDuration = isTouch ? LONG_PRESS_DURATION_TOUCH_MS : LONG_PRESS_DURATION_MS;
+    longPressStateRef.current = {
+      bodyId,
+      pointerId: event.pointerId ?? -1,
+      startX: event.clientX,
+      startY: event.clientY,
+      isTouch,
+      moveTolerance,
+      hasMoved: false
+    };
     const position = { x: event.clientX, y: event.clientY };
     longPressTimerRef.current = window.setTimeout(() => {
+      const state = longPressStateRef.current;
+      if (!state || state.bodyId !== bodyId) return;
+      longPressTriggeredRef.current = true;
       suppressClickRef.current = true;
       openBodyContextMenu(bodyId, position);
-    }, LONG_PRESS_DURATION_MS);
-  }, [clearLongPressTimer, openBodyContextMenu]);
+    }, pressDuration);
+  }, [clearLongPressTimer, openBodyContextMenu, prefersTouchFallback]);
+  const handleBodyPressMove = useCallback((event: ThreeEvent<PointerEvent>) => {
+    const state = longPressStateRef.current;
+    if (!state) return;
+    if (event.pointerId !== state.pointerId) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq > state.moveTolerance * state.moveTolerance) {
+      state.hasMoved = true;
+      clearLongPressTimer();
+    }
+  }, [clearLongPressTimer]);
   const handleBodyPressEnd = useCallback(() => {
+    const state = longPressStateRef.current;
+    if (state?.hasMoved && state.isTouch) {
+      suppressClickRef.current = true;
+    }
+    if (longPressTriggeredRef.current) {
+      suppressClickRef.current = true;
+    }
     clearLongPressTimer();
+    longPressStateRef.current = null;
+    longPressTriggeredRef.current = false;
   }, [clearLongPressTimer]);
   const handleBodyPressCancel = useCallback(() => {
     clearLongPressTimer();
+    longPressStateRef.current = null;
+    longPressTriggeredRef.current = false;
   }, [clearLongPressTimer]);
   useLayoutEffect(() => {
     if (!bodyContextMenu || !contextMenuRef.current) return;
     const rect = contextMenuRef.current.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const desiredX = bodyContextMenu.position.x + BODY_CONTEXT_MENU_OFFSET;
-    const desiredY = bodyContextMenu.position.y + BODY_CONTEXT_MENU_OFFSET;
-    const x = Math.max(BODY_CONTEXT_MENU_PADDING, Math.min(desiredX, viewportWidth - rect.width - BODY_CONTEXT_MENU_PADDING));
-    const y = Math.max(BODY_CONTEXT_MENU_PADDING, Math.min(desiredY, viewportHeight - rect.height - BODY_CONTEXT_MENU_PADDING));
+    const desiredX = bodyContextMenu.position.x + contextMenuOffset;
+    const desiredY = bodyContextMenu.position.y + contextMenuOffset;
+    const x = Math.max(contextMenuPadding, Math.min(desiredX, viewportWidth - rect.width - contextMenuPadding));
+    const y = Math.max(contextMenuPadding, Math.min(desiredY, viewportHeight - rect.height - contextMenuPadding));
     setContextMenuPosition({ x, y });
-  }, [bodyContextMenu]);
+  }, [bodyContextMenu, contextMenuOffset, contextMenuPadding]);
   const contextMenuBody = bodyContextMenu ? bodyInfoMap[bodyContextMenu.bodyId] : null;
   const contextMenuSurfaceTarget = contextMenuBody?.surfaceBodyId ?? contextMenuBody?.id ?? null;
   const canViewSurface = Boolean(
@@ -5080,11 +5177,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     cameraInitialSpherical.theta
   ]);
 
-  const prefersTouchFallback = typeof window !== 'undefined' && (
-    (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
-    || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
-  );
   const lowSpec = prefersTouchFallback;
+  const hitboxScaleMultiplier = prefersTouchFallback ? 1.2 : 1;
   const [rendererCaps, setRendererCaps] = useState(() => ({
     contextAntialias: false,
     isWebGL2: false,
@@ -5134,6 +5228,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return [ambientLightRef.current, starLightRef.current]
       .filter(Boolean) as Object3D[];
   }, [bloomLightsReady]);
+  const isTouchUi = prefersTouchFallback;
+  const contextMenuContainerClass = `pointer-events-auto fixed z-40 rounded border border-slate-700 bg-slate-900/95 p-2 text-white shadow-2xl backdrop-blur ${
+    isTouchUi ? 'min-w-[210px] text-base' : 'min-w-[180px] text-sm'
+  }`;
+  const contextMenuButtonBaseClass = isTouchUi
+    ? 'w-full rounded px-3 py-3 text-left text-base font-semibold'
+    : 'w-full rounded px-2 py-2 text-left text-sm font-semibold';
+  const contextMenuHeaderClass = isTouchUi
+    ? 'px-2 pb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400'
+    : 'px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
   const renderBodyRow = (item: BodyListItem, depth: number) => {
     const isSelected = selectedBodyId === item.id;
     const bodyTypeLabel = t(`systemView.bodyInfo.bodyType.${item.kind}`);
@@ -5281,7 +5385,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 starSpinReferenceRadius={starSpinReferenceRadius}
                 planetSpinReferenceRadius={planetSpinReferenceRadius}
                 moonSpinReferenceRadius={moonSpinReferenceRadius}
+                hitboxScaleMultiplier={hitboxScaleMultiplier}
                 onBodyPressStart={handleBodyPressStart}
+                onBodyPressMove={handleBodyPressMove}
                 onBodyPressEnd={handleBodyPressEnd}
                 onBodyPressCancel={handleBodyPressCancel}
                 onFocusBody={requestFocusOnBody}
@@ -5410,14 +5516,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           />
           <div
             ref={contextMenuRef}
-            className="pointer-events-auto fixed z-40 min-w-[180px] rounded border border-slate-700 bg-slate-900/95 p-2 text-sm text-white shadow-2xl backdrop-blur"
+            className={contextMenuContainerClass}
             style={{
               left: (contextMenuPosition ?? bodyContextMenu.position).x,
               top: (contextMenuPosition ?? bodyContextMenu.position).y
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className={contextMenuHeaderClass}>
               {contextMenuBody.name}
             </div>
             <button
@@ -5426,7 +5532,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 setInfoBodyId(contextMenuBody.id);
                 closeBodyContextMenu();
               }}
-              className="w-full rounded px-2 py-2 text-left font-semibold text-slate-200 transition hover:bg-slate-700/60 hover:text-white"
+              className={`${contextMenuButtonBaseClass} text-slate-200 transition hover:bg-slate-700/60 hover:text-white`}
             >
               {t('systemView.bodyInfo.title')}
             </button>
@@ -5437,7 +5543,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                   onOpenSurfaceView?.(contextMenuSurfaceTarget);
                   closeBodyContextMenu();
                 }}
-                className="mt-1 w-full rounded px-2 py-2 text-left font-semibold text-emerald-200 transition hover:bg-emerald-700/30 hover:text-white"
+                className={`mt-1 ${contextMenuButtonBaseClass} text-emerald-200 transition hover:bg-emerald-700/30 hover:text-white`}
               >
                 {t('systemView.bodyInfo.viewSurface')}
               </button>
