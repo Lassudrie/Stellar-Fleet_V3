@@ -28,6 +28,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Mesh,
+  NearestFilter,
   NormalBlending,
   Object3D,
   PerspectiveCamera,
@@ -110,7 +111,7 @@ const ORBIT_THICKNESS = 0.012;
 const DEFAULT_ORBIT_INNER_KM = 55_000_000;
 const DEFAULT_ORBIT_STEP_KM = 35_000_000;
 const STAR_TEXTURE_SIZE = 256;
-const STARFIELD_TEXTURE_SIZE = 1024;
+const STARFIELD_TEXTURE_SIZE = 2048;
 const STARFIELD_STAR_DENSITY = 0.0011;
 const STARFIELD_NEBULA_LAYERS = 4;
 const STARFIELD_EDGE_WRAP = 0.02;
@@ -586,8 +587,9 @@ const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): Canva
   const context = canvas.getContext('2d');
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
+  texture.generateMipmaps = false;
   texture.minFilter = LinearFilter;
-  texture.magFilter = LinearFilter;
+  texture.magFilter = NearestFilter;
 
   if (!context) {
     return texture;
