@@ -23,7 +23,6 @@ import {
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
 import { hashStringToUnit } from '../systemViewLayout';
 import {
-  BODY_SPIN_SPEED_MULTIPLIER,
   LENS_FLARE_BASE_SIZE_MULTIPLIER,
   LENS_FLARE_BASE_STRENGTH,
   LENS_FLARE_CENTER_FADE_END,
@@ -48,12 +47,9 @@ import {
   STARFIELD_POINT_COUNT,
   STARFIELD_POINT_SIZE_BRIGHT,
   STARFIELD_POINT_SIZE_DIM,
-  STAR_SPIN_SCALE_MAX,
-  STAR_SPIN_SCALE_MIN,
   STAR_TEXTURE_SIZE
 } from './config';
 import { createSeededRandom, toRgbaString, useDisposableMemo } from './renderUtils';
-import { getSpinScaleFromRadius } from './systemModel';
 
 const createStarSurfaceTexture = (surfaceTintColor: string, seed: number): CanvasTexture => {
   const canvas = document.createElement('canvas');
@@ -344,38 +340,6 @@ const createLensFlareRingTexture = (): CanvasTexture => {
   return texture;
 };
 
-const createLensFlareSparkTexture = (): CanvasTexture => {
-  const canvas = document.createElement('canvas');
-  canvas.width = LENS_FLARE_TEXTURE_SIZE;
-  canvas.height = LENS_FLARE_TEXTURE_SIZE;
-  const context = canvas.getContext('2d');
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  texture.minFilter = LinearFilter;
-  texture.magFilter = LinearFilter;
-
-  if (!context) {
-    return texture;
-  }
-
-  const center = LENS_FLARE_TEXTURE_SIZE * 0.5;
-  const bloom = context.createRadialGradient(center, center, 0, center, center, center);
-  bloom.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
-  bloom.addColorStop(0.18, 'rgba(255, 255, 255, 0.18)');
-  bloom.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  context.fillStyle = bloom;
-  context.fillRect(0, 0, LENS_FLARE_TEXTURE_SIZE, LENS_FLARE_TEXTURE_SIZE);
-
-  context.globalCompositeOperation = 'lighter';
-  context.fillStyle = 'rgba(255, 255, 255, 0.14)';
-  const streakThickness = LENS_FLARE_TEXTURE_SIZE * 0.035;
-  context.fillRect(center - streakThickness * 0.5, 0, streakThickness, LENS_FLARE_TEXTURE_SIZE);
-  context.fillRect(0, center - streakThickness * 0.5, LENS_FLARE_TEXTURE_SIZE, streakThickness);
-
-  texture.needsUpdate = true;
-  return texture;
-};
-
 export const SystemStarfield: React.FC<{ radius: number; seedKey: string; tintColor: string }> = ({
   radius,
   seedKey,
@@ -522,7 +486,7 @@ export const StarMesh: React.FC<StarMeshProps> = ({
   surfaceTintColor,
   geometry,
   seedKey,
-  spinReferenceRadius,
+  spinReferenceRadius: _spinReferenceRadius,
   enableLensFlare = true,
   lensFlareStrength = LENS_FLARE_BASE_STRENGTH,
   onDoubleClick,
@@ -544,18 +508,18 @@ export const StarMesh: React.FC<StarMeshProps> = ({
   );
   const coreMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({
-      color: '#ffffff',
+      color: new Color('#ffffff').lerp(new Color(tintColor), 0.35),
       map: surfaceTexture,
       toneMapped: true
     }),
-    [surfaceTexture]
+    [surfaceTexture, tintColor]
   );
   const innerGlowMaterial = useDisposableMemo(
     () => new MeshBasicMaterial({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.25),
       map: glowTexture,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.22,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: true
@@ -567,7 +531,7 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.2),
       map: glowTexture,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.07,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: true
@@ -586,10 +550,6 @@ export const StarMesh: React.FC<StarMeshProps> = ({
     () => [radius * 1.28, radius * 1.28, radius * 1.28],
     [radius]
   );
-  const spinScale = useMemo(
-    () => getSpinScaleFromRadius(radius, spinReferenceRadius, STAR_SPIN_SCALE_MIN, STAR_SPIN_SCALE_MAX),
-    [radius, spinReferenceRadius]
-  );
   const groupRef = useRef<Group | null>(null);
   const coreRef = useRef<Mesh | null>(null);
   const lensFlareState = useMemo(() => {
@@ -601,31 +561,27 @@ export const StarMesh: React.FC<StarMeshProps> = ({
     const haloTexture = createLensFlareHaloTexture();
     const ghostTexture = createLensFlareHaloTexture();
     const ringTexture = createLensFlareRingTexture();
-    const sparkTexture = createLensFlareSparkTexture();
 
     const base = new Color('#ffffff');
     const tint = new Color(tintColor);
     const haloBaseColor = base.clone().lerp(tint, 0.5);
     const ringBaseColor = base.clone().lerp(tint, 0.35);
     const ghostBaseColor = base.clone().lerp(tint, 0.25);
-    const sparkBaseColor = base.clone();
 
     const halo = new LensflareElement(haloTexture, 256, 0, haloBaseColor.clone());
     const ring = new LensflareElement(ringTexture, 180, 0.08, ringBaseColor.clone());
     const ghost = new LensflareElement(ghostTexture, 96, 0.62, ghostBaseColor.clone());
-    const spark = new LensflareElement(sparkTexture, 54, 0.88, sparkBaseColor.clone());
 
     lensflare.addElement(halo);
     lensflare.addElement(ring);
     lensflare.addElement(ghost);
-    lensflare.addElement(spark);
 
     return {
       lensflare,
-      elements: [halo, ring, ghost, spark],
-      baseColors: [haloBaseColor, ringBaseColor, ghostBaseColor, sparkBaseColor],
-      sizeScales: [1, 0.75, 0.42, 0.22],
-      intensityScales: [1, 0.85, 0.65, 0.5],
+      elements: [halo, ring, ghost],
+      baseColors: [haloBaseColor, ringBaseColor, ghostBaseColor],
+      sizeScales: [1, 0.75, 0.42],
+      intensityScales: [1, 0.85, 0.65],
       smoothed: {
         intensity: 0,
         baseSizePx: LENS_FLARE_SIZE_MIN_PX
@@ -648,10 +604,6 @@ export const StarMesh: React.FC<StarMeshProps> = ({
 
   useFrame((state, delta) => {
     if (!coreRef.current) return;
-    const spinFactor = BODY_SPIN_SPEED_MULTIPLIER * spinScale;
-    coreRef.current.rotation.y += delta * 0.08 * spinFactor;
-    coreRef.current.rotation.z += delta * 0.02 * spinFactor;
-
     const group = groupRef.current;
     const lensflare = lensFlareState?.lensflare ?? null;
     if (!group || !lensflare || !lensFlareState) return;

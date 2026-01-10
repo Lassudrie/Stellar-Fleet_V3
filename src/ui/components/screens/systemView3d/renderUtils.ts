@@ -141,13 +141,36 @@ export const getSurfaceTintFromTemperature = (temperatureK: number | undefined, 
   return new Color('#ffffff').lerp(tempColor, STAR_SURFACE_TINT_STRENGTH).getStyle();
 };
 
-export const applyDayNightTerminator = (material: MeshStandardMaterial) => {
-  if (material.userData.dayNightTerminatorApplied) return;
+export const applyDayNightTerminator = (
+  material: MeshStandardMaterial,
+  options?: { nightMin?: number; terminatorSoftness?: number }
+) => {
+  if (material.userData.dayNightTerminatorApplied) {
+    if (options) {
+      material.userData.dayNightNightMin = options.nightMin ?? DAY_NIGHT_NIGHT_MIN;
+      material.userData.dayNightTerminatorSoftness = options.terminatorSoftness ?? DAY_NIGHT_TERMINATOR_SOFTNESS;
+      const uniforms = material.userData.dayNightUniforms as { nightMin?: { value: number }; softness?: { value: number } } | undefined;
+      if (uniforms?.nightMin) {
+        uniforms.nightMin.value = material.userData.dayNightNightMin;
+      }
+      if (uniforms?.softness) {
+        uniforms.softness.value = material.userData.dayNightTerminatorSoftness;
+      }
+      material.needsUpdate = true;
+    }
+    return;
+  }
   material.userData.dayNightTerminatorApplied = true;
+  material.userData.dayNightNightMin = options?.nightMin ?? DAY_NIGHT_NIGHT_MIN;
+  material.userData.dayNightTerminatorSoftness = options?.terminatorSoftness ?? DAY_NIGHT_TERMINATOR_SOFTNESS;
 
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uNightMin = { value: DAY_NIGHT_NIGHT_MIN };
-    shader.uniforms.uTerminatorSoftness = { value: DAY_NIGHT_TERMINATOR_SOFTNESS };
+    shader.uniforms.uNightMin = { value: material.userData.dayNightNightMin };
+    shader.uniforms.uTerminatorSoftness = { value: material.userData.dayNightTerminatorSoftness };
+    material.userData.dayNightUniforms = {
+      nightMin: shader.uniforms.uNightMin,
+      softness: shader.uniforms.uTerminatorSoftness
+    };
 
     shader.vertexShader = shader.vertexShader
       .replace(

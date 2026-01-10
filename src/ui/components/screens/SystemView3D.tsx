@@ -55,6 +55,10 @@ import {
   createAtmosphereLayerMaterial,
   createCloudLayerMaterial,
   createFallbackStarOrbit,
+  DAY_NIGHT_NIGHT_MIN,
+  DAY_NIGHT_NIGHT_MIN_ATMOSPHERE,
+  DAY_NIGHT_TERMINATOR_SOFTNESS,
+  DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE,
   deriveSphericalState,
   getMoonRadiusKm,
   getMoonType,
@@ -461,7 +465,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       acc[type as PlanetType] = new MeshStandardMaterial({
         color,
         roughness: 0.55,
-        metalness: 0.2
+        metalness: 0,
+        dithering: true
       });
       return acc;
     }, {} as Record<PlanetType, MeshStandardMaterial>);
@@ -473,7 +478,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       acc[type as MoonType] = new MeshStandardMaterial({
         color,
         roughness: 0.6,
-        metalness: 0.15
+        metalness: 0,
+        dithering: true
       });
       return acc;
     }, {} as Record<MoonType, MeshStandardMaterial>);
@@ -654,6 +660,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const base = planetMaterialMap[planet.type];
     const baseColor = PLANET_TYPE_COLORS[planet.type];
     const { baseColor: tintedBaseColor, surfaceTint } = resolveThermalTints(baseColor, planet.temperatureK);
+    const hasAtmosphere = Boolean(planet.atmosphere && planet.atmosphere !== 'None');
+    const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
+    const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
     const existing = bodyMaterialByIdRef.current.get(planet.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
@@ -664,16 +673,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
         existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
       }
+      existing.metalness = 0;
+      existing.dithering = true;
       if (existing.map) {
         existing.color.set(surfaceTint);
       } else {
         existing.color.set(tintedBaseColor);
       }
+      applyDayNightTerminator(existing, { nightMin, terminatorSoftness });
       return existing;
     }
     const material = base.clone();
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
+    material.metalness = 0;
+    material.dithering = true;
     material.userData.baseColor = tintedBaseColor;
     material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
@@ -681,7 +695,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
     material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
     material.color.set(tintedBaseColor);
-    applyDayNightTerminator(material);
+    applyDayNightTerminator(material, { nightMin, terminatorSoftness });
     bodyMaterialByIdRef.current.set(planet.id, material);
     return material;
   }, [planetMaterialMap]);
@@ -690,6 +704,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const base = moonMaterialMap[moon.type];
     const baseColor = MOON_TYPE_COLORS[moon.type];
     const { baseColor: tintedBaseColor, surfaceTint } = resolveThermalTints(baseColor, moon.temperatureK);
+    const hasAtmosphere = Boolean(moon.atmosphere && moon.atmosphere !== 'None');
+    const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
+    const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
     const existing = bodyMaterialByIdRef.current.get(moon.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
@@ -700,16 +717,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
         existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
       }
+      existing.metalness = 0;
+      existing.dithering = true;
       if (existing.map) {
         existing.color.set(surfaceTint);
       } else {
         existing.color.set(tintedBaseColor);
       }
+      applyDayNightTerminator(existing, { nightMin, terminatorSoftness });
       return existing;
     }
     const material = base.clone();
     material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
+    material.metalness = 0;
+    material.dithering = true;
     material.userData.baseColor = tintedBaseColor;
     material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
@@ -717,7 +739,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
     material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
     material.color.set(tintedBaseColor);
-    applyDayNightTerminator(material);
+    applyDayNightTerminator(material, { nightMin, terminatorSoftness });
     bodyMaterialByIdRef.current.set(moon.id, material);
     return material;
   }, [moonMaterialMap]);
@@ -728,22 +750,22 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
   const starGeometry = useDisposableMemo(() => new SphereGeometry(1, 64, 64), []);
   const planetGeometry = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 48, 48);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
-  }, []);
-  const planetGeometryHigh = useDisposableMemo(() => {
     const geometry = new SphereGeometry(1, 96, 96);
     geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
     return geometry;
   }, []);
+  const planetGeometryHigh = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, 128, 128);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, []);
   const moonGeometry = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 32, 32);
+    const geometry = new SphereGeometry(1, 64, 64);
     geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
     return geometry;
   }, []);
   const moonGeometryHigh = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 64, 64);
+    const geometry = new SphereGeometry(1, 96, 96);
     geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
     return geometry;
   }, []);
@@ -1239,7 +1261,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const enableShadows = !lowSpec;
   const enableAntialias = true;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
-  const toneMappingExposure = prefersTouchFallback ? 1.05 : 1.12;
+  const toneMappingExposure = prefersTouchFallback ? 0.9 : 0.95;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
@@ -1250,10 +1272,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return Math.min(targetSamples, maxSamples);
   }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
   const enableSmaa = enablePostFX && postFxMultisampling === 0;
-  const bloomIntensity = prefersTouchFallback ? 0.4 : 0.75;
-  const bloomThreshold = prefersTouchFallback ? 0.32 : 0.26;
-  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.6;
-  const bloomRadius = prefersTouchFallback ? 0.2 : 0.38;
+  const bloomIntensity = prefersTouchFallback ? 0.25 : 0.5;
+  const bloomThreshold = prefersTouchFallback ? 0.48 : 0.38;
+  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.65;
+  const bloomRadius = prefersTouchFallback ? 0.18 : 0.25;
   const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
   const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
   const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;

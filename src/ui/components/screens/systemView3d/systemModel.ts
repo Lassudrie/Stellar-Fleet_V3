@@ -233,7 +233,7 @@ export const getSpinScaleFromRadius = (
 };
 
 export const getStarLightIntensityForRadius = (radius: number): number =>
-  MathUtils.clamp(MathUtils.clamp(3.5 + radius * 1.6, 3.5, 14) * 35, 45, 260);
+  MathUtils.clamp(MathUtils.clamp(2.2 + radius * 0.9, 2.2, 7.5) * 18, 18, 120);
 
 export const buildPlanetModel = (
   planet: PlanetSource,
