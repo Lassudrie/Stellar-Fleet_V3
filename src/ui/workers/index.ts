@@ -4,6 +4,7 @@ import { deserializeGameState } from '../../engine/serialization';
 import { getPlanetById } from '../../engine/planets';
 import type { GameScenario } from '../../content/scenarios';
 import type { Biome, GameState, PlanetSurfaceMap, StarSystem } from '../../shared/shared';
+import { FeatureBits } from '../../shared/shared';
 import type {
   SurfaceMapWorkerRequest,
   SurfaceMapWorkerResponseMessage,
@@ -33,6 +34,7 @@ export type SurfaceTextureResult = {
   aoRgba: Uint8Array | null;
   roughnessRgba: Uint8Array | null;
   heightRgba: Uint8Array | null;
+  emissiveRgba: Uint8Array | null;
 };
 
 type PendingTextureRequest = {
@@ -154,7 +156,8 @@ export class SurfaceMapWorkerClient {
         normalRgba: payload.normalRgba ?? null,
         aoRgba: payload.aoRgba ?? null,
         roughnessRgba: payload.roughnessRgba ?? null,
-        heightRgba: payload.heightRgba ?? null
+        heightRgba: payload.heightRgba ?? null,
+        emissiveRgba: payload.emissiveRgba ?? null
       });
     }
   };
@@ -179,8 +182,10 @@ export class SurfaceMapWorkerClient {
     const includeAoMap = request.textureOptions?.includeAoMap ?? true;
     const includeRoughnessMap = request.textureOptions?.includeRoughnessMap ?? true;
     const includeHeightMap = request.textureOptions?.includeHeightMap ?? false;
+    const includeEmissiveMap = request.textureOptions?.includeEmissiveMap ?? false;
     const roughnessRgba = includeRoughnessMap ? new Uint8Array(width * height * 4) : null;
     const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
+    const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
     const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
 
     const biomeColors: Record<Biome, string> = {
@@ -276,6 +281,19 @@ export class SurfaceMapWorkerClient {
       return out;
     })();
 
+    const CITY_LIGHTS_COLOR = '#fbd38d';
+    const POLE_BLEND_ROWS = 2;
+    const POLE_BLEND_STRENGTH = 0.35;
+    const CRATER_DENSITY_AIRLESS = 0.000035;
+    const CRATER_DENSITY_MOON = 0.000055;
+    const CRATER_DEPTH_SCALE_AIRLESS = 0.4;
+    const CRATER_DEPTH_SCALE_MOON = 0.5;
+
+    const cityLightLinearRgb = (() => {
+      const { r, g, b } = hexToRgb8(CITY_LIGHTS_COLOR);
+      return [srgbToLinear(r / 255), srgbToLinear(g / 255), srgbToLinear(b / 255)];
+    })();
+
     let elevMin = Number.POSITIVE_INFINITY;
     let elevMax = Number.NEGATIVE_INFINITY;
     for (const tile of map.tiles) {
@@ -325,6 +343,174 @@ export class SurfaceMapWorkerClient {
       const nx0 = lerp(n00, n10, sx);
       const nx1 = lerp(n01, n11, sx);
       return lerp(nx0, nx1, sy);
+    };
+
+    const createSeededRandom = (randomSeed: number): (() => number) => {
+      let state = randomSeed >>> 0;
+      return () => {
+        state += 0x6d2b79f5;
+        let result = Math.imul(state ^ (state >>> 15), 1 | state);
+        result ^= result + Math.imul(result ^ (result >>> 7), 61 | result);
+        return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+
+    const blendPolarRows = (buffer: Uint8Array, width: number, height: number): void => {
+      if (height <= POLE_BLEND_ROWS * 2 + 1) return;
+      for (let row = 0; row < POLE_BLEND_ROWS; row += 1) {
+        const t = ((POLE_BLEND_ROWS - row) / (POLE_BLEND_ROWS + 1)) * POLE_BLEND_STRENGTH;
+        const yTop = row;
+        const yTopNext = row + 1;
+        const yBottom = height - 1 - row;
+        const yBottomPrev = height - 2 - row;
+        const topOffset = yTop * width * 4;
+        const topNextOffset = yTopNext * width * 4;
+        const bottomOffset = yBottom * width * 4;
+        const bottomPrevOffset = yBottomPrev * width * 4;
+
+        for (let x = 0; x < width * 4; x += 1) {
+          buffer[topOffset + x] = Math.round(lerp(buffer[topOffset + x], buffer[topNextOffset + x], t));
+          buffer[bottomOffset + x] = Math.round(lerp(buffer[bottomOffset + x], buffer[bottomPrevOffset + x], t));
+        }
+      }
+    };
+
+    const blendPolarRowsFloat = (buffer: Float32Array, width: number, height: number): void => {
+      if (height <= POLE_BLEND_ROWS * 2 + 1) return;
+      for (let row = 0; row < POLE_BLEND_ROWS; row += 1) {
+        const t = ((POLE_BLEND_ROWS - row) / (POLE_BLEND_ROWS + 1)) * POLE_BLEND_STRENGTH;
+        const yTop = row;
+        const yTopNext = row + 1;
+        const yBottom = height - 1 - row;
+        const yBottomPrev = height - 2 - row;
+        const topOffset = yTop * width;
+        const topNextOffset = yTopNext * width;
+        const bottomOffset = yBottom * width;
+        const bottomPrevOffset = yBottomPrev * width;
+
+        for (let x = 0; x < width; x += 1) {
+          buffer[topOffset + x] = lerp(buffer[topOffset + x], buffer[topNextOffset + x], t);
+          buffer[bottomOffset + x] = lerp(buffer[bottomOffset + x], buffer[bottomPrevOffset + x], t);
+        }
+      }
+    };
+
+    const resolveCraterSettings = (
+      bodyMeta: SurfaceMapWorkerRequest['bodyMeta'] | undefined,
+      width: number,
+      height: number
+    ): { count: number; minRadius: number; maxRadius: number; depthScale: number } | null => {
+      if (!bodyMeta) return null;
+      const airless = bodyMeta.hasAtmosphere === false;
+      if (!airless && !bodyMeta.isMoon) return null;
+      const density = bodyMeta.isMoon ? CRATER_DENSITY_MOON : CRATER_DENSITY_AIRLESS;
+      const count = Math.min(90, Math.max(6, Math.round(width * height * density)));
+      const scale = Math.min(width, height);
+      const minRadius = Math.max(1.6, scale * 0.006);
+      const maxRadius = Math.max(minRadius + 1, scale * (bodyMeta.isMoon ? 0.035 : 0.028));
+      const depthScale = bodyMeta.isMoon ? CRATER_DEPTH_SCALE_MOON : CRATER_DEPTH_SCALE_AIRLESS;
+      return { count, minRadius, maxRadius, depthScale };
+    };
+
+    const buildCraterField = (
+      width: number,
+      height: number,
+      wrapX: boolean,
+      seed: number,
+      settings: { count: number; minRadius: number; maxRadius: number; depthScale: number }
+    ): Float32Array => {
+      const rand = createSeededRandom(seed);
+      const field = new Float32Array(width * height);
+      for (let i = 0; i < settings.count; i += 1) {
+        const cx = rand() * width;
+        const cy = rand() * height;
+        const radius = lerp(settings.minRadius, settings.maxRadius, rand());
+        const depth = lerp(0.2, 0.6, rand()) * settings.depthScale;
+        const x0 = Math.floor(cx - radius);
+        const x1 = Math.ceil(cx + radius);
+        const y0 = Math.floor(cy - radius);
+        const y1 = Math.ceil(cy + radius);
+
+        for (let y = y0; y <= y1; y += 1) {
+          if (y < 0 || y >= height) continue;
+          const dy = y - cy;
+          for (let x = x0; x <= x1; x += 1) {
+            let xx = x;
+            if (wrapX) {
+              xx = wrapIndex(x, width);
+            } else if (x < 0 || x >= width) {
+              continue;
+            }
+            const dx = x - cx;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > radius) continue;
+            const t = dist / radius;
+            const bowl = (1 - t);
+            const rim = smoothstep(0.7, 1.0, t);
+            const craterDepth = -bowl * bowl * depth;
+            const rimBoost = rim * rim * depth * 0.35;
+            const idx = y * width + xx;
+            const next = Math.max(-1, Math.min(1, field[idx] + craterDepth + rimBoost));
+            field[idx] = next;
+          }
+        }
+      }
+      return field;
+    };
+
+    const buildSettlementField = (
+      map: PlanetSurfaceMap,
+      width: number,
+      height: number
+    ): Float32Array | null => {
+      if (!map.settlements.length) return null;
+      const { w, h, wrapX } = map.descriptor.config;
+      const field = new Float32Array(width * height);
+      const seedBase = map.descriptor.seed >>> 0;
+
+      map.settlements.forEach((settlement, index) => {
+        const coord = settlement.coord;
+        const seed = Math.floor(hash2(coord.q + index * 17, coord.r, seedBase) * 0xffffffff);
+        const rand = createSeededRandom(seed);
+        const u = (coord.q + 0.5) / w;
+        const v = (coord.r + 0.5) / h;
+        const cx = u * width;
+        const cy = v * height;
+        const pop = Math.max(0, settlement.population ?? 0);
+        const popNorm = clamp01(Math.log10(pop + 10) / 6);
+        const radius = lerp(1.4, 6.2, popNorm) * (0.85 + rand() * 0.4);
+        const intensity = lerp(0.35, 1, popNorm) * (settlement.isCapital ? 1.25 : 1);
+
+        const x0 = Math.floor(cx - radius);
+        const x1 = Math.ceil(cx + radius);
+        const y0 = Math.floor(cy - radius);
+        const y1 = Math.ceil(cy + radius);
+
+        for (let y = y0; y <= y1; y += 1) {
+          if (y < 0 || y >= height) continue;
+          const dy = y - cy;
+          for (let x = x0; x <= x1; x += 1) {
+            let xx = x;
+            if (wrapX) {
+              xx = wrapIndex(x, width);
+            } else if (x < 0 || x >= width) {
+              continue;
+            }
+            const dx = x - cx;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > radius) continue;
+            const t = dist / radius;
+            const falloff = (1 - t);
+            const glow = falloff * falloff * intensity;
+            const idx = y * width + xx;
+            if (glow > field[idx]) {
+              field[idx] = glow;
+            }
+          }
+        }
+      });
+
+      return field;
     };
 
     const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
@@ -425,6 +611,11 @@ export class SurfaceMapWorkerClient {
     const cloudShadowConfig = request.cloudShadow && request.cloudShadow.strength > 0 ? request.cloudShadow : null;
     const cloudNoiseScaleX = cloudShadowConfig ? Math.max(2, Math.round(cloudShadowConfig.noiseScale)) : 0;
     const cloudNoiseScaleY = cloudShadowConfig ? Math.max(1, Math.round(cloudNoiseScaleX * 0.6)) : 0;
+    const craterSettings = resolveCraterSettings(request.bodyMeta, width, height);
+    const craterField = craterSettings ? buildCraterField(width, height, useWrap, seed + 4099, craterSettings) : null;
+    const settlementField = includeEmissiveMap ? buildSettlementField(map, width, height) : null;
+    let hasEmissive = false;
+    const cityMask = FeatureBits.City | FeatureBits.Capital;
 
     for (let y = 0; y < height; y += 1) {
       const v = (y + 0.5) / height;
@@ -524,6 +715,7 @@ export class SurfaceMapWorkerClient {
         const waterDepth = clamp01((seaLevel - elev) / elevRange);
         const shallow = 1 - clamp01(waterDepth * 2.4);
         const waterShade = 1 + waterWeight * (shallow * 0.08 - waterDepth * 0.22);
+        const craterValue = craterField ? craterField[y * width + x] * landWeight : 0;
 
         let cloudShadowFactor = 1;
         if (cloudShadowConfig) {
@@ -560,6 +752,9 @@ export class SurfaceMapWorkerClient {
 
           const waterRoughness = clamp01(0.04 + shallow * 0.06 + (macroNoise - 0.5) * 0.015);
           roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+          if (craterValue < 0) {
+            roughness = clamp01(roughness + (-craterValue) * 0.22);
+          }
         }
 
         rLin *= shade;
@@ -570,11 +765,19 @@ export class SurfaceMapWorkerClient {
         gLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
         bLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
 
+        if (craterValue !== 0) {
+          const craterShade = Math.max(0.7, Math.min(1.15, 1 + craterValue * 0.35));
+          rLin *= craterShade;
+          gLin *= craterShade;
+          bLin *= craterShade;
+        }
+
         const rr = Math.round(clamp01(linearToSrgb(Math.max(0, rLin))) * 255);
         const gg = Math.round(clamp01(linearToSrgb(Math.max(0, gLin))) * 255);
         const bb = Math.round(clamp01(linearToSrgb(Math.max(0, bLin))) * 255);
 
-        const idx = (y * width + x) * 4;
+        const pixelIndex = y * width + x;
+        const idx = pixelIndex * 4;
         rgba[idx] = rr;
         rgba[idx + 1] = gg;
         rgba[idx + 2] = bb;
@@ -591,9 +794,9 @@ export class SurfaceMapWorkerClient {
           const relief = landWeight
             * reliefSlope
             * (((macroNoise - 0.5) * macroAmp * 0.22) + ((microNoise - 0.5) * microAmp * 0.18));
-          const heightWithRelief = clamp01(heightNorm + relief);
+          const heightWithRelief = clamp01(heightNorm + relief + craterValue * 0.6);
           if (heightField) {
-            heightField[y * width + x] = heightWithRelief;
+            heightField[pixelIndex] = heightWithRelief;
           }
           if (heightRgba) {
             const landBlend = clamp01(landWeight + 0.25);
@@ -606,8 +809,35 @@ export class SurfaceMapWorkerClient {
             heightRgba[idx + 3] = 255;
           }
         }
+        if (emissiveRgba) {
+          const cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
+            + ((t10.featureBits & cityMask) !== 0 ? w10 : 0)
+            + ((t01.featureBits & cityMask) !== 0 ? w01 : 0)
+            + ((t11.featureBits & cityMask) !== 0 ? w11 : 0);
+          const settlementGlow = settlementField ? settlementField[pixelIndex] : 0;
+          const featureGlow = cityWeight * 0.4;
+          let emissiveLevel = (settlementGlow + featureGlow) * landWeight;
+          emissiveLevel = clamp01(emissiveLevel);
+          if (emissiveLevel > 0.001) {
+            hasEmissive = true;
+            emissiveRgba[idx] = Math.round(clamp01(linearToSrgb(cityLightLinearRgb[0] * emissiveLevel)) * 255);
+            emissiveRgba[idx + 1] = Math.round(clamp01(linearToSrgb(cityLightLinearRgb[1] * emissiveLevel)) * 255);
+            emissiveRgba[idx + 2] = Math.round(clamp01(linearToSrgb(cityLightLinearRgb[2] * emissiveLevel)) * 255);
+            emissiveRgba[idx + 3] = 255;
+          } else {
+            emissiveRgba[idx] = 0;
+            emissiveRgba[idx + 1] = 0;
+            emissiveRgba[idx + 2] = 0;
+            emissiveRgba[idx + 3] = 0;
+          }
+        }
       }
     }
+
+    if (heightField) {
+      blendPolarRowsFloat(heightField, width, height);
+    }
+    const finalEmissiveRgba = emissiveRgba && hasEmissive ? emissiveRgba : null;
 
     const shouldComputeRelief = Boolean(heightField) && (includeNormalMap || includeAoMap) && width >= 256 && height >= 128;
     if (!shouldComputeRelief) {
@@ -619,6 +849,19 @@ export class SurfaceMapWorkerClient {
         if (heightRgba) {
           blendSeamColumns(heightRgba, width, height);
         }
+        if (finalEmissiveRgba) {
+          blendSeamColumns(finalEmissiveRgba, width, height);
+        }
+      }
+      blendPolarRows(rgba, width, height);
+      if (roughnessRgba) {
+        blendPolarRows(roughnessRgba, width, height);
+      }
+      if (heightRgba) {
+        blendPolarRows(heightRgba, width, height);
+      }
+      if (finalEmissiveRgba) {
+        blendPolarRows(finalEmissiveRgba, width, height);
       }
       return {
         width,
@@ -627,7 +870,8 @@ export class SurfaceMapWorkerClient {
         normalRgba: null,
         aoRgba: null,
         roughnessRgba: includeRoughnessMap ? roughnessRgba : null,
-        heightRgba
+        heightRgba,
+        emissiveRgba: finalEmissiveRgba
       };
     }
 
@@ -706,6 +950,22 @@ export class SurfaceMapWorkerClient {
       if (heightRgba) {
         blendSeamColumns(heightRgba, width, height);
       }
+      if (finalEmissiveRgba) {
+        blendSeamColumns(finalEmissiveRgba, width, height);
+      }
+    }
+
+    blendPolarRows(rgba, width, height);
+    if (roughnessRgba) {
+      blendPolarRows(roughnessRgba, width, height);
+    }
+    blendPolarRows(aoRgba, width, height);
+    blendPolarRows(normalRgba, width, height);
+    if (heightRgba) {
+      blendPolarRows(heightRgba, width, height);
+    }
+    if (finalEmissiveRgba) {
+      blendPolarRows(finalEmissiveRgba, width, height);
     }
 
     return {
@@ -715,7 +975,8 @@ export class SurfaceMapWorkerClient {
       normalRgba: includeNormalMap ? normalRgba : null,
       aoRgba: includeAoMap ? aoRgba : null,
       roughnessRgba: includeRoughnessMap ? roughnessRgba : null,
-      heightRgba
+      heightRgba,
+      emissiveRgba: finalEmissiveRgba
     };
   }
 }
@@ -814,7 +1075,8 @@ export class BootstrapWorkerClient {
 
 export const buildSurfaceMapWorkerRequest = (
   state: GameState,
-  bodyId: string
+  bodyId: string,
+  bodyMeta?: SurfaceMapWorkerRequest['bodyMeta']
 ): SurfaceMapWorkerRequest | null => {
   const descriptor = getSurfaceDescriptor(state, bodyId);
   if (!descriptor) return null;
@@ -839,6 +1101,7 @@ export const buildSurfaceMapWorkerRequest = (
     state: {
       planetSurfaceDescriptorsByBodyId: scopedDescriptors,
       systems: [scopedSystem]
-    }
+    },
+    bodyMeta
   };
 };

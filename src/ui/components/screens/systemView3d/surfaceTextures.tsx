@@ -29,7 +29,19 @@ import type {
 } from '../../../../shared/shared';
 import { hashStringToUnit } from '../systemViewLayout';
 import { ATMOSPHERE_STYLE, resolveAirMassIndex } from './atmosphere';
-import { PLANET_TYPE_COLORS, SURFACE_DISPLACEMENT_BIAS, SURFACE_DISPLACEMENT_SCALE } from './config';
+import {
+  CITY_LIGHTS_DIAMETER_FULL_PX,
+  CITY_LIGHTS_DIAMETER_MIN_PX,
+  CITY_LIGHTS_INTENSITY_MAX,
+  CITY_LIGHTS_INTENSITY_MIN,
+  GAS_GIANT_NORMAL_STRENGTH,
+  HIGH_DETAIL_GEOMETRY_DIAMETER_PX,
+  HIGH_DETAIL_GEOMETRY_HYSTERESIS_PX,
+  OWNER_TINT_STRENGTH,
+  PLANET_TYPE_COLORS,
+  SURFACE_DISPLACEMENT_BIAS,
+  SURFACE_DISPLACEMENT_SCALE
+} from './config';
 import { createSeededRandom, linearToSrgbByte, smoothstep } from './renderUtils';
 import type { OrbitingPlanet } from './systemModel';
 
@@ -45,6 +57,16 @@ const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
 const SURFACE_MIPMAP_ANISOTROPY_MOBILE = 4;
 
 type SurfaceTextureResolution = { width: number; height: number };
+type SurfaceTextureDebugInfo = {
+  cacheSize: number;
+  inflightSize: number;
+  activeBodies: Array<{
+    bodyId: string;
+    diameterPx: number;
+    resolution: SurfaceTextureResolution | null;
+    isOnScreen: boolean;
+  }>;
+};
 
 const SURFACE_TEXTURE_RESOLUTIONS: Array<SurfaceTextureResolution & { minDiameter: number }> = [
   { width: 256, height: 128, minDiameter: SURFACE_TEXTURE_MIN_DIAMETER_PX },
@@ -101,7 +123,7 @@ const createGasGiantTextureData = (
   width: number,
   height: number,
   isIceGiant: boolean
-): { color: Uint8Array; roughness: Uint8Array } => {
+): { color: Uint8Array; roughness: Uint8Array; heightField: Float32Array } => {
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
   const rand = createSeededRandom(seed);
   const base = new Color(baseColor);
@@ -136,6 +158,7 @@ const createGasGiantTextureData = (
 
   const color = new Uint8Array(width * height * 4);
   const roughness = new Uint8Array(width * height * 4);
+  const heightField = new Float32Array(width * height);
   const twoPi = Math.PI * 2;
 
   for (let y = 0; y < height; y += 1) {
@@ -176,6 +199,7 @@ const createGasGiantTextureData = (
       color[idx + 1] = linearToSrgbByte(g);
       color[idx + 2] = linearToSrgbByte(b);
       color[idx + 3] = 255;
+      heightField[y * width + x] = MathUtils.clamp(bandWeight, 0, 1);
 
       const roughNoise = Math.sin(uAngle * (lonFreq * 0.7) + lat * 1.7) * 0.05;
       const rough = MathUtils.clamp(roughBase + (0.5 - band) * roughVar + roughNoise, 0.2, 0.95);
@@ -187,14 +211,55 @@ const createGasGiantTextureData = (
     }
   }
 
-  return { color, roughness };
+  return { color, roughness, heightField };
+};
+
+const buildGasGiantNormalRgba = (
+  heightField: Float32Array,
+  width: number,
+  height: number
+): Uint8Array => {
+  const normalRgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const v = (y + 0.5) / height;
+    const latNorm = Math.abs(v - 0.5) * 2;
+    const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+    const rowStrength = GAS_GIANT_NORMAL_STRENGTH * (0.35 + poleBlend * 0.65);
+    const row = y * width;
+    const row0 = (y === 0 ? 0 : y - 1) * width;
+    const row1 = (y === height - 1 ? height - 1 : y + 1) * width;
+
+    for (let x = 0; x < width; x += 1) {
+      const x0 = x === 0 ? width - 1 : x - 1;
+      const x1 = x === width - 1 ? 0 : x + 1;
+      const idx = row + x;
+      const hL = heightField[row + x0];
+      const hR = heightField[row + x1];
+      const hU = heightField[row0 + x];
+      const hD = heightField[row1 + x];
+      let nx = -(hR - hL) * rowStrength;
+      let ny = -(hD - hU) * rowStrength;
+      let nz = 1.0;
+      const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      nx *= invLen;
+      ny *= invLen;
+      nz *= invLen;
+
+      const nIdx = idx * 4;
+      normalRgba[nIdx] = Math.round((nx * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      normalRgba[nIdx + 3] = 255;
+    }
+  }
+  return normalRgba;
 };
 
 export const SystemSurfaceTextureManager: React.FC<{
   starSystem: StarSystem;
   astroKey: string;
   planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
-  ownerKeyByBodyId: Record<string, string>;
+  ownerColorByBodyId: Record<string, string>;
   planets: OrbitingPlanet[];
   bodyWorldPositions: Record<string, [number, number, number]>;
   bodyRadii: Record<string, number>;
@@ -202,12 +267,15 @@ export const SystemSurfaceTextureManager: React.FC<{
   hoveredBodyId: string | null;
   lowSpec: boolean;
   cloudShadowStrengthScale: number;
+  debugEnabled?: boolean;
+  onDebugUpdate?: (info: SurfaceTextureDebugInfo) => void;
+  onCloseUpBodyIdChange?: (bodyId: string | null) => void;
   resolveMaterial: (bodyId: string) => MeshStandardMaterial | null;
 }> = ({
   starSystem,
   astroKey,
   planetSurfaceDescriptorsByBodyId,
-  ownerKeyByBodyId,
+  ownerColorByBodyId,
   planets,
   bodyWorldPositions,
   bodyRadii,
@@ -215,6 +283,9 @@ export const SystemSurfaceTextureManager: React.FC<{
   hoveredBodyId,
   lowSpec,
   cloudShadowStrengthScale,
+  debugEnabled = false,
+  onDebugUpdate,
+  onCloseUpBodyIdChange,
   resolveMaterial
 }) => {
   const { camera, gl, size } = useThree();
@@ -225,12 +296,15 @@ export const SystemSurfaceTextureManager: React.FC<{
     ao: DataTexture | null;
     roughness: DataTexture | null;
     height: DataTexture | null;
+    emissive: DataTexture | null;
   };
   const cacheRef = useRef<Map<string, SurfaceTextureBundle>>(new Map());
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
   const inFlightRef = useRef<Map<string, { bodyId: string; epoch: number }>>(new Map());
   const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
   const lastResolutionByBodyIdRef = useRef<Map<string, SurfaceTextureResolution>>(new Map());
+  const closeUpBodyIdRef = useRef<string | null>(null);
+  const lastDebugUpdateRef = useRef(0);
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
@@ -242,20 +316,29 @@ export const SystemSurfaceTextureManager: React.FC<{
         includeNormalMap: true,
         includeAoMap: false,
         includeRoughnessMap: false,
-        includeHeightMap: false
+        includeHeightMap: false,
+        includeEmissiveMap: false
       }
       : null
   ), [lowSpec]);
-  const heightTextureOptions = useMemo<SurfaceTextureOptions>(() => (
-    lowSpec
-      ? {
-        includeNormalMap: true,
-        includeAoMap: false,
-        includeRoughnessMap: false,
-        includeHeightMap: true
+  const resolveTextureOptions = useCallback(
+    (wantsHeightMap: boolean, wantsEmissiveMap: boolean): SurfaceTextureOptions | null => {
+      if (!wantsHeightMap && !wantsEmissiveMap) {
+        return baseTextureOptions;
       }
-      : { includeHeightMap: true }
-  ), [lowSpec]);
+      const includeNormalMap = baseTextureOptions?.includeNormalMap ?? true;
+      const includeAoMap = baseTextureOptions?.includeAoMap ?? true;
+      const includeRoughnessMap = baseTextureOptions?.includeRoughnessMap ?? true;
+      return {
+        includeNormalMap,
+        includeAoMap,
+        includeRoughnessMap,
+        includeHeightMap: wantsHeightMap,
+        includeEmissiveMap: wantsEmissiveMap
+      };
+    },
+    [baseTextureOptions]
+  );
   const scratch = useMemo(() => ({
     world: new Vector3(),
     view: new Vector3(),
@@ -372,6 +455,7 @@ export const SystemSurfaceTextureManager: React.FC<{
     bundle.ao?.dispose();
     bundle.roughness?.dispose();
     bundle.height?.dispose();
+    bundle.emissive?.dispose();
   }, []);
 
   useEffect(() => {
@@ -389,7 +473,6 @@ export const SystemSurfaceTextureManager: React.FC<{
 
   const buildTextureKey = useCallback((bodyId: string, descriptor: PlanetSurfaceDescriptor, resolution: SurfaceTextureResolution): string => {
     const config = descriptor.config;
-    const ownerKey = ownerKeyByBodyId[bodyId] ?? '__neutral__';
     const { planetIndex, moonIndex } = descriptor.astroRef;
     return [
       bodyId,
@@ -401,17 +484,17 @@ export const SystemSurfaceTextureManager: React.FC<{
       planetIndex,
       moonIndex ?? 'no-moon',
       astroKey,
-      ownerKey,
       resolution.width,
       resolution.height
     ].join('|');
-  }, [astroKey, ownerKeyByBodyId]);
+  }, [astroKey]);
   const buildTextureOptionsKey = useCallback((options: SurfaceTextureOptions | null): string => {
     const includeNormalMap = options?.includeNormalMap ?? true;
     const includeAoMap = options?.includeAoMap ?? true;
     const includeRoughnessMap = options?.includeRoughnessMap ?? true;
     const includeHeightMap = options?.includeHeightMap ?? false;
-    return `maps:n${includeNormalMap ? 1 : 0}a${includeAoMap ? 1 : 0}r${includeRoughnessMap ? 1 : 0}h${includeHeightMap ? 1 : 0}`;
+    const includeEmissiveMap = options?.includeEmissiveMap ?? false;
+    return `maps:n${includeNormalMap ? 1 : 0}a${includeAoMap ? 1 : 0}r${includeRoughnessMap ? 1 : 0}h${includeHeightMap ? 1 : 0}e${includeEmissiveMap ? 1 : 0}`;
   }, []);
 
   const buildGasGiantTextureKey = useCallback((
@@ -438,14 +521,45 @@ export const SystemSurfaceTextureManager: React.FC<{
     const roughnessTexture = includeRoughness
       ? createDataTexture(data.roughness, resolution.width, resolution.height, false)
       : null;
+    const includeNormal = options?.includeNormalMap ?? true;
+    const normalTexture = includeNormal
+      ? createDataTexture(buildGasGiantNormalRgba(data.heightField, resolution.width, resolution.height), resolution.width, resolution.height, false)
+      : null;
     return {
       color: colorTexture,
-      normal: null,
+      normal: normalTexture,
       ao: null,
       roughness: roughnessTexture,
-      height: null
+      height: null,
+      emissive: null
     };
   }, [astroKey, createDataTexture]);
+
+  const applyOwnerTintColor = useCallback((material: MeshStandardMaterial, baseColor: string) => {
+    const ownerTint = typeof material.userData.ownerTintColor === 'string'
+      ? material.userData.ownerTintColor
+      : '#ffffff';
+    const ownerStrength = typeof material.userData.ownerTintStrength === 'number'
+      ? material.userData.ownerTintStrength
+      : 0;
+    if (ownerStrength <= 0 || ownerTint === '#ffffff') {
+      material.color.set(baseColor);
+      return;
+    }
+    const tinted = new Color(baseColor).lerp(new Color(ownerTint), ownerStrength);
+    material.color.copy(tinted);
+  }, []);
+
+  const resolveCityLightsIntensity = useCallback((diameterPx: number): number => {
+    if (!Number.isFinite(diameterPx)) return 0;
+    if (diameterPx <= CITY_LIGHTS_DIAMETER_MIN_PX) return 0;
+    const t = MathUtils.clamp(
+      (diameterPx - CITY_LIGHTS_DIAMETER_MIN_PX) / (CITY_LIGHTS_DIAMETER_FULL_PX - CITY_LIGHTS_DIAMETER_MIN_PX),
+      0,
+      1
+    );
+    return MathUtils.lerp(CITY_LIGHTS_INTENSITY_MIN, CITY_LIGHTS_INTENSITY_MAX, t);
+  }, []);
 
   const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, bundle: SurfaceTextureBundle) => {
     let needsUpdate = false;
@@ -454,7 +568,7 @@ export const SystemSurfaceTextureManager: React.FC<{
       const surfaceTint = typeof material.userData.surfaceTintColor === 'string'
         ? material.userData.surfaceTintColor
         : '#ffffff';
-      material.color.set(surfaceTint);
+      applyOwnerTintColor(material, surfaceTint);
       needsUpdate = true;
     }
     const nextNormal = bundle.normal ?? null;
@@ -475,6 +589,14 @@ export const SystemSurfaceTextureManager: React.FC<{
     const nextHeight = bundle.height ?? null;
     if (material.displacementMap !== nextHeight) {
       material.displacementMap = nextHeight;
+      needsUpdate = true;
+    }
+    const nextEmissive = bundle.emissive ?? null;
+    if (material.emissiveMap !== nextEmissive) {
+      material.emissiveMap = nextEmissive;
+      if (nextEmissive) {
+        material.emissive.set('#ffffff');
+      }
       needsUpdate = true;
     }
     const baseRoughness = typeof material.userData.baseRoughness === 'number'
@@ -498,6 +620,19 @@ export const SystemSurfaceTextureManager: React.FC<{
       material.displacementScale = 0;
       material.displacementBias = 0;
     }
+    const baseEmissiveIntensity = typeof material.userData.baseEmissiveIntensity === 'number'
+      ? material.userData.baseEmissiveIntensity
+      : 0;
+    if (nextEmissive) {
+      const targetIntensity = typeof material.userData.surfaceEmissiveIntensity === 'number'
+        ? material.userData.surfaceEmissiveIntensity
+        : baseEmissiveIntensity;
+      if (material.emissiveIntensity !== targetIntensity) {
+        material.emissiveIntensity = targetIntensity;
+      }
+    } else if (material.emissiveIntensity !== baseEmissiveIntensity) {
+      material.emissiveIntensity = baseEmissiveIntensity;
+    }
     if (needsUpdate) {
       material.needsUpdate = true;
     }
@@ -506,7 +641,8 @@ export const SystemSurfaceTextureManager: React.FC<{
     material.userData.surfaceAoTextureKey = nextAo ? key : null;
     material.userData.surfaceRoughnessTextureKey = nextRoughness ? key : null;
     material.userData.surfaceHeightTextureKey = nextHeight ? key : null;
-  }, []);
+    material.userData.surfaceEmissiveTextureKey = nextEmissive ? key : null;
+  }, [applyOwnerTintColor]);
 
   const clearTextureFromMaterial = useCallback((material: MeshStandardMaterial) => {
     let needsUpdate = false;
@@ -526,6 +662,10 @@ export const SystemSurfaceTextureManager: React.FC<{
       material.roughnessMap = null;
       needsUpdate = true;
     }
+    if (material.emissiveMap) {
+      material.emissiveMap = null;
+      needsUpdate = true;
+    }
     if (material.displacementMap) {
       material.displacementMap = null;
       material.displacementScale = 0;
@@ -537,18 +677,25 @@ export const SystemSurfaceTextureManager: React.FC<{
     }
     const baseColor = typeof material.userData.baseColor === 'string' ? material.userData.baseColor : null;
     if (baseColor) {
-      material.color.set(baseColor);
+      applyOwnerTintColor(material, baseColor);
     }
     const baseRoughness = typeof material.userData.baseRoughness === 'number' ? material.userData.baseRoughness : null;
     if (typeof baseRoughness === 'number') {
       material.roughness = baseRoughness;
+    }
+    const baseEmissiveIntensity = typeof material.userData.baseEmissiveIntensity === 'number'
+      ? material.userData.baseEmissiveIntensity
+      : 0;
+    if (material.emissiveIntensity !== baseEmissiveIntensity) {
+      material.emissiveIntensity = baseEmissiveIntensity;
     }
     material.userData.surfaceTextureKey = null;
     material.userData.surfaceNormalTextureKey = null;
     material.userData.surfaceAoTextureKey = null;
     material.userData.surfaceRoughnessTextureKey = null;
     material.userData.surfaceHeightTextureKey = null;
-  }, []);
+    material.userData.surfaceEmissiveTextureKey = null;
+  }, [applyOwnerTintColor]);
 
   useEffect(() => {
     requestEpochRef.current += 1;
@@ -558,6 +705,8 @@ export const SystemSurfaceTextureManager: React.FC<{
     inFlightRef.current.clear();
     desiredKeyByBodyIdRef.current.clear();
     lastResolutionByBodyIdRef.current.clear();
+    closeUpBodyIdRef.current = null;
+    onCloseUpBodyIdChange?.(null);
 
     planetsRef.current.forEach((planet) => {
       const material = resolveMaterial(planet.id);
@@ -571,7 +720,7 @@ export const SystemSurfaceTextureManager: React.FC<{
         }
       });
     });
-  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, lowSpec, resolveMaterial]);
+  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, lowSpec, onCloseUpBodyIdChange, resolveMaterial]);
 
   useFrame(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
@@ -599,9 +748,15 @@ export const SystemSurfaceTextureManager: React.FC<{
 
     const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
     const bodyMetricsById = new Map<string, { diameterPx: number; isOnScreen: boolean }>();
-    const bodyInfoById = new Map<string, { isSolid: boolean; isGasGiant: boolean; planetType: PlanetType | null }>();
-    let closeUpBodyId: string | null = null;
-    let closeUpDiameter = 0;
+    const bodyInfoById = new Map<string, {
+      isSolid: boolean;
+      isGasGiant: boolean;
+      planetType: PlanetType | null;
+      hasAtmosphere: boolean;
+      isMoon: boolean;
+    }>();
+    let ultraBodyId: string | null = null;
+    let ultraDiameter = 0;
 
     const recordBodyMetrics = (bodyId: string, canRender: boolean) => {
       if (!canRender) return;
@@ -629,27 +784,66 @@ export const SystemSurfaceTextureManager: React.FC<{
       const diameterPx = isOnScreen ? pixelRadius * 2 : 0;
       bodyMetricsById.set(bodyId, { diameterPx, isOnScreen });
 
-      if (isOnScreen && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX && diameterPx > closeUpDiameter) {
-        closeUpDiameter = diameterPx;
-        closeUpBodyId = bodyId;
+      if (isOnScreen && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX && diameterPx > ultraDiameter) {
+        ultraDiameter = diameterPx;
+        ultraBodyId = bodyId;
       }
     };
 
     planets.forEach((planet) => {
       const isGasGiant = planet.type === 'GasGiant' || planet.type === 'IceGiant';
       const isSolid = planet.isSolid ?? true;
-      bodyInfoById.set(planet.id, { isSolid, isGasGiant, planetType: planet.type });
+      const hasAtmosphere = Boolean(planet.atmosphere && planet.atmosphere !== 'None');
+      bodyInfoById.set(planet.id, {
+        isSolid,
+        isGasGiant,
+        planetType: planet.type,
+        hasAtmosphere,
+        isMoon: false
+      });
       const planetHasDescriptor = Boolean(planetSurfaceDescriptorsByBodyId?.[planet.id]);
       recordBodyMetrics(planet.id, isGasGiant || (isSolid && planetHasDescriptor));
       planet.moons.forEach((moon) => {
         const moonSolid = moon.isSolid ?? true;
-        bodyInfoById.set(moon.id, { isSolid: moonSolid, isGasGiant: false, planetType: null });
+        const moonHasAtmosphere = Boolean(moon.atmosphere && moon.atmosphere !== 'None');
+        bodyInfoById.set(moon.id, {
+          isSolid: moonSolid,
+          isGasGiant: false,
+          planetType: null,
+          hasAtmosphere: moonHasAtmosphere,
+          isMoon: true
+        });
         const moonHasDescriptor = Boolean(planetSurfaceDescriptorsByBodyId?.[moon.id]);
         recordBodyMetrics(moon.id, moonSolid && moonHasDescriptor);
       });
     });
 
-    const preferUltraBodyId = selectedBodyId ?? closeUpBodyId;
+    const downThreshold = HIGH_DETAIL_GEOMETRY_DIAMETER_PX - HIGH_DETAIL_GEOMETRY_HYSTERESIS_PX;
+    const prevCloseUpBodyId = closeUpBodyIdRef.current;
+    let nextCloseUpBodyId: string | null = null;
+    let nextCloseUpDiameter = 0;
+    if (prevCloseUpBodyId) {
+      const metrics = bodyMetricsById.get(prevCloseUpBodyId);
+      if (metrics && metrics.diameterPx >= downThreshold && metrics.isOnScreen) {
+        nextCloseUpBodyId = prevCloseUpBodyId;
+        nextCloseUpDiameter = metrics.diameterPx;
+      }
+    }
+    bodyMetricsById.forEach((metrics, bodyId) => {
+      if (!metrics.isOnScreen) return;
+      if (metrics.diameterPx < HIGH_DETAIL_GEOMETRY_DIAMETER_PX) return;
+      if (metrics.diameterPx > nextCloseUpDiameter) {
+        nextCloseUpDiameter = metrics.diameterPx;
+        nextCloseUpBodyId = bodyId;
+      }
+    });
+    const resolvedCloseUpBodyId = lowSpec ? null : nextCloseUpBodyId;
+    if (resolvedCloseUpBodyId !== closeUpBodyIdRef.current) {
+      closeUpBodyIdRef.current = resolvedCloseUpBodyId;
+      onCloseUpBodyIdChange?.(resolvedCloseUpBodyId);
+    }
+
+    const preferUltraBodyId = selectedBodyId ?? ultraBodyId;
     const shouldPreferUltra = (bodyId: string) => !lowSpec && bodyId === preferUltraBodyId;
 
     const touchKey = (key: string) => {
@@ -660,7 +854,13 @@ export const SystemSurfaceTextureManager: React.FC<{
     const updateBody = (bodyId: string) => {
       const bodyInfo = bodyInfoById.get(bodyId);
       if (!bodyInfo) return;
-      const { isSolid, isGasGiant, planetType } = bodyInfo;
+      const {
+        isSolid,
+        isGasGiant,
+        planetType,
+        hasAtmosphere,
+        isMoon
+      } = bodyInfo;
       const descriptor = planetSurfaceDescriptorsByBodyId?.[bodyId];
       if (!descriptor && !isGasGiant) return;
       if (!isSolid && !isGasGiant) return;
@@ -693,7 +893,32 @@ export const SystemSurfaceTextureManager: React.FC<{
         return;
       }
 
+      const emissiveIntensity = !lowSpec && !isGasGiant
+        ? resolveCityLightsIntensity(diameterPx)
+        : 0;
       const material = resolveMaterial(bodyId);
+      if (material) {
+        if (typeof material.userData.ownerTintStrength !== 'number') {
+          material.userData.ownerTintStrength = OWNER_TINT_STRENGTH;
+        }
+        const ownerTint = ownerColorByBodyId[bodyId] ?? '#ffffff';
+        if (material.userData.ownerTintColor !== ownerTint) {
+          material.userData.ownerTintColor = ownerTint;
+          const surfaceTint = typeof material.userData.surfaceTintColor === 'string'
+            ? material.userData.surfaceTintColor
+            : '#ffffff';
+          const baseColor = typeof material.userData.baseColor === 'string'
+            ? material.userData.baseColor
+            : surfaceTint;
+          applyOwnerTintColor(material, material.map ? surfaceTint : baseColor);
+        }
+        if (material.userData.surfaceEmissiveIntensity !== emissiveIntensity) {
+          material.userData.surfaceEmissiveIntensity = emissiveIntensity;
+          if (material.emissiveMap && material.emissiveIntensity !== emissiveIntensity) {
+            material.emissiveIntensity = emissiveIntensity;
+          }
+        }
+      }
       const activeKey = material?.userData.surfaceTextureKey;
       if (activeKey) {
         touchKey(activeKey);
@@ -715,7 +940,8 @@ export const SystemSurfaceTextureManager: React.FC<{
           ].join(':')
         : 'shadow:none';
       const wantsHeightMap = !isGasGiant && isOnScreen && resolution.width >= 512;
-      const textureOptionsForBody = wantsHeightMap ? heightTextureOptions : baseTextureOptions;
+      const wantsEmissiveMap = !isGasGiant && isOnScreen && resolution.width >= 256 && emissiveIntensity > 0;
+      const textureOptionsForBody = resolveTextureOptions(wantsHeightMap, wantsEmissiveMap);
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
         ? buildGasGiantTextureKey(bodyId, planetType, resolution, textureOptionsForBody)
@@ -746,7 +972,11 @@ export const SystemSurfaceTextureManager: React.FC<{
 
       const state = requestStateRef.current;
       if (!state) return;
-      const workerRequest = buildSurfaceMapWorkerRequest(state, bodyId);
+      const workerRequest = buildSurfaceMapWorkerRequest(state, bodyId, {
+        hasAtmosphere,
+        isMoon,
+        planetType
+      });
       if (!workerRequest) return;
       if (cloudShadow) {
         workerRequest.cloudShadow = cloudShadow;
@@ -781,12 +1011,16 @@ export const SystemSurfaceTextureManager: React.FC<{
           const heightTexture = result.heightRgba
             ? createDataTexture(result.heightRgba, result.width, result.height, false)
             : null;
+          const emissiveTexture = result.emissiveRgba
+            ? createDataTexture(result.emissiveRgba, result.width, result.height, true)
+            : null;
           const bundle = {
             color: colorTexture,
             normal: normalTexture,
             ao: aoTexture,
             roughness: roughnessTexture,
-            height: heightTexture
+            height: heightTexture,
+            emissive: emissiveTexture
           };
 
           cacheRef.current.set(key, bundle);
@@ -832,6 +1066,37 @@ export const SystemSurfaceTextureManager: React.FC<{
       cacheRef.current.delete(key);
       cacheLastUsedRef.current.delete(key);
       disposeTextureBundle(bundle);
+    }
+
+    if (debugEnabled && onDebugUpdate) {
+      const lastUpdate = lastDebugUpdateRef.current;
+      if (now - lastUpdate > 250) {
+        const activeBodies: SurfaceTextureDebugInfo['activeBodies'] = [];
+        bodyMetricsById.forEach((metrics, bodyId) => {
+          if (!metrics.isOnScreen) return;
+          activeBodies.push({
+            bodyId,
+            diameterPx: metrics.diameterPx,
+            resolution: lastResolutionByBodyIdRef.current.get(bodyId) ?? null,
+            isOnScreen: metrics.isOnScreen
+          });
+        });
+        for (let i = 1; i < activeBodies.length; i += 1) {
+          const entry = activeBodies[i];
+          let j = i - 1;
+          while (j >= 0 && activeBodies[j].diameterPx < entry.diameterPx) {
+            activeBodies[j + 1] = activeBodies[j];
+            j -= 1;
+          }
+          activeBodies[j + 1] = entry;
+        }
+        onDebugUpdate({
+          cacheSize: cacheRef.current.size,
+          inflightSize: inFlightRef.current.size,
+          activeBodies
+        });
+        lastDebugUpdateRef.current = now;
+      }
     }
   });
 

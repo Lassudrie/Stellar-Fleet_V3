@@ -44,6 +44,7 @@ interface MoonOrbitGroupProps {
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   spinReferenceRadius: number;
+  fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
@@ -63,6 +64,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   resolveAtmosphereBundle,
   orbitThickness,
   spinReferenceRadius,
+  fixedTerminator,
   hitboxScaleMultiplier,
   onPressStart,
   onPressMove,
@@ -113,17 +115,18 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     () => getSpinScaleFromRadius(moon.radius, spinReferenceRadius, MOON_SPIN_SCALE_MIN, MOON_SPIN_SCALE_MAX),
     [moon.radius, spinReferenceRadius]
   );
-  const spinSpeed = useMemo(() => {
+  const baseSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-spin`);
     return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed)
       * BODY_SPIN_SPEED_MULTIPLIER
       * spinScale;
   }, [moon.id, spinScale]);
+  const spinSpeed = fixedTerminator ? 0 : baseSpinSpeed;
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-cloud-spin`);
     const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
-    return spinSpeed * multiplier;
-  }, [moon.id, spinSpeed]);
+    return baseSpinSpeed * multiplier;
+  }, [moon.id, baseSpinSpeed]);
   const cloudNoiseSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${moon.id}-cloud-noise`);
     return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
@@ -267,6 +270,7 @@ interface PlanetOrbitGroupProps {
   spinReferenceRadius: number;
   moonSpinReferenceRadius: number;
   highDetailBodyId: string | null;
+  fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
@@ -293,6 +297,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   spinReferenceRadius,
   moonSpinReferenceRadius,
   highDetailBodyId,
+  fixedTerminator,
   hitboxScaleMultiplier,
   onPressStart,
   onPressMove,
@@ -346,17 +351,18 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     () => getSpinScaleFromRadius(planet.radius, spinReferenceRadius, PLANET_SPIN_SCALE_MIN, PLANET_SPIN_SCALE_MAX),
     [planet.radius, spinReferenceRadius]
   );
-  const spinSpeed = useMemo(() => {
+  const baseSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-spin`);
     return MathUtils.lerp(BODY_SPIN_SPEED_MIN, BODY_SPIN_SPEED_MAX, seed)
       * BODY_SPIN_SPEED_MULTIPLIER
       * spinScale;
   }, [planet.id, spinScale]);
+  const spinSpeed = fixedTerminator ? 0 : baseSpinSpeed;
   const cloudSpinSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-cloud-spin`);
     const multiplier = MathUtils.lerp(CLOUD_SPIN_MULTIPLIER_MIN, CLOUD_SPIN_MULTIPLIER_MAX, seed);
-    return spinSpeed * multiplier;
-  }, [planet.id, spinSpeed]);
+    return baseSpinSpeed * multiplier;
+  }, [planet.id, baseSpinSpeed]);
   const cloudNoiseSpeed = useMemo(() => {
     const seed = hashStringToUnit(`${planet.id}-cloud-noise`);
     return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
@@ -494,6 +500,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               resolveAtmosphereBundle={resolveAtmosphereBundle}
               orbitThickness={orbitThickness}
               spinReferenceRadius={moonSpinReferenceRadius}
+              fixedTerminator={fixedTerminator}
               hitboxScaleMultiplier={hitboxScaleMultiplier}
               onPressStart={onPressStart}
               onPressMove={onPressMove}
@@ -529,6 +536,7 @@ interface SystemCelestialLayerProps {
   planetSpinReferenceRadius: number;
   moonSpinReferenceRadius: number;
   highDetailBodyId: string | null;
+  fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
   onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
@@ -558,6 +566,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   planetSpinReferenceRadius,
   moonSpinReferenceRadius,
   highDetailBodyId,
+  fixedTerminator,
   hitboxScaleMultiplier,
   onBodyPressStart,
   onBodyPressMove,
@@ -607,6 +616,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           spinReferenceRadius={planetSpinReferenceRadius}
           moonSpinReferenceRadius={moonSpinReferenceRadius}
           highDetailBodyId={highDetailBodyId}
+          fixedTerminator={fixedTerminator}
           hitboxScaleMultiplier={hitboxScaleMultiplier}
           onPressStart={onBodyPressStart}
           onPressMove={onBodyPressMove}

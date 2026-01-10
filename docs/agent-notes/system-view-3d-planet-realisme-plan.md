@@ -131,3 +131,48 @@ Fichiers:
 - Verifier couture 0/360 et poles.
 - Verifier que l'ocean reste lisse et ne "bosselle" pas.
 - Executer `npm run typecheck` et `npm test` apres chaque phase impactante.
+
+## Backlog pragmatique (mobile-first)
+Backlog derivé de l'etat actuel du code + roadmap cible.
+
+### P0 - Lisibilite / stabilite (MVP solide)
+- [x] Terminator fige optionnel (planetes), nuages qui tournent encore.
+  - Dep: `src/ui/components/screens/systemView3d/celestial.tsx`, `src/ui/components/screens/systemView3d/renderUtils.ts`.
+  - Acceptance: le bord jour/nuit ne bouge pas quand la planete tourne; les nuages restent animes.
+  - Vigilance: ne pas casser la lecture multi-etoiles (terminator base sur l'etoile primaire).
+- [x] Ownership overlay sans regen de textures.
+  - Dep: `src/ui/components/screens/systemView3d/surfaceTextures.tsx`, `src/ui/components/screens/SystemView3D.tsx`.
+  - Acceptance: changement de `ownerFactionId` ne declenche pas une regen albedo/normal; overlay couleur ou masque separé.
+  - Vigilance: conserver la lisibilite des biomes (tint leger, alpha controle).
+- [x] Debug "surface textures" (resolution, cache, inflight) en mode dev.
+  - Dep: `src/ui/components/screens/SystemView3D.tsx`, `src/ui/components/screens/systemView3d/surfaceTextures.tsx`.
+  - Acceptance: affichage simple activable (flag dev) sans impact perf notable.
+  - Vigilance: pas de logs bruyants, pas d'impact sur determinisme.
+
+### P1 - Info gameplay / impact visuel
+- [x] City lights emissive mask (settlements + feature bits), masque cote jour.
+  - Dep: `src/shared/shared.ts` (settlements), `src/ui/workers/surfaceMapWorker.ts`, `src/ui/components/screens/SystemView3D.tsx`.
+  - Acceptance: planetes colonisees visibles cote nuit, intensite proportionnelle a la population.
+  - Vigilance: garder un seuil minimal (eviter le "sapin de Noel"), pas d'update continue.
+- [x] Multi-etoiles: clarifier la source du terminator (primary-only ou mix pondere).
+  - Dep: `src/ui/components/screens/SystemView3D.tsx`, `src/ui/components/screens/systemView3d/renderUtils.ts`.
+  - Acceptance: comportement defini et stable; pas de flicker.
+  - Vigilance: limiter le cout shader (1 direction lumineuse par defaut).
+- [x] Gas giants: normal/roughness legers pour accrocher la lumiere.
+  - Dep: `src/ui/components/screens/systemView3d/surfaceTextures.tsx`.
+  - Acceptance: bandes visibles avec relief subtil sans bruit excessif.
+  - Vigilance: rester cheap (pas de bruit lourd en shader).
+
+### P2 - Polish visuel / coherence 2D-3D
+- [x] Traitement poles/couture (blend caps ou triplanar leger).
+  - Dep: `src/ui/workers/surfaceMapWorker.ts`.
+  - Acceptance: couture 0/360 invisible, poles moins etires.
+  - Vigilance: ne pas introduire de divergence avec la carte 2D.
+- [x] Crater stamping pour lunes/monde sans atmosphere.
+  - Dep: `src/ui/workers/surfaceMapWorker.ts`.
+  - Acceptance: relief crateres lisible en gros plan, pas de repetition evidente.
+  - Vigilance: determinisme strict (seed derivee).
+- [x] LOD geometrie base sur taille ecran (pas seulement selection).
+  - Dep: `src/ui/components/screens/SystemView3D.tsx`.
+  - Acceptance: relief plus fin en zoom proche, sans "pop" brutal.
+  - Vigilance: capper sur mobile (pas de LOD high auto).

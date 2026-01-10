@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type DependencyList } from 'react';
-import { Color, MathUtils, Material, MeshStandardMaterial } from 'three';
+import { Color, MathUtils, Material, MeshStandardMaterial, Vector3 } from 'three';
 import {
   DAY_NIGHT_NIGHT_MIN,
   DAY_NIGHT_TERMINATOR_SOFTNESS,
@@ -143,18 +143,31 @@ export const getSurfaceTintFromTemperature = (temperatureK: number | undefined, 
 
 export const applyDayNightTerminator = (
   material: MeshStandardMaterial,
-  options?: { nightMin?: number; terminatorSoftness?: number }
+  options?: { nightMin?: number; terminatorSoftness?: number; sunPosition?: Vector3 | [number, number, number] }
 ) => {
+  const sunPosition = options?.sunPosition
+    ? options.sunPosition instanceof Vector3
+      ? options.sunPosition
+      : new Vector3(...options.sunPosition)
+    : new Vector3(0, 0, 0);
   if (material.userData.dayNightTerminatorApplied) {
     if (options) {
       material.userData.dayNightNightMin = options.nightMin ?? DAY_NIGHT_NIGHT_MIN;
       material.userData.dayNightTerminatorSoftness = options.terminatorSoftness ?? DAY_NIGHT_TERMINATOR_SOFTNESS;
-      const uniforms = material.userData.dayNightUniforms as { nightMin?: { value: number }; softness?: { value: number } } | undefined;
+      material.userData.dayNightSunPosition = sunPosition;
+      const uniforms = material.userData.dayNightUniforms as {
+        nightMin?: { value: number };
+        softness?: { value: number };
+        sunPosition?: { value: Vector3 };
+      } | undefined;
       if (uniforms?.nightMin) {
         uniforms.nightMin.value = material.userData.dayNightNightMin;
       }
       if (uniforms?.softness) {
         uniforms.softness.value = material.userData.dayNightTerminatorSoftness;
+      }
+      if (uniforms?.sunPosition) {
+        uniforms.sunPosition.value.copy(material.userData.dayNightSunPosition);
       }
       material.needsUpdate = true;
     }
@@ -163,13 +176,16 @@ export const applyDayNightTerminator = (
   material.userData.dayNightTerminatorApplied = true;
   material.userData.dayNightNightMin = options?.nightMin ?? DAY_NIGHT_NIGHT_MIN;
   material.userData.dayNightTerminatorSoftness = options?.terminatorSoftness ?? DAY_NIGHT_TERMINATOR_SOFTNESS;
+  material.userData.dayNightSunPosition = sunPosition;
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uNightMin = { value: material.userData.dayNightNightMin };
     shader.uniforms.uTerminatorSoftness = { value: material.userData.dayNightTerminatorSoftness };
+    shader.uniforms.uSunPosition = { value: material.userData.dayNightSunPosition.clone() };
     material.userData.dayNightUniforms = {
       nightMin: shader.uniforms.uNightMin,
-      softness: shader.uniforms.uTerminatorSoftness
+      softness: shader.uniforms.uTerminatorSoftness,
+      sunPosition: shader.uniforms.uSunPosition
     };
 
     shader.vertexShader = shader.vertexShader
@@ -198,21 +214,27 @@ vWorldPosition = sfWorldPosition.xyz;`
 varying vec3 vWorldPosition;
 varying vec3 vWorldNormal;
 uniform float uNightMin;
-uniform float uTerminatorSoftness;`
+uniform float uTerminatorSoftness;
+uniform vec3 uSunPosition;`
       )
       .replace(
         '#include <opaque_fragment>',
-        `float sunDistance = length(vWorldPosition);
-vec3 sunDir = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+        `vec3 sunVec = uSunPosition - vWorldPosition;
+float sunDistance = length(sunVec);
+vec3 sunDir = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
 float nDotL = dot(normalize(vWorldNormal), sunDir);
 float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
 float lightFactor = mix(uNightMin, 1.0, terminator);
-outgoingLight *= lightFactor;
+float nightMask = 1.0 - terminator;
+vec3 emissiveRadiance = totalEmissiveRadiance;
+vec3 lit = outgoingLight - emissiveRadiance;
+lit *= lightFactor;
+outgoingLight = lit + emissiveRadiance * nightMask;
 #include <opaque_fragment>`
       );
   };
 
-  material.customProgramCacheKey = () => 'sf_day_night_terminator_v1';
+  material.customProgramCacheKey = () => 'sf_day_night_terminator_v2';
   material.needsUpdate = true;
 };
 

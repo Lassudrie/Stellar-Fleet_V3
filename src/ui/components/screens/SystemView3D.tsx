@@ -90,6 +90,8 @@ import {
   SURFACE_DISPLACEMENT_BIAS,
   SURFACE_DISPLACEMENT_SCALE,
   SURFACE_NORMAL_SCALE,
+  SYSTEM_VIEW_FIXED_TERMINATOR,
+  OWNER_TINT_STRENGTH,
   SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR,
   SYSTEM_VIEW_CAMERA_MIN_DISTANCE_RADIUS_FACTOR,
   SystemBodyLabels,
@@ -130,6 +132,7 @@ interface SystemView3DProps {
   onCameraStateChange?: (state: SystemCameraState) => void;
   scaleFactor?: number;
   showBodyLabels?: boolean;
+  fixedTerminator?: boolean;
   onOpenSurfaceView?: (bodyId: string) => void;
   onBack?: () => void;
 }
@@ -159,6 +162,16 @@ type BodyListItem = {
   name: string;
   kind: 'star' | 'planet' | 'moon';
   children?: BodyListItem[];
+};
+type SurfaceTextureDebugInfo = {
+  cacheSize: number;
+  inflightSize: number;
+  activeBodies: Array<{
+    bodyId: string;
+    diameterPx: number;
+    resolution: { width: number; height: number } | null;
+    isOnScreen: boolean;
+  }>;
 };
 
 const MENU_OFFSET = 12;
@@ -271,10 +284,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   onCameraStateChange,
   scaleFactor = 1,
   showBodyLabels = true,
+  fixedTerminator = SYSTEM_VIEW_FIXED_TERMINATOR,
   onOpenSurfaceView,
   onBack
 }) => {
   const { t } = useI18n();
+  const showSurfaceDebug = useMemo(() => {
+    if (!import.meta.env.DEV) return false;
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('surfaceDebug') === '1';
+  }, []);
   const prefersTouchFallback = typeof window !== 'undefined' && (
     (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
@@ -344,6 +364,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const starBodyId = primaryStar?.id ?? `${starSystem.id}-star-primary`;
   const starRadius = primaryStar?.radius ?? minStarRadius;
   const starTintColor = primaryStar?.tintColor ?? getSpectralTint(astro?.primarySpectralType, starSystem.color || '#ffffff');
+  const sunPosition = useMemo(
+    () => new Vector3(...(primaryStar?.position ?? [0, 0, 0])),
+    [primaryStar?.position]
+  );
   const orbitMassSun = Math.max(primaryStar?.data.massSun ?? 1, 0.1);
   const astroKey = useMemo(() => {
     if (!astro) return 'no-astro';
@@ -353,13 +377,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => starSystem.planets.filter(body => body.bodyType === 'planet'),
     [starSystem.planets]
   );
-  const ownerKeyByBodyId = useMemo<Record<string, string>>(() => {
-    const out: Record<string, string> = {};
-    starSystem.planets.forEach(body => {
-      out[body.id] = body.ownerFactionId ?? '__neutral__';
-    });
-    return out;
-  }, [starSystem.planets]);
   const moonBodiesByPlanetIndex = useMemo(() => {
     const buckets: PlanetBody[][] = [];
     let planetIndex = -1;
@@ -656,6 +673,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     bodyMaterialByIdRef.current.clear();
   }, []);
 
+  const resolveOwnerTintedColor = useCallback((baseColor: string, ownerTint: string): string => {
+    if (ownerTint === '#ffffff' || OWNER_TINT_STRENGTH <= 0) return baseColor;
+    return new Color(baseColor).lerp(new Color(ownerTint), OWNER_TINT_STRENGTH).getStyle();
+  }, []);
+
+  const factionById = useMemo(() => new Map(factions.map((faction) => [faction.id, faction])), [factions]);
+  const ownerColorByBodyId = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    starSystem.planets.forEach(body => {
+      const ownerId = body.ownerFactionId ?? null;
+      out[body.id] = ownerId ? (factionById.get(ownerId)?.color ?? '#ffffff') : '#ffffff';
+    });
+    return out;
+  }, [factionById, starSystem.planets]);
+
   const resolvePlanetMaterial = useCallback((planet: OrbitingPlanet): MeshStandardMaterial => {
     const base = planetMaterialMap[planet.type];
     const baseColor = PLANET_TYPE_COLORS[planet.type];
@@ -663,10 +695,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const hasAtmosphere = Boolean(planet.atmosphere && planet.atmosphere !== 'None');
     const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
     const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
+    const ownerTint = ownerColorByBodyId[planet.id] ?? '#ffffff';
     const existing = bodyMaterialByIdRef.current.get(planet.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
       existing.userData.surfaceTintColor = surfaceTint;
+      existing.userData.ownerTintColor = ownerTint;
+      existing.userData.ownerTintStrength = OWNER_TINT_STRENGTH;
+      if (typeof existing.userData.baseEmissiveIntensity !== 'number') {
+        existing.userData.baseEmissiveIntensity = existing.emissiveIntensity ?? 0;
+      }
       if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
         existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
       }
@@ -675,12 +713,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       }
       existing.metalness = 0;
       existing.dithering = true;
-      if (existing.map) {
-        existing.color.set(surfaceTint);
-      } else {
-        existing.color.set(tintedBaseColor);
-      }
-      applyDayNightTerminator(existing, { nightMin, terminatorSoftness });
+      const baseTint = existing.map ? surfaceTint : tintedBaseColor;
+      existing.color.set(resolveOwnerTintedColor(baseTint, ownerTint));
+      applyDayNightTerminator(existing, { nightMin, terminatorSoftness, sunPosition });
       return existing;
     }
     const material = base.clone();
@@ -690,15 +725,19 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.dithering = true;
     material.userData.baseColor = tintedBaseColor;
     material.userData.surfaceTintColor = surfaceTint;
+    material.userData.ownerTintColor = ownerTint;
+    material.userData.ownerTintStrength = OWNER_TINT_STRENGTH;
     material.userData.baseRoughness = material.roughness;
+    material.userData.baseEmissiveIntensity = material.emissiveIntensity ?? 0;
     material.userData.surfaceTextureKey = null;
     material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
     material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
-    material.color.set(tintedBaseColor);
-    applyDayNightTerminator(material, { nightMin, terminatorSoftness });
+    material.emissive.set('#000000');
+    material.color.set(resolveOwnerTintedColor(tintedBaseColor, ownerTint));
+    applyDayNightTerminator(material, { nightMin, terminatorSoftness, sunPosition });
     bodyMaterialByIdRef.current.set(planet.id, material);
     return material;
-  }, [planetMaterialMap]);
+  }, [ownerColorByBodyId, planetMaterialMap, resolveOwnerTintedColor, sunPosition]);
 
   const resolveMoonMaterial = useCallback((moon: OrbitingMoon): MeshStandardMaterial => {
     const base = moonMaterialMap[moon.type];
@@ -707,10 +746,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const hasAtmosphere = Boolean(moon.atmosphere && moon.atmosphere !== 'None');
     const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
     const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
+    const ownerTint = ownerColorByBodyId[moon.id] ?? '#ffffff';
     const existing = bodyMaterialByIdRef.current.get(moon.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
       existing.userData.surfaceTintColor = surfaceTint;
+      existing.userData.ownerTintColor = ownerTint;
+      existing.userData.ownerTintStrength = OWNER_TINT_STRENGTH;
+      if (typeof existing.userData.baseEmissiveIntensity !== 'number') {
+        existing.userData.baseEmissiveIntensity = existing.emissiveIntensity ?? 0;
+      }
       if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
         existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
       }
@@ -719,12 +764,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       }
       existing.metalness = 0;
       existing.dithering = true;
-      if (existing.map) {
-        existing.color.set(surfaceTint);
-      } else {
-        existing.color.set(tintedBaseColor);
-      }
-      applyDayNightTerminator(existing, { nightMin, terminatorSoftness });
+      const baseTint = existing.map ? surfaceTint : tintedBaseColor;
+      existing.color.set(resolveOwnerTintedColor(baseTint, ownerTint));
+      applyDayNightTerminator(existing, { nightMin, terminatorSoftness, sunPosition });
       return existing;
     }
     const material = base.clone();
@@ -734,15 +776,19 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.dithering = true;
     material.userData.baseColor = tintedBaseColor;
     material.userData.surfaceTintColor = surfaceTint;
+    material.userData.ownerTintColor = ownerTint;
+    material.userData.ownerTintStrength = OWNER_TINT_STRENGTH;
     material.userData.baseRoughness = material.roughness;
+    material.userData.baseEmissiveIntensity = material.emissiveIntensity ?? 0;
     material.userData.surfaceTextureKey = null;
     material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
     material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
-    material.color.set(tintedBaseColor);
-    applyDayNightTerminator(material, { nightMin, terminatorSoftness });
+    material.emissive.set('#000000');
+    material.color.set(resolveOwnerTintedColor(tintedBaseColor, ownerTint));
+    applyDayNightTerminator(material, { nightMin, terminatorSoftness, sunPosition });
     bodyMaterialByIdRef.current.set(moon.id, material);
     return material;
-  }, [moonMaterialMap]);
+  }, [moonMaterialMap, ownerColorByBodyId, resolveOwnerTintedColor, sunPosition]);
 
   const resolveBodyMaterial = useCallback((bodyId: string): MeshStandardMaterial | null => {
     return bodyMaterialByIdRef.current.get(bodyId) ?? null;
@@ -888,7 +934,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     [stations, starSystem.id]
   );
   const fleetById = useMemo(() => new Map(systemFleets.map((fleet) => [fleet.id, fleet])), [systemFleets]);
-  const factionById = useMemo(() => new Map(factions.map((faction) => [faction.id, faction])), [factions]);
 
   const [hoveredObjectId, setHoveredObjectId] = useState<SystemObjectId | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<SystemObjectId | null>(null);
@@ -897,6 +942,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [contextMenuConstraints, setContextMenuConstraints] = useState<{ maxHeight?: number; maxWidth?: number }>({});
   const [infoBodyId, setInfoBodyId] = useState<string | null>(null);
   const [isBodyListOpen, setIsBodyListOpen] = useState(false);
+  const [closeUpBodyId, setCloseUpBodyId] = useState<string | null>(null);
+  const [surfaceDebug, setSurfaceDebug] = useState<SurfaceTextureDebugInfo | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -922,7 +969,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
-  const highDetailBodyId = selectedBodyId ?? hoveredBodyId ?? null;
+  const highDetailBodyId = selectedBodyId ?? hoveredBodyId ?? closeUpBodyId ?? null;
 
   const handleHoverBody = useCallback((bodyId: string) => {
     setHoveredObjectId(makeObjectId('body', bodyId));
@@ -1053,6 +1100,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setHoveredObjectId(null);
     setSelectedObjectId(null);
     setIsBodyListOpen(false);
+    setCloseUpBodyId(null);
   }, [starSystem.id]);
   const fleetIconScale = 0.45 * clampedScale;
   const eclipticEpsilon = Math.max(fleetIconScale * 0.02, clampedScale * 0.01);
@@ -1430,7 +1478,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 starSystem={starSystem}
                 astroKey={astroKey}
                 planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
-                ownerKeyByBodyId={ownerKeyByBodyId}
+                ownerColorByBodyId={ownerColorByBodyId}
                 planets={planets}
                 bodyWorldPositions={bodyWorldPositions}
                 bodyRadii={bodyRadii}
@@ -1438,6 +1486,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 hoveredBodyId={hoveredBodyId}
                 lowSpec={lowSpec}
                 cloudShadowStrengthScale={cloudShadowStrengthScale}
+                debugEnabled={showSurfaceDebug}
+                onDebugUpdate={showSurfaceDebug ? setSurfaceDebug : undefined}
+                onCloseUpBodyIdChange={setCloseUpBodyId}
                 resolveMaterial={resolveBodyMaterial}
               />
               <SystemCelestialLayer
@@ -1458,6 +1509,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 planetSpinReferenceRadius={planetSpinReferenceRadius}
                 moonSpinReferenceRadius={moonSpinReferenceRadius}
                 highDetailBodyId={highDetailBodyId}
+                fixedTerminator={fixedTerminator}
                 hitboxScaleMultiplier={hitboxScaleMultiplier}
                 onBodyPressStart={handleBodyPressStart}
                 onBodyPressMove={handleBodyPressMove}
@@ -1530,6 +1582,28 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               />
             </svg>
           </button>
+        </div>
+      )}
+      {showSurfaceDebug && surfaceDebug && (
+        <div className="pointer-events-none absolute right-4 top-4 z-40 rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-[11px] text-slate-100 shadow-lg">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Surface Textures
+          </div>
+          <div className="flex gap-3 text-slate-200">
+            <span>cache: {surfaceDebug.cacheSize}</span>
+            <span>inflight: {surfaceDebug.inflightSize}</span>
+          </div>
+          <div className="mt-2 space-y-1 text-slate-300">
+            {surfaceDebug.activeBodies.map((body) => (
+              <div key={body.bodyId} className="flex items-center gap-2">
+                <span className="min-w-[90px] truncate">{body.bodyId}</span>
+                <span className="text-slate-500">{Math.round(body.diameterPx)}px</span>
+                <span className="text-slate-400">
+                  {body.resolution ? `${body.resolution.width}x${body.resolution.height}` : 'off'}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="pointer-events-none absolute inset-0 z-30">
