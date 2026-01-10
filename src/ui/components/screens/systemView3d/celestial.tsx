@@ -51,7 +51,7 @@ interface MoonOrbitGroupProps {
   onPressCancel: () => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
-  onSelect: (bodyId: string) => void;
+  onSelect: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
 }
 
 const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string) => void }> = ({
@@ -197,7 +197,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             }}
             onClick={(event) => {
               event.stopPropagation();
-              onSelect(moon.id);
+              onSelect(moon.id, event);
             }}
             frustumCulled
           />
@@ -233,7 +233,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             }}
             onClick={(event) => {
               event.stopPropagation();
-              onSelect(moon.id);
+              onSelect(moon.id, event);
             }}
             frustumCulled
           />
@@ -275,7 +275,7 @@ interface PlanetOrbitGroupProps {
   onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
-  onSelect: (bodyId: string) => void;
+  onSelect: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
 }
 
 const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
@@ -431,7 +431,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             }}
             onClick={(event) => {
               event.stopPropagation();
-              onSelect(planet.id);
+              onSelect(planet.id, event);
             }}
             frustumCulled
           />
@@ -467,7 +467,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             }}
             onClick={(event) => {
               event.stopPropagation();
-              onSelect(planet.id);
+              onSelect(planet.id, event);
             }}
             frustumCulled
           />
@@ -537,7 +537,7 @@ interface SystemCelestialLayerProps {
   onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
   onBlurBody: (bodyId: string) => void;
-  onSelectBody: (bodyId: string) => void;
+  onSelectBody: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
 }
 
 export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
@@ -586,7 +586,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
             }}
             onHover={() => onHoverBody(star.id)}
             onBlur={() => onBlurBody(star.id)}
-            onSelect={() => onSelectBody(star.id)}
+            onSelect={(event) => onSelectBody(star.id, event)}
           />
         </group>
       ))}

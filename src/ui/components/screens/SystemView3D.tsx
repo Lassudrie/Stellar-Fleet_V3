@@ -137,6 +137,19 @@ type BodyContextMenuState = {
   position: { x: number; y: number };
 };
 
+type AnchorPoint = { x: number; y: number };
+type Size = { width: number; height: number };
+type ViewportRect = { left: number; top: number; width: number; height: number };
+type SafeAreaInsets = { top: number; right: number; bottom: number; left: number };
+type PositioningConstraints = {
+  anchor: AnchorPoint;
+  menuSize: Size;
+  viewport: ViewportRect;
+  safeInsets: SafeAreaInsets;
+  offset: number;
+  padding: number;
+};
+
 type BodyListItem = {
   id: string;
   name: string;
@@ -144,28 +157,101 @@ type BodyListItem = {
   children?: BodyListItem[];
 };
 
-type LongPressState = {
-  bodyId: string;
-  pointerId: number;
-  startX: number;
-  startY: number;
-  isTouch: boolean;
-  moveTolerance: number;
-  hasMoved: boolean;
-};
-
-const BODY_CONTEXT_MENU_OFFSET = 12;
-const BODY_CONTEXT_MENU_PADDING = 10;
-const LONG_PRESS_DURATION_MS = 420;
-const LONG_PRESS_DURATION_TOUCH_MS = 520;
-const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
-const LONG_PRESS_MOVE_TOLERANCE_TOUCH_PX = 18;
+const MENU_OFFSET = 12;
+const SAFE_PADDING = 8;
+const OVERLAY_ID = 'ui-overlay';
 
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
     {children}
   </group>
 );
+
+const clamp = (value: number, min: number, max: number): number => {
+  if (min > max) return min;
+  return Math.min(Math.max(value, min), max);
+};
+
+const computeConstrainedMenuPosition = ({
+  anchor,
+  menuSize,
+  viewport,
+  safeInsets,
+  offset,
+  padding
+}: PositioningConstraints): AnchorPoint => {
+  const viewportRight = viewport.left + viewport.width;
+  const viewportBottom = viewport.top + viewport.height;
+
+  const minX = viewport.left + safeInsets.left + padding;
+  const minY = viewport.top + safeInsets.top + padding;
+  const maxX = viewportRight - safeInsets.right - padding - menuSize.width;
+  const maxY = viewportBottom - safeInsets.bottom - padding - menuSize.height;
+
+  let x = anchor.x + offset;
+  let y = anchor.y + offset;
+
+  const preferredRight = x + menuSize.width;
+  const preferredBottom = y + menuSize.height;
+
+  if (preferredRight > viewportRight - safeInsets.right - padding) {
+    x = anchor.x - menuSize.width - offset;
+  }
+
+  if (preferredBottom > viewportBottom - safeInsets.bottom - padding) {
+    y = anchor.y - menuSize.height - offset;
+  }
+
+  return {
+    x: clamp(x, minX, maxX),
+    y: clamp(y, minY, maxY)
+  };
+};
+
+const readSafeAreaInsets = (): SafeAreaInsets => {
+  if (typeof document === 'undefined') {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+  const overlay = document.getElementById(OVERLAY_ID);
+  if (!overlay) {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+
+  const style = window.getComputedStyle(overlay);
+  const toNumber = (value: string | null) => {
+    const parsed = Number.parseFloat(value ?? '');
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  return {
+    top: toNumber(style.paddingTop),
+    right: toNumber(style.paddingRight),
+    bottom: toNumber(style.paddingBottom),
+    left: toNumber(style.paddingLeft)
+  };
+};
+
+const readViewportRect = (): ViewportRect => {
+  if (typeof window === 'undefined') {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const vv = window.visualViewport;
+  if (vv) {
+    return {
+      left: vv.offsetLeft,
+      top: vv.offsetTop,
+      width: vv.width,
+      height: vv.height
+    };
+  }
+
+  return {
+    left: 0,
+    top: 0,
+    width: window.innerWidth,
+    height: window.innerHeight
+  };
+};
 
 const SystemView3D: React.FC<SystemView3DProps> = ({
   starSystem,
@@ -784,12 +870,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [selectedObjectId, setSelectedObjectId] = useState<SystemObjectId | null>(null);
   const [bodyContextMenu, setBodyContextMenu] = useState<BodyContextMenuState | null>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuConstraints, setContextMenuConstraints] = useState<{ maxHeight?: number; maxWidth?: number }>({});
   const [infoBodyId, setInfoBodyId] = useState<string | null>(null);
   const [isBodyListOpen, setIsBodyListOpen] = useState(false);
-  const longPressTimerRef = useRef<number | null>(null);
-  const longPressStateRef = useRef<LongPressState | null>(null);
-  const longPressTriggeredRef = useRef(false);
-  const suppressClickRef = useRef(false);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -816,8 +899,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
   const highDetailBodyId = selectedBodyId ?? hoveredBodyId ?? null;
-  const contextMenuOffset = prefersTouchFallback ? 18 : BODY_CONTEXT_MENU_OFFSET;
-  const contextMenuPadding = prefersTouchFallback ? 14 : BODY_CONTEXT_MENU_PADDING;
 
   const handleHoverBody = useCallback((bodyId: string) => {
     setHoveredObjectId(makeObjectId('body', bodyId));
@@ -826,15 +907,18 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const objectId = makeObjectId('body', bodyId);
     setHoveredObjectId(prev => (prev === objectId ? null : prev));
   }, []);
-  const handleSelectBody = useCallback((bodyId: string) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
+  const handleSelectBody = useCallback((bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => {
+    const body = bodyInfoMap[bodyId];
+    setSelectedObjectId(makeObjectId('body', bodyId));
+    onSelectFleet?.(null);
+    if (!body || body.bodyType === 'star') {
+      setBodyContextMenu(null);
       return;
     }
-    setSelectedObjectId(makeObjectId('body', bodyId));
-    setBodyContextMenu(null);
-    onSelectFleet?.(null);
-  }, [onSelectFleet]);
+    setBodyContextMenu({ bodyId, position: { x: event.clientX, y: event.clientY } });
+    setContextMenuPosition({ x: event.clientX, y: event.clientY });
+    setInfoBodyId(null);
+  }, [bodyInfoMap, onSelectFleet]);
   const handleHoverObject = useCallback((objectId: SystemObjectId) => {
     setHoveredObjectId(objectId);
   }, []);
@@ -842,10 +926,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setHoveredObjectId(prev => (prev === objectId ? null : prev));
   }, []);
   const handleSelectObject = useCallback((objectId: SystemObjectId) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
     setSelectedObjectId(objectId);
     setBodyContextMenu(null);
     const parsed = parseObjectId(objectId);
@@ -855,93 +935,33 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       onSelectFleet?.(null);
     }
   }, [onSelectFleet]);
-  const clearLongPressTimer = useCallback(() => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  }, []);
-  useEffect(() => () => clearLongPressTimer(), [clearLongPressTimer]);
-  const openBodyContextMenu = useCallback((bodyId: string, position: { x: number; y: number }) => {
-    const body = bodyInfoMap[bodyId];
-    if (!body || body.bodyType === 'star') return;
-    setBodyContextMenu({ bodyId, position });
-    setContextMenuPosition(position);
-    setInfoBodyId(null);
-    setSelectedObjectId(makeObjectId('body', bodyId));
-    onSelectFleet?.(null);
-  }, [bodyInfoMap, onSelectFleet]);
   const closeBodyContextMenu = useCallback(() => {
     setBodyContextMenu(null);
-    suppressClickRef.current = false;
+    setContextMenuPosition(null);
   }, []);
-  const handleBodyPressStart = useCallback((bodyId: string, event: ThreeEvent<PointerEvent>) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    clearLongPressTimer();
-    suppressClickRef.current = false;
-    longPressTriggeredRef.current = false;
-    const pointerType = event.pointerType || (prefersTouchFallback ? 'touch' : 'mouse');
-    const isTouch = pointerType === 'touch';
-    const moveTolerance = isTouch ? LONG_PRESS_MOVE_TOLERANCE_TOUCH_PX : LONG_PRESS_MOVE_TOLERANCE_PX;
-    const pressDuration = isTouch ? LONG_PRESS_DURATION_TOUCH_MS : LONG_PRESS_DURATION_MS;
-    longPressStateRef.current = {
-      bodyId,
-      pointerId: event.pointerId ?? -1,
-      startX: event.clientX,
-      startY: event.clientY,
-      isTouch,
-      moveTolerance,
-      hasMoved: false
-    };
-    const position = { x: event.clientX, y: event.clientY };
-    longPressTimerRef.current = window.setTimeout(() => {
-      const state = longPressStateRef.current;
-      if (!state || state.bodyId !== bodyId) return;
-      longPressTriggeredRef.current = true;
-      suppressClickRef.current = true;
-      openBodyContextMenu(bodyId, position);
-    }, pressDuration);
-  }, [clearLongPressTimer, openBodyContextMenu, prefersTouchFallback]);
-  const handleBodyPressMove = useCallback((event: ThreeEvent<PointerEvent>) => {
-    const state = longPressStateRef.current;
-    if (!state) return;
-    if (event.pointerId !== state.pointerId) return;
-    const dx = event.clientX - state.startX;
-    const dy = event.clientY - state.startY;
-    const distanceSq = dx * dx + dy * dy;
-    if (distanceSq > state.moveTolerance * state.moveTolerance) {
-      state.hasMoved = true;
-      clearLongPressTimer();
-    }
-  }, [clearLongPressTimer]);
-  const handleBodyPressEnd = useCallback(() => {
-    const state = longPressStateRef.current;
-    if (state?.hasMoved && state.isTouch) {
-      suppressClickRef.current = true;
-    }
-    if (longPressTriggeredRef.current) {
-      suppressClickRef.current = true;
-    }
-    clearLongPressTimer();
-    longPressStateRef.current = null;
-    longPressTriggeredRef.current = false;
-  }, [clearLongPressTimer]);
-  const handleBodyPressCancel = useCallback(() => {
-    clearLongPressTimer();
-    longPressStateRef.current = null;
-    longPressTriggeredRef.current = false;
-  }, [clearLongPressTimer]);
-  useLayoutEffect(() => {
+  const handleBodyPressStart = useCallback((_bodyId: string, _event: ThreeEvent<PointerEvent>) => {}, []);
+  const handleBodyPressMove = useCallback((_event: ThreeEvent<PointerEvent>) => {}, []);
+  const handleBodyPressEnd = useCallback(() => {}, []);
+  const handleBodyPressCancel = useCallback(() => {}, []);
+  const recalcContextMenuPosition = useCallback(() => {
     if (!bodyContextMenu || !contextMenuRef.current) return;
+    const viewport = readViewportRect();
+    const safeInsets = readSafeAreaInsets();
     const rect = contextMenuRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const desiredX = bodyContextMenu.position.x + contextMenuOffset;
-    const desiredY = bodyContextMenu.position.y + contextMenuOffset;
-    const x = Math.max(contextMenuPadding, Math.min(desiredX, viewportWidth - rect.width - contextMenuPadding));
-    const y = Math.max(contextMenuPadding, Math.min(desiredY, viewportHeight - rect.height - contextMenuPadding));
-    setContextMenuPosition({ x, y });
-  }, [bodyContextMenu, contextMenuOffset, contextMenuPadding]);
+    const constrained = computeConstrainedMenuPosition({
+      anchor: bodyContextMenu.position,
+      menuSize: { width: rect.width, height: rect.height },
+      viewport,
+      safeInsets,
+      offset: MENU_OFFSET,
+      padding: SAFE_PADDING
+    });
+    setContextMenuPosition(constrained);
+
+    const maxHeight = Math.max(SAFE_PADDING, viewport.height - safeInsets.top - safeInsets.bottom - (SAFE_PADDING * 2));
+    const maxWidth = Math.max(SAFE_PADDING, viewport.width - safeInsets.left - safeInsets.right - (SAFE_PADDING * 2));
+    setContextMenuConstraints({ maxHeight, maxWidth });
+  }, [bodyContextMenu]);
   const contextMenuBody = bodyContextMenu ? bodyInfoMap[bodyContextMenu.bodyId] : null;
   const contextMenuSurfaceTarget = contextMenuBody?.surfaceBodyId ?? contextMenuBody?.id ?? null;
   const canViewSurface = Boolean(
@@ -950,6 +970,47 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     && contextMenuBody.bodyType !== 'star'
     && (contextMenuBody.isSolid ?? true)
   );
+  const contextMenuTitleId = useMemo(
+    () => (bodyContextMenu ? `system-body-context-${bodyContextMenu.bodyId}` : 'system-body-context'),
+    [bodyContextMenu]
+  );
+  useLayoutEffect(() => {
+    if (!bodyContextMenu) return;
+    recalcContextMenuPosition();
+  }, [bodyContextMenu, canViewSurface, contextMenuBody, recalcContextMenuPosition]);
+  useEffect(() => {
+    if (!bodyContextMenu || !contextMenuRef.current) return;
+    const observer = new ResizeObserver(() => recalcContextMenuPosition());
+    observer.observe(contextMenuRef.current);
+    return () => observer.disconnect();
+  }, [bodyContextMenu, recalcContextMenuPosition]);
+  useEffect(() => {
+    if (!bodyContextMenu) return;
+    const handleViewportChange = () => recalcContextMenuPosition();
+    window.addEventListener('resize', handleViewportChange);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', handleViewportChange);
+    vv?.addEventListener('scroll', handleViewportChange);
+    return () => {
+      window.removeEventListener('resize', handleViewportChange);
+      vv?.removeEventListener('resize', handleViewportChange);
+      vv?.removeEventListener('scroll', handleViewportChange);
+    };
+  }, [bodyContextMenu, recalcContextMenuPosition]);
+  useEffect(() => {
+    if (!bodyContextMenu) return;
+    contextMenuRef.current?.focus();
+  }, [bodyContextMenu]);
+  useEffect(() => {
+    if (!bodyContextMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const menu = contextMenuRef.current;
+      if (menu && menu.contains(event.target as Node)) return;
+      closeBodyContextMenu();
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [bodyContextMenu, closeBodyContextMenu]);
   useEffect(() => {
     if (!bodyContextMenu && !infoBodyId) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1149,7 +1210,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     requestFocusOnPoint(position, radius, bodyId);
   }, [bodyRadii, bodyWorldPositions, focusDistanceFloor, requestFocusOnPoint]);
   const handleNavigateToBody = useCallback((bodyId: string) => {
-    suppressClickRef.current = false;
     setSelectedObjectId(makeObjectId('body', bodyId));
     setBodyContextMenu(null);
     onSelectFleet?.(null);
@@ -1216,7 +1276,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       .filter(Boolean) as Object3D[];
   }, [bloomLightsReady]);
   const isTouchUi = prefersTouchFallback;
-  const contextMenuContainerClass = `pointer-events-auto fixed z-40 rounded border border-slate-700 bg-slate-900/95 p-2 text-white shadow-2xl backdrop-blur ${
+  const contextMenuContainerClass = `pointer-events-auto fixed z-40 rounded border border-slate-700 bg-slate-900/95 p-2 text-white shadow-2xl backdrop-blur overflow-y-auto overscroll-contain ${
     isTouchUi ? 'min-w-[210px] text-base' : 'min-w-[180px] text-sm'
   }`;
   const contextMenuButtonBaseClass = isTouchUi
@@ -1495,50 +1555,49 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         </div>
       </div>
       {bodyContextMenu && contextMenuBody && (contextMenuPosition ?? bodyContextMenu.position) && (
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="pointer-events-auto absolute inset-0"
-            onPointerDown={closeBodyContextMenu}
-            onContextMenu={(event) => {
-              event.preventDefault();
+        <div
+          ref={contextMenuRef}
+          role="dialog"
+          aria-labelledby={contextMenuTitleId}
+          tabIndex={-1}
+          className={contextMenuContainerClass}
+          style={{
+            left: (contextMenuPosition ?? bodyContextMenu.position).x,
+            top: (contextMenuPosition ?? bodyContextMenu.position).y,
+            maxHeight: contextMenuConstraints.maxHeight,
+            maxWidth: contextMenuConstraints.maxWidth
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.stopPropagation();
+            closeBodyContextMenu();
+          }}
+        >
+          <div id={contextMenuTitleId} className={contextMenuHeaderClass}>
+            {contextMenuBody.name}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setInfoBodyId(contextMenuBody.id);
               closeBodyContextMenu();
             }}
-          />
-          <div
-            ref={contextMenuRef}
-            className={contextMenuContainerClass}
-            style={{
-              left: (contextMenuPosition ?? bodyContextMenu.position).x,
-              top: (contextMenuPosition ?? bodyContextMenu.position).y
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
+            className={`${contextMenuButtonBaseClass} text-slate-200 transition hover:bg-slate-700/60 hover:text-white`}
           >
-            <div className={contextMenuHeaderClass}>
-              {contextMenuBody.name}
-            </div>
+            {t('systemView.bodyInfo.title')}
+          </button>
+          {canViewSurface && contextMenuSurfaceTarget && (
             <button
               type="button"
               onClick={() => {
-                setInfoBodyId(contextMenuBody.id);
+                onOpenSurfaceView?.(contextMenuSurfaceTarget);
                 closeBodyContextMenu();
               }}
-              className={`${contextMenuButtonBaseClass} text-slate-200 transition hover:bg-slate-700/60 hover:text-white`}
+              className={`mt-1 ${contextMenuButtonBaseClass} text-emerald-200 transition hover:bg-emerald-700/30 hover:text-white`}
             >
-              {t('systemView.bodyInfo.title')}
+              {t('systemView.bodyInfo.viewSurface')}
             </button>
-            {canViewSurface && contextMenuSurfaceTarget && (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenSurfaceView?.(contextMenuSurfaceTarget);
-                  closeBodyContextMenu();
-                }}
-                className={`mt-1 ${contextMenuButtonBaseClass} text-emerald-200 transition hover:bg-emerald-700/30 hover:text-white`}
-              >
-                {t('systemView.bodyInfo.viewSurface')}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
       {infoBody && (

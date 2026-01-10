@@ -513,7 +513,7 @@ interface StarMeshProps {
   onDoubleClick?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
   onHover?: () => void;
   onBlur?: () => void;
-  onSelect?: () => void;
+  onSelect?: (event: ThreeEvent<MouseEvent | PointerEvent>) => void;
 }
 
 export const StarMesh: React.FC<StarMeshProps> = ({
@@ -747,7 +747,7 @@ export const StarMesh: React.FC<StarMeshProps> = ({
         }}
         onClick={(event) => {
           event.stopPropagation();
-          onSelect?.();
+          onSelect?.(event);
         }}
         frustumCulled
       />
