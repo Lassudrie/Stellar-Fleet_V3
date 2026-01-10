@@ -1,15 +1,18 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/GameEngine';
-import { GameMessage, GameState, StarSystem, EnemySighting, PlanetSurfaceMap, PlanetBody, ShipType } from '../shared/shared';
+import { GameMessage, GameState, StarSystem, EnemySighting, PlanetSurfaceMap, PlanetBody, ShipType, ArmyState } from '../shared/shared';
 import GameScene from './components/GameScene';
 import UI from './components/UI';
 import { FleetNameProvider } from './context/FleetNames';
-import MainMenu from './components/screens/MainMenu';
-import LoadGameScreen from './components/screens/LoadGameScreen';
-import ScenarioSelectScreen from './components/screens/ScenarioSelectScreen';
-import SystemView3D, { SystemCameraState } from './components/screens/SystemView3D';
-import SurfaceView from './components/screens/SurfaceView';
+import {
+  LoadGameScreen,
+  MainMenu,
+  ScenarioSelectScreen,
+  SurfaceView,
+  SystemView3D,
+  type SystemCameraState
+} from './components/screens';
 import { buildScenario } from '../content/scenarios';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -17,6 +20,7 @@ import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower } from '../engine/world';
 import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState } from '../engine/serialization';
+import { generateSurfaceMapForState } from '../engine/planetSurface';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
@@ -138,6 +142,30 @@ const resolveSurfaceContext = ({
   }
 
   return null;
+};
+
+const collectSurfaceWarmupBodyIds = (state: GameState): string[] => {
+  const descriptors = state.planetSurfaceDescriptorsByBodyId;
+  if (!descriptors) return [];
+
+  const bodyIds = new Set<string>();
+
+  state.armies.forEach(army => {
+    if (army.state === ArmyState.DEPLOYED) {
+      bodyIds.add(army.containerId);
+    }
+    const landingBodyId = army.landingOrder?.to.bodyId;
+    if (landingBodyId) {
+      bodyIds.add(landingBodyId);
+    }
+  });
+
+  (state.groundBuildings ?? []).forEach(building => {
+    bodyIds.add(building.surfacePos.bodyId);
+  });
+
+  const filtered = Array.from(bodyIds).filter(bodyId => Boolean(descriptors[bodyId]));
+  return sorted(filtered, (a, b) => a.localeCompare(b));
 };
 
 const App: React.FC = () => {
@@ -447,6 +475,35 @@ const App: React.FC = () => {
     return chunks.join('');
   }, []);
 
+  const prewarmSurfaceMaps = useCallback(async (state: GameState, sessionId: number): Promise<GameState> => {
+    if (sessionId !== loadingSessionRef.current) return state;
+    const bodyIds = collectSurfaceWarmupBodyIds(state);
+    if (bodyIds.length === 0) return state;
+
+    const total = bodyIds.length;
+    updateLoadingStage('engine', 0, { current: 0, total });
+
+    let completed = 0;
+    for (const bodyId of bodyIds) {
+      if (sessionId !== loadingSessionRef.current) return state;
+      generateSurfaceMapForState(state, bodyId);
+      completed += 1;
+      updateLoadingStage('engine', completed / total, { current: completed, total });
+      if (completed < total && completed % 2 === 0) {
+        // Yield so the loading UI can repaint during heavy surface generation.
+        await new Promise<void>(resolve => {
+          if (typeof window === 'undefined') {
+            resolve();
+            return;
+          }
+          window.setTimeout(resolve, 0);
+        });
+      }
+    }
+
+    return state;
+  }, [updateLoadingStage]);
+
   // Function to compute the view state with optional Fog of War logic
   const updateViewState = useCallback((baseState: GameState) => {
       let nextView = { ...baseState };
@@ -590,7 +647,9 @@ const App: React.FC = () => {
         if (sessionId !== loadingSessionRef.current) return;
 
         updateLoadingStage('engine', 0);
-        const newEngine = new GameEngine(state);
+        const warmedState = await prewarmSurfaceMaps(state, sessionId);
+        if (sessionId !== loadingSessionRef.current) return;
+        const newEngine = new GameEngine(warmedState);
         setEngine(newEngine);
         updateViewState(newEngine.state);
         setScreen('GAME');
@@ -667,7 +726,9 @@ const App: React.FC = () => {
           if (sessionId !== loadingSessionRef.current) return;
           
           updateLoadingStage('engine', 0);
-          const newEngine = new GameEngine(state);
+          const warmedState = await prewarmSurfaceMaps(state, sessionId);
+          if (sessionId !== loadingSessionRef.current) return;
+          const newEngine = new GameEngine(warmedState);
           setEngine(newEngine);
 
           setEnemySightings({});
