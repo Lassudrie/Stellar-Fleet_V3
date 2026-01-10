@@ -611,6 +611,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           rimPower: style.lower.rimPower,
           miePower: style.lower.miePower,
           mieStrength: style.lower.mieStrength,
+          mieG: style.mieG,
           sunsetStrength: style.lower.sunsetStrength,
           nightMin: style.lower.nightMin
         }),
@@ -627,6 +628,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           rimPower: style.haze.rimPower,
           miePower: style.haze.miePower,
           mieStrength: style.haze.mieStrength,
+          mieG: style.mieG,
           sunsetStrength: style.haze.sunsetStrength,
           nightMin: style.haze.nightMin
         }),

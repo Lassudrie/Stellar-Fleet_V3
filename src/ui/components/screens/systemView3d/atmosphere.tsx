@@ -39,6 +39,7 @@ type AtmosphereLayerStyle = {
   mieColor: string;
   sunsetColor: string;
   baseThickness: number;
+  mieG: number;
   lower: {
     intensity: number;
     density: number;
@@ -67,6 +68,7 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     mieColor: '#ffffff',
     sunsetColor: '#ffd7aa',
     baseThickness: 0.02,
+    mieG: 0.55,
     lower: {
       intensity: 0.32,
       density: 0.75,
@@ -92,6 +94,7 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     mieColor: '#f8fafc',
     sunsetColor: '#ffb36b',
     baseThickness: 0.035,
+    mieG: 0.68,
     lower: {
       intensity: 0.4,
       density: 0.9,
@@ -130,6 +133,7 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     mieColor: '#fff7ed',
     sunsetColor: '#ff6b3d',
     baseThickness: 0.048,
+    mieG: 0.86,
     lower: {
       intensity: 0.45,
       density: 1.0,
@@ -168,6 +172,7 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     mieColor: '#f5f3ff',
     sunsetColor: '#fbcfe8',
     baseThickness: 0.09,
+    mieG: 0.9,
     lower: {
       intensity: 0.6,
       density: 1.15,
@@ -246,6 +251,7 @@ export const createAtmosphereLayerMaterial = (params: {
   rimPower: number;
   miePower: number;
   mieStrength: number;
+  mieG: number;
   sunsetStrength: number;
   nightMin: number;
 }): ShaderMaterial => {
@@ -264,6 +270,7 @@ export const createAtmosphereLayerMaterial = (params: {
       uRimPower: { value: params.rimPower },
       uMiePower: { value: params.miePower },
       uMieStrength: { value: params.mieStrength },
+      uMieG: { value: params.mieG },
       uSunsetStrength: { value: params.sunsetStrength },
       uNightMin: { value: params.nightMin },
       uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
@@ -288,6 +295,7 @@ export const createAtmosphereLayerMaterial = (params: {
       uniform float uRimPower;
       uniform float uMiePower;
       uniform float uMieStrength;
+      uniform float uMieG;
       uniform float uSunsetStrength;
       uniform float uNightMin;
       uniform float uTerminatorSoftness;
@@ -305,7 +313,10 @@ export const createAtmosphereLayerMaterial = (params: {
         vec3 L = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
 
         float mu = dot(N, L);
-        float day = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, mu);
+        float g = clamp(uMieG, 0.0, 0.92);
+        float g2 = g * g;
+        float terminatorSoftness = uTerminatorSoftness * mix(1.0, 1.6, smoothstep(0.5, 0.9, g));
+        float day = smoothstep(-terminatorSoftness, terminatorSoftness, mu);
         float daylight = mix(uNightMin, 1.0, day);
 
         float nv = clamp(dot(N, V), 0.0, 1.0);
@@ -316,14 +327,14 @@ export const createAtmosphereLayerMaterial = (params: {
 
         float cosTheta = clamp(dot(V, L), -1.0, 1.0);
         float rayleighPhase = 0.75 * (1.0 + cosTheta * cosTheta);
-        float g = clamp(0.2 + uMiePower * 0.04, 0.35, 0.8);
-        float g2 = g * g;
         float miePhase = (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * cosTheta, 0.0001), 1.5);
-        miePhase *= 0.35;
+        float miePhaseScale = 0.25 + 0.015 * uMiePower;
+        miePhase = min(miePhase * miePhaseScale, 6.0);
+        float mieAnisotropyDamp = mix(1.0, 0.65, smoothstep(0.6, 0.9, g));
         float rayleigh = depth * rayleighPhase;
-        float mie = miePhase * depth * uMieStrength;
+        float mie = miePhase * depth * uMieStrength * mieAnisotropyDamp;
 
-        float terminatorBand = 1.0 - smoothstep(0.0, uTerminatorSoftness * 2.5, abs(mu));
+        float terminatorBand = 1.0 - smoothstep(0.0, terminatorSoftness * 2.5, abs(mu));
         float twilight = terminatorBand * (0.35 + 0.65 * rayleighPhase);
         float sunset = twilight * depth * uSunsetStrength;
 
@@ -331,7 +342,8 @@ export const createAtmosphereLayerMaterial = (params: {
         if (scatter <= 0.00001) discard;
 
         vec3 scatterColor = (uRayleighColor * rayleigh + uMieColor * mie + uSunsetColor * sunset) / max(scatter, 0.0001);
-        float alpha = clamp(scatter * uIntensity * daylight, 0.0, 1.0);
+        float alphaScatter = min(scatter, 1.15);
+        float alpha = clamp(alphaScatter * uIntensity * daylight, 0.0, 1.0);
         vec3 color = uSunColor * scatterColor;
 
         gl_FragColor = vec4(color, alpha);
