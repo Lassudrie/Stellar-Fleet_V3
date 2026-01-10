@@ -11,7 +11,7 @@ import { computeHiddenToastState, selectActiveToastMessages } from './components
 import { clampCameraToBounds, createClampScratch, ClampBounds } from './hooks';
 
 import { vec3 } from '../engine/math/vec3';
-import { getSystemFleets, hashStringToAngle, layoutTacticalRing } from './components/screens/systemViewLayout';
+import { getSystemFleets, hashStringToAngle, layoutTacticalRing } from './components/screens';
 
 import { dispatchAndProcess, processCommandResult } from './commands/processCommandResult';
 

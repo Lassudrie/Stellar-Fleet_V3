@@ -1,21 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
-import {
-  BufferGeometry,
-  Color,
-  Float32BufferAttribute,
-  InstancedMesh,
-  LineBasicMaterial,
-  MeshBasicMaterial,
-  Object3D,
-  OrthographicCamera,
-  Shape,
-  ShapeGeometry
-} from 'three';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas } from '@react-three/fiber';
 import {
   Army,
   ArmyState,
-  Biome,
   FeatureBits,
   FactionId,
   FactionState,
@@ -26,9 +13,7 @@ import {
   PlanetSurfaceMap,
   Settlement,
   SettlementControlState,
-  SettlementType,
   StarSystem,
-  shortId,
   sorted
 } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
@@ -53,7 +38,6 @@ import {
 } from '../../../engine/ground';
 import { GROUND_UNIT_STATS } from '../../../content/data/groundUnits';
 import { isFleetOrbitingSystem } from '../../../engine/orbit';
-import { isPassable } from '../../../engine/planetSurface';
 import { useMapControlsCamera, zoomAroundPoint } from '../../hooks';
 import {
   CENTER_SLOP_PX,
@@ -71,9 +55,19 @@ import {
   pixelToGrid,
   sameHex,
   surfaceMapKey,
-  PAN_MARGIN_PX,
-  drawHex
+  PAN_MARGIN_PX
 } from './surfaceViewCore';
+import {
+  CameraState,
+  SurfaceMapCameraSync,
+  SurfaceTerrainLayer,
+  drawSurfaceOverlay
+} from './surfaceViewLayers';
+import {
+  SurfaceViewHud,
+  SurfaceCombatPreview,
+  SurfaceMovePreview
+} from './surfaceViewHud';
 
 interface SurfaceViewProps {
   map: PlanetSurfaceMap | null;
@@ -91,7 +85,6 @@ interface SurfaceViewProps {
   onIssueCommand?: (cmd: GameCommand) => void;
 }
 
-type CameraState = { zoom: number; offset: { x: number; y: number } };
 type WheelInput = { clientX: number; clientY: number; deltaY: number; currentTarget: EventTarget | null };
 type PointerSnapshot = {
   pointerId: number;
@@ -105,324 +98,6 @@ const INTERACTION_COOLDOWN_MS = 140;
 // Surface view is a 2D tactical map: favor crispness over aggressive DPR caps (especially on mobile).
 const MAX_DPR_MOBILE = 2.5;
 const MAX_DPR_DESKTOP = 2.5;
-
-const OTAN_SYMBOL_COLOR = '#0f172a';
-
-type UseMemoDisposableDeps = React.DependencyList;
-
-const useDisposableMemo = <T extends { dispose: () => void }>(factory: () => T, deps: UseMemoDisposableDeps): T => {
-  const resource = useMemo(factory, deps);
-  useEffect(() => {
-    return () => {
-      resource.dispose();
-    };
-  }, [resource]);
-  return resource;
-};
-
-const hexToRgba = (hex: string, alpha: number): string => {
-  const raw = hex.trim();
-  if (!raw.startsWith('#')) return `rgba(15, 23, 42, ${alpha})`;
-  const value = raw.slice(1);
-  if (value.length === 3) {
-    const r = parseInt(value[0] + value[0], 16);
-    const g = parseInt(value[1] + value[1], 16);
-    const b = parseInt(value[2] + value[2], 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  if (value.length === 6) {
-    const r = parseInt(value.slice(0, 2), 16);
-    const g = parseInt(value.slice(2, 4), 16);
-    const b = parseInt(value.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  return `rgba(15, 23, 42, ${alpha})`;
-};
-
-const drawOtanInfantry = (
-  ctx: CanvasRenderingContext2D,
-  center: { x: number; y: number },
-  hexSize: number,
-  frameColor: string,
-  showSymbol: boolean,
-  showEchelon: boolean
-) => {
-  const frameW = clamp(hexSize * 1.25, 10, 22);
-  const frameH = frameW * 0.68;
-  const left = center.x - frameW / 2;
-  const top = center.y - frameH / 2;
-  const right = center.x + frameW / 2;
-  const bottom = center.y + frameH / 2;
-  const lineWidth = clamp(frameW * 0.08, 1, 2.5);
-
-  ctx.fillStyle = hexToRgba(frameColor, 0.16);
-  ctx.strokeStyle = frameColor;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  ctx.rect(left, top, frameW, frameH);
-  ctx.fill();
-  ctx.stroke();
-
-  if (showSymbol) {
-    const inset = frameW * 0.18;
-    ctx.strokeStyle = OTAN_SYMBOL_COLOR;
-    ctx.lineWidth = clamp(frameW * 0.07, 1, 2.2);
-    ctx.beginPath();
-    ctx.moveTo(left + inset, top + inset);
-    ctx.lineTo(right - inset, bottom - inset);
-    ctx.moveTo(left + inset, bottom - inset);
-    ctx.lineTo(right - inset, top + inset);
-    ctx.stroke();
-  }
-
-  if (showEchelon) {
-    const barGap = Math.max(2, frameH * 0.12);
-    const barHeight = Math.max(4, frameH * 0.45);
-    ctx.strokeStyle = frameColor;
-    ctx.lineWidth = clamp(frameW * 0.08, 1, 2.2);
-    ctx.beginPath();
-    ctx.moveTo(center.x, top - barGap);
-    ctx.lineTo(center.x, top - barGap - barHeight);
-    ctx.stroke();
-  }
-};
-
-const biomeColors: Record<Biome, string> = {
-  ocean: '#0a75c2',        // deep ocean blue
-  coast: '#2bb9a8',        // bright teal shallows
-  lake: '#4f9dfd',         // clear lake blue
-  ice: '#f2f7fb',          // icy white-blue
-  fractured_ice: '#d7e6f6', // fractured ice
-  dusty_ice: '#c9d2c8',     // dusty ice
-  cryovolcanic: '#9aaec7',  // cryovolcanic plains
-  tundra: '#ced4a4',       // pale sage tundra
-  taiga: '#1b6b4b',        // pine green
-  grassland: '#8ccb4a',    // fresh prairie green
-  forest: '#1e7c2f',       // dense forest green
-  rainforest: '#22a95f',   // lush rainforest jade
-  desert: '#e3b04c',       // warm sand
-  ash_desert: '#a88463',    // mineral ash
-  thermal_polygons: '#b6a46d', // thermal polygon terrain
-  lava_flats: '#b3402c',    // cooled lava
-  vitrified: '#6b7c8a',     // glassy plains
-  oxidized: '#b35a3a',      // oxidized metal
-  compressed_plateau: '#7c7f75', // compressed plateau
-  chemical_erosion: '#7aa081', // chemical alteration
-  fossil_basin: '#c1a07a',  // fossil basin
-  rocky: '#9b8974',        // stone brown
-  mountain: '#565f6b',     // slate mountain
-  volcanic: '#e05b3c',     // lava orange
-  cratered: '#8a60c6'      // impact purple
-};
-
-type SettlementMarkerShape = 'circle' | 'square' | 'diamond' | 'triangle' | 'hex';
-
-const SETTLEMENT_MARKER_STYLE: Record<SettlementType, {
-  shape: SettlementMarkerShape;
-  sizeFactor: number;
-  fill: string;
-  ring: 'none' | 'single' | 'double';
-  labelZoom: number;
-  labelScale: number;
-}> = {
-  outpost: { shape: 'triangle', sizeFactor: 0.15, fill: 'rgba(180, 180, 180, 0.85)', ring: 'none', labelZoom: 1.8, labelScale: 0.85 },
-  colony: { shape: 'circle', sizeFactor: 0.16, fill: 'rgba(195, 195, 195, 0.90)', ring: 'none', labelZoom: 1.65, labelScale: 0.90 },
-  frontierTown: { shape: 'square', sizeFactor: 0.18, fill: 'rgba(210, 210, 210, 0.92)', ring: 'none', labelZoom: 1.35, labelScale: 0.95 },
-  city: { shape: 'diamond', sizeFactor: 0.21, fill: 'rgba(225, 225, 225, 0.94)', ring: 'none', labelZoom: 1.05, labelScale: 1.00 },
-  metropolis: { shape: 'circle', sizeFactor: 0.24, fill: 'rgba(240, 240, 240, 0.96)', ring: 'single', labelZoom: 0.90, labelScale: 1.15 },
-  megalopolis: { shape: 'hex', sizeFactor: 0.28, fill: 'rgba(248, 248, 248, 0.98)', ring: 'double', labelZoom: 0.80, labelScale: 1.25 }
-};
-
-const SETTLEMENT_MARKER_STROKE = 'rgba(30, 30, 30, 0.95)';
-const SETTLEMENT_LABEL_FILL = 'rgba(250, 250, 250, 0.95)';
-const SETTLEMENT_LABEL_STROKE = 'rgba(20, 20, 20, 0.85)';
-
-const createHexShape = (radius: number): Shape => {
-  const shape = new Shape();
-  for (let i = 0; i < 6; i += 1) {
-    const angle = Math.PI / 180 * (60 * i - 30);
-    const x = radius * Math.cos(angle);
-    const y = radius * Math.sin(angle);
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  return shape;
-};
-
-const SurfaceMapCameraSync: React.FC<{ cameraState: CameraState }> = ({ cameraState }) => {
-  const camera = useThree(state => state.camera);
-  const size = useThree(state => state.size);
-  const invalidate = useThree(state => state.invalidate);
-
-  useEffect(() => {
-    if (!(camera instanceof OrthographicCamera)) return;
-
-    // World units are screen pixels at zoom=1, matching the Canvas-based math (camera.offset + zoom).
-    camera.left = -size.width / 2;
-    camera.right = size.width / 2;
-    camera.top = size.height / 2;
-    camera.bottom = -size.height / 2;
-    camera.near = 0.1;
-    camera.far = 1000;
-
-    camera.zoom = cameraState.zoom;
-    camera.position.set(
-      (size.width / 2 - cameraState.offset.x) / cameraState.zoom,
-      (cameraState.offset.y - size.height / 2) / cameraState.zoom,
-      100
-    );
-    camera.lookAt(camera.position.x, camera.position.y, 0);
-    camera.updateProjectionMatrix();
-
-    invalidate();
-  }, [
-    camera,
-    cameraState.offset.x,
-    cameraState.offset.y,
-    cameraState.zoom,
-    invalidate,
-    size.height,
-    size.width
-  ]);
-
-  return null;
-};
-
-const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> = React.memo(({ map, mapKey }) => {
-  const config = map.descriptor.config;
-  const count = config.w * config.h;
-  const fillRef = useRef<InstancedMesh>(null);
-  const temp = useMemo(() => new Object3D(), []);
-  const color = useMemo(() => new Color(), []);
-  const invalidate = useThree(state => state.invalidate);
-
-  const fillShape = useMemo(() => createHexShape(HEX_SIZE), []);
-  const hexCornerOffsets = useMemo(() => {
-    const corners: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < 6; i += 1) {
-      const angle = Math.PI / 180 * (60 * i - 30);
-      corners.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
-    }
-    return corners;
-  }, []);
-
-  const fillGeometry = useDisposableMemo(() => {
-    const geometry = new ShapeGeometry(fillShape);
-    const vertexCount = geometry.attributes.position.count;
-    const colors = new Float32Array(vertexCount * 3);
-    colors.fill(1);
-    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-    return geometry;
-  }, [fillShape]);
-  const fillMaterial = useDisposableMemo(
-    () => new MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
-    []
-  );
-  const gridGeometry = useDisposableMemo(() => {
-    const positions: number[] = [];
-    const z = 0.02;
-
-    const neighborOf = (q: number, r: number, edge: number): { q: number; r: number } | null => {
-      const odd = (r & 1) === 1;
-      switch (edge) {
-        case 0: // E
-          return { q: q + 1, r };
-        case 1: // SE
-          return { q: q + (odd ? 1 : 0), r: r + 1 };
-        case 2: // SW
-          return { q: q + (odd ? 0 : -1), r: r + 1 };
-        case 3: // W
-          return { q: q - 1, r };
-        case 4: // NW
-          return { q: q + (odd ? 0 : -1), r: r - 1 };
-        case 5: // NE
-          return { q: q + (odd ? 1 : 0), r: r - 1 };
-        default:
-          return null;
-      }
-    };
-
-    const inBounds = (coord: { q: number; r: number } | null): coord is { q: number; r: number } => {
-      if (!coord) return false;
-      return coord.q >= 0 && coord.q < config.w && coord.r >= 0 && coord.r < config.h;
-    };
-
-    const isLower = (a: { q: number; r: number }, b: { q: number; r: number }): boolean => (
-      a.r < b.r || (a.r === b.r && a.q < b.q)
-    );
-
-    for (let r = 0; r < config.h; r += 1) {
-      for (let q = 0; q < config.w; q += 1) {
-        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-        const cx = x;
-        const cy = -y;
-
-        for (let edge = 0; edge < 6; edge += 1) {
-          const neighbor = neighborOf(q, r, edge);
-          const shouldDraw = !inBounds(neighbor) || isLower({ q, r }, neighbor);
-          if (!shouldDraw) continue;
-
-          const a = hexCornerOffsets[edge];
-          const b = hexCornerOffsets[(edge + 1) % 6];
-          positions.push(cx + a.x, cy + a.y, z, cx + b.x, cy + b.y, z);
-        }
-      }
-    }
-
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new Float32BufferAttribute(new Float32Array(positions), 3));
-    return geometry;
-  }, [config.h, config.w, hexCornerOffsets, mapKey]);
-
-  const gridMaterial = useDisposableMemo(() => new LineBasicMaterial({
-    color: '#94a3b8',
-    transparent: true,
-    opacity: 0.28,
-    depthTest: false,
-    depthWrite: false
-  }), []);
-
-  useLayoutEffect(() => {
-    const fill = fillRef.current;
-    if (!fill) return;
-
-    for (let r = 0; r < config.h; r += 1) {
-      for (let q = 0; q < config.w; q += 1) {
-        const index = r * config.w + q;
-        const tile = map.tiles[index] ?? null;
-        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-
-        temp.position.set(x, -y, 0);
-        temp.rotation.set(0, 0, 0);
-        temp.scale.set(1, 1, 1);
-        temp.updateMatrix();
-        fill.setMatrixAt(index, temp.matrix);
-
-        color.set(tile ? (biomeColors[tile.biome] ?? '#334155') : '#1f2937');
-        fill.setColorAt(index, color);
-      }
-    }
-
-    fill.count = count;
-    fill.instanceMatrix.needsUpdate = true;
-    if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
-
-    invalidate();
-  }, [color, config.h, config.w, invalidate, map.tiles, mapKey, temp]);
-
-  return (
-    <group>
-      <instancedMesh ref={fillRef} args={[fillGeometry, fillMaterial, count]} frustumCulled={false} />
-      <lineSegments
-        geometry={gridGeometry}
-        material={gridMaterial}
-        frustumCulled={false}
-        renderOrder={1}
-      />
-    </group>
-  );
-});
 
 const SurfaceView: React.FC<SurfaceViewProps> = ({
   map: mapProp,
@@ -797,6 +472,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
       plannedBodyId: string | null;
       plannedBodyName: string | null;
       plannedPos: { q: number; r: number } | null;
+      faction?: FactionState;
     }> = [];
 
     armies.forEach(army => {
@@ -819,11 +495,17 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         }
       }
 
-      entries.push({ army, plannedBodyId, plannedBodyName, plannedPos });
+      entries.push({
+        army,
+        plannedBodyId,
+        plannedBodyName,
+        plannedPos,
+        faction: factionIndex[army.factionId]
+      });
     });
 
     return sorted(entries, (a, b) => a.army.id.localeCompare(b.army.id));
-  }, [activeMapConfig, armies, body?.id, fleetById, planetNameById, playerFactionId, system]);
+  }, [activeMapConfig, armies, body?.id, factionIndex, fleetById, planetNameById, playerFactionId, system]);
 
   const selectedLanding = useMemo(() => {
     if (!landingArmyId) return null;
@@ -1193,7 +875,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     return cost;
   }, [buildings, map, occupancyByHex]);
 
-  const movePreview = useMemo(() => {
+  const movePreview = useMemo<SurfaceMovePreview | null>(() => {
     if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
     if (orderMode !== 'move') return null;
 
@@ -1277,7 +959,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     });
   }, [isArmySupplied, map, movementStepCostCenti, occupancyByHex, selectedArmy, selectedArmyCoord, zocSnapshot]);
 
-  const combatPreview = useMemo(() => {
+  const combatPreview = useMemo<SurfaceCombatPreview | null>(() => {
     if (!map || !selectedArmy || !selectedArmyCoord || !hovered) return null;
 
     const enemy = normalizedArmies
@@ -1339,212 +1021,40 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const dpr = renderDpr;
-    const hot = isInteractionActive();
-
-    ctx.save();
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, viewport.width, viewport.height);
-
-    const hexSize = HEX_SIZE * camera.zoom;
-
-    // --- Overlays ---
-    if (reachableCosts) {
-      reachableCosts.forEach((_cost, key) => {
-        const [qStr, rStr] = key.split('|');
-        const q = Number(qStr);
-        const r = Number(rStr);
-        if (!Number.isFinite(q) || !Number.isFinite(r)) return;
-        const tile = map.tiles[r * activeMapConfig.w + q];
-        if (!tile || !isPassable(tile.biome)) return;
-        const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-        const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
-        drawHex(ctx, center, hexSize, { fill: 'rgba(56, 189, 248, 0.10)' });
-      });
-    }
-
-    if (movePreview?.path && movePreview.path.length > 1) {
-      ctx.beginPath();
-      movePreview.path.forEach((c, i) => {
-        const { x, y } = gridToPixel(c, HEX_SIZE);
-        const px = x * camera.zoom + camera.offset.x;
-        const py = y * camera.zoom + camera.offset.y;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
-      ctx.lineWidth = Math.max(2, hexSize * 0.08);
-      ctx.stroke();
-    }
-
-    const labelGrid = new Set<string>();
-    const labelCell = Math.max(70, hexSize * 3.2);
-
-    settlements.forEach(settlement => {
-      const { x, y } = gridToPixel(settlement.coord, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-
-      const style = SETTLEMENT_MARKER_STYLE[settlement.type] ?? SETTLEMENT_MARKER_STYLE.city;
-      const size = Math.max(3, hexSize * style.sizeFactor);
-      const stroke = SETTLEMENT_MARKER_STROKE;
-
-      if (style.shape === 'hex') {
-        drawHex(ctx, center, size, {
-          fill: style.fill,
-          stroke,
-          lineWidth: Math.max(1, size * 0.12)
-        });
-      } else {
-        ctx.beginPath();
-        if (style.shape === 'circle') {
-          ctx.arc(center.x, center.y, size, 0, Math.PI * 2);
-        } else if (style.shape === 'square') {
-          ctx.rect(center.x - size, center.y - size, size * 2, size * 2);
-        } else if (style.shape === 'diamond') {
-          ctx.moveTo(center.x, center.y - size);
-          ctx.lineTo(center.x + size, center.y);
-          ctx.lineTo(center.x, center.y + size);
-          ctx.lineTo(center.x - size, center.y);
-          ctx.closePath();
-        } else if (style.shape === 'triangle') {
-          ctx.moveTo(center.x, center.y - size);
-          ctx.lineTo(center.x + size, center.y + size);
-          ctx.lineTo(center.x - size, center.y + size);
-          ctx.closePath();
-        }
-        ctx.fillStyle = style.fill;
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = Math.max(1, size * 0.12);
-        ctx.fill();
-        ctx.stroke();
-      }
-
-      if (style.ring === 'single') {
-        ctx.beginPath();
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = Math.max(1, size * 0.10);
-        ctx.arc(center.x, center.y, size * 1.55, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (style.ring === 'double') {
-        drawHex(ctx, center, size * 1.55, { stroke, lineWidth: Math.max(1, size * 0.10) });
-        drawHex(ctx, center, size * 1.05, { stroke, lineWidth: Math.max(1, size * 0.08) });
-      }
-
-      // Capital overlay (grayscale cross)
-      if (settlement.isCapital) {
-        ctx.beginPath();
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = Math.max(1, size * 0.18);
-        ctx.moveTo(center.x - size * 0.55, center.y);
-        ctx.lineTo(center.x + size * 0.55, center.y);
-        ctx.moveTo(center.x, center.y - size * 0.55);
-        ctx.lineTo(center.x, center.y + size * 0.55);
-        ctx.stroke();
-      }
-
-      // Labels
-      if (!hot && camera.zoom >= style.labelZoom) {
-        const fontPx = Math.round(clamp(hexSize * 0.45 * style.labelScale, 9, 18));
-        const lx = center.x;
-        const ly = center.y - size * 1.2;
-
-        const cellKey = `${Math.floor(lx / labelCell)},${Math.floor(ly / labelCell)}`;
-        if (!labelGrid.has(cellKey)) {
-          labelGrid.add(cellKey);
-          ctx.font = `${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
-          ctx.lineWidth = Math.max(2, fontPx * 0.25);
-          ctx.strokeStyle = SETTLEMENT_LABEL_STROKE;
-          ctx.fillStyle = SETTLEMENT_LABEL_FILL;
-          ctx.strokeText(settlement.name, lx, ly);
-          ctx.fillText(settlement.name, lx, ly);
-        }
-      }
+    drawSurfaceOverlay(ctx, {
+      map,
+      activeMapConfig,
+      camera,
+      viewport,
+      renderDpr,
+      hovered,
+      selected,
+      selectedArmyCoord,
+      movePreviewPath: movePreview?.path ?? null,
+      reachableCosts,
+      armyMarkers: normalizedArmies,
+      buildingMarkers: normalizedBuildings,
+      landingMarkers: plannedLandings,
+      settlements,
+      showLabels: !isInteractionActive()
     });
-
-    normalizedBuildings.forEach(marker => {
-      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      const size = Math.max(3, hexSize * 0.2);
-      ctx.fillStyle = marker.faction?.color ?? '#e2e8f0';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.rect(center.x - size, center.y - size, size * 2, size * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    const iconWidth = clamp(hexSize * 1.25, 10, 22);
-    const showSymbol = iconWidth >= 12;
-    const showEchelon = iconWidth >= 15;
-
-    normalizedArmies.forEach(marker => {
-      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      const frameColor = marker.faction?.color ?? '#93c5fd';
-      drawOtanInfantry(ctx, center, hexSize, frameColor, showSymbol, showEchelon);
-    });
-
-    plannedLandings.forEach(marker => {
-      const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      const frameColor = marker.faction?.color ?? '#93c5fd';
-      ctx.save();
-      ctx.setLineDash([Math.max(4, hexSize * 0.35), Math.max(3, hexSize * 0.25)]);
-      drawHex(ctx, center, hexSize * 0.92, { stroke: hexToRgba(frameColor, 0.95), lineWidth: Math.max(1.5, hexSize * 0.1) });
-      ctx.setLineDash([]);
-      ctx.restore();
-    });
-
-    const drawHighlight = (coord: HexCoord, color: string) => {
-      const { x, y } = gridToPixel(coord, HEX_SIZE);
-      const center = {
-        x: x * camera.zoom + camera.offset.x,
-        y: y * camera.zoom + camera.offset.y
-      };
-      drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
-    };
-
-    if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');
-    if (selected) drawHighlight(selected, 'rgba(59, 130, 246, 0.9)');
-    if (selectedArmyCoord) drawHighlight(selectedArmyCoord, 'rgba(56, 189, 248, 0.9)');
-
-    ctx.restore();
   }, [
     activeMapConfig,
-    camera.offset.x,
-    camera.offset.y,
-    camera.zoom,
+    camera,
     hovered,
+    isInteractionActive,
     map,
     movePreview,
     normalizedArmies,
-    plannedLandings,
     normalizedBuildings,
-    isInteractionActive,
-    playerFactionId,
+    plannedLandings,
     reachableCosts,
+    renderDpr,
     selected,
     selectedArmyCoord,
     settlements,
     viewport.height,
-    viewport.width,
-    renderDpr
+    viewport.width
   ]);
 
   const scheduleDraw = useCallback(() => {
@@ -1660,365 +1170,34 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         />
       </div>
 
-      {showLoadingOverlay && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex justify-end p-4">
-          <div className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-sm font-semibold text-slate-100 shadow-lg">
-            {t('surfaceView.loadingOverlay')}
-          </div>
-        </div>
-      )}
-
-      <div className="absolute top-4 left-4 right-4 z-10 pointer-events-none flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="pointer-events-auto rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm font-semibold text-slate-100 backdrop-blur">
-          {t('surfaceView.bodyHeader', { name: body.name })}
-        </div>
-        <div className="pointer-events-auto flex justify-start sm:justify-end">
-          {onBackToSystem ? (
-            <button
-              onClick={onBackToSystem}
-              className="rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
-            >
-              {t('surfaceView.backToSystem')}
-            </button>
-          ) : (
-            <button
-              onClick={onBackToGalaxy}
-              className="rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:border-slate-500 backdrop-blur"
-            >
-              {t('surfaceView.backToGalaxy')}
-            </button>
-          )}
-        </div>
-      </div>
-      {touchFallbackEnabled && (
-        <div className="pointer-events-none absolute top-16 right-4 z-10">
-          <div className="rounded border border-slate-700 bg-slate-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 backdrop-blur">
-            Touch input active
-          </div>
-        </div>
-      )}
-
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-end">
-        <div className="pointer-events-auto m-4 self-end w-full max-w-md">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur max-h-[45vh] overflow-auto md:max-h-none">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('surfaceView.tilePanel')}</p>
-                {activeCoord ? (
-                  <p className="text-base font-bold text-white">
-                    {t('surfaceView.tileCoordinate', { q: activeCoord.q, r: activeCoord.r })}
-                  </p>
-                ) : (
-                  <p className="text-sm text-slate-500">{t('surfaceView.hoverHint')}</p>
-                )}
-              </div>
-              <div className="text-xs text-slate-400">
-                {t('surfaceView.zoomLevel', { value: camera.zoom.toFixed(2) })}
-              </div>
-            </div>
-
-            {activeTile && (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <div className="text-slate-400 text-xs uppercase">{t('surfaceView.tileBiome')}</div>
-                  <div className="font-semibold">{activeTile.biome}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-xs uppercase">{t('surfaceView.tileElevation')}</div>
-                  <div className="font-semibold">{activeTile.elev.toFixed(0)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-xs uppercase">{t('surfaceView.tileTemperature')}</div>
-                  <div className="font-semibold">{(activeTile.tempC2 / 2).toFixed(1)}°C</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-xs uppercase">{t('surfaceView.tileMoisture')}</div>
-                  <div className="font-semibold">{activeTile.moist}</div>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-400" />
-                {t('surfaceView.armies')}
-              </div>
-              {tileArmies.length === 0 ? (
-                <div className="text-sm text-slate-500">{t('surfaceView.noArmies')}</div>
-              ) : (
-                <div className="space-y-1">
-                  {tileArmies.map(marker => (
-                    <div key={marker.army.id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: marker.faction?.color ?? '#e2e8f0' }} />
-                        <span className="font-semibold text-slate-100">{marker.faction?.name ?? marker.army.factionId}</span>
-                      </div>
-                      <button
-                        className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                          marker.army.id === selectedArmyId
-                            ? 'border-sky-400 text-sky-200'
-                            : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                        }`}
-                        onClick={() => setSelectedArmyId(marker.army.id)}
-                        title="Select unit"
-                      >
-                        {marker.army.members.toFixed(0)}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                {t('surfaceView.landingOps')}
-              </div>
-              {landingCandidates.length === 0 ? (
-                <div className="text-sm text-slate-500">{t('surfaceView.noLandingOps')}</div>
-              ) : (
-                <div className="space-y-2">
-                  {landingCandidates.map(entry => {
-                    const faction = factionIndex[entry.army.factionId];
-                    const isActive = orderMode === 'land' && landingArmyId === entry.army.id;
-                    const plannedLabel = entry.plannedPos
-                      ? t('surfaceView.landingPlanned', { q: entry.plannedPos.q, r: entry.plannedPos.r })
-                      : entry.plannedBodyName
-                        ? t('surfaceView.landingPlannedOther', { planet: entry.plannedBodyName })
-                        : null;
-                    return (
-                      <div key={entry.army.id} className="flex items-center justify-between text-sm">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: faction?.color ?? '#e2e8f0' }} />
-                            <span className="font-mono text-slate-100">{shortId(entry.army.id)}</span>
-                            <span className="text-xs text-slate-400">{entry.army.members.toFixed(0)}</span>
-                          </div>
-                          <div className="text-[10px] text-slate-500">{entry.army.unitType}</div>
-                          {plannedLabel && (
-                            <div className="text-[10px] text-emerald-300">{plannedLabel}</div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            disabled={!onIssueCommand}
-                            onClick={() => handleSelectLanding(entry.army.id)}
-                            className={`rounded border px-2 py-0.5 text-xs font-semibold ${
-                              !onIssueCommand
-                                ? 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
-                                : isActive
-                                  ? 'border-amber-400 bg-amber-900/30 text-amber-100'
-                                  : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
-                            }`}
-                          >
-                            {t('surfaceView.selectLanding')}
-                          </button>
-                          {entry.plannedBodyId && (
-                            <button
-                              disabled={!onIssueCommand}
-                              onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: entry.army.id })}
-                              className={`rounded border px-2 py-0.5 text-xs font-semibold ${
-                                onIssueCommand
-                                  ? 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
-                                  : 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
-                              }`}
-                            >
-                              {t('surfaceView.cancelLanding')}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {orderMode === 'land' && selectedLanding && (
-                <div className="text-[11px] text-amber-200">
-                  {t('surfaceView.landingHint', { army: shortId(selectedLanding.army.id) })}
-                </div>
-              )}
-            </div>
-
-            {plannedLandings.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  {t('surfaceView.plannedLandings')}
-                </div>
-                {tilePlannedLandings.length === 0 ? (
-                  <div className="text-sm text-slate-500">{t('surfaceView.noPlannedLandings')}</div>
-                ) : (
-                  <div className="space-y-1">
-                    {tilePlannedLandings.map(marker => {
-                      const canCancel = marker.army.factionId === playerFactionId;
-                      const isLandingSelected = orderMode === 'land' && landingArmyId === marker.army.id;
-                      return (
-                        <div key={marker.army.id} className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: marker.faction?.color ?? '#e2e8f0' }} />
-                            <span className="font-semibold text-slate-100">{marker.faction?.name ?? marker.army.factionId}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                                isLandingSelected
-                                  ? 'border-amber-400 text-amber-200'
-                                  : 'border-emerald-700 text-emerald-200 hover:border-emerald-500'
-                              }`}
-                              onClick={() => handleSelectLanding(marker.army.id)}
-                              title="Select landing"
-                            >
-                              {marker.army.members.toFixed(0)}
-                            </button>
-                            <button
-                              disabled={!onIssueCommand || !canCancel}
-                              onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: marker.army.id })}
-                              className={`rounded border px-2 py-0.5 text-xs font-semibold ${
-                                onIssueCommand && canCancel
-                                  ? 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
-                                  : 'border-slate-800 bg-slate-950/20 text-slate-500 cursor-not-allowed'
-                              }`}
-                            >
-                              {t('surfaceView.cancelLanding')}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedArmy && canControlSelectedArmy && (
-              <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Orders</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    disabled={!onIssueCommand}
-                    onClick={() => setOrderMode(prev => (prev === 'move' ? 'none' : 'move'))}
-                    className={`rounded border px-3 py-2 text-xs font-semibold ${
-                      orderMode === 'move' ? 'border-sky-400 bg-sky-900/40 text-sky-100' : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
-                    }`}
-                  >
-                    Move
-                  </button>
-                  <button
-                    disabled={!onIssueCommand}
-                    onClick={() => setOrderMode(prev => (prev === 'attack' ? 'none' : 'attack'))}
-                    className={`rounded border px-3 py-2 text-xs font-semibold ${
-                      orderMode === 'attack' ? 'border-rose-400 bg-rose-900/30 text-rose-100' : 'border-slate-700 bg-slate-950/40 text-slate-200 hover:border-slate-500'
-                    }`}
-                  >
-                    Attack
-                  </button>
-                  <button
-                    disabled={!onIssueCommand}
-                    onClick={() => onIssueCommand?.({ type: 'CANCEL_GROUND_ORDER', armyId: selectedArmy.id })}
-                    className="rounded border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={!onIssueCommand}
-                    onClick={() => onIssueCommand?.({
-                      type: 'SET_GROUND_POSTURE',
-                      armyId: selectedArmy.id,
-                      posture: selectedArmy.posture === 'prepared_defense' ? 'normal' : 'prepared_defense'
-                    })}
-                    className="rounded border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
-                  >
-                    {selectedArmy.posture === 'prepared_defense' ? 'Unprepare' : 'Prepare'}
-                  </button>
-                </div>
-                <div className="text-[11px] text-slate-400">
-                  {orderMode === 'move' && 'Click a hex to set a move order.'}
-                  {orderMode === 'attack' && 'Click an enemy unit hex to set an attack order.'}
-                </div>
-
-                {orderMode === 'move' && movePreview && (
-                  <div className="text-[11px] text-slate-300 space-y-1">
-                    <div>
-                      MP: <span className="font-mono">{movePreview.mpEff}</span>{' '}
-                      (<span className="text-slate-400">{movePreview.supplied ? 'supplied' : 'out of supply'}</span>)
-                    </div>
-                    <div>
-                      Cost:{' '}
-                      <span className="font-mono">
-                        {movePreview.costCenti === null ? '—' : `${(movePreview.costCenti / 100).toFixed(2)} MP`}
-                      </span>
-                    </div>
-                    {movePreview.costCenti !== null && (
-                      <div className="text-slate-400">
-                        Used: {((movePreview.costCenti / Math.max(1, movePreview.mpCenti)) * 100).toFixed(0)}%
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {combatPreview && (
-              <div className="mt-4 border-t border-slate-800 pt-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combat preview</div>
-                  <div className="text-[10px] text-slate-500">
-                    {combatPreview.terrainType} · R{combatPreview.range}
-                  </div>
-                </div>
-                <div className="text-[11px] text-slate-200">
-                  Target: <span className="font-mono">{combatPreview.enemy.id}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">Attack power</div>
-                    <div className="font-mono text-slate-100">{combatPreview.preview.attackPower.toFixed(1)}</div>
-                  </div>
-                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">Defense power</div>
-                    <div className="font-mono text-slate-100">{combatPreview.preview.defensePower.toFixed(1)}</div>
-                  </div>
-                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">Loss rates</div>
-                    <div className="font-mono text-slate-100">A {(combatPreview.preview.lossRateAtk * 100).toFixed(1)}%</div>
-                    <div className="font-mono text-slate-100">D {(combatPreview.preview.lossRateDef * 100).toFixed(1)}%</div>
-                  </div>
-                  <div className="bg-slate-950/40 border border-slate-800 rounded p-2">
-                    <div className="text-slate-400">Losses (est.)</div>
-                    <div className="font-mono text-slate-100">A {combatPreview.preview.lossesAtkTotal}</div>
-                    <div className="font-mono text-slate-100">D {combatPreview.preview.lossesDef}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-2">
-                <span className="w-2 h-2 rounded bg-amber-400" />
-                {t('surfaceView.buildings')}
-              </div>
-              {tileBuildings.length === 0 ? (
-                <div className="text-sm text-slate-500">{t('surfaceView.noBuildings')}</div>
-              ) : (
-                <div className="space-y-1">
-                  {tileBuildings.map(marker => (
-                    <div key={marker.building.id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: marker.faction?.color ?? '#fde68a' }} />
-                        <span className="font-semibold text-slate-100">
-                          {marker.building.name ?? marker.building.type}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-300 font-mono">{marker.building.type}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      <SurfaceViewHud
+        bodyName={body.name}
+        onBackToGalaxy={onBackToGalaxy}
+        onBackToSystem={onBackToSystem}
+        showLoadingOverlay={showLoadingOverlay}
+        showTouchBadge={touchFallbackEnabled}
+        activeCoord={activeCoord}
+        activeTile={activeTile}
+        cameraZoom={camera.zoom}
+        tileArmies={tileArmies}
+        landingCandidates={landingCandidates}
+        selectedLanding={selectedLanding}
+        landingArmyId={landingArmyId}
+        orderMode={orderMode}
+        onSelectLanding={handleSelectLanding}
+        onSelectArmy={(armyId) => setSelectedArmyId(armyId)}
+        selectedArmy={selectedArmy}
+        selectedArmyId={selectedArmyId}
+        canControlSelectedArmy={canControlSelectedArmy}
+        movePreview={movePreview}
+        combatPreview={combatPreview}
+        tilePlannedLandings={tilePlannedLandings}
+        plannedLandingsCount={plannedLandings.length}
+        tileBuildings={tileBuildings}
+        onIssueCommand={onIssueCommand}
+        setOrderMode={setOrderMode}
+        playerFactionId={playerFactionId}
+      />
     </div>
   );
 };
