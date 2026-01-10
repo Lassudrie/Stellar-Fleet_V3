@@ -32,6 +32,7 @@ export type SurfaceTextureResult = {
   normalRgba: Uint8Array | null;
   aoRgba: Uint8Array | null;
   roughnessRgba: Uint8Array | null;
+  heightRgba: Uint8Array | null;
 };
 
 type PendingTextureRequest = {
@@ -152,7 +153,8 @@ export class SurfaceMapWorkerClient {
         rgba: payload.rgba,
         normalRgba: payload.normalRgba ?? null,
         aoRgba: payload.aoRgba ?? null,
-        roughnessRgba: payload.roughnessRgba ?? null
+        roughnessRgba: payload.roughnessRgba ?? null,
+        heightRgba: payload.heightRgba ?? null
       });
     }
   };
@@ -176,7 +178,10 @@ export class SurfaceMapWorkerClient {
     const includeNormalMap = request.textureOptions?.includeNormalMap ?? true;
     const includeAoMap = request.textureOptions?.includeAoMap ?? true;
     const includeRoughnessMap = request.textureOptions?.includeRoughnessMap ?? true;
-    const heightField = new Float32Array(width * height);
+    const includeHeightMap = request.textureOptions?.includeHeightMap ?? false;
+    const roughnessRgba = includeRoughnessMap ? new Uint8Array(width * height * 4) : null;
+    const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
+    const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
 
     const biomeColors: Record<Biome, string> = {
       ocean: '#0a75c2',
@@ -412,7 +417,6 @@ export class SurfaceMapWorkerClient {
     };
 
     const rgba = new Uint8Array(width * height * 4);
-    const roughnessRgba = new Uint8Array(width * height * 4);
     const useWrap = Boolean(wrapX);
     const macroNoiseScaleX = 12;
     const macroNoiseScaleY = 6;
@@ -542,18 +546,21 @@ export class SurfaceMapWorkerClient {
           }
         }
 
-        const rough00 = biomeRoughness(t00.biome);
-        const rough10 = biomeRoughness(t10.biome);
-        const rough01 = biomeRoughness(t01.biome);
-        const rough11 = biomeRoughness(t11.biome);
-        let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
-        const dryness = clamp01(1 - moistNorm);
-        landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
-        landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
-        landRoughness = clamp01(landRoughness);
+        let roughness = 0;
+        if (roughnessRgba) {
+          const rough00 = biomeRoughness(t00.biome);
+          const rough10 = biomeRoughness(t10.biome);
+          const rough01 = biomeRoughness(t01.biome);
+          const rough11 = biomeRoughness(t11.biome);
+          let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
+          const dryness = clamp01(1 - moistNorm);
+          landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
+          landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
+          landRoughness = clamp01(landRoughness);
 
-        const waterRoughness = clamp01(0.08 + shallow * 0.09 + (macroNoise - 0.5) * 0.02);
-        const roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+          const waterRoughness = clamp01(0.04 + shallow * 0.06 + (macroNoise - 0.5) * 0.015);
+          roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
+        }
 
         rLin *= shade;
         gLin *= shade;
@@ -572,20 +579,46 @@ export class SurfaceMapWorkerClient {
         rgba[idx + 1] = gg;
         rgba[idx + 2] = bb;
         rgba[idx + 3] = 255;
-        const roughByte = Math.round(roughness * 255);
-        roughnessRgba[idx] = roughByte;
-        roughnessRgba[idx + 1] = roughByte;
-        roughnessRgba[idx + 2] = roughByte;
-        roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
-        heightField[y * width + x] = heightNorm;
+        if (roughnessRgba) {
+          const roughByte = Math.round(roughness * 255);
+          roughnessRgba[idx] = roughByte;
+          roughnessRgba[idx + 1] = roughByte;
+          roughnessRgba[idx + 2] = roughByte;
+          roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
+        }
+        if (heightField || heightRgba) {
+          const reliefSlope = 0.4 + 0.6 * smoothstep(0.2, 0.8, slopeNorm);
+          const relief = landWeight
+            * reliefSlope
+            * (((macroNoise - 0.5) * macroAmp * 0.22) + ((microNoise - 0.5) * microAmp * 0.18));
+          const heightWithRelief = clamp01(heightNorm + relief);
+          if (heightField) {
+            heightField[y * width + x] = heightWithRelief;
+          }
+          if (heightRgba) {
+            const landBlend = clamp01(landWeight + 0.25);
+            const heightForMap = lerp(seaLevelNorm, heightWithRelief, landBlend);
+            const heightEncoded = clamp01(0.5 + (heightForMap - seaLevelNorm) * 0.85);
+            const heightByte = Math.round(heightEncoded * 255);
+            heightRgba[idx] = heightByte;
+            heightRgba[idx + 1] = heightByte;
+            heightRgba[idx + 2] = heightByte;
+            heightRgba[idx + 3] = 255;
+          }
+        }
       }
     }
 
-    const shouldComputeRelief = width >= 256 && height >= 128;
+    const shouldComputeRelief = Boolean(heightField) && (includeNormalMap || includeAoMap) && width >= 256 && height >= 128;
     if (!shouldComputeRelief) {
       if (useWrap) {
         blendSeamColumns(rgba, width, height);
-        blendSeamColumns(roughnessRgba, width, height);
+        if (roughnessRgba) {
+          blendSeamColumns(roughnessRgba, width, height);
+        }
+        if (heightRgba) {
+          blendSeamColumns(heightRgba, width, height);
+        }
       }
       return {
         width,
@@ -593,7 +626,8 @@ export class SurfaceMapWorkerClient {
         rgba,
         normalRgba: null,
         aoRgba: null,
-        roughnessRgba: includeRoughnessMap ? roughnessRgba : null
+        roughnessRgba: includeRoughnessMap ? roughnessRgba : null,
+        heightRgba
       };
     }
 
@@ -602,6 +636,7 @@ export class SurfaceMapWorkerClient {
     const heightScale = Math.min(1.6, Math.max(0.55, elevRange / 1200));
     const normalStrength = 1.1 * heightScale;
     const aoStrength = 1.5 * heightScale;
+    const heightFieldData = heightField as Float32Array;
 
     for (let y = 0; y < height; y += 1) {
       const v = (y + 0.5) / height;
@@ -621,11 +656,11 @@ export class SurfaceMapWorkerClient {
         const x1 = useWrap ? (x === width - 1 ? 0 : x + 1) : Math.min(width - 1, x + 1);
 
         const idx = row + x;
-        const hC = heightField[idx];
-        const hL = heightField[row + x0];
-        const hR = heightField[row + x1];
-        const hU = heightField[row0 + x];
-        const hD = heightField[row1 + x];
+        const hC = heightFieldData[idx];
+        const hL = heightFieldData[row + x0];
+        const hR = heightFieldData[row + x1];
+        const hU = heightFieldData[row0 + x];
+        const hD = heightFieldData[row1 + x];
 
         const dx = hR - hL;
         const dy = hD - hU;
@@ -643,10 +678,10 @@ export class SurfaceMapWorkerClient {
         normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
         normalRgba[nIdx + 3] = 255;
 
-        const hUL = heightField[row0 + x0];
-        const hUR = heightField[row0 + x1];
-        const hDL = heightField[row1 + x0];
-        const hDR = heightField[row1 + x1];
+        const hUL = heightFieldData[row0 + x0];
+        const hUR = heightFieldData[row0 + x1];
+        const hDL = heightFieldData[row1 + x0];
+        const hDR = heightFieldData[row1 + x1];
         const neighborAvg = (hL + hR + hU + hD + hUL + hUR + hDL + hDR) / 8;
         const concavity = Math.max(0, neighborAvg - hC);
         const waterFactor = hC < seaLevelNorm ? 0.55 : 1;
@@ -663,9 +698,14 @@ export class SurfaceMapWorkerClient {
 
     if (useWrap) {
       blendSeamColumns(rgba, width, height);
-      blendSeamColumns(roughnessRgba, width, height);
+      if (roughnessRgba) {
+        blendSeamColumns(roughnessRgba, width, height);
+      }
       blendSeamColumns(aoRgba, width, height);
       blendSeamNormals(normalRgba, width, height);
+      if (heightRgba) {
+        blendSeamColumns(heightRgba, width, height);
+      }
     }
 
     return {
@@ -674,7 +714,8 @@ export class SurfaceMapWorkerClient {
       rgba,
       normalRgba: includeNormalMap ? normalRgba : null,
       aoRgba: includeAoMap ? aoRgba : null,
-      roughnessRgba: includeRoughnessMap ? roughnessRgba : null
+      roughnessRgba: includeRoughnessMap ? roughnessRgba : null,
+      heightRgba
     };
   }
 }

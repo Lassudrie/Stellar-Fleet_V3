@@ -80,7 +80,13 @@ import {
   type TacticalRingConfig,
   type SystemObjectId
 } from './systemViewLayout';
-import { SurfaceMapWorkerClient, buildSurfaceMapWorkerRequest, type CloudShadowSettings, type SurfaceTextureResult } from '../../workers';
+import {
+  SurfaceMapWorkerClient,
+  buildSurfaceMapWorkerRequest,
+  type CloudShadowSettings,
+  type SurfaceTextureOptions,
+  type SurfaceTextureResult
+} from '../../workers';
 
 interface SystemView3DProps {
   starSystem: StarSystem;
@@ -209,6 +215,8 @@ const SURFACE_TEXTURE_UPSHIFT = 1.18;
 const SURFACE_TEXTURE_DOWNSHIFT = 0.84;
 const SURFACE_NORMAL_SCALE = 0.85;
 const SURFACE_AO_INTENSITY = 0.6;
+const SURFACE_DISPLACEMENT_SCALE = 0.02;
+const SURFACE_DISPLACEMENT_BIAS = -0.01;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const DAY_NIGHT_TERMINATOR_SOFTNESS = 0.22;
@@ -1946,13 +1954,16 @@ interface PlanetOrbitGroupProps {
   orbitMaterial: MeshBasicMaterial;
   orbitShadowMaterial: ShadowMaterial;
   planetGeometry: SphereGeometry;
+  planetGeometryHigh: SphereGeometry;
   moonGeometry: SphereGeometry;
+  moonGeometryHigh: SphereGeometry;
   planetMaterial: MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   orbitThickness: number;
   spinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  highDetailBodyId: string | null;
   hitboxScaleMultiplier: number;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
@@ -1969,13 +1980,16 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   orbitMaterial,
   orbitShadowMaterial,
   planetGeometry,
+  planetGeometryHigh,
   moonGeometry,
+  moonGeometryHigh,
   planetMaterial,
   resolveMoonMaterial,
   resolveAtmosphereBundle,
   orbitThickness,
   spinReferenceRadius,
   moonSpinReferenceRadius,
+  highDetailBodyId,
   hitboxScaleMultiplier,
   onPressStart,
   onPressMove,
@@ -2045,6 +2059,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
   }, [planet.id]);
   const spinGroupRef = useRef<Group>(null);
+  const planetGeometryActive = highDetailBodyId === planet.id ? planetGeometryHigh : planetGeometry;
 
   useFrame((_, delta) => {
     if (spinGroupRef.current) {
@@ -2068,7 +2083,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
       <group position={planetPosition}>
         <group ref={spinGroupRef}>
           <mesh
-            geometry={planetGeometry}
+            geometry={planetGeometryActive}
             material={hitboxMaterial}
             scale={planetHitboxScale}
             castShadow={false}
@@ -2118,7 +2133,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             frustumCulled
           />
           <mesh
-            geometry={planetGeometry}
+            geometry={planetGeometryActive}
             material={planetMaterial}
             scale={planetScale}
             castShadow
@@ -2155,7 +2170,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
           />
           {atmosphereBundle && (
             <AtmosphereStack
-              geometry={planetGeometry}
+              geometry={planetGeometryActive}
               radius={planet.radius}
               bundle={atmosphereBundle}
               cloudSpinSpeed={cloudSpinSpeed}
@@ -2163,28 +2178,31 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             />
           )}
         </group>
-        {planet.moons.map(moon => (
-          <MoonOrbitGroup
-            key={moon.id}
-            moon={moon}
-            orbitMaterial={orbitMaterial}
-            orbitShadowMaterial={orbitShadowMaterial}
-            moonGeometry={moonGeometry}
-            moonMaterial={resolveMoonMaterial(moon)}
-            resolveAtmosphereBundle={resolveAtmosphereBundle}
-            orbitThickness={orbitThickness}
-            spinReferenceRadius={moonSpinReferenceRadius}
-            hitboxScaleMultiplier={hitboxScaleMultiplier}
-            onPressStart={onPressStart}
-            onPressMove={onPressMove}
-            onPressEnd={onPressEnd}
-            onPressCancel={onPressCancel}
-            onFocus={onFocus}
-            onHover={onHover}
-            onBlur={onBlur}
-            onSelect={onSelect}
-          />
-        ))}
+        {planet.moons.map(moon => {
+          const moonGeometryActive = highDetailBodyId === moon.id ? moonGeometryHigh : moonGeometry;
+          return (
+            <MoonOrbitGroup
+              key={moon.id}
+              moon={moon}
+              orbitMaterial={orbitMaterial}
+              orbitShadowMaterial={orbitShadowMaterial}
+              moonGeometry={moonGeometryActive}
+              moonMaterial={resolveMoonMaterial(moon)}
+              resolveAtmosphereBundle={resolveAtmosphereBundle}
+              orbitThickness={orbitThickness}
+              spinReferenceRadius={moonSpinReferenceRadius}
+              hitboxScaleMultiplier={hitboxScaleMultiplier}
+              onPressStart={onPressStart}
+              onPressMove={onPressMove}
+              onPressEnd={onPressEnd}
+              onPressCancel={onPressCancel}
+              onFocus={onFocus}
+              onHover={onHover}
+              onBlur={onBlur}
+              onSelect={onSelect}
+            />
+          );
+        })}
       </group>
     </group>
   );
@@ -2197,7 +2215,9 @@ interface SystemCelestialLayerProps {
   orbitMaterial: MeshBasicMaterial;
   orbitShadowMaterial: ShadowMaterial;
   planetGeometry: SphereGeometry;
+  planetGeometryHigh: SphereGeometry;
   moonGeometry: SphereGeometry;
+  moonGeometryHigh: SphereGeometry;
   resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
@@ -2205,6 +2225,7 @@ interface SystemCelestialLayerProps {
   starSpinReferenceRadius: number;
   planetSpinReferenceRadius: number;
   moonSpinReferenceRadius: number;
+  highDetailBodyId: string | null;
   hitboxScaleMultiplier: number;
   onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
@@ -2223,7 +2244,9 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   orbitMaterial,
   orbitShadowMaterial,
   planetGeometry,
+  planetGeometryHigh,
   moonGeometry,
+  moonGeometryHigh,
   resolvePlanetMaterial,
   resolveMoonMaterial,
   resolveAtmosphereBundle,
@@ -2231,6 +2254,7 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   starSpinReferenceRadius,
   planetSpinReferenceRadius,
   moonSpinReferenceRadius,
+  highDetailBodyId,
   hitboxScaleMultiplier,
   onBodyPressStart,
   onBodyPressMove,
@@ -2270,13 +2294,16 @@ const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           orbitMaterial={orbitMaterial}
           orbitShadowMaterial={orbitShadowMaterial}
           planetGeometry={planetGeometry}
+          planetGeometryHigh={planetGeometryHigh}
           moonGeometry={moonGeometry}
+          moonGeometryHigh={moonGeometryHigh}
           planetMaterial={resolvePlanetMaterial(planet)}
           resolveMoonMaterial={resolveMoonMaterial}
           resolveAtmosphereBundle={resolveAtmosphereBundle}
           orbitThickness={orbitThickness}
           spinReferenceRadius={planetSpinReferenceRadius}
           moonSpinReferenceRadius={moonSpinReferenceRadius}
+          highDetailBodyId={highDetailBodyId}
           hitboxScaleMultiplier={hitboxScaleMultiplier}
           onPressStart={onBodyPressStart}
           onPressMove={onBodyPressMove}
@@ -2868,6 +2895,7 @@ const SystemSurfaceTextureManager: React.FC<{
     normal: DataTexture | null;
     ao: DataTexture | null;
     roughness: DataTexture | null;
+    height: DataTexture | null;
   };
   const cacheRef = useRef<Map<string, SurfaceTextureBundle>>(new Map());
   const cacheLastUsedRef = useRef<Map<string, number>>(new Map());
@@ -2879,12 +2907,13 @@ const SystemSurfaceTextureManager: React.FC<{
   const planetsRef = useRef(planets);
   const maxCacheEntries = lowSpec ? 4 : SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
   const maxInflight = lowSpec ? 1 : SURFACE_TEXTURE_MAX_INFLIGHT;
-  const textureOptions = useMemo(() => (
+  const baseTextureOptions = useMemo<SurfaceTextureOptions | null>(() => (
     lowSpec
       ? {
         includeNormalMap: false,
         includeAoMap: false,
-        includeRoughnessMap: false
+        includeRoughnessMap: false,
+        includeHeightMap: false
       }
       : null
   ), [lowSpec]);
@@ -3003,6 +3032,7 @@ const SystemSurfaceTextureManager: React.FC<{
     bundle.normal?.dispose();
     bundle.ao?.dispose();
     bundle.roughness?.dispose();
+    bundle.height?.dispose();
   }, []);
 
   useEffect(() => {
@@ -3037,26 +3067,35 @@ const SystemSurfaceTextureManager: React.FC<{
       resolution.height
     ].join('|');
   }, [astroKey, ownerKeyByBodyId]);
+  const buildTextureOptionsKey = useCallback((options: SurfaceTextureOptions | null): string => {
+    const includeNormalMap = options?.includeNormalMap ?? true;
+    const includeAoMap = options?.includeAoMap ?? true;
+    const includeRoughnessMap = options?.includeRoughnessMap ?? true;
+    const includeHeightMap = options?.includeHeightMap ?? false;
+    return `maps:n${includeNormalMap ? 1 : 0}a${includeAoMap ? 1 : 0}r${includeRoughnessMap ? 1 : 0}h${includeHeightMap ? 1 : 0}`;
+  }, []);
 
   const buildGasGiantTextureKey = useCallback((
     bodyId: string,
     planetType: PlanetType | null,
-    resolution: SurfaceTextureResolution
+    resolution: SurfaceTextureResolution,
+    options: SurfaceTextureOptions | null
   ): string => (
-    ['gas', bodyId, planetType ?? 'unknown', astroKey, resolution.width, resolution.height].join('|')
-  ), [astroKey]);
+    ['gas', bodyId, planetType ?? 'unknown', astroKey, resolution.width, resolution.height, buildTextureOptionsKey(options)].join('|')
+  ), [astroKey, buildTextureOptionsKey]);
 
   const buildGasGiantBundle = useCallback((
     bodyId: string,
     planetType: PlanetType | null,
-    resolution: SurfaceTextureResolution
+    resolution: SurfaceTextureResolution,
+    options: SurfaceTextureOptions | null
   ): SurfaceTextureBundle => {
     const baseColor = planetType ? PLANET_TYPE_COLORS[planetType] : '#cbd5e1';
     const isIceGiant = planetType === 'IceGiant';
     const seedKey = `${bodyId}|${astroKey}|${resolution.width}x${resolution.height}`;
     const data = createGasGiantTextureData(seedKey, baseColor, resolution.width, resolution.height, isIceGiant);
     const colorTexture = createDataTexture(data.color, resolution.width, resolution.height, true);
-    const includeRoughness = textureOptions?.includeRoughnessMap ?? true;
+    const includeRoughness = options?.includeRoughnessMap ?? true;
     const roughnessTexture = includeRoughness
       ? createDataTexture(data.roughness, resolution.width, resolution.height, false)
       : null;
@@ -3064,9 +3103,10 @@ const SystemSurfaceTextureManager: React.FC<{
       color: colorTexture,
       normal: null,
       ao: null,
-      roughness: roughnessTexture
+      roughness: roughnessTexture,
+      height: null
     };
-  }, [astroKey, createDataTexture, textureOptions]);
+  }, [astroKey, createDataTexture]);
 
   const applyTextureToMaterial = useCallback((material: MeshStandardMaterial, key: string, bundle: SurfaceTextureBundle) => {
     let needsUpdate = false;
@@ -3093,6 +3133,11 @@ const SystemSurfaceTextureManager: React.FC<{
       material.roughnessMap = nextRoughness;
       needsUpdate = true;
     }
+    const nextHeight = bundle.height ?? null;
+    if (material.displacementMap !== nextHeight) {
+      material.displacementMap = nextHeight;
+      needsUpdate = true;
+    }
     const baseRoughness = typeof material.userData.baseRoughness === 'number'
       ? material.userData.baseRoughness
       : material.roughness;
@@ -3101,6 +3146,19 @@ const SystemSurfaceTextureManager: React.FC<{
     } else if (material.roughness !== baseRoughness) {
       material.roughness = baseRoughness;
     }
+    if (nextHeight) {
+      const displacementScale = typeof material.userData.surfaceDisplacementScale === 'number'
+        ? material.userData.surfaceDisplacementScale
+        : SURFACE_DISPLACEMENT_SCALE;
+      const displacementBias = typeof material.userData.surfaceDisplacementBias === 'number'
+        ? material.userData.surfaceDisplacementBias
+        : SURFACE_DISPLACEMENT_BIAS;
+      material.displacementScale = displacementScale;
+      material.displacementBias = displacementBias;
+    } else if (material.displacementScale !== 0 || material.displacementBias !== 0) {
+      material.displacementScale = 0;
+      material.displacementBias = 0;
+    }
     if (needsUpdate) {
       material.needsUpdate = true;
     }
@@ -3108,6 +3166,7 @@ const SystemSurfaceTextureManager: React.FC<{
     material.userData.surfaceNormalTextureKey = nextNormal ? key : null;
     material.userData.surfaceAoTextureKey = nextAo ? key : null;
     material.userData.surfaceRoughnessTextureKey = nextRoughness ? key : null;
+    material.userData.surfaceHeightTextureKey = nextHeight ? key : null;
   }, []);
 
   const clearTextureFromMaterial = useCallback((material: MeshStandardMaterial) => {
@@ -3128,6 +3187,12 @@ const SystemSurfaceTextureManager: React.FC<{
       material.roughnessMap = null;
       needsUpdate = true;
     }
+    if (material.displacementMap) {
+      material.displacementMap = null;
+      material.displacementScale = 0;
+      material.displacementBias = 0;
+      needsUpdate = true;
+    }
     if (needsUpdate) {
       material.needsUpdate = true;
     }
@@ -3143,6 +3208,7 @@ const SystemSurfaceTextureManager: React.FC<{
     material.userData.surfaceNormalTextureKey = null;
     material.userData.surfaceAoTextureKey = null;
     material.userData.surfaceRoughnessTextureKey = null;
+    material.userData.surfaceHeightTextureKey = null;
   }, []);
 
   useEffect(() => {
@@ -3309,9 +3375,12 @@ const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
+      const wantsHeightMap = !lowSpec && !isGasGiant && shouldPreferUltra(bodyId) && resolution.width >= 1024;
+      const textureOptionsForBody = wantsHeightMap ? { includeHeightMap: true } : baseTextureOptions;
+      const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
-        ? buildGasGiantTextureKey(bodyId, planetType, resolution)
-        : `${buildTextureKey(bodyId, descriptor as PlanetSurfaceDescriptor, resolution)}|${shadowKey}`;
+        ? buildGasGiantTextureKey(bodyId, planetType, resolution, textureOptionsForBody)
+        : `${buildTextureKey(bodyId, descriptor as PlanetSurfaceDescriptor, resolution)}|${shadowKey}|${optionsKey}`;
       desiredKeyByBodyIdRef.current.set(bodyId, key);
       touchKey(key);
 
@@ -3322,7 +3391,7 @@ const SystemSurfaceTextureManager: React.FC<{
 
       if (cachedBundle) return;
       if (isGasGiant) {
-        const bundle = buildGasGiantBundle(bodyId, planetType, resolution);
+        const bundle = buildGasGiantBundle(bodyId, planetType, resolution, textureOptionsForBody);
         cacheRef.current.set(key, bundle);
         cacheLastUsedRef.current.set(key, performance.now());
         const desiredKey = desiredKeyByBodyIdRef.current.get(bodyId);
@@ -3343,8 +3412,8 @@ const SystemSurfaceTextureManager: React.FC<{
       if (cloudShadow) {
         workerRequest.cloudShadow = cloudShadow;
       }
-      if (textureOptions) {
-        workerRequest.textureOptions = textureOptions;
+      if (textureOptionsForBody) {
+        workerRequest.textureOptions = textureOptionsForBody;
       }
       if (lowSpec) {
         workerRequest.allowSync = false;
@@ -3370,7 +3439,16 @@ const SystemSurfaceTextureManager: React.FC<{
           const roughnessTexture = result.roughnessRgba
             ? createDataTexture(result.roughnessRgba, result.width, result.height, false)
             : null;
-          const bundle = { color: colorTexture, normal: normalTexture, ao: aoTexture, roughness: roughnessTexture };
+          const heightTexture = result.heightRgba
+            ? createDataTexture(result.heightRgba, result.width, result.height, false)
+            : null;
+          const bundle = {
+            color: colorTexture,
+            normal: normalTexture,
+            ao: aoTexture,
+            roughness: roughnessTexture,
+            height: heightTexture
+          };
 
           cacheRef.current.set(key, bundle);
           cacheLastUsedRef.current.set(key, performance.now());
@@ -4616,6 +4694,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
       existing.userData.surfaceTintColor = surfaceTint;
+      if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
+        existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
+      }
+      if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
+        existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
+      }
       if (existing.map) {
         existing.color.set(surfaceTint);
       } else {
@@ -4630,6 +4714,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
+    material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
+    material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
     material.color.set(tintedBaseColor);
     applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(planet.id, material);
@@ -4644,6 +4730,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
       existing.userData.surfaceTintColor = surfaceTint;
+      if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
+        existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
+      }
+      if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
+        existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
+      }
       if (existing.map) {
         existing.color.set(surfaceTint);
       } else {
@@ -4658,6 +4750,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.surfaceTintColor = surfaceTint;
     material.userData.baseRoughness = material.roughness;
     material.userData.surfaceTextureKey = null;
+    material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
+    material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
     material.color.set(tintedBaseColor);
     applyDayNightTerminator(material);
     bodyMaterialByIdRef.current.set(moon.id, material);
@@ -4674,8 +4768,18 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
     return geometry;
   }, []);
+  const planetGeometryHigh = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, 96, 96);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, []);
   const moonGeometry = useDisposableMemo(() => {
     const geometry = new SphereGeometry(1, 32, 32);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, []);
+  const moonGeometryHigh = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, 64, 64);
     geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
     return geometry;
   }, []);
@@ -4835,6 +4939,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
+  const highDetailBodyId = selectedBodyId ?? hoveredBodyId ?? null;
   const contextMenuOffset = prefersTouchFallback ? 18 : BODY_CONTEXT_MENU_OFFSET;
   const contextMenuPadding = prefersTouchFallback ? 14 : BODY_CONTEXT_MENU_PADDING;
 
@@ -5383,7 +5488,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 orbitMaterial={orbitMaterial}
                 orbitShadowMaterial={orbitShadowMaterial}
                 planetGeometry={planetGeometry}
+                planetGeometryHigh={planetGeometryHigh}
                 moonGeometry={moonGeometry}
+                moonGeometryHigh={moonGeometryHigh}
                 resolvePlanetMaterial={resolvePlanetMaterial}
                 resolveMoonMaterial={resolveMoonMaterial}
                 resolveAtmosphereBundle={resolveAtmosphereBundle}
@@ -5391,6 +5498,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 starSpinReferenceRadius={starSpinReferenceRadius}
                 planetSpinReferenceRadius={planetSpinReferenceRadius}
                 moonSpinReferenceRadius={moonSpinReferenceRadius}
+                highDetailBodyId={highDetailBodyId}
                 hitboxScaleMultiplier={hitboxScaleMultiplier}
                 onBodyPressStart={handleBodyPressStart}
                 onBodyPressMove={handleBodyPressMove}
