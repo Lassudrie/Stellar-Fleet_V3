@@ -704,7 +704,7 @@ export const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
-      const wantsHeightMap = !lowSpec && !isGasGiant && shouldPreferUltra(bodyId) && resolution.width >= 1024;
+      const wantsHeightMap = !lowSpec && !isGasGiant && isOnScreen && resolution.width >= 512;
       const textureOptionsForBody = wantsHeightMap ? { includeHeightMap: true } : baseTextureOptions;
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
