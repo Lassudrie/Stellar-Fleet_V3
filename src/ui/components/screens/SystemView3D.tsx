@@ -1261,7 +1261,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const enableShadows = !lowSpec;
   const enableAntialias = true;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
-  const toneMappingExposure = prefersTouchFallback ? 0.9 : 0.85;
+  const toneMappingExposure = prefersTouchFallback ? 0.8 : 0.75;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
@@ -1272,10 +1272,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return Math.min(targetSamples, maxSamples);
   }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
   const enableSmaa = enablePostFX && postFxMultisampling === 0;
-  const bloomIntensity = prefersTouchFallback ? 0.18 : 0.35;
-  const bloomThreshold = prefersTouchFallback ? 0.5 : 0.45;
-  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.7;
-  const bloomRadius = prefersTouchFallback ? 0.15 : 0.22;
+  const bloomIntensity = prefersTouchFallback ? 0.14 : 0.25;
+  const bloomThreshold = prefersTouchFallback ? 0.7 : 0.65;
+  const bloomSmoothing = prefersTouchFallback ? 0.65 : 0.6;
+  const bloomRadius = prefersTouchFallback ? 0.12 : 0.18;
   const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
   const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
   const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
@@ -1290,14 +1290,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [bloomLightsReady, setBloomLightsReady] = useState(false);
   useEffect(() => {
     if (bloomLightsReady) return;
-    if (ambientLightRef.current && starLightRef.current) {
+    if (starLightRef.current) {
       setBloomLightsReady(true);
     }
   }, [bloomLightsReady]);
   const bloomLights = useMemo(() => {
     if (!bloomLightsReady) return [];
-    return [ambientLightRef.current, starLightRef.current]
-      .filter(Boolean) as Object3D[];
+    return [starLightRef.current].filter(Boolean) as Object3D[];
   }, [bloomLightsReady]);
   const isTouchUi = prefersTouchFallback;
   const contextMenuContainerClass = `pointer-events-auto fixed z-40 rounded border border-slate-700 bg-slate-900/95 p-2 text-white shadow-2xl backdrop-blur overflow-y-auto overscroll-contain ${

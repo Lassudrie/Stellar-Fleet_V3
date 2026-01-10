@@ -524,10 +524,10 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.25),
       map: glowTexture,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.08,
       blending: AdditiveBlending,
       depthWrite: false,
-      toneMapped: true
+      toneMapped: false
     }),
     [glowTexture, tintColor]
   );
@@ -536,10 +536,10 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.2),
       map: glowTexture,
       transparent: true,
-      opacity: 0.04,
+      opacity: 0.025,
       blending: AdditiveBlending,
       depthWrite: false,
-      toneMapped: true
+      toneMapped: false
     }),
     [glowTexture, tintColor]
   );
