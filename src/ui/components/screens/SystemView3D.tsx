@@ -4,25 +4,28 @@ import { EffectComposer, Select, SelectiveBloom, Selection, SMAA, Vignette } fro
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  BufferAttribute,
   Color,
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   PCFSoftShadowMap,
   PointLight,
+  SRGBColorSpace,
   ShadowMaterial,
   SphereGeometry,
   Vector2,
   Vector3
 } from 'three';
 import type {
-  AtmosphereType,
   FactionState,
   Fleet,
   GameState,
   MoonType,
   PlanetBody,
   PlanetBodyType,
+  PlanetData,
   PlanetType,
   Station,
   StarData,
@@ -37,6 +40,7 @@ import {
   hashStringToUnit,
   makeObjectId,
   parseObjectId,
+  type TacticalRingConfig,
   type SystemObjectId
 } from './systemViewLayout';
 import {
@@ -52,6 +56,9 @@ import {
   createCloudLayerMaterial,
   createFallbackStarOrbit,
   deriveSphericalState,
+  getMoonRadiusKm,
+  getMoonType,
+  getPlanetRadiusKm,
   getPlanetType,
   getSpectralTint,
   getStarLightIntensityForRadius,
@@ -94,6 +101,7 @@ import type {
   AtmosphereLayerBundle,
   BodyLabelTarget,
   CameraSphericalState,
+  FocusRequest,
   MoonSource,
   OrbitingMoon,
   OrbitingPlanet,

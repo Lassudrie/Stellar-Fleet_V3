@@ -99,6 +99,7 @@ export type MoonSource = MoonData & {
   id?: string;
   name?: string;
   isSolid?: boolean;
+  size?: number;
 };
 
 export const computeOrbitalPeriodDays = (semiMajorAxisAu: number, massSun: number): number => {
@@ -171,8 +172,8 @@ export const getPlanetType = (planet: PlanetSource): PlanetType => {
 export const getSemiMajorAxisKm = (planet: PlanetSource, index: number): number => {
   if (typeof planet.semiMajorAxisKm === 'number') return planet.semiMajorAxisKm;
   const fallback = DEFAULT_ORBIT_INNER_KM + DEFAULT_ORBIT_STEP_KM * index;
-  if (typeof (planet as PlanetData).orbitSemiMajorAxisAu === 'number') {
-    return (planet as PlanetData).orbitSemiMajorAxisAu * KM_PER_AU;
+  if (typeof (planet as PlanetData).semiMajorAxisAu === 'number') {
+    return (planet as PlanetData).semiMajorAxisAu * KM_PER_AU;
   }
   return fallback;
 };
@@ -214,8 +215,8 @@ export const getMoonType = (moon: MoonSource): MoonType => moon.moonType ?? moon
 
 export const getMoonOrbitKm = (moon: MoonSource, planetRadiusKm: number): number => {
   if (typeof moon.orbitDistanceKm === 'number') return moon.orbitDistanceKm;
-  if (typeof (moon as MoonData).orbitDistanceEarth === 'number') {
-    return (moon as MoonData).orbitDistanceEarth * EARTH_RADIUS_KM * 2.5;
+  if (typeof (moon as MoonData).orbitDistanceRp === 'number') {
+    return (moon as MoonData).orbitDistanceRp * planetRadiusKm;
   }
   return planetRadiusKm * 4.5;
 };

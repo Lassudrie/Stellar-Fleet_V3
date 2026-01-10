@@ -19,7 +19,7 @@ export type CameraSphericalState = {
   radius: number;
 };
 
-type FocusRequest = {
+export type FocusRequest = {
   target: Vector3;
   distance: number;
 };

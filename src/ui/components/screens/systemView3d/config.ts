@@ -93,22 +93,18 @@ export const THERMAL_HOT_END_C = 900;
 
 export const PLANET_TYPE_COLORS: Record<PlanetType, string> = {
   Terrestrial: '#22c55e',
-  Desert: '#f59e0b',
-  Ice: '#60a5fa',
-  Lava: '#f97316',
-  Toxic: '#84cc16',
-  Ocean: '#38bdf8',
+  SubNeptune: '#38bdf8',
+  IceGiant: '#7dd3fc',
   GasGiant: '#c084fc',
-  IceGiant: '#7dd3fc'
+  Dwarf: '#94a3b8'
 };
 
 export const MOON_TYPE_COLORS: Record<MoonType, string> = {
-  Rocky: '#9ca3af',
-  Ice: '#cbd5f5',
+  Regular: '#9ca3af',
+  Icy: '#cbd5f5',
   Volcanic: '#f97316',
-  Desert: '#f59e0b',
-  Ocean: '#38bdf8',
-  Exotic: '#e879f9'
+  Eden: '#22c55e',
+  Irregular: '#f59e0b'
 };
 
 export const SPECTRAL_TINTS: Record<string, string> = {
