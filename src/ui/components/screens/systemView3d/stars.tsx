@@ -507,11 +507,16 @@ export const StarMesh: React.FC<StarMeshProps> = ({
     [tintColor]
   );
   const coreMaterial = useDisposableMemo(
-    () => new MeshBasicMaterial({
-      color: new Color('#ffffff').lerp(new Color(tintColor), 0.35),
-      map: surfaceTexture,
-      toneMapped: true
-    }),
+    () => {
+      const coreColor = new Color('#ffffff')
+        .lerp(new Color(tintColor), 0.25)
+        .multiplyScalar(0.85);
+      return new MeshBasicMaterial({
+        color: coreColor,
+        map: surfaceTexture,
+        toneMapped: true
+      });
+    },
     [surfaceTexture, tintColor]
   );
   const innerGlowMaterial = useDisposableMemo(
@@ -519,7 +524,7 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.25),
       map: glowTexture,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.12,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: true
@@ -531,7 +536,7 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       color: new Color('#ffffff').lerp(new Color(tintColor), 0.2),
       map: glowTexture,
       transparent: true,
-      opacity: 0.07,
+      opacity: 0.04,
       blending: AdditiveBlending,
       depthWrite: false,
       toneMapped: true

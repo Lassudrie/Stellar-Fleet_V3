@@ -44,7 +44,7 @@ export const CLOUD_NOISE_SPEED_MIN = 0.015;
 export const CLOUD_NOISE_SPEED_MAX = 0.045;
 
 export const LENS_FLARE_TEXTURE_SIZE = 128;
-export const LENS_FLARE_BASE_STRENGTH = 0.32;
+export const LENS_FLARE_BASE_STRENGTH = 0.2;
 export const LENS_FLARE_CENTER_FADE_START = 0.12;
 export const LENS_FLARE_CENTER_FADE_END = 0.65;
 export const LENS_FLARE_INTENSITY_POWER = 2.4;

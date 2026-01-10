@@ -1261,7 +1261,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const enableShadows = !lowSpec;
   const enableAntialias = true;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
-  const toneMappingExposure = prefersTouchFallback ? 0.9 : 0.95;
+  const toneMappingExposure = prefersTouchFallback ? 0.9 : 0.85;
   const shadowMapSize = prefersTouchFallback ? 512 : 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
@@ -1272,10 +1272,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return Math.min(targetSamples, maxSamples);
   }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
   const enableSmaa = enablePostFX && postFxMultisampling === 0;
-  const bloomIntensity = prefersTouchFallback ? 0.25 : 0.5;
-  const bloomThreshold = prefersTouchFallback ? 0.48 : 0.38;
-  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.65;
-  const bloomRadius = prefersTouchFallback ? 0.18 : 0.25;
+  const bloomIntensity = prefersTouchFallback ? 0.18 : 0.35;
+  const bloomThreshold = prefersTouchFallback ? 0.5 : 0.45;
+  const bloomSmoothing = prefersTouchFallback ? 0.75 : 0.7;
+  const bloomRadius = prefersTouchFallback ? 0.15 : 0.22;
   const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
   const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
   const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
