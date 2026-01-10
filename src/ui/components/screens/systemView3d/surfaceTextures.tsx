@@ -239,12 +239,22 @@ export const SystemSurfaceTextureManager: React.FC<{
   const baseTextureOptions = useMemo<SurfaceTextureOptions | null>(() => (
     lowSpec
       ? {
-        includeNormalMap: false,
+        includeNormalMap: true,
         includeAoMap: false,
         includeRoughnessMap: false,
         includeHeightMap: false
       }
       : null
+  ), [lowSpec]);
+  const heightTextureOptions = useMemo<SurfaceTextureOptions>(() => (
+    lowSpec
+      ? {
+        includeNormalMap: true,
+        includeAoMap: false,
+        includeRoughnessMap: false,
+        includeHeightMap: true
+      }
+      : { includeHeightMap: true }
   ), [lowSpec]);
   const scratch = useMemo(() => ({
     world: new Vector3(),
@@ -704,8 +714,8 @@ export const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
-      const wantsHeightMap = !lowSpec && !isGasGiant && isOnScreen && resolution.width >= 512;
-      const textureOptionsForBody = wantsHeightMap ? { includeHeightMap: true } : baseTextureOptions;
+      const wantsHeightMap = !isGasGiant && isOnScreen && resolution.width >= 512;
+      const textureOptionsForBody = wantsHeightMap ? heightTextureOptions : baseTextureOptions;
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
         ? buildGasGiantTextureKey(bodyId, planetType, resolution, textureOptionsForBody)
