@@ -28,7 +28,7 @@ import type {
   StarSystem
 } from '../../../../shared/shared';
 import { hashStringToUnit } from '../systemViewLayout';
-import { ATMOSPHERE_STYLE, resolveAirMassIndex } from './atmosphere';
+import { ATMOSPHERE_PRESETS, resolveAirMassIndex } from './atmosphere';
 import {
   CITY_LIGHTS_DIAMETER_FULL_PX,
   CITY_LIGHTS_DIAMETER_MIN_PX,
@@ -380,9 +380,8 @@ export const SystemSurfaceTextureManager: React.FC<{
       if (!isSolid) return;
       const atmosphere = body.atmosphere;
       if (!atmosphere || atmosphere === 'None') return;
-
-      const style = ATMOSPHERE_STYLE[atmosphere];
-      const cloudStyle = style.clouds;
+      const preset = ATMOSPHERE_PRESETS[atmosphere];
+      const cloudStyle = preset.cloudStyle;
       if (!cloudStyle) return;
 
       const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
@@ -390,23 +389,23 @@ export const SystemSurfaceTextureManager: React.FC<{
         ? body.temperatureK
         : (atmosphere === 'H2He' ? 140 : 288);
 
-      let cloudiness = 0;
+      let cloudiness = MathUtils.clamp(preset.clouds * MathUtils.lerp(0.55, 1.2, airMass), 0, 1);
       switch (atmosphere) {
         case 'Earthlike': {
           const tempSuitability = MathUtils.clamp(1 - Math.abs(temperatureK - 288) / 170, 0, 1);
-          cloudiness = MathUtils.clamp(0.15 + airMass * 0.75 * tempSuitability, 0, 1);
+          cloudiness = MathUtils.clamp(cloudiness * MathUtils.lerp(0.6, 1.3, tempSuitability), 0, 1);
           break;
         }
         case 'CO2': {
-          cloudiness = MathUtils.clamp(0.1 + airMass * 0.65, 0, 1);
+          cloudiness = MathUtils.clamp(cloudiness * 0.9, 0, 1);
           break;
         }
         case 'H2He': {
-          cloudiness = MathUtils.clamp(0.6 + airMass * 0.4, 0, 1);
+          cloudiness = MathUtils.clamp(cloudiness * 1.05, 0, 1);
           break;
         }
         default:
-          cloudiness = 0;
+          break;
       }
 
       if (cloudiness <= 0.08) return;

@@ -19,6 +19,7 @@ import {
   Vector3
 } from 'three';
 import type {
+  AtmosphereType,
   FactionState,
   Fleet,
   GameState,
@@ -47,26 +48,22 @@ import {
   applyDayNightTerminator,
   applyMoonOrbitSpacing,
   applyPlanetOrbitSpacing,
-  ATMOSPHERE_STYLE,
-  ATMOSPHERE_HALO_BOOST_MAX,
-  ATMOSPHERE_HALO_FAR_FACTOR,
-  ATMOSPHERE_HALO_K,
-  ATMOSPHERE_HALO_M,
-  ATMOSPHERE_HALO_NEAR_FACTOR,
-  ATMOSPHERE_HALO_STRENGTH,
-  ATMOSPHERE_HALO_THICKNESS,
+  ATMOSPHERE_PRESETS,
+  ATMOSPHERE_SHELL_DISTANCE_BOOST_MAX,
+  ATMOSPHERE_SHELL_DISTANCE_FAR_FACTOR,
+  ATMOSPHERE_SHELL_DISTANCE_NEAR_FACTOR,
   buildPlanetModel,
   computeFleetRingBaseRadius,
   computeInclinedOrbitPosition,
   computeOrbitAngle,
-  createAtmosphereHaloMaterial,
-  createAtmosphereLayerMaterial,
+  createAtmosphereShellMaterial,
   createCloudLayerMaterial,
   createFallbackStarOrbit,
   DAY_NIGHT_NIGHT_MIN,
   DAY_NIGHT_NIGHT_MIN_ATMOSPHERE,
   DAY_NIGHT_TERMINATOR_SOFTNESS,
   DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE,
+  deriveScatteringCoeffs,
   deriveSphericalState,
   getMoonRadiusKm,
   getMoonType,
@@ -91,8 +88,6 @@ import {
   POST_FX_MSAA_SAMPLES_MOBILE,
   RADIUS_VISIBILITY_BONUS,
   resolveAirMassIndex,
-  resolveAtmosphereHaloTint,
-  resolveStarHaloTint,
   resolveThermalTints,
   SOLAR_RADIUS_KM,
   STAR_SPIN_REFERENCE_RADIUS_FACTOR,
@@ -115,6 +110,7 @@ import {
 } from './systemView3d';
 import type {
   AtmosphereLayerBundle,
+  AtmosphereParams,
   BodyLabelTarget,
   CameraSphericalState,
   FocusRequest,
@@ -384,15 +380,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new Vector3(...(primaryStar?.position ?? [0, 0, 0])),
     [primaryStar?.position]
   );
-  const starHaloTint = useMemo(
-    () => resolveStarHaloTint(primaryStar?.data.spectralType ?? astro?.primarySpectralType),
-    [astro?.primarySpectralType, primaryStar?.data.spectralType]
-  );
-  const starHaloKey = useMemo(() => {
-    const spectralType = primaryStar?.data.spectralType ?? astro?.primarySpectralType ?? 'G';
-    const key = spectralType.trim().charAt(0).toUpperCase() || 'G';
-    return `${key}:${starTintColor}`;
-  }, [astro?.primarySpectralType, primaryStar?.data.spectralType, starTintColor]);
   const orbitMassSun = Math.max(primaryStar?.data.massSun ?? 1, 0.1);
   const astroKey = useMemo(() => {
     if (!astro) return 'no-astro';
@@ -536,108 +523,153 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const sunColorRef = useRef<Color>(new Color('#ffffff'));
   const atmosphereBundleByBodyIdRef = useRef<Map<string, AtmosphereBundleCacheEntry>>(new Map());
   const disposeAtmosphereBundle = useCallback((bundle: AtmosphereLayerBundle) => {
-    bundle.lower.material.dispose();
-    bundle.haze.material.dispose();
-    bundle.halo?.material.dispose();
+    bundle.shell.material.dispose();
     bundle.clouds?.material.dispose();
   }, []);
   const clearAtmosphereCache = useCallback(() => {
     atmosphereBundleByBodyIdRef.current.forEach(entry => disposeAtmosphereBundle(entry));
     atmosphereBundleByBodyIdRef.current.clear();
-  }, [disposeAtmosphereBundle, starHaloKey, starHaloTint, sunPosition]);
+  }, [disposeAtmosphereBundle]);
   useEffect(() => () => clearAtmosphereCache(), [clearAtmosphereCache]);
   useEffect(() => {
     clearAtmosphereCache();
   }, [astroKey, clearAtmosphereCache]);
 
-  const resolveAtmosphereBundle = useCallback((body: OrbitingPlanet | OrbitingMoon): AtmosphereLayerBundle | null => {
-    const atmosphere = body.atmosphere;
-    if (!atmosphere || atmosphere === 'None') return null;
-    const isGasGiant = body.type === 'GasGiant' || body.type === 'IceGiant';
-
-    const style = ATMOSPHERE_STYLE[atmosphere];
+  const resolveAtmosphereParams = useCallback((
+    body: OrbitingPlanet | OrbitingMoon,
+    atmosphere: Exclude<AtmosphereType, 'None'>,
+    isGasBody: boolean
+  ) => {
+    const preset = ATMOSPHERE_PRESETS[atmosphere];
     const airMass = resolveAirMassIndex(body.airMassIndex, body.pressureBar, atmosphere);
     const temperatureK = typeof body.temperatureK === 'number' && Number.isFinite(body.temperatureK)
       ? body.temperatureK
       : (atmosphere === 'H2He' ? 140 : 288);
+    const gravityG = typeof body.gravityG === 'number' && Number.isFinite(body.gravityG)
+      ? body.gravityG
+      : (isGasBody ? 2.2 : 1);
+    const pressureAtm = typeof body.pressureBar === 'number' && Number.isFinite(body.pressureBar)
+      ? body.pressureBar
+      : preset.pressureAtm;
+    const tempFactor = MathUtils.clamp(temperatureK / 288, 0.45, 2.2);
+    const gravityFactor = MathUtils.clamp(1 / Math.max(gravityG, 0.35), 0.4, 2.2);
+    const scaleHeightKm = preset.scaleHeightKm * MathUtils.clamp(tempFactor * gravityFactor, 0.5, 2.4);
+    const aerosols = MathUtils.clamp(preset.aerosols * MathUtils.lerp(0.7, 1.25, airMass), 0, 1);
+    let cloudiness = MathUtils.clamp(preset.clouds * MathUtils.lerp(0.55, 1.2, airMass), 0, 1);
+    let storminess = MathUtils.clamp(preset.storminess * MathUtils.lerp(0.6, 1.3, airMass), 0, 1);
+
+    if (atmosphere === 'Earthlike') {
+      const tempSuitability = MathUtils.clamp(1 - Math.abs(temperatureK - 288) / 170, 0, 1);
+      cloudiness = MathUtils.clamp(cloudiness * MathUtils.lerp(0.6, 1.3, tempSuitability), 0, 1);
+    } else if (atmosphere === 'CO2') {
+      cloudiness = MathUtils.clamp(cloudiness * 0.9, 0, 1);
+    } else if (atmosphere === 'H2He') {
+      cloudiness = MathUtils.clamp(cloudiness * 1.05, 0, 1);
+    }
+
+    if (isGasBody) {
+      cloudiness = MathUtils.clamp(cloudiness + 0.12, 0, 1);
+      storminess = MathUtils.clamp(storminess + 0.08, 0, 1);
+    }
+
+    const radiusKm = Math.max(body.radius / (sceneScale * RADIUS_VISIBILITY_BONUS), 1);
+    const baseAltitudeRatio = preset.cloudStyle?.baseAltitude ?? (isGasBody ? 0.012 : 0.006);
+    const cloudAltitudeKm = Math.max(1, radiusKm * baseAltitudeRatio * MathUtils.lerp(0.85, 1.25, airMass));
+    const albedoBoostBase = preset.albedoBoost ?? 0;
+    const albedoBoost = MathUtils.clamp(albedoBoostBase + cloudiness * 0.12 + aerosols * 0.05, 0, 1);
+
+    const params: AtmosphereParams = {
+      planetClass: isGasBody ? 'gas' : 'terrestrial',
+      pressureAtm,
+      scaleHeightKm,
+      composition: preset.composition,
+      aerosols,
+      clouds: cloudiness,
+      cloudAltitudeKm,
+      storminess,
+      albedoBoost
+    };
+
+    return {
+      params,
+      cloudStyle: preset.cloudStyle,
+      airMass,
+      radiusKm
+    };
+  }, [sceneScale]);
+
+  const resolveAtmosphereBundle = useCallback((body: OrbitingPlanet | OrbitingMoon): AtmosphereLayerBundle | null => {
+    const atmosphere = body.atmosphere;
+    if (!atmosphere || atmosphere === 'None') return null;
+
+    const isGasBody = body.isSolid === false
+      || body.type === 'GasGiant'
+      || body.type === 'IceGiant'
+      || body.type === 'SubNeptune';
+    const { params, cloudStyle, airMass, radiusKm } = resolveAtmosphereParams(body, atmosphere, isGasBody);
+    const coeffs = deriveScatteringCoeffs(params);
+    const distanceNear = body.radius * ATMOSPHERE_SHELL_DISTANCE_NEAR_FACTOR;
+    const distanceFar = body.radius * ATMOSPHERE_SHELL_DISTANCE_FAR_FACTOR;
 
     let cloudsKey = 'cloud:none';
     let clouds: AtmosphereLayerBundle['clouds'] = undefined;
-    const cloudStyle = style.clouds;
-    if (cloudStyle) {
-      let cloudiness = 0;
-      switch (atmosphere) {
-        case 'Earthlike': {
-          const tempSuitability = MathUtils.clamp(1 - Math.abs(temperatureK - 288) / 170, 0, 1);
-          cloudiness = MathUtils.clamp(0.15 + airMass * 0.75 * tempSuitability, 0, 1);
-          break;
-        }
-        case 'CO2': {
-          cloudiness = MathUtils.clamp(0.1 + airMass * 0.65, 0, 1);
-          break;
-        }
-        case 'H2He': {
-          cloudiness = MathUtils.clamp(0.6 + airMass * 0.4, 0, 1);
-          break;
-        }
-        default:
-          cloudiness = 0;
-      }
+    if (cloudStyle && params.clouds > 0.08) {
+      const seed = hashStringToUnit(`${body.id}|cloud_seed`);
+      const seed2 = hashStringToUnit(`${body.id}|cloud_seed2`);
+      const bandOffset = hashStringToUnit(`${body.id}|cloud_band_offset`) * Math.PI * 2;
+      const cloudiness = MathUtils.clamp(params.clouds, 0, 1);
+      const threshold = MathUtils.clamp(
+        cloudStyle.threshold - cloudiness * (isGasBody ? 0.18 : 0.12),
+        0.16,
+        0.9
+      );
+      const opacity = MathUtils.clamp(
+        cloudStyle.opacity * MathUtils.lerp(0.65, 1.2, cloudiness) * (isGasBody ? 1.15 : 1),
+        0,
+        0.98
+      );
+      const altitudeRatio = MathUtils.clamp(params.cloudAltitudeKm / radiusKm, 0.002, 0.2);
+      const cloudScale = 1 + altitudeRatio;
+      const bandStrength = cloudStyle.bandStrength * MathUtils.lerp(0.6, 1.2, params.storminess);
+      const bandFrequency = cloudStyle.bandFrequency * MathUtils.lerp(0.8, 1.2, params.storminess);
+      const noiseScale = cloudStyle.noiseScale * MathUtils.lerp(0.9, 1.2, params.storminess);
+      cloudsKey = `cloud:${cloudScale.toFixed(4)}:${threshold.toFixed(3)}:${opacity.toFixed(3)}:${bandStrength.toFixed(2)}`;
 
-      if (isGasGiant) {
-        cloudiness = MathUtils.clamp(cloudiness + 0.18, 0, 1);
-      }
-
-      if (cloudiness > 0.08) {
-        const seed = hashStringToUnit(`${body.id}|cloud_seed`);
-        const seed2 = hashStringToUnit(`${body.id}|cloud_seed2`);
-        const bandOffset = hashStringToUnit(`${body.id}|cloud_band_offset`) * Math.PI * 2;
-
-        const threshold = MathUtils.clamp(
-          cloudStyle.threshold - cloudiness * 0.14 - (isGasGiant ? 0.06 : 0),
-          0.18,
-          0.9
-        );
-        const opacity = MathUtils.clamp(
-          cloudStyle.opacity * MathUtils.lerp(0.65, 1.05, cloudiness) * (isGasGiant ? 1.25 : 1),
-          0,
-          0.98
-        );
-        const altitude = cloudStyle.baseAltitude * MathUtils.lerp(0.85, 1.25, airMass) * (isGasGiant ? 1.6 : 1);
-        const cloudScale = 1 + altitude;
-        cloudsKey = `cloud:${cloudScale.toFixed(4)}:${threshold.toFixed(3)}:${opacity.toFixed(3)}`;
-
-        clouds = {
-          material: createCloudLayerMaterial({
-            sunColor: sunColorRef.current,
-            cloudColor: cloudStyle.color,
-            shadowColor: cloudStyle.shadowColor,
-            opacity,
-            threshold,
-            softness: cloudStyle.softness,
-            noiseScale: cloudStyle.noiseScale,
-            seed,
-            seed2,
-            bandStrength: cloudStyle.bandStrength,
-            bandFrequency: cloudStyle.bandFrequency,
-            bandOffset,
-            rimPower: cloudStyle.rimPower,
-            rimStrength: cloudStyle.rimStrength,
-            nightMin: MathUtils.clamp(0.06 + airMass * 0.04, 0.06, 0.13)
-          }),
-          scale: cloudScale
-        };
-      }
+      clouds = {
+        material: createCloudLayerMaterial({
+          sunColor: sunColorRef.current,
+          sunPosition,
+          cloudColor: cloudStyle.color,
+          shadowColor: cloudStyle.shadowColor,
+          opacity,
+          threshold,
+          softness: cloudStyle.softness,
+          noiseScale,
+          seed,
+          seed2,
+          bandStrength,
+          bandFrequency,
+          bandOffset,
+          rimPower: cloudStyle.rimPower,
+          rimStrength: cloudStyle.rimStrength,
+          nightMin: MathUtils.clamp(coeffs.nightMin + airMass * 0.04, 0.06, 0.18)
+        }),
+        scale: cloudScale
+      };
     }
 
-    const thickness = style.baseThickness * MathUtils.lerp(0.55, 1.25, airMass);
-    const intensityFactor = MathUtils.lerp(0.65, 1.0, airMass);
-    const densityFactor = MathUtils.lerp(0.55, 1.0, airMass);
-    const haloStrength = ATMOSPHERE_HALO_STRENGTH * MathUtils.lerp(0.55, 1.15, airMass);
-    const haloScale = 1 + thickness * style.haze.thicknessMultiplier + ATMOSPHERE_HALO_THICKNESS;
-    const haloTint = resolveAtmosphereHaloTint(atmosphere);
-    const haloKey = `halo:${haloStrength.toFixed(3)}:${haloScale.toFixed(4)}:${starHaloKey}`;
-    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}|${cloudsKey}|${haloKey}`;
+    const shellKey = [
+      atmosphere,
+      params.planetClass,
+      params.pressureAtm.toFixed(2),
+      params.scaleHeightKm.toFixed(2),
+      params.aerosols.toFixed(2),
+      params.clouds.toFixed(2),
+      params.storminess.toFixed(2),
+      params.albedoBoost.toFixed(2),
+      body.radius.toFixed(3)
+    ].join('|');
+    const cacheKey = `${shellKey}|${cloudsKey}`;
 
     const existing = atmosphereBundleByBodyIdRef.current.get(body.id);
     if (existing && existing.key === cacheKey) return existing;
@@ -648,54 +680,16 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     const bundle: AtmosphereBundleCacheEntry = {
       key: cacheKey,
-      lower: {
-        material: createAtmosphereLayerMaterial({
+      shell: {
+        material: createAtmosphereShellMaterial({
           sunColor: sunColorRef.current,
-          rayleighColor: style.rayleighColor,
-          mieColor: style.mieColor,
-          sunsetColor: style.sunsetColor,
-          intensity: style.lower.intensity * intensityFactor,
-          density: style.lower.density * densityFactor,
-          rimPower: style.lower.rimPower,
-          miePower: style.lower.miePower,
-          mieStrength: style.lower.mieStrength,
-          mieG: style.mieG,
-          sunsetStrength: style.lower.sunsetStrength,
-          nightMin: style.lower.nightMin
-        }),
-        scale: 1 + thickness
-      },
-      haze: {
-        material: createAtmosphereLayerMaterial({
-          sunColor: sunColorRef.current,
-          rayleighColor: style.rayleighColor,
-          mieColor: style.mieColor,
-          sunsetColor: style.sunsetColor,
-          intensity: style.haze.intensity * intensityFactor,
-          density: style.haze.density * densityFactor,
-          rimPower: style.haze.rimPower,
-          miePower: style.haze.miePower,
-          mieStrength: style.haze.mieStrength,
-          mieG: style.mieG,
-          sunsetStrength: style.haze.sunsetStrength,
-          nightMin: style.haze.nightMin
-        }),
-        scale: 1 + thickness * style.haze.thicknessMultiplier
-      },
-      halo: {
-        material: createAtmosphereHaloMaterial({
           sunPosition,
-          starTint: starHaloTint,
-          atmosphereTint: haloTint,
-          haloStrength,
-          rimPower: ATMOSPHERE_HALO_K,
-          dayPower: ATMOSPHERE_HALO_M,
-          boostMax: ATMOSPHERE_HALO_BOOST_MAX,
-          nearFactor: ATMOSPHERE_HALO_NEAR_FACTOR,
-          farFactor: ATMOSPHERE_HALO_FAR_FACTOR,
-          radius: body.radius
+          coeffs,
+          distanceNear,
+          distanceFar,
+          boostMax: ATMOSPHERE_SHELL_DISTANCE_BOOST_MAX
         }),
-        scale: haloScale
+        scale: 1 + coeffs.thickness
       }
     };
 
@@ -705,7 +699,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     atmosphereBundleByBodyIdRef.current.set(body.id, bundle);
     return bundle;
-  }, [disposeAtmosphereBundle]);
+  }, [disposeAtmosphereBundle, resolveAtmosphereParams, sunPosition]);
 
   const bodyMaterialByIdRef = useRef<Map<string, MeshStandardMaterial>>(new Map());
   useEffect(() => () => {

@@ -17,13 +17,11 @@ import type { AtmosphereType } from '../../../../shared/shared';
 import { CLOUD_NOISE_SPEED_MIN, DAY_NIGHT_TERMINATOR_SOFTNESS } from './config';
 
 export type AtmosphereLayerBundle = {
-  lower: { material: ShaderMaterial; scale: number };
-  haze: { material: ShaderMaterial; scale: number };
-  halo?: { material: ShaderMaterial; scale: number };
+  shell: { material: ShaderMaterial; scale: number };
   clouds?: { material: ShaderMaterial; scale: number };
 };
 
-type CloudLayerStyle = {
+export type CloudLayerStyle = {
   color: string;
   shadowColor: string;
   baseAltitude: number;
@@ -37,87 +35,73 @@ type CloudLayerStyle = {
   bandFrequency: number;
 };
 
-type AtmosphereLayerStyle = {
-  rayleighColor: string;
-  mieColor: string;
-  sunsetColor: string;
-  baseThickness: number;
-  mieG: number;
-  lower: {
-    intensity: number;
-    density: number;
-    rimPower: number;
-    miePower: number;
-    mieStrength: number;
-    sunsetStrength: number;
-    nightMin: number;
-  };
-  haze: {
-    intensity: number;
-    density: number;
-    rimPower: number;
-    miePower: number;
-    mieStrength: number;
-    sunsetStrength: number;
-    nightMin: number;
-    thicknessMultiplier: number;
-  };
-  clouds?: CloudLayerStyle;
+export type AtmosphereComposition = {
+  N2: number;
+  O2: number;
+  CO2: number;
+  CH4: number;
+  H2: number;
+  He: number;
+  SO2: number;
+  H2O: number;
+  NH3: number;
 };
 
-export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, AtmosphereLayerStyle> = {
+export type AtmosphereParams = {
+  planetClass: 'terrestrial' | 'gas';
+  pressureAtm: number;
+  scaleHeightKm: number;
+  composition: AtmosphereComposition;
+  aerosols: number;
+  clouds: number;
+  cloudAltitudeKm: number;
+  storminess: number;
+  albedoBoost: number;
+  tintOverride?: Color;
+};
+
+export type AtmosphereCoeffs = {
+  betaRayleigh: Color;
+  betaMie: Color;
+  absorption: Color;
+  hazeTint: Color;
+  mieG: number;
+  thickness: number;
+  rimPower: number;
+  gasStrength: number;
+  nightMin: number;
+};
+
+type AtmospherePreset = {
+  composition: AtmosphereComposition;
+  aerosols: number;
+  clouds: number;
+  storminess: number;
+  scaleHeightKm: number;
+  pressureAtm: number;
+  albedoBoost?: number;
+  cloudStyle?: CloudLayerStyle;
+};
+
+export const ATMOSPHERE_PRESETS: Record<Exclude<AtmosphereType, 'None'>, AtmospherePreset> = {
   Thin: {
-    rayleighColor: '#a5f3fc',
-    mieColor: '#ffffff',
-    sunsetColor: '#ffd7aa',
-    baseThickness: 0.02,
-    mieG: 0.55,
-    lower: {
-      intensity: 0.32,
-      density: 0.75,
-      rimPower: 2.6,
-      miePower: 10,
-      mieStrength: 0.18,
-      sunsetStrength: 0.55,
-      nightMin: 0.08
-    },
-    haze: {
-      intensity: 0.16,
-      density: 0.5,
-      rimPower: 3.2,
-      miePower: 9,
-      mieStrength: 0.12,
-      sunsetStrength: 0.45,
-      nightMin: 0.06,
-      thicknessMultiplier: 1.85
-    }
+    composition: { N2: 0.85, O2: 0.1, CO2: 0.04, CH4: 0, H2: 0, He: 0, SO2: 0.01, H2O: 0, NH3: 0 },
+    aerosols: 0.05,
+    clouds: 0.05,
+    storminess: 0.05,
+    scaleHeightKm: 5,
+    pressureAtm: 0.25,
+    albedoBoost: 0
   },
   Earthlike: {
-    rayleighColor: '#38bdf8',
-    mieColor: '#f8fafc',
-    sunsetColor: '#ffb36b',
-    baseThickness: 0.035,
-    mieG: 0.68,
-    lower: {
-      intensity: 0.4,
-      density: 0.9,
-      rimPower: 2.45,
-      miePower: 11,
-      mieStrength: 0.26,
-      sunsetStrength: 0.9,
-      nightMin: 0.09
-    },
-    haze: {
-      intensity: 0.2,
-      density: 0.6,
-      rimPower: 3.15,
-      miePower: 10,
-      mieStrength: 0.18,
-      sunsetStrength: 0.75,
-      nightMin: 0.07,
-      thicknessMultiplier: 1.9
-    },
-    clouds: {
+    composition: { N2: 0.78, O2: 0.21, CO2: 0.01, CH4: 0, H2: 0, He: 0, SO2: 0, H2O: 0.02, NH3: 0 },
+    aerosols: 0.2,
+    clouds: 0.45,
+    storminess: 0.25,
+    scaleHeightKm: 8.5,
+    pressureAtm: 1,
+    albedoBoost: 0,
+    cloudStyle: {
       color: '#f8fafc',
       shadowColor: '#64748b',
       baseAltitude: 0.006,
@@ -132,31 +116,14 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     }
   },
   CO2: {
-    rayleighColor: '#fb923c',
-    mieColor: '#fff7ed',
-    sunsetColor: '#ff6b3d',
-    baseThickness: 0.048,
-    mieG: 0.86,
-    lower: {
-      intensity: 0.45,
-      density: 1.0,
-      rimPower: 2.35,
-      miePower: 11,
-      mieStrength: 0.22,
-      sunsetStrength: 1.05,
-      nightMin: 0.1
-    },
-    haze: {
-      intensity: 0.24,
-      density: 0.7,
-      rimPower: 3.05,
-      miePower: 10,
-      mieStrength: 0.16,
-      sunsetStrength: 0.9,
-      nightMin: 0.08,
-      thicknessMultiplier: 1.95
-    },
-    clouds: {
+    composition: { N2: 0.03, O2: 0, CO2: 0.95, CH4: 0, H2: 0, He: 0, SO2: 0.02, H2O: 0, NH3: 0 },
+    aerosols: 0.75,
+    clouds: 0.55,
+    storminess: 0.15,
+    scaleHeightKm: 10,
+    pressureAtm: 6.5,
+    albedoBoost: 0.15,
+    cloudStyle: {
       color: '#fff7ed',
       shadowColor: '#a16207',
       baseAltitude: 0.008,
@@ -171,31 +138,14 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
     }
   },
   H2He: {
-    rayleighColor: '#a78bfa',
-    mieColor: '#f5f3ff',
-    sunsetColor: '#fbcfe8',
-    baseThickness: 0.09,
-    mieG: 0.9,
-    lower: {
-      intensity: 0.6,
-      density: 1.15,
-      rimPower: 2.15,
-      miePower: 9,
-      mieStrength: 0.35,
-      sunsetStrength: 0.5,
-      nightMin: 0.12
-    },
-    haze: {
-      intensity: 0.32,
-      density: 0.9,
-      rimPower: 2.8,
-      miePower: 8,
-      mieStrength: 0.28,
-      sunsetStrength: 0.35,
-      nightMin: 0.1,
-      thicknessMultiplier: 2.05
-    },
-    clouds: {
+    composition: { N2: 0, O2: 0, CO2: 0, CH4: 0.04, H2: 0.86, He: 0.09, SO2: 0, H2O: 0, NH3: 0.01 },
+    aerosols: 0.6,
+    clouds: 0.65,
+    storminess: 0.6,
+    scaleHeightKm: 42,
+    pressureAtm: 18,
+    albedoBoost: 0.1,
+    cloudStyle: {
       color: '#f5f3ff',
       shadowColor: '#7c3aed',
       baseAltitude: 0.014,
@@ -211,41 +161,172 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
   }
 };
 
-const STAR_HALO_TINTS: Record<string, [number, number, number]> = {
-  O: [0.7, 0.8, 1.0],
-  B: [0.75, 0.82, 1.0],
-  A: [0.83, 0.88, 1.0],
-  F: [1.0, 0.97, 0.9],
-  G: [1.0, 0.95, 0.85],
-  K: [1.0, 0.88, 0.7],
-  M: [1.0, 0.8, 0.6]
+export const ATMOSPHERE_EXAMPLE_PRESETS: Record<string, AtmosphereParams> = {
+  earthlike: {
+    planetClass: 'terrestrial',
+    pressureAtm: 1,
+    scaleHeightKm: 8.5,
+    composition: { N2: 0.78, O2: 0.21, CO2: 0.01, CH4: 0, H2: 0, He: 0, SO2: 0, H2O: 0.02, NH3: 0 },
+    aerosols: 0.2,
+    clouds: 0.45,
+    cloudAltitudeKm: 12,
+    storminess: 0.25,
+    albedoBoost: 0
+  },
+  marslike: {
+    planetClass: 'terrestrial',
+    pressureAtm: 0.12,
+    scaleHeightKm: 6,
+    composition: { N2: 0.03, O2: 0, CO2: 0.95, CH4: 0, H2: 0, He: 0, SO2: 0.02, H2O: 0, NH3: 0 },
+    aerosols: 0.55,
+    clouds: 0.05,
+    cloudAltitudeKm: 8,
+    storminess: 0.05,
+    albedoBoost: 0
+  },
+  venuslike: {
+    planetClass: 'terrestrial',
+    pressureAtm: 30,
+    scaleHeightKm: 12,
+    composition: { N2: 0.03, O2: 0, CO2: 0.96, CH4: 0, H2: 0, He: 0, SO2: 0.01, H2O: 0, NH3: 0 },
+    aerosols: 0.9,
+    clouds: 0.8,
+    cloudAltitudeKm: 20,
+    storminess: 0.2,
+    albedoBoost: 0.2
+  },
+  jupiterlike: {
+    planetClass: 'gas',
+    pressureAtm: 25,
+    scaleHeightKm: 45,
+    composition: { N2: 0, O2: 0, CO2: 0, CH4: 0.02, H2: 0.86, He: 0.1, SO2: 0, H2O: 0, NH3: 0.02 },
+    aerosols: 0.6,
+    clouds: 0.7,
+    cloudAltitudeKm: 35,
+    storminess: 0.7,
+    albedoBoost: 0.1
+  },
+  neptunelike: {
+    planetClass: 'gas',
+    pressureAtm: 20,
+    scaleHeightKm: 50,
+    composition: { N2: 0, O2: 0, CO2: 0, CH4: 0.08, H2: 0.82, He: 0.08, SO2: 0, H2O: 0, NH3: 0.02 },
+    aerosols: 0.5,
+    clouds: 0.55,
+    cloudAltitudeKm: 38,
+    storminess: 0.5,
+    albedoBoost: 0.05
+  },
+  titanlike: {
+    planetClass: 'terrestrial',
+    pressureAtm: 1.6,
+    scaleHeightKm: 12,
+    composition: { N2: 0.9, O2: 0, CO2: 0.02, CH4: 0.08, H2: 0, He: 0, SO2: 0, H2O: 0, NH3: 0 },
+    aerosols: 0.7,
+    clouds: 0.3,
+    cloudAltitudeKm: 22,
+    storminess: 0.2,
+    albedoBoost: 0.1
+  }
 };
 
-const ATMOSPHERE_HALO_TINTS: Record<Exclude<AtmosphereType, 'None'>, [number, number, number]> = {
-  Thin: [0.6, 0.7, 1.0],
-  Earthlike: [0.5, 0.6, 1.0],
-  CO2: [1.0, 0.7, 0.6],
-  H2He: [0.6, 0.9, 1.0]
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const normalizeComposition = (composition: AtmosphereComposition): AtmosphereComposition => {
+  const total =
+    composition.N2
+    + composition.O2
+    + composition.CO2
+    + composition.CH4
+    + composition.H2
+    + composition.He
+    + composition.SO2
+    + composition.H2O
+    + composition.NH3;
+  if (total <= 0) {
+    return { ...composition, N2: 1 };
+  }
+  const inv = 1 / total;
+  return {
+    N2: composition.N2 * inv,
+    O2: composition.O2 * inv,
+    CO2: composition.CO2 * inv,
+    CH4: composition.CH4 * inv,
+    H2: composition.H2 * inv,
+    He: composition.He * inv,
+    SO2: composition.SO2 * inv,
+    H2O: composition.H2O * inv,
+    NH3: composition.NH3 * inv
+  };
 };
 
-export const resolveStarHaloTint = (spectralType: string | undefined): Color => {
-  const key = spectralType?.trim().charAt(0).toUpperCase();
-  const tint = key ? STAR_HALO_TINTS[key] : undefined;
-  if (tint) {
-    return new Color(tint[0], tint[1], tint[2]);
-  }
-  return new Color(1, 1, 1);
-};
+export const deriveScatteringCoeffs = (params: AtmosphereParams): AtmosphereCoeffs => {
+  const composition = normalizeComposition(params.composition);
+  const pressure = MathUtils.clamp(params.pressureAtm, 0, 100);
+  const scaleHeight = MathUtils.clamp(params.scaleHeightKm, 0.5, 80);
+  const pressureNorm = MathUtils.clamp(Math.log10(pressure + 0.1) / 2, 0, 1);
+  const scaleNorm = MathUtils.clamp(scaleHeight / 80, 0, 1);
+  const gasStrength = params.planetClass === 'gas' ? MathUtils.clamp(0.5 + params.storminess * 0.5, 0.35, 1) : 0;
 
-export const resolveAtmosphereHaloTint = (atmosphere: AtmosphereType): Color => {
-  if (atmosphere === 'None') {
-    return new Color(1, 1, 1);
+  const rayleighStrength = MathUtils.clamp(
+    (composition.N2 + composition.O2) * 1.1
+    + composition.H2 * 0.25
+    + composition.He * 0.2
+    - (composition.CO2 + composition.CH4 + composition.NH3) * 0.15,
+    0.05,
+    1.4
+  );
+  const mieStrength = MathUtils.clamp(
+    0.15 + params.aerosols * 1.2 + params.clouds * 0.8 + pressureNorm * 0.8 + gasStrength * 0.4,
+    0.1,
+    2.5
+  );
+
+  const methaneAbsorb = MathUtils.clamp(composition.CH4 * 1.1 + composition.NH3 * 0.7, 0, 1);
+  const co2Absorb = MathUtils.clamp(composition.CO2 * 0.9 + params.aerosols * 0.35, 0, 1);
+  const so2Absorb = MathUtils.clamp(composition.SO2 * 0.6 + params.aerosols * 0.2, 0, 1);
+  const absorbR = MathUtils.clamp(methaneAbsorb * (0.4 + pressureNorm), 0, 1.2);
+  const absorbG = MathUtils.clamp(so2Absorb * (0.35 + pressureNorm * 0.6), 0, 1.1);
+  const absorbB = MathUtils.clamp(co2Absorb * (0.45 + pressureNorm * 0.6), 0, 1.4);
+  const absorption = new Color(absorbR, absorbG, absorbB);
+
+  const rayleighTint = new Color(0.6, 0.75, 1.0)
+    .lerp(new Color(1.0, 0.85, 0.7), clamp01(composition.CO2 + composition.SO2 * 0.7))
+    .lerp(new Color(0.55, 0.85, 1.0), clamp01(composition.CH4 + composition.NH3));
+  const mieTint = new Color(1, 1, 1)
+    .lerp(new Color(1.0, 0.86, 0.68), clamp01(composition.CO2 + params.aerosols * 0.6))
+    .lerp(new Color(0.7, 0.9, 1.0), clamp01(composition.CH4 + composition.NH3 * 0.5));
+
+  if (params.tintOverride) {
+    rayleighTint.copy(params.tintOverride);
   }
-  const tint = ATMOSPHERE_HALO_TINTS[atmosphere];
-  if (tint) {
-    return new Color(tint[0], tint[1], tint[2]);
-  }
-  return new Color(1, 1, 1);
+
+  const albedoBoost = 1 + MathUtils.clamp(params.albedoBoost, 0, 1) * 0.4;
+  const baseRayleigh = (0.35 + pressureNorm * 0.9) * rayleighStrength * (0.6 + scaleNorm * 0.8) * albedoBoost;
+  const baseMie = (0.25 + pressureNorm * 0.8) * mieStrength * (0.5 + scaleNorm * 0.6) * albedoBoost;
+  const betaRayleigh = rayleighTint.clone().multiplyScalar(baseRayleigh);
+  const betaMie = mieTint.clone().multiplyScalar(baseMie);
+  const hazeTint = mieTint.clone().lerp(rayleighTint, 0.35);
+
+  const mieG = MathUtils.clamp(0.6 + params.aerosols * 0.25 + pressureNorm * 0.2 + gasStrength * 0.1, 0.55, 0.92);
+  const rimPower = params.planetClass === 'gas'
+    ? MathUtils.lerp(1.6, 2.4, 1 - scaleNorm)
+    : MathUtils.lerp(2.8, 4.1, 1 - pressureNorm);
+  const thicknessBase = 0.01 + pressureNorm * 0.04 + scaleNorm * 0.08;
+  const thickness = MathUtils.clamp(thicknessBase * (params.planetClass === 'gas' ? 1.5 : 1), 0.008, 0.25);
+  const nightMin = MathUtils.clamp(0.02 + pressureNorm * 0.05 + gasStrength * 0.03, 0.02, 0.12);
+
+  return {
+    betaRayleigh,
+    betaMie,
+    absorption,
+    hazeTint,
+    mieG,
+    thickness,
+    rimPower,
+    gasStrength,
+    nightMin
+  };
 };
 
 const fallbackAirMassIndex = (atmosphere: AtmosphereType): number => {
@@ -281,19 +362,13 @@ export const resolveAirMassIndex = (
   return fallbackAirMassIndex(atmosphere);
 };
 
-export const createAtmosphereLayerMaterial = (params: {
+export const createAtmosphereShellMaterial = (params: {
   sunColor: Color;
-  rayleighColor: string;
-  mieColor: string;
-  sunsetColor: string;
-  intensity: number;
-  density: number;
-  rimPower: number;
-  miePower: number;
-  mieStrength: number;
-  mieG: number;
-  sunsetStrength: number;
-  nightMin: number;
+  sunPosition: Vector3;
+  coeffs: AtmosphereCoeffs;
+  distanceNear: number;
+  distanceFar: number;
+  boostMax: number;
 }): ShaderMaterial => {
   return new ShaderMaterial({
     transparent: true,
@@ -302,17 +377,18 @@ export const createAtmosphereLayerMaterial = (params: {
     side: BackSide,
     uniforms: {
       uSunColor: { value: params.sunColor },
-      uRayleighColor: { value: new Color(params.rayleighColor) },
-      uMieColor: { value: new Color(params.mieColor) },
-      uSunsetColor: { value: new Color(params.sunsetColor) },
-      uIntensity: { value: params.intensity },
-      uDensity: { value: params.density },
-      uRimPower: { value: params.rimPower },
-      uMiePower: { value: params.miePower },
-      uMieStrength: { value: params.mieStrength },
-      uMieG: { value: params.mieG },
-      uSunsetStrength: { value: params.sunsetStrength },
-      uNightMin: { value: params.nightMin },
+      uSunPosition: { value: params.sunPosition.clone() },
+      uBetaRayleigh: { value: params.coeffs.betaRayleigh },
+      uBetaMie: { value: params.coeffs.betaMie },
+      uAbsorption: { value: params.coeffs.absorption },
+      uHazeTint: { value: params.coeffs.hazeTint },
+      uMieG: { value: params.coeffs.mieG },
+      uRimPower: { value: params.coeffs.rimPower },
+      uGasStrength: { value: params.coeffs.gasStrength },
+      uNightMin: { value: params.coeffs.nightMin },
+      uCamDist: { value: params.distanceFar },
+      uDistParams: { value: new Vector2(params.distanceNear, params.distanceFar) },
+      uBoostMax: { value: params.boostMax },
       uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
     },
     vertexShader: `
@@ -327,20 +403,27 @@ export const createAtmosphereLayerMaterial = (params: {
     `,
     fragmentShader: `
       uniform vec3 uSunColor;
-      uniform vec3 uRayleighColor;
-      uniform vec3 uMieColor;
-      uniform vec3 uSunsetColor;
-      uniform float uIntensity;
-      uniform float uDensity;
-      uniform float uRimPower;
-      uniform float uMiePower;
-      uniform float uMieStrength;
+      uniform vec3 uSunPosition;
+      uniform vec3 uBetaRayleigh;
+      uniform vec3 uBetaMie;
+      uniform vec3 uAbsorption;
+      uniform vec3 uHazeTint;
       uniform float uMieG;
-      uniform float uSunsetStrength;
+      uniform float uRimPower;
+      uniform float uGasStrength;
       uniform float uNightMin;
+      uniform float uCamDist;
+      uniform vec2 uDistParams;
+      uniform float uBoostMax;
       uniform float uTerminatorSoftness;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
+
+      float saturate(float x) { return clamp(x, 0.0, 1.0); }
+      float remap(float x, float a, float b, float c, float d) {
+        float t = saturate((x - a) / max(b - a, 0.0001));
+        return mix(c, d, t);
+      }
 
       void main() {
         vec3 N = normalize(vWorldNormal);
@@ -348,43 +431,40 @@ export const createAtmosphereLayerMaterial = (params: {
           N = -N;
         #endif
         vec3 V = normalize(cameraPosition - vWorldPosition);
+        vec3 sunVec = uSunPosition - vWorldPosition;
+        float sunDistance = length(sunVec);
+        vec3 L = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
 
-        float sunDistance = length(vWorldPosition);
-        vec3 L = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+        float NdotV = saturate(dot(N, V));
+        float NdotL = saturate(dot(N, L));
+        float rim = pow(1.0 - NdotV, uRimPower);
 
-        float mu = dot(N, L);
-        float g = clamp(uMieG, 0.0, 0.92);
-        float g2 = g * g;
-        float terminatorSoftness = uTerminatorSoftness * mix(1.0, 1.6, smoothstep(0.5, 0.9, g));
-        float day = smoothstep(-terminatorSoftness, terminatorSoftness, mu);
-        float daylight = mix(uNightMin, 1.0, day);
-
-        float nv = clamp(dot(N, V), 0.0, 1.0);
-        float opticalDepth = clamp(1.0 - nv, 0.0, 1.0);
-        float density = 1.0 - exp(-uDensity * opticalDepth * 2.2);
-        float limb = pow(opticalDepth, uRimPower);
-        float depth = limb * density;
+        float distanceBoost = remap(uCamDist, uDistParams.x, uDistParams.y, uBoostMax, 1.0);
+        float lat = abs(N.y);
+        float gasBand = mix(1.0, 0.8, smoothstep(0.2, 0.9, lat));
+        float optical = rim * distanceBoost * mix(1.0, gasBand, uGasStrength);
 
         float cosTheta = clamp(dot(V, L), -1.0, 1.0);
-        float rayleighPhase = 0.75 * (1.0 + cosTheta * cosTheta);
+        float g = clamp(uMieG, 0.0, 0.95);
+        float g2 = g * g;
         float miePhase = (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * cosTheta, 0.0001), 1.5);
-        float miePhaseScale = 0.25 + 0.015 * uMiePower;
-        miePhase = min(miePhase * miePhaseScale, 6.0);
-        float mieAnisotropyDamp = mix(1.0, 0.65, smoothstep(0.6, 0.9, g));
-        float rayleigh = depth * rayleighPhase;
-        float mie = miePhase * depth * uMieStrength * mieAnisotropyDamp;
+        miePhase = min(miePhase, 8.0);
 
-        float terminatorBand = 1.0 - smoothstep(0.0, terminatorSoftness * 2.5, abs(mu));
-        float twilight = terminatorBand * (0.35 + 0.65 * rayleighPhase);
-        float sunset = twilight * depth * uSunsetStrength;
+        vec3 rayleigh = uBetaRayleigh * optical;
+        vec3 mie = uBetaMie * optical * (0.35 + 0.65 * miePhase);
+        vec3 scatter = rayleigh + mie;
+        vec3 absorption = exp(-uAbsorption * optical);
+        vec3 color = scatter * absorption;
+        color = mix(color, color * uHazeTint, 0.35 + uGasStrength * 0.35);
 
-        float scatter = rayleigh + mie + sunset;
-        if (scatter <= 0.00001) discard;
+        float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, NdotL);
+        float night = mix(uNightMin, 1.0, terminator);
+        color *= night;
+        color *= uSunColor;
 
-        vec3 scatterColor = (uRayleighColor * rayleigh + uMieColor * mie + uSunsetColor * sunset) / max(scatter, 0.0001);
-        float alphaScatter = min(scatter, 1.15);
-        float alpha = clamp(alphaScatter * uIntensity * daylight, 0.0, 1.0);
-        vec3 color = uSunColor * scatterColor;
+        float alpha = clamp((scatter.r + scatter.g + scatter.b) / 3.0, 0.0, 1.0);
+        alpha *= night;
+        if (alpha <= 0.002) discard;
 
         gl_FragColor = vec4(color, alpha);
       }
@@ -395,6 +475,7 @@ export const createAtmosphereLayerMaterial = (params: {
 
 export const createCloudLayerMaterial = (params: {
   sunColor: Color;
+  sunPosition: Vector3;
   cloudColor: string;
   shadowColor: string;
   opacity: number;
@@ -417,6 +498,7 @@ export const createCloudLayerMaterial = (params: {
     side: FrontSide,
     uniforms: {
       uSunColor: { value: params.sunColor },
+      uSunPosition: { value: params.sunPosition.clone() },
       uCloudColor: { value: new Color(params.cloudColor) },
       uShadowColor: { value: new Color(params.shadowColor) },
       uOpacity: { value: params.opacity },
@@ -446,6 +528,7 @@ export const createCloudLayerMaterial = (params: {
     `,
     fragmentShader: `
       uniform vec3 uSunColor;
+      uniform vec3 uSunPosition;
       uniform vec3 uCloudColor;
       uniform vec3 uShadowColor;
       uniform float uOpacity;
@@ -507,8 +590,9 @@ export const createCloudLayerMaterial = (params: {
         vec3 N = normalize(vWorldNormal);
         vec3 V = normalize(cameraPosition - vWorldPosition);
 
-        float sunDistance = length(vWorldPosition);
-        vec3 L = sunDistance > 0.000001 ? (-vWorldPosition / sunDistance) : vec3(0.0, 0.0, 1.0);
+        vec3 sunVec = uSunPosition - vWorldPosition;
+        float sunDistance = length(sunVec);
+        vec3 L = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
 
         float mu = dot(N, L);
         float day = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, mu);
@@ -541,93 +625,6 @@ export const createCloudLayerMaterial = (params: {
   });
 };
 
-export const createAtmosphereHaloMaterial = (params: {
-  sunPosition: Vector3;
-  starTint: Color;
-  atmosphereTint: Color;
-  haloStrength: number;
-  rimPower: number;
-  dayPower: number;
-  boostMax: number;
-  nearFactor: number;
-  farFactor: number;
-  radius: number;
-}): ShaderMaterial => {
-  return new ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: AdditiveBlending,
-    side: BackSide,
-    uniforms: {
-      uStarTint: { value: params.starTint },
-      uAtmoTint: { value: params.atmosphereTint },
-      uHaloStrength: { value: params.haloStrength },
-      uK: { value: params.rimPower },
-      uM: { value: params.dayPower },
-      uCamDist: { value: params.radius * params.farFactor },
-      uDistParams: { value: new Vector2(params.nearFactor, params.farFactor) },
-      uBoostMax: { value: params.boostMax },
-      uSunPosition: { value: params.sunPosition.clone() },
-      uRadius: { value: params.radius }
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uStarTint;
-      uniform vec3 uAtmoTint;
-      uniform float uHaloStrength;
-      uniform float uK;
-      uniform float uM;
-      uniform float uCamDist;
-      uniform vec2 uDistParams;
-      uniform float uBoostMax;
-      uniform vec3 uSunPosition;
-      uniform float uRadius;
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-
-      float saturate(float x) { return clamp(x, 0.0, 1.0); }
-      float remap(float x, float a, float b, float c, float d) {
-        float t = saturate((x - a) / max(b - a, 0.0001));
-        return mix(c, d, t);
-      }
-
-      void main() {
-        vec3 N = normalize(vWorldNormal);
-        #ifdef FLIP_SIDED
-          N = -N;
-        #endif
-        vec3 V = normalize(cameraPosition - vWorldPosition);
-        vec3 sunVec = uSunPosition - vWorldPosition;
-        float sunDistance = length(sunVec);
-        vec3 L = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
-        float NdotV = saturate(dot(N, V));
-        float NdotL = saturate(dot(N, L));
-
-        float dNear = uRadius * uDistParams.x;
-        float dFar = uRadius * uDistParams.y;
-        float distanceBoost = remap(uCamDist, dNear, dFar, uBoostMax, 1.0);
-        float halo = uHaloStrength * pow(saturate(1.0 - NdotV), uK) * pow(NdotL, uM) * distanceBoost;
-        if (halo <= 0.00001) discard;
-
-        vec3 starTint = normalize(max(uStarTint, vec3(0.0001)));
-        vec3 hue = starTint * uAtmoTint;
-        vec3 col = hue * halo;
-        gl_FragColor = vec4(col, halo);
-      }
-    `,
-    toneMapped: false
-  });
-};
-
 export const AtmosphereStack: React.FC<{
   geometry: SphereGeometry;
   radius: number;
@@ -637,14 +634,12 @@ export const AtmosphereStack: React.FC<{
   sunPosition: Vector3;
 }> = ({ geometry, radius, bundle, cloudSpinSpeed, cloudNoiseSpeed, sunPosition }) => {
   const { camera } = useThree();
-  const haloMeshRef = useRef<Mesh>(null);
+  const shellMeshRef = useRef<Mesh>(null);
   const cloudRadius = bundle.clouds ? radius * bundle.clouds.scale : 0;
-  const haloRadius = bundle.halo ? radius * bundle.halo.scale : 0;
-  const lowerRadius = radius * bundle.lower.scale;
-  const hazeRadius = radius * bundle.haze.scale;
+  const shellRadius = radius * bundle.shell.scale;
   const cloudMeshRef = useRef<Mesh>(null);
   const cloudTimeRef = useRef(0);
-  const haloWorldRef = useRef(new Vector3());
+  const shellWorldRef = useRef(new Vector3());
   const cameraWorldRef = useRef(new Vector3());
 
   useEffect(() => {
@@ -654,10 +649,13 @@ export const AtmosphereStack: React.FC<{
     }
   }, [bundle.clouds?.material]);
   useEffect(() => {
-    if (bundle.halo?.material.uniforms.uSunPosition) {
-      bundle.halo.material.uniforms.uSunPosition.value.copy(sunPosition);
+    if (bundle.shell.material.uniforms.uSunPosition) {
+      bundle.shell.material.uniforms.uSunPosition.value.copy(sunPosition);
     }
-  }, [bundle.halo?.material, sunPosition]);
+    if (bundle.clouds?.material.uniforms.uSunPosition) {
+      bundle.clouds.material.uniforms.uSunPosition.value.copy(sunPosition);
+    }
+  }, [bundle.clouds?.material, bundle.shell.material, sunPosition]);
 
   useFrame((_, delta) => {
     if (bundle.clouds) {
@@ -670,28 +668,15 @@ export const AtmosphereStack: React.FC<{
         bundle.clouds.material.uniforms.uTime.value = cloudTimeRef.current;
       }
     }
-    if (bundle.halo?.material.uniforms.uCamDist && haloMeshRef.current) {
+    if (bundle.shell.material.uniforms.uCamDist && shellMeshRef.current) {
       camera.getWorldPosition(cameraWorldRef.current);
-      haloMeshRef.current.getWorldPosition(haloWorldRef.current);
-      bundle.halo.material.uniforms.uCamDist.value = cameraWorldRef.current.distanceTo(haloWorldRef.current);
+      shellMeshRef.current.getWorldPosition(shellWorldRef.current);
+      bundle.shell.material.uniforms.uCamDist.value = cameraWorldRef.current.distanceTo(shellWorldRef.current);
     }
   });
 
   return (
     <group raycast={() => null}>
-      {bundle.halo && (
-        <mesh
-          geometry={geometry}
-          material={bundle.halo.material}
-          scale={[haloRadius, haloRadius, haloRadius]}
-          castShadow={false}
-          receiveShadow={false}
-          frustumCulled
-          raycast={() => null}
-          renderOrder={3.2}
-          ref={haloMeshRef}
-        />
-      )}
       {bundle.clouds && (
         <mesh
           geometry={geometry}
@@ -707,23 +692,14 @@ export const AtmosphereStack: React.FC<{
       )}
       <mesh
         geometry={geometry}
-        material={bundle.lower.material}
-        scale={[lowerRadius, lowerRadius, lowerRadius]}
+        material={bundle.shell.material}
+        scale={[shellRadius, shellRadius, shellRadius]}
         castShadow={false}
         receiveShadow={false}
         frustumCulled
         raycast={() => null}
         renderOrder={4}
-      />
-      <mesh
-        geometry={geometry}
-        material={bundle.haze.material}
-        scale={[hazeRadius, hazeRadius, hazeRadius]}
-        castShadow={false}
-        receiveShadow={false}
-        frustumCulled
-        raycast={() => null}
-        renderOrder={5}
+        ref={shellMeshRef}
       />
     </group>
   );
