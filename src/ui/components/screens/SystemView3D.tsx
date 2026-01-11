@@ -176,6 +176,7 @@ type BodyListItem = {
   id: string;
   name: string;
   kind: 'star' | 'planet' | 'moon';
+  subType?: string;
   children?: BodyListItem[];
 };
 type SurfaceTextureDebugInfo = {
@@ -1290,16 +1291,19 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       id: planet.id,
       name: bodyInfoMap[planet.id]?.name ?? planet.id,
       kind: 'planet',
+      subType: bodyInfoMap[planet.id]?.bodySubType,
       children: planet.moons.map((moon) => ({
         id: moon.id,
         name: bodyInfoMap[moon.id]?.name ?? moon.id,
-        kind: 'moon'
+        kind: 'moon',
+        subType: bodyInfoMap[moon.id]?.bodySubType
       }))
     }));
     return starModels.map((star, index) => ({
       id: star.id,
       name: bodyInfoMap[star.id]?.name ?? star.id,
       kind: 'star',
+      subType: bodyInfoMap[star.id]?.bodySubType,
       children: index === 0 ? planetItems : undefined
     }));
   }, [bodyInfoMap, planets, starModels]);
@@ -1399,9 +1403,18 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const contextMenuHeaderClass = isTouchUi
     ? 'px-2 pb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400'
     : 'px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
+  const resolveBodyListTypeLabel = useCallback((item: BodyListItem): string => {
+    if (item.kind === 'star') {
+      return item.subType ?? t('systemView.bodyInfo.bodyType.star');
+    }
+    if (item.subType) {
+      return t(`systemView.bodySubType.${item.kind}.${item.subType}`, { defaultValue: item.subType });
+    }
+    return t(`systemView.bodyInfo.bodyType.${item.kind}`);
+  }, [t]);
   const renderBodyRow = (item: BodyListItem, depth: number) => {
     const isSelected = selectedBodyId === item.id;
-    const bodyTypeLabel = t(`systemView.bodyInfo.bodyType.${item.kind}`);
+    const bodyTypeLabel = resolveBodyListTypeLabel(item);
     const dotClass = item.kind === 'star'
       ? 'bg-amber-400'
       : item.kind === 'planet'
