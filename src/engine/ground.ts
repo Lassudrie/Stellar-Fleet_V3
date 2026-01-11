@@ -230,9 +230,10 @@ export const isRouted = (army: Army): boolean => army.routed === true || army.mo
 
 export const isPreparedDefenseActive = (army: Army, turn?: number): boolean => {
   if (army.posture !== 'prepared_defense') return false;
-  if (!Number.isFinite(army.postureSetTurn)) return true;
-  if (!Number.isFinite(turn)) return true;
-  return turn > (army.postureSetTurn ?? turn);
+  const postureSetTurn = army.postureSetTurn;
+  if (typeof postureSetTurn !== 'number' || !Number.isFinite(postureSetTurn)) return true;
+  if (typeof turn !== 'number' || !Number.isFinite(turn)) return true;
+  return turn > postureSetTurn;
 };
 
 export const computeStackingFactor = (index: number): number => {

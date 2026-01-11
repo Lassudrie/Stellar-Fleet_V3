@@ -64,6 +64,7 @@ Surface logs intentionally avoid full tile dumps. Each surface includes:
 
 Chaque `surface_map_summary` inclut aussi des **entrees** d'audit :
 - `descriptor.settlementConfig` (parametres de colonisation neutre)
+- `descriptor.config.generatorVersion` (v6 = terrain-first)
 - `env.surfaceClassReason` (raison de la classe de surface)
 - `bodySummary` (resume du corps: type, masse/rayon/gravite, atmosphere/pression, temperature, flux si disponible)
 

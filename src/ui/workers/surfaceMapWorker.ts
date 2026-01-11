@@ -1,4 +1,10 @@
-import { generateSurfaceMapForState } from '../../engine/planetSurface';
+import {
+  createTerrainField,
+  generateSurfaceMapForState,
+  getAstroForBody,
+  getSurfaceDescriptor,
+  surfaceDirFromUv
+} from '../../engine/planetSurface';
 import { generateWorld } from '../../engine/worldgen/worldGenerator';
 import { deserializeGameState } from '../../engine/serialization';
 import type { GameScenario } from '../../content/scenarios';
@@ -231,26 +237,11 @@ const biomeLinearRgb = (() => {
 const CITY_LIGHTS_COLOR = '#fbd38d';
 const POLE_BLEND_ROWS = 2;
 const POLE_BLEND_STRENGTH = 0.35;
-const CRATER_DENSITY_AIRLESS = 0.000035;
-const CRATER_DENSITY_MOON = 0.000055;
-const CRATER_DEPTH_SCALE_AIRLESS = 0.4;
-const CRATER_DEPTH_SCALE_MOON = 0.5;
 
 const cityLightLinearRgb = (() => {
   const { r, g, b } = hexToRgb8(CITY_LIGHTS_COLOR);
   return [srgbToLinear(r / 255), srgbToLinear(g / 255), srgbToLinear(b / 255)];
 })();
-
-const computeElevRange = (tiles: PlanetSurfaceTile[]): { min: number; max: number } => {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  for (const tile of tiles) {
-    min = Math.min(min, tile.elev);
-    max = Math.max(max, tile.elev);
-  }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 0 };
-  return { min, max };
-};
 
 const wrapIndex = (index: number, mod: number): number => {
   if (mod <= 0) return 0;
@@ -336,78 +327,6 @@ const valueNoise2D = (x: number, y: number, seed: number, wrapPeriodX?: number):
   const nx0 = lerp(n00, n10, sx);
   const nx1 = lerp(n01, n11, sx);
   return lerp(nx0, nx1, sy);
-};
-
-type CraterSettings = {
-  count: number;
-  minRadius: number;
-  maxRadius: number;
-  depthScale: number;
-};
-
-const resolveCraterSettings = (
-  bodyMeta: SurfaceMapWorkerRequest['bodyMeta'] | undefined,
-  width: number,
-  height: number
-): CraterSettings | null => {
-  if (!bodyMeta) return null;
-  const airless = bodyMeta.hasAtmosphere === false;
-  if (!airless && !bodyMeta.isMoon) return null;
-  const density = bodyMeta.isMoon ? CRATER_DENSITY_MOON : CRATER_DENSITY_AIRLESS;
-  const count = Math.min(90, Math.max(6, Math.round(width * height * density)));
-  const scale = Math.min(width, height);
-  const minRadius = Math.max(1.6, scale * 0.006);
-  const maxRadius = Math.max(minRadius + 1, scale * (bodyMeta.isMoon ? 0.035 : 0.028));
-  const depthScale = bodyMeta.isMoon ? CRATER_DEPTH_SCALE_MOON : CRATER_DEPTH_SCALE_AIRLESS;
-  return { count, minRadius, maxRadius, depthScale };
-};
-
-const buildCraterField = (
-  width: number,
-  height: number,
-  wrapX: boolean,
-  seed: number,
-  settings: CraterSettings
-): Float32Array => {
-  const rand = createSeededRandom(seed);
-  const field = new Float32Array(width * height);
-
-  for (let i = 0; i < settings.count; i += 1) {
-    const cx = rand() * width;
-    const cy = rand() * height;
-    const radius = lerp(settings.minRadius, settings.maxRadius, rand());
-    const depth = lerp(0.2, 0.6, rand()) * settings.depthScale;
-    const x0 = Math.floor(cx - radius);
-    const x1 = Math.ceil(cx + radius);
-    const y0 = Math.floor(cy - radius);
-    const y1 = Math.ceil(cy + radius);
-
-    for (let y = y0; y <= y1; y += 1) {
-      if (y < 0 || y >= height) continue;
-      const dy = y - cy;
-      for (let x = x0; x <= x1; x += 1) {
-        let xx = x;
-        if (wrapX) {
-          xx = wrapIndex(x, width);
-        } else if (x < 0 || x >= width) {
-          continue;
-        }
-        const dx = x - cx;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > radius) continue;
-        const t = dist / radius;
-        const bowl = (1 - t);
-        const rim = smoothstep(0.7, 1.0, t);
-        const craterDepth = -bowl * bowl * depth;
-        const rimBoost = rim * rim * depth * 0.35;
-        const idx = y * width + xx;
-        const next = Math.max(-1, Math.min(1, field[idx] + craterDepth + rimBoost));
-        field[idx] = next;
-      }
-    }
-  }
-
-  return field;
 };
 
 const buildSettlementField = (
@@ -508,39 +427,6 @@ const blendSeamNormals = (buffer: Uint8Array, width: number, height: number): vo
   }
 };
 
-const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
-
-const biomeNoiseAmplitude = (biome: Biome): { macro: number; micro: number } => {
-  switch (biome) {
-    case 'ocean':
-    case 'lake':
-      return { macro: 0.06, micro: 0.018 };
-    case 'coast':
-      return { macro: 0.07, micro: 0.024 };
-    case 'ice':
-    case 'fractured_ice':
-    case 'dusty_ice':
-    case 'cryovolcanic':
-      return { macro: 0.06, micro: 0.02 };
-    case 'taiga':
-    case 'grassland':
-    case 'forest':
-    case 'rainforest':
-    case 'tundra':
-      return { macro: 0.08, micro: 0.03 };
-    case 'desert':
-    case 'ash_desert':
-    case 'thermal_polygons':
-      return { macro: 0.09, micro: 0.034 };
-    case 'lava_flats':
-    case 'volcanic':
-    case 'vitrified':
-      return { macro: 0.08, micro: 0.028 };
-    default:
-      return { macro: 0.075, micro: 0.028 };
-  }
-};
-
 const biomeRoughness = (biome: Biome): number => {
   switch (biome) {
     case 'ocean':
@@ -603,10 +489,10 @@ const getTile = (tiles: PlanetSurfaceTile[], w: number, q: number, r: number): P
 
 const renderSurfaceTexture = (
   map: PlanetSurfaceMap,
+  terrain: ReturnType<typeof createTerrainField>,
   resolution: SurfaceTextureResolution,
   cloudShadow?: CloudShadowSettings | null,
-  textureOptions?: SurfaceTextureOptions | null,
-  bodyMeta?: SurfaceMapWorkerRequest['bodyMeta']
+  textureOptions?: SurfaceTextureOptions | null
 ): {
   rgba: Uint8Array;
   normalRgba: Uint8Array | null;
@@ -616,7 +502,6 @@ const renderSurfaceTexture = (
   emissiveRgba: Uint8Array | null;
 } => {
   const { w, h, wrapX } = map.descriptor.config;
-  const seed = map.descriptor.seed >>> 0;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
@@ -629,127 +514,47 @@ const renderSurfaceTexture = (
   const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
   const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
   const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
-
-  const { min: elevMin, max: elevMax } = computeElevRange(map.tiles);
-  const elevRange = Math.max(1, elevMax - elevMin);
-  const seaLevel = map.seaLevelElev;
-  const invElevRange = 1 / elevRange;
-  const seaLevelNorm = (seaLevel - elevMin) * invElevRange;
-
   const useWrap = Boolean(wrapX);
-  const macroNoiseScaleX = 12;
-  const macroNoiseScaleY = 6;
-  const microNoiseScaleX = 96;
-  const microNoiseScaleY = 48;
+
   const cloudShadowConfig = cloudShadow && cloudShadow.strength > 0 ? cloudShadow : null;
   const cloudNoiseScaleX = cloudShadowConfig ? Math.max(2, Math.round(cloudShadowConfig.noiseScale)) : 0;
   const cloudNoiseScaleY = cloudShadowConfig ? Math.max(1, Math.round(cloudNoiseScaleX * 0.6)) : 0;
-  const craterSettings = resolveCraterSettings(bodyMeta, width, height);
-  const craterField = craterSettings ? buildCraterField(width, height, useWrap, seed + 4099, craterSettings) : null;
   const settlementField = includeEmissiveMap ? buildSettlementField(map, width, height) : null;
   let hasEmissive = false;
   const cityMask = FeatureBits.City | FeatureBits.Capital;
+  const coastColor = biomeLinearRgb.coast;
+  const seaLevel = terrain.seaLevelElev;
+
+  let heightMin = Number.POSITIVE_INFINITY;
+  let heightMax = Number.NEGATIVE_INFINITY;
 
   for (let y = 0; y < height; y += 1) {
-    const v = (y + 0.5) / height; // 0..1
+    const v = (y + 0.5) / height;
     const latNorm = Math.abs(v - 0.5) * 2;
     const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
     const detailFactor = lerp(0.35, 1, poleBlend);
-    const rFloat = v * (h - 1);
-    const r0 = Math.max(0, Math.min(h - 1, Math.floor(rFloat)));
-    const r1 = Math.min(r0 + 1, h - 1);
-    const rFrac = rFloat - r0;
-    const wR0 = 1 - rFrac;
-    const wR1 = rFrac;
 
     for (let x = 0; x < width; x += 1) {
-      const u = (x + 0.5) / width; // 0..1
+      const u = (x + 0.5) / width;
+      const dir = surfaceDirFromUv(u, v);
+      const sample = terrain.sample(dir);
 
-      let qFloat: number;
-      let q0: number;
-      let q1: number;
-      let qFrac: number;
-      if (useWrap) {
-        qFloat = u * w;
-        const qFloor = Math.floor(qFloat);
-        q0 = wrapIndex(qFloor, w);
-        q1 = wrapIndex(qFloor + 1, w);
-        qFrac = qFloat - qFloor;
-      } else {
-        qFloat = u * (w - 1);
-        q0 = Math.max(0, Math.min(w - 1, Math.floor(qFloat)));
-        q1 = Math.min(q0 + 1, w - 1);
-        qFrac = qFloat - q0;
-      }
+      const baseColor = biomeLinearRgb[sample.biome];
+      const shoreMix = sample.coast * (sample.isWater ? 0.65 : 0.35);
+      let rLin = lerp(baseColor[0], coastColor[0], shoreMix);
+      let gLin = lerp(baseColor[1], coastColor[1], shoreMix);
+      let bLin = lerp(baseColor[2], coastColor[2], shoreMix);
 
-      const wQ0 = 1 - qFrac;
-      const wQ1 = qFrac;
-
-      const t00 = getTile(map.tiles, w, q0, r0);
-      const t10 = getTile(map.tiles, w, q1, r0);
-      const t01 = getTile(map.tiles, w, q0, r1);
-      const t11 = getTile(map.tiles, w, q1, r1);
-
-      const c00 = biomeLinearRgb[t00.biome];
-      const c10 = biomeLinearRgb[t10.biome];
-      const c01 = biomeLinearRgb[t01.biome];
-      const c11 = biomeLinearRgb[t11.biome];
-
-      const w00 = wQ0 * wR0;
-      const w10 = wQ1 * wR0;
-      const w01 = wQ0 * wR1;
-      const w11 = wQ1 * wR1;
-
-      let rLin = c00[0] * w00 + c10[0] * w10 + c01[0] * w01 + c11[0] * w11;
-      let gLin = c00[1] * w00 + c10[1] * w10 + c01[1] * w01 + c11[1] * w11;
-      let bLin = c00[2] * w00 + c10[2] * w10 + c01[2] * w01 + c11[2] * w11;
-
-      const e00 = t00.elev;
-      const e10 = t10.elev;
-      const e01 = t01.elev;
-      const e11 = t11.elev;
-      const elev = e00 * w00 + e10 * w10 + e01 * w01 + e11 * w11;
-      const heightNorm = (elev - elevMin) * invElevRange;
-
-      // Local slope magnitude (normalized) for subtle relief shading (direction-independent).
-      const dElevDq = (e10 - e00) * wR0 + (e11 - e01) * wR1;
-      const dElevDr = (e01 - e00) * wQ0 + (e11 - e10) * wQ1;
-      const slopeNorm = Math.sqrt(dElevDq * dElevDq + dElevDr * dElevDr) / elevRange;
-
-      const slopeShade = Math.max(0.82, 1 - slopeNorm * 1.35);
-      const poleSlopeShade = lerp(1, slopeShade, detailFactor);
-      const altNorm = (elev - seaLevel) / elevRange;
-      const altShade = 1 + Math.max(-0.06, Math.min(0.09, altNorm * 0.12));
-      const shade = poleSlopeShade * altShade;
-
-      const amp00 = biomeNoiseAmplitude(t00.biome);
-      const amp10 = biomeNoiseAmplitude(t10.biome);
-      const amp01 = biomeNoiseAmplitude(t01.biome);
-      const amp11 = biomeNoiseAmplitude(t11.biome);
-      const macroAmp = (amp00.macro * w00 + amp10.macro * w10 + amp01.macro * w01 + amp11.macro * w11) * detailFactor;
-      const microAmp = (amp00.micro * w00 + amp10.micro * w10 + amp01.micro * w01 + amp11.micro * w11) * detailFactor;
-
-      const macroNoise = valueNoise2D(u * macroNoiseScaleX, v * macroNoiseScaleY, seed + 1013, useWrap ? macroNoiseScaleX : undefined);
-      const microNoise = valueNoise2D(u * microNoiseScaleX, v * microNoiseScaleY, seed + 2017, useWrap ? microNoiseScaleX : undefined);
-      const noiseShade = Math.min(1.18, Math.max(0.86, 1 + (macroNoise - 0.5) * macroAmp + (microNoise - 0.5) * microAmp));
-
-      const moist = t00.moist * w00 + t10.moist * w10 + t01.moist * w01 + t11.moist * w11;
-      const tempC2 = t00.tempC2 * w00 + t10.tempC2 * w10 + t01.tempC2 * w01 + t11.tempC2 * w11;
-      const moistNorm = clamp01(moist / 255);
-      const tempC = tempC2 * 0.5;
-      const tempNorm = clamp01((tempC + 50) / 100);
-
-      const waterWeight = (isWaterBiome(t00.biome) ? w00 : 0)
-        + (isWaterBiome(t10.biome) ? w10 : 0)
-        + (isWaterBiome(t01.biome) ? w01 : 0)
-        + (isWaterBiome(t11.biome) ? w11 : 0);
-      const landWeight = 1 - waterWeight;
+      const landWeight = sample.isWater ? 0 : 1;
+      const waterWeight = 1 - landWeight;
+      const tempNorm = clamp01((sample.tempC + 50) / 100);
+      const moistNorm = clamp01(sample.moist);
       const climateShade = 1 + landWeight * ((moistNorm - 0.5) * 0.05 + (tempNorm - 0.5) * 0.03);
-
-      const waterDepth = clamp01((seaLevel - elev) / elevRange);
-      const shallow = 1 - clamp01(waterDepth * 2.4);
-      const waterShade = 1 + waterWeight * (shallow * 0.08 - waterDepth * 0.22);
-      const craterValue = craterField ? craterField[y * width + x] * landWeight : 0;
+      const reliefShade = 1 + (sample.relief - 0.5) * 0.14 * detailFactor;
+      const detailShade = 1 + sample.detail * 0.08 * detailFactor;
+      const altShade = 1 + landWeight * (sample.landness - 0.5) * 0.12 - waterWeight * sample.oceanness * 0.12;
+      const shallow = 1 - clamp01(sample.oceanness * 1.8);
+      const waterShade = 1 + waterWeight * (shallow * 0.08 - sample.oceanness * 0.2);
 
       let cloudShadowFactor = 1;
       if (cloudShadowConfig) {
@@ -772,82 +577,93 @@ const renderSurfaceTexture = (
         }
       }
 
-      let roughness = 0;
-      if (roughnessRgba) {
-        const rough00 = biomeRoughness(t00.biome);
-        const rough10 = biomeRoughness(t10.biome);
-        const rough01 = biomeRoughness(t01.biome);
-        const rough11 = biomeRoughness(t11.biome);
-        let landRoughness = rough00 * w00 + rough10 * w10 + rough01 * w01 + rough11 * w11;
-        const dryness = clamp01(1 - moistNorm);
-        landRoughness += ((macroNoise - 0.5) * 0.08 + (microNoise - 0.5) * 0.04) * detailFactor;
-        landRoughness += slopeNorm * 0.25 * detailFactor + dryness * 0.07;
-        landRoughness = clamp01(landRoughness);
+      rLin *= reliefShade * detailShade * climateShade * waterShade * altShade * cloudShadowFactor;
+      gLin *= reliefShade * detailShade * climateShade * waterShade * altShade * cloudShadowFactor;
+      bLin *= reliefShade * detailShade * climateShade * waterShade * altShade * cloudShadowFactor;
 
-        const waterRoughness = clamp01(0.04 + shallow * 0.06 + (macroNoise - 0.5) * 0.015);
-        roughness = clamp01(landRoughness * landWeight + waterRoughness * waterWeight);
-        if (craterValue < 0) {
-          roughness = clamp01(roughness + (-craterValue) * 0.22);
-        }
-      }
-
-      rLin *= shade;
-      gLin *= shade;
-      bLin *= shade;
-
-      rLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
-      gLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
-      bLin *= noiseShade * climateShade * waterShade * cloudShadowFactor;
-
-      if (craterValue !== 0) {
-        const craterShade = Math.max(0.7, Math.min(1.15, 1 + craterValue * 0.35));
+      if (sample.crater !== 0) {
+        const craterShade = Math.max(0.7, Math.min(1.15, 1 + sample.crater * 0.35));
         rLin *= craterShade;
         gLin *= craterShade;
         bLin *= craterShade;
       }
 
-      const rr = Math.round(clamp01(linearToSrgb(Math.max(0, rLin))) * 255);
-      const gg = Math.round(clamp01(linearToSrgb(Math.max(0, gLin))) * 255);
-      const bb = Math.round(clamp01(linearToSrgb(Math.max(0, bLin))) * 255);
-
       const pixelIndex = y * width + x;
       const idx = pixelIndex * 4;
-      rgba[idx] = rr;
-      rgba[idx + 1] = gg;
-      rgba[idx + 2] = bb;
+      rgba[idx] = Math.round(clamp01(linearToSrgb(Math.max(0, rLin))) * 255);
+      rgba[idx + 1] = Math.round(clamp01(linearToSrgb(Math.max(0, gLin))) * 255);
+      rgba[idx + 2] = Math.round(clamp01(linearToSrgb(Math.max(0, bLin))) * 255);
       rgba[idx + 3] = 255;
+
       if (roughnessRgba) {
+        const baseRough = biomeRoughness(sample.biome);
+        const dryness = clamp01(1 - moistNorm);
+        let landRoughness = baseRough + (sample.relief - 0.5) * 0.18 * detailFactor + dryness * 0.08;
+        landRoughness += sample.detail * 0.04 * detailFactor;
+        landRoughness = clamp01(landRoughness);
+        const waterRoughness = clamp01(0.04 + shallow * 0.06 + sample.detail * 0.02);
+        const coastBlend = sample.coast * 0.6;
+        let roughness = lerp(landRoughness, waterRoughness, sample.isWater ? 1 - coastBlend : coastBlend);
+        if (sample.crater < 0) {
+          roughness = clamp01(roughness + (-sample.crater) * 0.22);
+        }
+
         const roughByte = Math.round(roughness * 255);
         roughnessRgba[idx] = roughByte;
         roughnessRgba[idx + 1] = roughByte;
         roughnessRgba[idx + 2] = roughByte;
         roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
       }
-      if (heightField || heightRgba) {
-        const reliefSlope = 0.4 + 0.6 * smoothstep(0.2, 0.8, slopeNorm);
-        const relief = landWeight
-          * reliefSlope
-          * (((macroNoise - 0.5) * macroAmp * 0.22) + ((microNoise - 0.5) * microAmp * 0.18));
-        const heightWithRelief = clamp01(heightNorm + relief + craterValue * 0.6);
-        if (heightField) {
-          heightField[pixelIndex] = heightWithRelief;
-        }
-        if (heightRgba) {
-          const landBlend = clamp01(landWeight + 0.25);
-          const heightForMap = lerp(seaLevelNorm, heightWithRelief, landBlend);
-          const heightEncoded = clamp01(0.5 + (heightForMap - seaLevelNorm) * 0.85);
-          const heightByte = Math.round(heightEncoded * 255);
-          heightRgba[idx] = heightByte;
-          heightRgba[idx + 1] = heightByte;
-          heightRgba[idx + 2] = heightByte;
-          heightRgba[idx + 3] = 255;
-        }
+
+      if (heightField) {
+        heightField[pixelIndex] = sample.height;
+        if (sample.height < heightMin) heightMin = sample.height;
+        if (sample.height > heightMax) heightMax = sample.height;
       }
+
       if (emissiveRgba) {
-        const cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
+        let cityWeight = 0;
+        const rFloat = v * (h - 1);
+        const r0 = Math.max(0, Math.min(h - 1, Math.floor(rFloat)));
+        const r1 = Math.min(r0 + 1, h - 1);
+        const rFrac = rFloat - r0;
+        const wR0 = 1 - rFrac;
+        const wR1 = rFrac;
+
+        let qFloat: number;
+        let q0: number;
+        let q1: number;
+        let qFrac: number;
+        if (useWrap) {
+          qFloat = u * w;
+          const qFloor = Math.floor(qFloat);
+          q0 = wrapIndex(qFloor, w);
+          q1 = wrapIndex(qFloor + 1, w);
+          qFrac = qFloat - qFloor;
+        } else {
+          qFloat = u * (w - 1);
+          q0 = Math.max(0, Math.min(w - 1, Math.floor(qFloat)));
+          q1 = Math.min(q0 + 1, w - 1);
+          qFrac = qFloat - q0;
+        }
+
+        const wQ0 = 1 - qFrac;
+        const wQ1 = qFrac;
+
+        const t00 = getTile(map.tiles, w, q0, r0);
+        const t10 = getTile(map.tiles, w, q1, r0);
+        const t01 = getTile(map.tiles, w, q0, r1);
+        const t11 = getTile(map.tiles, w, q1, r1);
+        const w00 = wQ0 * wR0;
+        const w10 = wQ1 * wR0;
+        const w01 = wQ0 * wR1;
+        const w11 = wQ1 * wR1;
+
+        cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
           + ((t10.featureBits & cityMask) !== 0 ? w10 : 0)
           + ((t01.featureBits & cityMask) !== 0 ? w01 : 0)
           + ((t11.featureBits & cityMask) !== 0 ? w11 : 0);
+
         const settlementGlow = settlementField ? settlementField[pixelIndex] : 0;
         const featureGlow = cityWeight * 0.4;
         let emissiveLevel = (settlementGlow + featureGlow) * landWeight;
@@ -868,9 +684,34 @@ const renderSurfaceTexture = (
     }
   }
 
+  let heightRange = 0;
+  let invHeightRange = 0;
+  let seaLevelNorm = 0;
   if (heightField) {
+    heightRange = Math.max(1e-6, heightMax - heightMin);
+    invHeightRange = 1 / heightRange;
+    for (let i = 0; i < heightField.length; i += 1) {
+      heightField[i] = (heightField[i] - heightMin) * invHeightRange;
+    }
+    seaLevelNorm = (seaLevel - heightMin) * invHeightRange;
     blendPolarRowsFloat(heightField, width, height);
   }
+
+  if (heightRgba && heightField) {
+    for (let i = 0; i < heightField.length; i += 1) {
+      const heightNorm = heightField[i];
+      const landBlend = clamp01((heightNorm - (seaLevelNorm - 0.02)) / 0.04);
+      const heightForMap = lerp(seaLevelNorm, heightNorm, landBlend);
+      const heightEncoded = clamp01(0.5 + (heightForMap - seaLevelNorm) * 0.85);
+      const heightByte = Math.round(heightEncoded * 255);
+      const idx = i * 4;
+      heightRgba[idx] = heightByte;
+      heightRgba[idx + 1] = heightByte;
+      heightRgba[idx + 2] = heightByte;
+      heightRgba[idx + 3] = 255;
+    }
+  }
+
   const finalEmissiveRgba = emissiveRgba && hasEmissive ? emissiveRgba : null;
 
   const shouldComputeRelief = Boolean(heightField) && (includeNormalMap || includeAoMap) && width >= 256 && height >= 128;
@@ -902,6 +743,7 @@ const renderSurfaceTexture = (
 
   const normalRgba = includeNormalMap ? new Uint8Array(width * height * 4) : null;
   const aoRgba = includeAoMap ? new Uint8Array(width * height * 4) : null;
+  const elevRange = heightRange * 1000;
   const heightScale = Math.min(1.6, Math.max(0.55, elevRange / 1200));
   const normalStrength = 1.1 * heightScale;
   const aoStrength = 1.5 * heightScale;
@@ -1007,7 +849,6 @@ const renderSurfaceTexture = (
 
   return { rgba, normalRgba, aoRgba, roughnessRgba, heightRgba, emissiveRgba: finalEmissiveRgba };
 };
-
 self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
   const message = event.data;
   const kind = (message as { kind?: string }).kind;
@@ -1039,8 +880,11 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
   if (kind === 'surfaceTexture') {
     const { id, payload } = message as SurfaceTextureWorkerRequestMessage;
     try {
-      const map = generateSurfaceMapForState(payload.state as GameState, payload.bodyId);
-      if (!map) {
+      const state = payload.state as GameState;
+      const descriptor = getSurfaceDescriptor(state, payload.bodyId);
+      const astro = descriptor ? getAstroForBody(state, payload.bodyId, descriptor) : null;
+      const map = generateSurfaceMapForState(state, payload.bodyId);
+      if (!descriptor || !astro || !map) {
         postResponse({
           kind: 'surfaceTexture',
           id,
@@ -1059,12 +903,17 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
         return;
       }
 
+      const terrain = createTerrainField({
+        descriptor,
+        planetData: astro.planetData,
+        moonData: astro.moonData
+      });
       const { rgba, normalRgba, aoRgba, roughnessRgba, heightRgba, emissiveRgba } = renderSurfaceTexture(
         map,
+        terrain,
         payload.resolution,
         payload.cloudShadow ?? null,
-        payload.textureOptions ?? null,
-        payload.bodyMeta
+        payload.textureOptions ?? null
       );
       const transfer: Transferable[] = [rgba.buffer];
       if (normalRgba) transfer.push(normalRgba.buffer);

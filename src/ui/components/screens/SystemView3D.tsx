@@ -125,6 +125,77 @@ const envMeta =
     ? (import.meta as ImportMeta & { env?: { DEV?: boolean } })
     : undefined;
 
+const resolveSurfaceDetailScales = (params: {
+  isMoon: boolean;
+  bodyType: PlanetType | MoonType;
+  hasAtmosphere: boolean;
+}): { displacementScale: number; displacementBias: number; normalScale: number } => {
+  let displacementFactor = 1;
+  let normalFactor = 1;
+
+  if (params.isMoon) {
+    switch (params.bodyType as MoonType) {
+      case 'Icy':
+        displacementFactor = 0.85;
+        normalFactor = 0.9;
+        break;
+      case 'Volcanic':
+        displacementFactor = 1.2;
+        normalFactor = 1.15;
+        break;
+      case 'Eden':
+        displacementFactor = 0.95;
+        normalFactor = 0.95;
+        break;
+      case 'Irregular':
+        displacementFactor = 1.15;
+        normalFactor = 1.1;
+        break;
+      default:
+        displacementFactor = 1;
+        normalFactor = 1;
+        break;
+    }
+  } else {
+    switch (params.bodyType as PlanetType) {
+      case 'SubNeptune':
+        displacementFactor = 0.7;
+        normalFactor = 0.8;
+        break;
+      case 'IceGiant':
+        displacementFactor = 0.55;
+        normalFactor = 0.7;
+        break;
+      case 'GasGiant':
+        displacementFactor = 0.25;
+        normalFactor = 0.5;
+        break;
+      case 'Dwarf':
+        displacementFactor = 1.1;
+        normalFactor = 1.05;
+        break;
+      default:
+        displacementFactor = 1;
+        normalFactor = 1;
+        break;
+    }
+  }
+
+  if (params.hasAtmosphere) {
+    displacementFactor *= 0.92;
+    normalFactor *= 0.94;
+  } else {
+    displacementFactor *= 1.08;
+    normalFactor *= 1.06;
+  }
+
+  return {
+    displacementScale: SURFACE_DISPLACEMENT_SCALE * displacementFactor,
+    displacementBias: SURFACE_DISPLACEMENT_BIAS * displacementFactor,
+    normalScale: SURFACE_NORMAL_SCALE * normalFactor
+  };
+};
+
 interface SystemView3DProps {
   starSystem: StarSystem;
   astro?: StarSystemAstro;
@@ -726,6 +797,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
     const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
     const ownerTint = ownerColorByBodyId[planet.id] ?? '#ffffff';
+    const surfaceScales = resolveSurfaceDetailScales({ isMoon: false, bodyType: planet.type, hasAtmosphere });
     const existing = bodyMaterialByIdRef.current.get(planet.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
@@ -735,12 +807,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       if (typeof existing.userData.baseEmissiveIntensity !== 'number') {
         existing.userData.baseEmissiveIntensity = existing.emissiveIntensity ?? 0;
       }
-      if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
-        existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
-      }
-      if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
-        existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
-      }
+      existing.userData.surfaceDisplacementScale = surfaceScales.displacementScale;
+      existing.userData.surfaceDisplacementBias = surfaceScales.displacementBias;
+      existing.normalScale.set(surfaceScales.normalScale, surfaceScales.normalScale);
       existing.metalness = 0;
       existing.dithering = true;
       const baseTint = existing.map ? surfaceTint : tintedBaseColor;
@@ -749,7 +818,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       return existing;
     }
     const material = base.clone();
-    material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
+    material.normalScale = new Vector2(surfaceScales.normalScale, surfaceScales.normalScale);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.metalness = 0;
     material.dithering = true;
@@ -760,8 +829,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.baseRoughness = material.roughness;
     material.userData.baseEmissiveIntensity = material.emissiveIntensity ?? 0;
     material.userData.surfaceTextureKey = null;
-    material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
-    material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
+    material.userData.surfaceDisplacementScale = surfaceScales.displacementScale;
+    material.userData.surfaceDisplacementBias = surfaceScales.displacementBias;
     material.emissive.set('#000000');
     material.color.set(resolveOwnerTintedColor(tintedBaseColor, ownerTint));
     applyDayNightTerminator(material, { nightMin, terminatorSoftness, sunPosition });
@@ -777,6 +846,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const terminatorSoftness = hasAtmosphere ? DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE : DAY_NIGHT_TERMINATOR_SOFTNESS;
     const nightMin = hasAtmosphere ? DAY_NIGHT_NIGHT_MIN_ATMOSPHERE : DAY_NIGHT_NIGHT_MIN;
     const ownerTint = ownerColorByBodyId[moon.id] ?? '#ffffff';
+    const surfaceScales = resolveSurfaceDetailScales({ isMoon: true, bodyType: moon.type, hasAtmosphere });
     const existing = bodyMaterialByIdRef.current.get(moon.id);
     if (existing) {
       existing.userData.baseColor = tintedBaseColor;
@@ -786,12 +856,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       if (typeof existing.userData.baseEmissiveIntensity !== 'number') {
         existing.userData.baseEmissiveIntensity = existing.emissiveIntensity ?? 0;
       }
-      if (typeof existing.userData.surfaceDisplacementScale !== 'number') {
-        existing.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
-      }
-      if (typeof existing.userData.surfaceDisplacementBias !== 'number') {
-        existing.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
-      }
+      existing.userData.surfaceDisplacementScale = surfaceScales.displacementScale;
+      existing.userData.surfaceDisplacementBias = surfaceScales.displacementBias;
+      existing.normalScale.set(surfaceScales.normalScale, surfaceScales.normalScale);
       existing.metalness = 0;
       existing.dithering = true;
       const baseTint = existing.map ? surfaceTint : tintedBaseColor;
@@ -800,7 +867,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       return existing;
     }
     const material = base.clone();
-    material.normalScale = new Vector2(SURFACE_NORMAL_SCALE, SURFACE_NORMAL_SCALE);
+    material.normalScale = new Vector2(surfaceScales.normalScale, surfaceScales.normalScale);
     material.aoMapIntensity = SURFACE_AO_INTENSITY;
     material.metalness = 0;
     material.dithering = true;
@@ -811,8 +878,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     material.userData.baseRoughness = material.roughness;
     material.userData.baseEmissiveIntensity = material.emissiveIntensity ?? 0;
     material.userData.surfaceTextureKey = null;
-    material.userData.surfaceDisplacementScale = SURFACE_DISPLACEMENT_SCALE;
-    material.userData.surfaceDisplacementBias = SURFACE_DISPLACEMENT_BIAS;
+    material.userData.surfaceDisplacementScale = surfaceScales.displacementScale;
+    material.userData.surfaceDisplacementBias = surfaceScales.displacementBias;
     material.emissive.set('#000000');
     material.color.set(resolveOwnerTintedColor(tintedBaseColor, ownerTint));
     applyDayNightTerminator(material, { nightMin, terminatorSoftness, sunPosition });

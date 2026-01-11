@@ -102,6 +102,43 @@ const computeLatTermOffset = (h: number, latGradientK: number): number => {
 };
 
 // ==========================================
+// Sphere helpers (terrain-first sampling)
+// ==========================================
+
+export type SurfaceDir = { x: number; y: number; z: number };
+
+const TWO_PI = Math.PI * 2;
+
+export const surfaceDirFromLatLon = (latRad: number, lonRad: number): SurfaceDir => {
+  const cosLat = Math.cos(latRad);
+  return {
+    x: Math.cos(lonRad) * cosLat,
+    y: Math.sin(latRad),
+    z: Math.sin(lonRad) * cosLat
+  };
+};
+
+export const surfaceDirFromUv = (u: number, v: number): SurfaceDir => {
+  const lon = u * TWO_PI - Math.PI;
+  const lat = v * Math.PI - Math.PI / 2;
+  return surfaceDirFromLatLon(lat, lon);
+};
+
+export const surfaceDirFromTile = (
+  q: number,
+  r: number,
+  w: number,
+  h: number,
+  offsetQ = 0.5,
+  offsetR = 0.5
+): SurfaceDir => {
+  if (w <= 0 || h <= 0) return { x: 1, y: 0, z: 0 };
+  const u = (q + offsetQ) / w;
+  const v = (r + offsetR) / h;
+  return surfaceDirFromUv(u, v);
+};
+
+// ==========================================
 // Noise (was: planetSurface/noise.ts)
 // ==========================================
 
@@ -294,6 +331,12 @@ type NoiseRotation3D = { cosX: number; sinX: number; cosY: number; sinY: number;
 
 const unitFromHash = (seed: number, salt: string): number => hashJoin32(seed, salt) / 0xffffffff;
 
+const vectorFromHash = (seed: number, salt: string, scale = 1): SurfaceDir => ({
+  x: (unitFromHash(seed, `${salt}-x`) * 2 - 1) * scale,
+  y: (unitFromHash(seed, `${salt}-y`) * 2 - 1) * scale,
+  z: (unitFromHash(seed, `${salt}-z`) * 2 - 1) * scale
+});
+
 const buildRotation2D = (seed: number, salt: string): NoiseRotation2D => {
   const angle = unitFromHash(seed, salt) * Math.PI * 2;
   return { cos: Math.cos(angle), sin: Math.sin(angle) };
@@ -321,6 +364,98 @@ const rotate3D = (x: number, y: number, z: number, rot: NoiseRotation3D): { x: n
   const x3 = x2 * rot.cosZ - y1 * rot.sinZ;
   const y3 = x2 * rot.sinZ + y1 * rot.cosZ;
   return { x: x3, y: y3, z: z2 };
+};
+
+const valueNoise3DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  z: number,
+  fx: number,
+  fy: number,
+  fz: number,
+  rot: NoiseRotation3D
+): number => {
+  const p = rotate3D(x * fx, y * fy, z * fz, rot);
+  return valueNoise3D(seed, p.x, p.y, p.z);
+};
+
+const fbm3DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  z: number,
+  octaves: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1,
+  baseFreqZ = 1,
+  lacunarity = 2,
+  gain = 0.5
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    const fz = baseFreqZ * freq;
+    sum += (valueNoise3DRot(seed + i * 1013, x, y, z, fx, fy, fz, rot) * 2 - 1) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const ridgedFbm3DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  z: number,
+  octaves: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1,
+  baseFreqZ = 1
+): number => {
+  let amp = 1;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+
+  for (let i = 0; i < octaves; i += 1) {
+    const fx = baseFreqX * freq;
+    const fy = baseFreqY * freq;
+    const fz = baseFreqZ * freq;
+    const n = valueNoise3DRot(seed + i * 2179, x, y, z, fx, fy, fz, rot);
+    const ridge = 1 - Math.abs(n * 2 - 1);
+    const v = ridge * 2 - 1;
+    sum += v * amp;
+    norm += amp;
+    amp *= 0.55;
+    freq *= 2.1;
+  }
+  return norm > 0 ? sum / norm : 0;
+};
+
+const domainWarp3DRot = (
+  seed: number,
+  x: number,
+  y: number,
+  z: number,
+  strength: number,
+  rot: NoiseRotation3D,
+  baseFreqX = 1,
+  baseFreqY = 1,
+  baseFreqZ = 1
+): { x: number; y: number; z: number } => {
+  const dx = fbm3DRot(seed ^ 0x68bc21eb, x, y, z, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8, baseFreqZ * 0.8);
+  const dy = fbm3DRot(seed ^ 0x02e5be93, x, y, z, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8, baseFreqZ * 0.8);
+  const dz = fbm3DRot(seed ^ 0x85ebca6b, x, y, z, 3, rot, baseFreqX * 0.8, baseFreqY * 0.8, baseFreqZ * 0.8);
+  return { x: x + dx * strength, y: y + dy * strength, z: z + dz * strength };
 };
 
 const valueNoise2DRot = (seed: number, x: number, y: number, fx: number, fy: number, rot: NoiseRotation2D): number => {
@@ -489,6 +624,24 @@ type NoiseSampler = {
   noise: (seed: number, x: number, y: number, fx: number, fy: number) => number;
 };
 
+type NoiseSampler3D = {
+  warp: (seed: number, x: number, y: number, z: number, strength: number, fx: number, fy: number, fz: number) => { x: number; y: number; z: number };
+  fbm: (
+    seed: number,
+    x: number,
+    y: number,
+    z: number,
+    octaves: number,
+    fx: number,
+    fy: number,
+    fz: number,
+    lac?: number,
+    gain?: number
+  ) => number;
+  ridged: (seed: number, x: number, y: number, z: number, octaves: number, fx: number, fy: number, fz: number) => number;
+  noise: (seed: number, x: number, y: number, z: number, fx: number, fy: number, fz: number) => number;
+};
+
 const makeNoiseSampler = (wrapX: boolean, rot2D: NoiseRotation2D, rot3D: NoiseRotation3D): NoiseSampler => {
   if (wrapX) {
     return {
@@ -506,6 +659,14 @@ const makeNoiseSampler = (wrapX: boolean, rot2D: NoiseRotation2D, rot3D: NoiseRo
     noise: (seed, x, y, fx, fy) => valueNoise2DRot(seed, x, y, fx, fy, rot2D)
   };
 };
+
+const makeNoiseSampler3D = (rot3D: NoiseRotation3D): NoiseSampler3D => ({
+  warp: (seed, x, y, z, strength, fx, fy, fz) => domainWarp3DRot(seed, x, y, z, strength, rot3D, fx, fy, fz),
+  fbm: (seed, x, y, z, octaves, fx, fy, fz, lac = 2, gain = 0.5) =>
+    fbm3DRot(seed, x, y, z, octaves, rot3D, fx, fy, fz, lac, gain),
+  ridged: (seed, x, y, z, octaves, fx, fy, fz) => ridgedFbm3DRot(seed, x, y, z, octaves, rot3D, fx, fy, fz),
+  noise: (seed, x, y, z, fx, fy, fz) => valueNoise3DRot(seed, x, y, z, fx, fy, fz, rot3D)
+});
 
 // ==========================================
 // Params (was: planetSurface/params.ts)
@@ -945,6 +1106,310 @@ const resolveSurfaceInputs = (params: {
   return { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK };
 };
 
+// ==========================================
+// TerrainField (terrain-first sampling)
+// ==========================================
+
+export type TerrainSample = {
+  height: number;
+  landness: number;
+  oceanness: number;
+  coast: number;
+  isWater: boolean;
+  tempC: number;
+  moist: number; // 0..1
+  biome: Biome;
+  relief: number; // 0..1
+  detail: number; // [-1..1]
+  crater: number; // [-1..1]
+};
+
+export type TerrainField = {
+  env: SurfaceParams;
+  hydrologyMode: HydrologyMode;
+  atmosphere?: AtmosphereType;
+  seaLevelElev: number;
+  sample: (dir: SurfaceDir) => TerrainSample;
+};
+
+const TERRAIN_SEA_LEVEL_SAMPLE_W = 72;
+const TERRAIN_SEA_LEVEL_SAMPLE_H = 36;
+const TERRAIN_LAT_SAMPLE_COUNT = 64;
+
+const computeLatTermOffsetContinuous = (latGradientK: number): number => {
+  if (latGradientK === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < TERRAIN_LAT_SAMPLE_COUNT; i += 1) {
+    const t = (i + 0.5) / TERRAIN_LAT_SAMPLE_COUNT;
+    const lat = t * Math.PI - Math.PI / 2;
+    const latValue = Math.abs(Math.sin(lat));
+    sum += -latGradientK * Math.pow(latValue, LATITUDE_EXPONENT);
+  }
+  return sum / TERRAIN_LAT_SAMPLE_COUNT;
+};
+
+export const createTerrainField = (params: {
+  descriptor: PlanetSurfaceDescriptor;
+  planetData?: PlanetData;
+  moonData?: MoonData;
+}): TerrainField => {
+  const { descriptor } = params;
+  const baseSeed = descriptor.seed >>> 0;
+  const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
+  const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K, maxLiquidWaterK });
+  const envHydrology: SurfaceParams =
+    hydrologyMode === 'liquid'
+      ? env
+      : {
+          ...env,
+          waterFraction: hydrologyMode === 'none' ? 0 : env.waterFraction,
+          riversEnabled: false
+        };
+  const albedoOffset =
+    typeof albedo === 'number' ? -18 * clamp((albedo - 0.25) / 0.6, 0, 1) : 0;
+  const latTermOffset = computeLatTermOffsetContinuous(env.latGradientK);
+
+  const macroNoise = makeNoiseSampler3D(buildRotation3D(baseSeed, 'macro'));
+  const reliefNoise = makeNoiseSampler3D(buildRotation3D(baseSeed, 'relief'));
+  const detailNoise = makeNoiseSampler3D(buildRotation3D(baseSeed, 'detail'));
+  const macroShift = vectorFromHash(baseSeed, 'macro-shift', 1.2);
+  const reliefShift = vectorFromHash(baseSeed, 'relief-shift', 1.1);
+  const detailShift = vectorFromHash(baseSeed, 'detail-shift', 1.1);
+
+  const coreRng = new RNG(baseSeed ^ 0x6f0f3b1d);
+  const coreCount = coreRng.int(1, 2 + Math.round(env.tectonicsIndex * 2));
+  const coreRadiusScale = 1.1 - 0.25 * env.tectonicsIndex;
+  const coreStrengthScale = 0.85 + 0.35 * env.tectonicsIndex;
+  const cores: Array<{ dir: SurfaceDir; radius: number; strength: number }> = [];
+  const randomUnitDir = (): SurfaceDir => {
+    const u = coreRng.next();
+    const v = coreRng.next();
+    const theta = u * TWO_PI;
+    const z = v * 2 - 1;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    return { x: r * Math.cos(theta), y: z, z: r * Math.sin(theta) };
+  };
+  for (let i = 0; i < coreCount; i += 1) {
+    cores.push({
+      dir: randomUnitDir(),
+      radius: coreRng.range(0.18, 0.34) * coreRadiusScale,
+      strength: coreRng.range(0.65, 1.1) * coreStrengthScale
+    });
+  }
+
+  const sampleMacro = (dir: SurfaceDir): { macro: number; coreSum: number } => {
+    const dx = dir.x + macroShift.x;
+    const dy = dir.y + macroShift.y;
+    const dz = dir.z + macroShift.z;
+    const warped = macroNoise.warp(baseSeed ^ 0x1b873593, dx, dy, dz, 0.42, 0.55, 0.45, 0.5);
+    const macroBase = macroNoise.fbm(baseSeed ^ 0xa2b3c4d5, warped.x, warped.y, warped.z, 3, 0.55, 0.42, 0.48, 2.05, 0.5);
+    const macroDetail = macroNoise.fbm(baseSeed ^ 0x8f1bbcdc, warped.x, warped.y, warped.z, 2, 1.25, 0.95, 1.1, 2.2, 0.5);
+
+    let coreSum = 0;
+    for (const core of cores) {
+      const dot = dir.x * core.dir.x + dir.y * core.dir.y + dir.z * core.dir.z;
+      const angle = Math.acos(clamp(dot, -1, 1));
+      const d = angle / Math.PI;
+      const influence = Math.exp(-d * d / (2 * core.radius * core.radius));
+      coreSum += influence * core.strength;
+    }
+
+    return { macro: macroBase * 0.6 + macroDetail * 0.2 + coreSum * 0.85, coreSum };
+  };
+
+  const sampleCount = TERRAIN_SEA_LEVEL_SAMPLE_W * TERRAIN_SEA_LEVEL_SAMPLE_H;
+  const macroSamples = new Float32Array(sampleCount);
+  let macroMin = Number.POSITIVE_INFINITY;
+  let macroMax = Number.NEGATIVE_INFINITY;
+  let coreMax = 0;
+
+  let sampleIndex = 0;
+  for (let r = 0; r < TERRAIN_SEA_LEVEL_SAMPLE_H; r += 1) {
+    const v = (r + 0.5) / TERRAIN_SEA_LEVEL_SAMPLE_H;
+    const lat = v * Math.PI - Math.PI / 2;
+    const cosLat = Math.cos(lat);
+    const sinLat = Math.sin(lat);
+    for (let q = 0; q < TERRAIN_SEA_LEVEL_SAMPLE_W; q += 1) {
+      const u = (q + 0.5) / TERRAIN_SEA_LEVEL_SAMPLE_W;
+      const lon = u * TWO_PI - Math.PI;
+      const dir = { x: Math.cos(lon) * cosLat, y: sinLat, z: Math.sin(lon) * cosLat };
+      const { macro, coreSum } = sampleMacro(dir);
+      macroSamples[sampleIndex] = macro;
+      if (macro < macroMin) macroMin = macro;
+      if (macro > macroMax) macroMax = macro;
+      if (coreSum > coreMax) coreMax = coreSum;
+      sampleIndex += 1;
+    }
+  }
+
+  const macroSeaBase = quantile(macroSamples, envHydrology.waterFraction);
+  const macroRange = Math.max(0.0001, macroMax - macroMin);
+  const coastBand = clamp(macroRange * 0.18, 0.06, 0.28);
+  const coastStrength = macroRange * 0.12;
+
+  const macroAdjustedSamples = new Float32Array(sampleCount);
+  let adjustedMin = Number.POSITIVE_INFINITY;
+  let adjustedMax = Number.NEGATIVE_INFINITY;
+
+  sampleIndex = 0;
+  for (let r = 0; r < TERRAIN_SEA_LEVEL_SAMPLE_H; r += 1) {
+    const v = (r + 0.5) / TERRAIN_SEA_LEVEL_SAMPLE_H;
+    const lat = v * Math.PI - Math.PI / 2;
+    const cosLat = Math.cos(lat);
+    const sinLat = Math.sin(lat);
+    for (let q = 0; q < TERRAIN_SEA_LEVEL_SAMPLE_W; q += 1) {
+      const u = (q + 0.5) / TERRAIN_SEA_LEVEL_SAMPLE_W;
+      const lon = u * TWO_PI - Math.PI;
+      const dir = { x: Math.cos(lon) * cosLat, y: sinLat, z: Math.sin(lon) * cosLat };
+      const macroVal = macroSamples[sampleIndex];
+      const dx = dir.x + detailShift.x;
+      const dy = dir.y + detailShift.y;
+      const dz = dir.z + detailShift.z;
+      const coastNoise = detailNoise.fbm(baseSeed ^ 0x2c1b3c6d, dx, dy, dz, 2, 4.6, 3.4, 4.0, 2.1, 0.5);
+      const dist = Math.abs(macroVal - macroSeaBase);
+      const t = dist < coastBand ? 1 - dist / coastBand : 0;
+      const coastWeight = fade(clamp(t, 0, 1));
+      const macroAdjusted = macroVal + coastNoise * coastStrength * coastWeight;
+      macroAdjustedSamples[sampleIndex] = macroAdjusted;
+      if (macroAdjusted < adjustedMin) adjustedMin = macroAdjusted;
+      if (macroAdjusted > adjustedMax) adjustedMax = macroAdjusted;
+      sampleIndex += 1;
+    }
+  }
+
+  const seaLevelMacro = quantile(macroAdjustedSamples, envHydrology.waterFraction);
+  const landSpan = Math.max(0.0001, adjustedMax - seaLevelMacro);
+  const oceanSpan = Math.max(0.0001, seaLevelMacro - adjustedMin);
+  const invLand = 1 / landSpan;
+  const invOcean = 1 / oceanSpan;
+  const coreScale = coreMax > 0 ? 1 / coreMax : 0;
+  const reliefScale = 1 - env.erosionIndex * 0.35;
+
+  const sample = (dir: SurfaceDir): TerrainSample => {
+    const { macro, coreSum } = sampleMacro(dir);
+    const dist = Math.abs(macro - macroSeaBase);
+    const t = dist < coastBand ? 1 - dist / coastBand : 0;
+    const coast = fade(clamp(t, 0, 1));
+
+    const dxDetail = dir.x + detailShift.x;
+    const dyDetail = dir.y + detailShift.y;
+    const dzDetail = dir.z + detailShift.z;
+    const coastNoise = detailNoise.fbm(baseSeed ^ 0x2c1b3c6d, dxDetail, dyDetail, dzDetail, 2, 4.6, 3.4, 4.0, 2.1, 0.5);
+    const macroAdjusted = macro + coastNoise * coastStrength * coast;
+
+    const isWater = hydrologyMode === 'none' ? false : macroAdjusted <= seaLevelMacro;
+    const landness = isWater ? 0 : clamp((macroAdjusted - seaLevelMacro) * invLand, 0, 1);
+    const oceanness = isWater ? clamp((seaLevelMacro - macroAdjusted) * invOcean, 0, 1) : 0;
+    const coreBias = coreScale > 0 ? clamp(coreSum * coreScale, 0, 1) : 0;
+
+    let base = isWater
+      ? -0.06 - oceanness * 0.55
+      : 0.06 + landness * 0.62 + coreBias * 0.14;
+
+    const dxRelief = dir.x + reliefShift.x;
+    const dyRelief = dir.y + reliefShift.y;
+    const dzRelief = dir.z + reliefShift.z;
+    let relief = 0;
+
+    if (!isWater) {
+      const warped = reliefNoise.warp(baseSeed ^ 0x9e3779b9, dxRelief, dyRelief, dzRelief, 0.3, 1.8, 1.4, 1.5);
+      const hills = reliefNoise.fbm(baseSeed ^ 0x3c6ef372, warped.x, warped.y, warped.z, 4, 2.4, 2.1, 2.2, 2.05, 0.5);
+      const ridges = reliefNoise.ridged(baseSeed ^ 0x1f123bb5, warped.x, warped.y, warped.z, 4, 3.2, 3.0, 3.1);
+      const reliefMask = (0.2 + 0.55 * landness + 0.25 * coreBias) * reliefScale;
+      const reliefRaw = (hills * 0.4 + ridges * 0.6) * reliefMask * 0.35;
+      base += reliefRaw;
+      relief = clamp01(0.5 + reliefRaw * 1.8);
+    } else {
+      const seabed = reliefNoise.fbm(baseSeed ^ 0x7f4a7c15, dxRelief, dyRelief, dzRelief, 3, 1.4, 1.2, 1.3, 2.1, 0.5);
+      base += seabed * 0.05;
+      relief = clamp01(0.45 + seabed * 0.35);
+    }
+
+    const craterNoise = detailNoise.noise(
+      baseSeed ^ 0x165667b1,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      6.0,
+      6.0,
+      6.0
+    ) * 2 - 1;
+    const crater = env.surfaceClass === 'airless' ? craterNoise * env.craterIntensity * 0.45 : 0;
+
+    const height = (base + crater) * env.reliefScale;
+    const aboveSea = Math.max(0, height);
+    const latValue = Math.abs(dir.y);
+    const latTerm = -env.latGradientK * Math.pow(latValue, LATITUDE_EXPONENT) - latTermOffset;
+    const altTerm = -env.lapseRateK * aboveSea;
+    const localK = baseT0K + latTerm + altTerm + albedoOffset;
+    const tempC = localK - 273.15;
+
+    const moistNoise = detailNoise.fbm(baseSeed ^ 0x27d4eb2d, dxDetail, dyDetail, dzDetail, 2, 1.15, 1.1, 1.2, 2.0, 0.5);
+    const equatorBias = 1 - latValue;
+    const dryness = landness * 0.6 + relief * 0.2 + (1 - env.humidityFactor) * 0.2;
+    let moist = clamp01(
+      (0.55 + moistNoise * 0.25 + equatorBias * 0.2 - dryness * 0.4) * (0.5 + 0.5 * env.humidityFactor)
+    );
+    if (hydrologyMode === 'none') {
+      moist *= 0.1;
+    } else if (hydrologyMode === 'frozen') {
+      moist *= 0.5;
+    }
+    if (isWater) {
+      moist = hydrologyMode === 'none' ? moist : hydrologyMode === 'frozen' ? 0.85 : 1;
+    }
+
+    const tempJitter = detailNoise.fbm(baseSeed ^ 0x5bd1e995, dxDetail, dyDetail, dzDetail, 2, 6.4, 5.2, 6.0, 2.1, 0.5);
+    const moistJitter = detailNoise.fbm(baseSeed ^ 0x2a86f283, dxDetail, dyDetail, dzDetail, 2, 7.1, 6.3, 6.6, 2.1, 0.5);
+    const tempForBiome = tempC + tempJitter * 1.6;
+    const moistForBiome = clamp(moist * 255 + moistJitter * 12, 0, 255);
+    let biome: Biome = isWater ? 'ocean' : 'rocky';
+    if (!isWater) {
+      biome = classifyLandBiome({
+        env,
+        hydrologyMode,
+        elevRel: height,
+        tempC: tempForBiome,
+        moist: moistForBiome,
+        atmosphere
+      });
+    } else if (hydrologyMode === 'frozen') {
+      biome = 'ice';
+    }
+
+    if (!isWater && env.volcanismIndex > 0.55) {
+      const hot = detailNoise.fbm(baseSeed ^ 0xdeadbeef, dxDetail, dyDetail, dzDetail, 4, 4.0, 4.0, 4.1, 2.0, 0.5);
+      if (hot > 0.72 + (1 - env.volcanismIndex) * 0.25) {
+        biome = 'volcanic';
+      }
+    }
+
+    const detail = detailNoise.fbm(baseSeed ^ 0x9e3779b1, dxDetail, dyDetail, dzDetail, 2, 8.4, 7.2, 7.8, 2.1, 0.5);
+
+    return {
+      height,
+      landness,
+      oceanness,
+      coast,
+      isWater,
+      tempC,
+      moist,
+      biome,
+      relief,
+      detail,
+      crater
+    };
+  };
+
+  return {
+    env: envHydrology,
+    hydrologyMode,
+    atmosphere,
+    seaLevelElev: 0,
+    sample
+  };
+};
+
 const classifyLandBiome = (params: {
   env: SurfaceParams;
   hydrologyMode: HydrologyMode;
@@ -1044,7 +1509,7 @@ const classifyLandBiome = (params: {
 // Descriptor (was: planetSurface/descriptor.ts)
 // ==========================================
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 5;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 6;
 
 const clampInt = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, Math.round(x)));
 
@@ -2731,6 +3196,145 @@ const generateSurfaceMapV4 = (params: {
   };
 };
 
+const TERRAIN_TILE_SAMPLE_COUNT = 4;
+
+const sampleTileJitter = (seed: number, q: number, r: number, sampleIndex: number): { dq: number; dr: number } => {
+  const jx = hashJoin32(seed, q, r, sampleIndex, 'jx') / 0xffffffff - 0.5;
+  const jy = hashJoin32(seed, q, r, sampleIndex, 'jy') / 0xffffffff - 0.5;
+  return { dq: jx * 0.6, dr: jy * 0.6 };
+};
+
+const generateSurfaceMapV6 = (params: {
+  systemId: string;
+  bodyId: string;
+  descriptor: PlanetSurfaceDescriptor;
+  planetData?: PlanetData;
+  moonData?: MoonData;
+  ownerFactionId?: string | null;
+}): PlanetSurfaceMap => {
+  const { descriptor } = params;
+  const { w, h, wrapX } = descriptor.config;
+  const n = w * h;
+
+  const field = createTerrainField(params);
+  const { env, hydrologyMode, atmosphere } = field;
+  const allowRivers = hydrologyMode === 'liquid' && env.riversEnabled;
+
+  const elev = new Float32Array(n);
+  const tempC2 = new Int16Array(n);
+  const moistU8 = new Uint8Array(n);
+  const initialWaterMask = new Uint8Array(n);
+  const volcanicVotes = new Uint8Array(n);
+
+  for (let r = 0; r < h; r += 1) {
+    for (let q = 0; q < w; q += 1) {
+      const idx = r * w + q;
+      let heightSum = 0;
+      let tempSum = 0;
+      let moistSum = 0;
+      let waterHits = 0;
+      let volcanicHits = 0;
+
+      for (let s = 0; s < TERRAIN_TILE_SAMPLE_COUNT; s += 1) {
+        const jitter = sampleTileJitter(descriptor.seed, q, r, s);
+        const dir = surfaceDirFromTile(q, r, w, h, 0.5 + jitter.dq, 0.5 + jitter.dr);
+        const sample = field.sample(dir);
+        heightSum += sample.height;
+        tempSum += sample.tempC;
+        moistSum += sample.moist;
+        if (sample.isWater) waterHits += 1;
+        if (sample.biome === 'volcanic') volcanicHits += 1;
+      }
+
+      const invSamples = 1 / TERRAIN_TILE_SAMPLE_COUNT;
+      elev[idx] = heightSum * invSamples;
+      tempC2[idx] = Math.round(tempSum * invSamples * 2);
+      moistU8[idx] = Math.round(clamp01(moistSum * invSamples) * 255);
+      volcanicVotes[idx] = volcanicHits;
+
+      if (hydrologyMode !== 'none' && waterHits >= TERRAIN_TILE_SAMPLE_COUNT / 2) {
+        initialWaterMask[idx] = 1;
+      }
+    }
+  }
+
+  const seaLevelElev = field.seaLevelElev;
+  const forceDry = hydrologyMode === 'none';
+  const microSize = Math.max(3, Math.floor(n / 1400));
+  const waterMask = forceDry
+    ? initialWaterMask
+    : applyMicroCleanup(initialWaterMask, w, h, wrapX, microSize, microSize);
+  const oceanMask = forceDry ? new Uint8Array(n) : classifyWaterComponents(waterMask, w, h, wrapX).oceanMask;
+
+  const seaLevelEps = 0.001;
+  for (let i = 0; i < n; i += 1) {
+    if (waterMask[i]) {
+      if (elev[i] > seaLevelElev - seaLevelEps) elev[i] = seaLevelElev - seaLevelEps;
+    } else if (elev[i] < seaLevelElev + seaLevelEps) {
+      elev[i] = seaLevelElev + seaLevelEps;
+    }
+  }
+
+  const tiles: PlanetSurfaceTile[] = Array.from({ length: n }, (_, i): PlanetSurfaceTile => {
+    let biome: Biome = 'rocky';
+    if (waterMask[i]) biome = oceanMask[i] ? 'ocean' : 'lake';
+
+    return {
+      elev: Math.round(elev[i] * 1000),
+      tempC2: tempC2[i],
+      moist: moistU8[i],
+      biome,
+      featureBits: 0
+    };
+  });
+
+  for (let i = 0; i < n; i += 1) {
+    if (!isWaterBiome(tiles[i].biome)) continue;
+    const c = indexToAxial(i, w);
+    const ns = neighborsAxial(c, w, h, wrapX);
+    const adjacentLand = ns.some(nc => !isWaterBiome(tiles[axialToIndex(nc, w)].biome));
+    if (adjacentLand) tiles[i].biome = 'coast';
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    if (isWaterBiome(tiles[i].biome)) continue;
+    const elevRel = elev[i] - seaLevelElev;
+    const t = tiles[i].tempC2 / 2;
+    const m = tiles[i].moist;
+    tiles[i].biome = classifyLandBiome({ env, hydrologyMode, elevRel, tempC: t, moist: m, atmosphere });
+    if (volcanicVotes[i] >= TERRAIN_TILE_SAMPLE_COUNT / 2) {
+      tiles[i].biome = 'volcanic';
+    }
+  }
+
+  if (allowRivers) {
+    addRivers({ tiles, elev, seaLevelElev, w, h, wrapX });
+  }
+
+  const settlements = placeSettlements({
+    descriptor,
+    tiles,
+    w,
+    h,
+    wrapX,
+    ownerFactionId: params.ownerFactionId,
+    env
+  });
+
+  if (hydrologyMode === 'frozen') {
+    freezeWaterBiomes(tiles);
+  }
+
+  return {
+    systemId: params.systemId,
+    bodyId: params.bodyId,
+    descriptor,
+    seaLevelElev: Math.round(seaLevelElev * 1000),
+    tiles,
+    settlements
+  };
+};
+
 export const generateSurfaceMap = (params: {
   systemId: string;
   bodyId: string;
@@ -2740,6 +3344,9 @@ export const generateSurfaceMap = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const generatorVersion = params.descriptor.config?.generatorVersion ?? 1;
+  if (generatorVersion >= 6) {
+    return generateSurfaceMapV6(params);
+  }
   if (generatorVersion >= 4) {
     return generateSurfaceMapV4(params);
   }

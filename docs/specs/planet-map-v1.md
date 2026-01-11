@@ -171,9 +171,10 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
   - ou maintenir la compat bit-for-bit (rarement souhaitable).
 
 ### Implémentation actuelle (repo)
-- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v5 par défaut).
+- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v6 par défaut).
 - Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
 - Spécificités v4/v5 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
+- Spécificités v6 (terrain-first) : champ de terrain continu échantillonné sur la sphère (dir unitaire), bruit 3D sans couture, carte 2D dérivée par sampling multi-points, textures 3D dérivées du même champ (source de vérité unique).
 
 ## 5. Pipeline de génération (cohérence environnementale)
 
@@ -181,7 +182,7 @@ Le pipeline standard produit trois champs continus puis discrétise :
 
 - Altitude (elev) → Mer/continents/montagnes/cratères
 - Température locale (tempC2) → gradient latitude/altitude + contraintes atmosphère/albédo
-- Humidité (moist) → distance à l’eau + facteur atmosphère/pression + option “rain shadow”
+- Humidité (moist) → champ continu (bruit + latitude + hydrologie), modulé par l’atmosphère/pression
 
 Validation hydrologie/climat (avant biomes et rivières) :
 - Pas d’hydrosphère liquide si atmosphère absente ou pression < seuil (≈ 0.08 bar) → aucune eau de surface, pas de rivières.

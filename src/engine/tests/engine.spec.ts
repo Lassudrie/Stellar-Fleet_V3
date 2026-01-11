@@ -3925,6 +3925,117 @@ tests.push(
         }
       }
     }
+  },
+  {
+    name: 'Surface v6 ocean tiles belong to the largest water component',
+    run: () => {
+      const worldSeed = 514;
+      const systemId = 'sys_surface_ocean_v6';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      const waterMask = new Uint8Array(map.tiles.length);
+      let oceanTiles = 0;
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (engine_isWaterBiome(map.tiles[i].biome)) waterMask[i] = 1;
+        if (map.tiles[i].biome === 'ocean') oceanTiles += 1;
+      }
+      const { labels, sizes } = engine_labelComponents(waterMask, w, h, wrapX);
+      if (sizes.length === 0 || oceanTiles === 0) return;
+
+      let largestIdx = 0;
+      let largestSize = sizes[0] ?? 0;
+      for (let i = 1; i < sizes.length; i += 1) {
+        if ((sizes[i] ?? 0) > largestSize) {
+          largestSize = sizes[i] ?? 0;
+          largestIdx = i;
+        }
+      }
+
+      for (let i = 0; i < map.tiles.length; i += 1) {
+        if (map.tiles[i].biome !== 'ocean') continue;
+        assert.strictEqual(labels[i], largestIdx, 'Ocean tiles should belong to the largest water component');
+      }
+    }
+  },
+  {
+    name: 'Surface v6 wrapX seam elevation deltas are within internal range',
+    run: () => {
+      const worldSeed = 372;
+      const systemId = 'sys_surface_seam_v6';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const { w, h, wrapX } = map.descriptor.config;
+      if (!wrapX || w < 2) return;
+
+      const seamDiffs: number[] = [];
+      const internalDiffs: number[] = [];
+      for (let r = 0; r < h; r += 1) {
+        const leftIdx = r * w;
+        const rightIdx = r * w + (w - 1);
+        seamDiffs.push(Math.abs(map.tiles[leftIdx].elev - map.tiles[rightIdx].elev));
+        for (let q = 0; q < w - 1; q += 1) {
+          const a = r * w + q;
+          const b = a + 1;
+          internalDiffs.push(Math.abs(map.tiles[a].elev - map.tiles[b].elev));
+        }
+      }
+
+      const maxSeam = Math.max(...seamDiffs);
+      const maxInternal = Math.max(...internalDiffs);
+      assert.ok(
+        maxSeam <= maxInternal * 1.5 + 1,
+        `Wrap seam delta ${maxSeam} exceeds internal max ${maxInternal}`
+      );
+    }
+  },
+  {
+    name: 'Surface v6 water fraction remains stable across resolutions',
+    run: () => {
+      const worldSeed = 618;
+      const systemId = 'sys_surface_scale_v6';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const baseDescriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
+      const smallDescriptor = {
+        ...baseDescriptor,
+        config: { ...baseDescriptor.config, w: 64, h: 32 }
+      };
+      const largeDescriptor = {
+        ...baseDescriptor,
+        config: { ...baseDescriptor.config, w: 128, h: 64 }
+      };
+
+      const mapSmall = generateSurfaceMap({ systemId, bodyId: body.id, descriptor: smallDescriptor, planetData, ownerFactionId: null });
+      const mapLarge = generateSurfaceMap({ systemId, bodyId: body.id, descriptor: largeDescriptor, planetData, ownerFactionId: null });
+      const waterSmall = mapSmall.tiles.filter(t => engine_isWaterBiome(t.biome)).length / mapSmall.tiles.length;
+      const waterLarge = mapLarge.tiles.filter(t => engine_isWaterBiome(t.biome)).length / mapLarge.tiles.length;
+      const delta = Math.abs(waterSmall - waterLarge);
+      assert.ok(delta <= 0.1, `Water fraction drift ${delta} exceeds tolerance`);
+    }
+  },
+  {
+    name: 'Surface v6 water/land respects sea level after cleanup',
+    run: () => {
+      const worldSeed = 278;
+      const systemId = 'sys_surface_sea_level_v6';
+      const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
+      const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
+      const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
+
+      const seaLevel = map.seaLevelElev;
+      const tolerance = 1;
+      for (const tile of map.tiles) {
+        if (engine_isWaterBiome(tile.biome)) {
+          assert.ok(tile.elev <= seaLevel + tolerance, `Water tile above sea level: ${tile.elev} > ${seaLevel}`);
+        } else if (tile.biome !== 'ice') {
+          assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
+        }
+      }
+    }
   }
 );
 

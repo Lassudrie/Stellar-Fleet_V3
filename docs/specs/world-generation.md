@@ -48,6 +48,9 @@ Notes astro :
 - La métallicité `[Fe/H]` suit un gradient radial (centre → bord) avec dispersion déterministe.
 - Un âge stellaire (bins `young/mid/old`) est assigné ; les types B/O (et une partie des A) sont réservés aux systèmes jeunes.
 
+Note surfaces :
+- Le moteur de surface (PlanetSurface) utilise un champ de terrain continu (TerrainField v6) comme source de vérité, puis dérive la carte 2D et les textures 3D via sampling déterministe.
+
 ## 6. Distribution des Flottes et Armées Initiales
 Les flottes décrites dans `setup.initialFleets` sont instanciées par faction :
 - **Spawn** :  
