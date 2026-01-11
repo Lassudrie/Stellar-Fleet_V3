@@ -2,8 +2,11 @@ import { distSq } from './math/vec3';
 
 type PositionedEntity = { position: { x: number; y: number; z: number } };
 
+const INDEX_OFFSET = 32768;
+
 export class SpatialIndex<T extends PositionedEntity> {
-  private readonly buckets = new Map<string, T[]>();
+  // Key is packed integer: ((x + OFFSET) << 16) | (z + OFFSET)
+  private readonly buckets = new Map<number, T[]>();
   private readonly cellSize: number;
   private readonly minCell: { x: number; z: number } = { x: Infinity, z: Infinity };
   private readonly maxCell: { x: number; z: number } = { x: -Infinity, z: -Infinity };
@@ -42,17 +45,15 @@ export class SpatialIndex<T extends PositionedEntity> {
   }
 
   private getKey(x: number, z: number) {
-    return `${x}:${z}`;
+    return ((x + INDEX_OFFSET) << 16) | (z + INDEX_OFFSET);
   }
 
-  private getCellsInRadius(center: { x: number; z: number }, cellRadius: number) {
-    const cells: Array<{ x: number; z: number }> = [];
+  private forEachCellInSquare(center: { x: number; z: number }, cellRadius: number, callback: (x: number, z: number) => void) {
     for (let x = center.x - cellRadius; x <= center.x + cellRadius; x += 1) {
       for (let z = center.z - cellRadius; z <= center.z + cellRadius; z += 1) {
-        cells.push({ x, z });
+        callback(x, z);
       }
     }
-    return cells;
   }
 
   private getSearchBounds(center: { x: number; z: number }, cellRadius: number) {
@@ -96,15 +97,16 @@ export class SpatialIndex<T extends PositionedEntity> {
     const maxDistanceSq = maxDistance * maxDistance;
     const candidates: T[] = [];
 
-    this.getCellsInRadius(center, cellRadius).forEach(cell => {
-      const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+    this.forEachCellInSquare(center, cellRadius, (cx, cz) => {
+      const bucket = this.buckets.get(this.getKey(cx, cz));
       if (!bucket) return;
 
-      bucket.forEach(item => {
+      for (let i = 0; i < bucket.length; i++) {
+        const item = bucket[i];
         if (distSq(item.position, position) <= maxDistanceSq) {
           candidates.push(item);
         }
-      });
+      }
     });
 
     return candidates;
@@ -128,20 +130,19 @@ export class SpatialIndex<T extends PositionedEntity> {
     let bestDistanceSq = Infinity;
 
     for (let cellRadius = 0; cellRadius <= maxRadius; cellRadius += 1) {
-      const cells = this.getCellsInRadius(center, cellRadius);
-
-      cells.forEach(cell => {
-        const bucket = this.buckets.get(this.getKey(cell.x, cell.z));
+      this.forEachCellInSquare(center, cellRadius, (cx, cz) => {
+        const bucket = this.buckets.get(this.getKey(cx, cz));
         if (!bucket) return;
 
-        bucket.forEach(item => {
-          if (predicate && !predicate(item)) return;
+        for (let i = 0; i < bucket.length; i++) {
+          const item = bucket[i];
+          if (predicate && !predicate(item)) continue;
           const distanceSq = distSq(item.position, position);
           if (distanceSq < bestDistanceSq) {
             bestDistanceSq = distanceSq;
             bestItem = item;
           }
-        });
+        }
       });
 
       if (bestItem) {
