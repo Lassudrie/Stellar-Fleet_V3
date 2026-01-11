@@ -148,7 +148,7 @@ export const fr = {
   'systemView.bodyInfo.clearSelection': 'Effacer la sélection',
   'systemView.bodyInfo.unknown': 'Inconnu',
   'systemView.bodyList.title': 'Corps du système',
-  'systemView.bodyList.open': 'Système',
+  'systemView.bodyList.open': 'Système {{system}}',
   'systemView.bodyList.close': 'Fermer',
   'systemView.objectInfo.title': 'Infos objet',
   'systemView.objectInfo.hoverHint': 'Survolez ou cliquez un objet pour l\u2019inspecter.',

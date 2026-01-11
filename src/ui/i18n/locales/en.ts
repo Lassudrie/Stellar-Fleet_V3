@@ -149,7 +149,7 @@ export const en = {
   'systemView.bodyInfo.clearSelection': 'Clear selection',
   'systemView.bodyInfo.unknown': 'Unknown',
   'systemView.bodyList.title': 'System bodies',
-  'systemView.bodyList.open': 'Bodies',
+  'systemView.bodyList.open': 'System {{system}}',
   'systemView.bodyList.close': 'Close',
   'systemView.objectInfo.title': 'Object info',
   'systemView.objectInfo.hoverHint': 'Hover or click an object to inspect it.',

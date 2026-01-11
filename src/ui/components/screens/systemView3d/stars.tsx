@@ -141,7 +141,7 @@ const createStarfieldTexture = (seedKey: string, tintColor: string): CanvasTextu
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
   const rand = createSeededRandom(seed);
   const base = new Color(STARFIELD_BASE_COLOR);
-  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.7);
+  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.92);
 
   const background = base.clone().lerp(tint, STARFIELD_BASE_TINT_STRENGTH);
   context.fillStyle = background.getStyle();
@@ -183,7 +183,7 @@ const createStarfieldPointsData = (seedKey: string, tintColor: string): Starfiel
   const brightCount = Math.max(1, Math.round(STARFIELD_POINT_COUNT * STARFIELD_POINT_BRIGHT_FRACTION));
   const dimCount = Math.max(0, STARFIELD_POINT_COUNT - brightCount);
   const baseStar = new Color('#ffffff');
-  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.25);
+  const tint = new Color(tintColor).lerp(new Color('#0b1020'), 0.88);
 
   const makeBuffers = (count: number) => ({
     positions: new Float32Array(count * 3),

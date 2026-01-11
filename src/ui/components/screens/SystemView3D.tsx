@@ -1623,8 +1623,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           )}
         </Selection>
       </Canvas>
-      {onBack && (
-        <div className="pointer-events-none absolute inset-0 flex items-start justify-start p-4">
+      <div className="pointer-events-none absolute left-4 top-4 z-40 flex items-center gap-3">
+        {onBack && (
           <button
             type="button"
             onClick={onBack}
@@ -1639,34 +1639,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               />
             </svg>
           </button>
-        </div>
-      )}
-      {showSurfaceDebug && surfaceDebug && (
-        <div className="pointer-events-none absolute right-4 top-4 z-40 rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-[11px] text-slate-100 shadow-lg">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-            Surface Textures
-          </div>
-          <div className="flex gap-3 text-slate-200">
-            <span>cache: {surfaceDebug.cacheSize}</span>
-            <span>inflight: {surfaceDebug.inflightSize}</span>
-          </div>
-          <div className="mt-2 space-y-1 text-slate-300">
-            {surfaceDebug.activeBodies.map((body) => (
-              <div key={body.bodyId} className="flex items-center gap-2">
-                <span className="min-w-[90px] truncate">{body.bodyId}</span>
-                <span className="text-slate-500">{Math.round(body.diameterPx)}px</span>
-                <span className="text-slate-400">
-                  {body.resolution ? `${body.resolution.width}x${body.resolution.height}` : 'off'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="pointer-events-none absolute inset-0 z-30">
-        <div className="pointer-events-auto absolute left-4 top-16">
+        )}
+        <div className="pointer-events-auto relative">
           {isBodyListOpen ? (
-            <div className="w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-700 bg-slate-900/90 shadow-2xl backdrop-blur">
+            <div className="absolute left-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-700 bg-slate-900/90 shadow-2xl backdrop-blur">
               <div className="flex items-center justify-between border-b border-slate-700 px-3 py-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                   {t('systemView.bodyList.title')}
@@ -1703,11 +1679,33 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               className="rounded-full border border-slate-700 bg-slate-900/85 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 shadow transition hover:border-slate-500 hover:bg-slate-800"
               aria-label={t('systemView.bodyList.open')}
             >
-              {t('systemView.bodyList.open')}
+              {t('systemView.bodyList.open', { system: starSystem.name })}
             </button>
           )}
         </div>
       </div>
+      {showSurfaceDebug && surfaceDebug && (
+        <div className="pointer-events-none absolute right-4 top-4 z-40 rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-[11px] text-slate-100 shadow-lg">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Surface Textures
+          </div>
+          <div className="flex gap-3 text-slate-200">
+            <span>cache: {surfaceDebug.cacheSize}</span>
+            <span>inflight: {surfaceDebug.inflightSize}</span>
+          </div>
+          <div className="mt-2 space-y-1 text-slate-300">
+            {surfaceDebug.activeBodies.map((body) => (
+              <div key={body.bodyId} className="flex items-center gap-2">
+                <span className="min-w-[90px] truncate">{body.bodyId}</span>
+                <span className="text-slate-500">{Math.round(body.diameterPx)}px</span>
+                <span className="text-slate-400">
+                  {body.resolution ? `${body.resolution.width}x${body.resolution.height}` : 'off'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {bodyContextMenu && contextMenuBody && (contextMenuPosition ?? bodyContextMenu.position) && (
         <div
           ref={contextMenuRef}
