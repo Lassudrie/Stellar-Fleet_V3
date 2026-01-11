@@ -6,14 +6,13 @@ import {
   AmbientLight,
   BufferAttribute,
   Color,
+  LineBasicMaterial,
   MathUtils,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PCFSoftShadowMap,
   PointLight,
   SRGBColorSpace,
-  ShadowMaterial,
   SphereGeometry,
   Vector2,
   Vector3
@@ -80,7 +79,6 @@ import {
   MIN_STAR_RADIUS,
   MOON_SPIN_REFERENCE_RADIUS_FACTOR,
   MOON_TYPE_COLORS,
-  ORBIT_THICKNESS,
   PLANET_SPIN_REFERENCE_RADIUS_FACTOR,
   PLANET_TYPE_COLORS,
   positionFromSpherical,
@@ -313,7 +311,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   );
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
-  const orbitThickness = ORBIT_THICKNESS * clampedScale;
   const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
   const minMoonRadius = minPlanetRadius / 3;
   const minStarRadius = MIN_STAR_RADIUS * clampedScale;
@@ -474,16 +471,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   ]);
 
   const orbitMaterial = useDisposableMemo(
-    () => new MeshBasicMaterial({ color: '#334155', transparent: true, opacity: 0.8 }),
+    () => new LineBasicMaterial({
+      color: '#334155',
+      transparent: true,
+      opacity: 0.75,
+      depthTest: false,
+      depthWrite: false
+    }),
     []
   );
-  const orbitShadowMaterial = useDisposableMemo(() => {
-    const material = new ShadowMaterial();
-    material.opacity = 0.32;
-    material.transparent = true;
-    material.depthWrite = false;
-    return material;
-  }, []);
 
   const planetMaterialMap = useMemo<Record<PlanetType, MeshStandardMaterial>>(() => {
     const materials = Object.entries(PLANET_TYPE_COLORS).reduce((acc, [type, color]) => {
@@ -1541,19 +1537,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 stars={starModels}
                 starGeometry={starGeometry}
                 planets={planets}
-                orbitMaterial={orbitMaterial}
-                orbitShadowMaterial={orbitShadowMaterial}
-                planetGeometry={planetGeometry}
-                planetGeometryHigh={planetGeometryHigh}
-                moonGeometry={moonGeometry}
-                moonGeometryHigh={moonGeometryHigh}
-                resolvePlanetMaterial={resolvePlanetMaterial}
-                resolveMoonMaterial={resolveMoonMaterial}
-                resolveAtmosphereBundle={resolveAtmosphereBundle}
-                orbitThickness={orbitThickness}
-                starSpinReferenceRadius={starSpinReferenceRadius}
-                planetSpinReferenceRadius={planetSpinReferenceRadius}
-                moonSpinReferenceRadius={moonSpinReferenceRadius}
+              orbitMaterial={orbitMaterial}
+              planetGeometry={planetGeometry}
+              planetGeometryHigh={planetGeometryHigh}
+              moonGeometry={moonGeometry}
+              moonGeometryHigh={moonGeometryHigh}
+              resolvePlanetMaterial={resolvePlanetMaterial}
+              resolveMoonMaterial={resolveMoonMaterial}
+              resolveAtmosphereBundle={resolveAtmosphereBundle}
+              starSpinReferenceRadius={starSpinReferenceRadius}
+              planetSpinReferenceRadius={planetSpinReferenceRadius}
+              moonSpinReferenceRadius={moonSpinReferenceRadius}
                 highDetailBodyId={highDetailBodyId}
                 fixedTerminator={fixedTerminator}
                 hitboxScaleMultiplier={hitboxScaleMultiplier}
