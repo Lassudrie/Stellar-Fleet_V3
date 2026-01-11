@@ -468,8 +468,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       index,
       sourcePlanets.length,
       sceneScale,
-      minPlanetRadius,
-      minMoonRadius,
       orbitMassSun,
       day
     ));
@@ -480,8 +478,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return applyPlanetOrbitSpacing(planetsWithSpacedMoons, starRadius, planetOrbitClearance);
   }, [
     day,
-    minMoonRadius,
-    minPlanetRadius,
     moonOrbitClearance,
     orbitMassSun,
     planetOrbitClearance,

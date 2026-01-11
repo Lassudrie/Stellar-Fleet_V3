@@ -224,17 +224,17 @@ float sunDistance = length(sunVec);
 vec3 sunDir = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
 float nDotL = dot(normalize(vWorldNormal), sunDir);
 float terminator = smoothstep(-uTerminatorSoftness, uTerminatorSoftness, nDotL);
-float lightFactor = mix(uNightMin, 1.0, terminator);
 float nightMask = 1.0 - terminator;
 vec3 emissiveRadiance = totalEmissiveRadiance;
 vec3 lit = outgoingLight - emissiveRadiance;
-lit *= lightFactor;
+vec3 nightFill = diffuseColor.rgb * uNightMin;
+lit = mix(nightFill, lit, terminator);
 outgoingLight = lit + emissiveRadiance * nightMask;
 #include <opaque_fragment>`
       );
   };
 
-  material.customProgramCacheKey = () => 'sf_day_night_terminator_v2';
+  material.customProgramCacheKey = () => 'sf_day_night_terminator_v3';
   material.needsUpdate = true;
 };
 

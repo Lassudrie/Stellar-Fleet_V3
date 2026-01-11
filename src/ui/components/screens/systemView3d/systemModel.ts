@@ -240,8 +240,6 @@ export const buildPlanetModel = (
   index: number,
   _total: number,
   sceneScale: number,
-  minPlanetRadius: number,
-  minMoonRadius: number,
   orbitMassSun: number,
   day: number
 ): OrbitingPlanet => {
@@ -258,7 +256,7 @@ export const buildPlanetModel = (
     ? planet.orbitAscendingNodeDeg
     : getPlanetOrbitAscendingNodeDeg(planetId);
   const orbitRadius = semiMajorAxisKm * sceneScale;
-  const radius = Math.max(radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minPlanetRadius);
+  const radius = radiusKm * sceneScale * RADIUS_VISIBILITY_BONUS;
   const planetType = getPlanetType(planet);
   const isSolid = (planet as { isSolid?: boolean }).isSolid ?? true;
   const planetData = planet as Partial<PlanetData>;
@@ -283,7 +281,7 @@ export const buildPlanetModel = (
     const moonData = moon as Partial<MoonData>;
     return {
       id: moonId,
-      radius: Math.max(moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS, minMoonRadius),
+      radius: moonRadiusKm * sceneScale * RADIUS_VISIBILITY_BONUS,
       orbitRadius: moonOrbitRadius,
       orbitAngle: moonAngle,
       orbitInclinationDeg: moonInclinationDeg,
