@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import {
   AdditiveBlending,
   BackSide,
@@ -9,7 +9,9 @@ import {
   Mesh,
   NormalBlending,
   ShaderMaterial,
-  SphereGeometry
+  SphereGeometry,
+  Vector2,
+  Vector3
 } from 'three';
 import type { AtmosphereType } from '../../../../shared/shared';
 import { CLOUD_NOISE_SPEED_MIN, DAY_NIGHT_TERMINATOR_SOFTNESS } from './config';
@@ -17,6 +19,7 @@ import { CLOUD_NOISE_SPEED_MIN, DAY_NIGHT_TERMINATOR_SOFTNESS } from './config';
 export type AtmosphereLayerBundle = {
   lower: { material: ShaderMaterial; scale: number };
   haze: { material: ShaderMaterial; scale: number };
+  halo?: { material: ShaderMaterial; scale: number };
   clouds?: { material: ShaderMaterial; scale: number };
 };
 
@@ -206,6 +209,43 @@ export const ATMOSPHERE_STYLE: Record<Exclude<AtmosphereType, 'None'>, Atmospher
       bandFrequency: 18
     }
   }
+};
+
+const STAR_HALO_TINTS: Record<string, [number, number, number]> = {
+  O: [0.7, 0.8, 1.0],
+  B: [0.75, 0.82, 1.0],
+  A: [0.83, 0.88, 1.0],
+  F: [1.0, 0.97, 0.9],
+  G: [1.0, 0.95, 0.85],
+  K: [1.0, 0.88, 0.7],
+  M: [1.0, 0.8, 0.6]
+};
+
+const ATMOSPHERE_HALO_TINTS: Record<Exclude<AtmosphereType, 'None'>, [number, number, number]> = {
+  Thin: [0.6, 0.7, 1.0],
+  Earthlike: [0.5, 0.6, 1.0],
+  CO2: [1.0, 0.7, 0.6],
+  H2He: [0.6, 0.9, 1.0]
+};
+
+export const resolveStarHaloTint = (spectralType: string | undefined): Color => {
+  const key = spectralType?.trim().charAt(0).toUpperCase();
+  const tint = key ? STAR_HALO_TINTS[key] : undefined;
+  if (tint) {
+    return new Color(tint[0], tint[1], tint[2]);
+  }
+  return new Color(1, 1, 1);
+};
+
+export const resolveAtmosphereHaloTint = (atmosphere: AtmosphereType): Color => {
+  if (atmosphere === 'None') {
+    return new Color(1, 1, 1);
+  }
+  const tint = ATMOSPHERE_HALO_TINTS[atmosphere];
+  if (tint) {
+    return new Color(tint[0], tint[1], tint[2]);
+  }
+  return new Color(1, 1, 1);
 };
 
 const fallbackAirMassIndex = (atmosphere: AtmosphereType): number => {
@@ -501,18 +541,111 @@ export const createCloudLayerMaterial = (params: {
   });
 };
 
+export const createAtmosphereHaloMaterial = (params: {
+  sunPosition: Vector3;
+  starTint: Color;
+  atmosphereTint: Color;
+  haloStrength: number;
+  rimPower: number;
+  dayPower: number;
+  boostMax: number;
+  nearFactor: number;
+  farFactor: number;
+  radius: number;
+}): ShaderMaterial => {
+  return new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: BackSide,
+    uniforms: {
+      uStarTint: { value: params.starTint },
+      uAtmoTint: { value: params.atmosphereTint },
+      uHaloStrength: { value: params.haloStrength },
+      uK: { value: params.rimPower },
+      uM: { value: params.dayPower },
+      uCamDist: { value: params.radius * params.farFactor },
+      uDistParams: { value: new Vector2(params.nearFactor, params.farFactor) },
+      uBoostMax: { value: params.boostMax },
+      uSunPosition: { value: params.sunPosition.clone() },
+      uRadius: { value: params.radius }
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uStarTint;
+      uniform vec3 uAtmoTint;
+      uniform float uHaloStrength;
+      uniform float uK;
+      uniform float uM;
+      uniform float uCamDist;
+      uniform vec2 uDistParams;
+      uniform float uBoostMax;
+      uniform vec3 uSunPosition;
+      uniform float uRadius;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+
+      float saturate(float x) { return clamp(x, 0.0, 1.0); }
+      float remap(float x, float a, float b, float c, float d) {
+        float t = saturate((x - a) / max(b - a, 0.0001));
+        return mix(c, d, t);
+      }
+
+      void main() {
+        vec3 N = normalize(vWorldNormal);
+        #ifdef FLIP_SIDED
+          N = -N;
+        #endif
+        vec3 V = normalize(cameraPosition - vWorldPosition);
+        vec3 sunVec = uSunPosition - vWorldPosition;
+        float sunDistance = length(sunVec);
+        vec3 L = sunDistance > 0.000001 ? (sunVec / sunDistance) : vec3(0.0, 0.0, 1.0);
+        float NdotV = saturate(dot(N, V));
+        float NdotL = saturate(dot(N, L));
+
+        float dNear = uRadius * uDistParams.x;
+        float dFar = uRadius * uDistParams.y;
+        float distanceBoost = remap(uCamDist, dNear, dFar, uBoostMax, 1.0);
+        float halo = uHaloStrength * pow(saturate(1.0 - NdotV), uK) * pow(NdotL, uM) * distanceBoost;
+        if (halo <= 0.00001) discard;
+
+        vec3 starTint = normalize(max(uStarTint, vec3(0.0001)));
+        vec3 hue = starTint * uAtmoTint;
+        vec3 col = hue * halo;
+        gl_FragColor = vec4(col, halo);
+      }
+    `,
+    toneMapped: false
+  });
+};
+
 export const AtmosphereStack: React.FC<{
   geometry: SphereGeometry;
   radius: number;
   bundle: AtmosphereLayerBundle;
   cloudSpinSpeed?: number;
   cloudNoiseSpeed?: number;
-}> = ({ geometry, radius, bundle, cloudSpinSpeed, cloudNoiseSpeed }) => {
+  sunPosition: Vector3;
+}> = ({ geometry, radius, bundle, cloudSpinSpeed, cloudNoiseSpeed, sunPosition }) => {
+  const { camera } = useThree();
+  const haloMeshRef = useRef<Mesh>(null);
   const cloudRadius = bundle.clouds ? radius * bundle.clouds.scale : 0;
+  const haloRadius = bundle.halo ? radius * bundle.halo.scale : 0;
   const lowerRadius = radius * bundle.lower.scale;
   const hazeRadius = radius * bundle.haze.scale;
   const cloudMeshRef = useRef<Mesh>(null);
   const cloudTimeRef = useRef(0);
+  const haloWorldRef = useRef(new Vector3());
+  const cameraWorldRef = useRef(new Vector3());
 
   useEffect(() => {
     cloudTimeRef.current = 0;
@@ -520,21 +653,45 @@ export const AtmosphereStack: React.FC<{
       bundle.clouds.material.uniforms.uTime.value = 0;
     }
   }, [bundle.clouds?.material]);
+  useEffect(() => {
+    if (bundle.halo?.material.uniforms.uSunPosition) {
+      bundle.halo.material.uniforms.uSunPosition.value.copy(sunPosition);
+    }
+  }, [bundle.halo?.material, sunPosition]);
 
   useFrame((_, delta) => {
-    if (!bundle.clouds) return;
-    if (cloudMeshRef.current && typeof cloudSpinSpeed === 'number') {
-      cloudMeshRef.current.rotation.y += delta * cloudSpinSpeed;
+    if (bundle.clouds) {
+      if (cloudMeshRef.current && typeof cloudSpinSpeed === 'number') {
+        cloudMeshRef.current.rotation.y += delta * cloudSpinSpeed;
+      }
+      if (bundle.clouds.material.uniforms.uTime) {
+        const speed = cloudNoiseSpeed ?? CLOUD_NOISE_SPEED_MIN;
+        cloudTimeRef.current += delta * speed;
+        bundle.clouds.material.uniforms.uTime.value = cloudTimeRef.current;
+      }
     }
-    if (bundle.clouds.material.uniforms.uTime) {
-      const speed = cloudNoiseSpeed ?? CLOUD_NOISE_SPEED_MIN;
-      cloudTimeRef.current += delta * speed;
-      bundle.clouds.material.uniforms.uTime.value = cloudTimeRef.current;
+    if (bundle.halo?.material.uniforms.uCamDist && haloMeshRef.current) {
+      camera.getWorldPosition(cameraWorldRef.current);
+      haloMeshRef.current.getWorldPosition(haloWorldRef.current);
+      bundle.halo.material.uniforms.uCamDist.value = cameraWorldRef.current.distanceTo(haloWorldRef.current);
     }
   });
 
   return (
     <group raycast={() => null}>
+      {bundle.halo && (
+        <mesh
+          geometry={geometry}
+          material={bundle.halo.material}
+          scale={[haloRadius, haloRadius, haloRadius]}
+          castShadow={false}
+          receiveShadow={false}
+          frustumCulled
+          raycast={() => null}
+          renderOrder={3.2}
+          ref={haloMeshRef}
+        />
+      )}
       {bundle.clouds && (
         <mesh
           geometry={geometry}

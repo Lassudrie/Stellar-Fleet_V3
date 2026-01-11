@@ -8,7 +8,8 @@ import {
   MeshStandardMaterial,
   RingGeometry,
   ShadowMaterial,
-  SphereGeometry
+  SphereGeometry,
+  Vector3
 } from 'three';
 import { hashStringToUnit } from '../systemViewLayout';
 import {
@@ -46,6 +47,7 @@ interface MoonOrbitGroupProps {
   spinReferenceRadius: number;
   fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
+  sunPosition: Vector3;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onPressEnd: () => void;
@@ -66,6 +68,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   spinReferenceRadius,
   fixedTerminator,
   hitboxScaleMultiplier,
+  sunPosition,
   onPressStart,
   onPressMove,
   onPressEnd,
@@ -247,6 +250,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
               bundle={atmosphereBundle}
               cloudSpinSpeed={cloudSpinSpeed}
               cloudNoiseSpeed={cloudNoiseSpeed}
+              sunPosition={sunPosition}
             />
           )}
         </group>
@@ -272,6 +276,7 @@ interface PlanetOrbitGroupProps {
   highDetailBodyId: string | null;
   fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
+  sunPosition: Vector3;
   onPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onPressEnd: () => void;
@@ -299,6 +304,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   highDetailBodyId,
   fixedTerminator,
   hitboxScaleMultiplier,
+  sunPosition,
   onPressStart,
   onPressMove,
   onPressEnd,
@@ -484,6 +490,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               bundle={atmosphereBundle}
               cloudSpinSpeed={cloudSpinSpeed}
               cloudNoiseSpeed={cloudNoiseSpeed}
+              sunPosition={sunPosition}
             />
           )}
         </group>
@@ -502,6 +509,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               spinReferenceRadius={moonSpinReferenceRadius}
               fixedTerminator={fixedTerminator}
               hitboxScaleMultiplier={hitboxScaleMultiplier}
+              sunPosition={sunPosition}
               onPressStart={onPressStart}
               onPressMove={onPressMove}
               onPressEnd={onPressEnd}
@@ -538,6 +546,7 @@ interface SystemCelestialLayerProps {
   highDetailBodyId: string | null;
   fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
+  sunPosition: Vector3;
   onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onBodyPressEnd: () => void;
@@ -568,6 +577,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   highDetailBodyId,
   fixedTerminator,
   hitboxScaleMultiplier,
+  sunPosition,
   onBodyPressStart,
   onBodyPressMove,
   onBodyPressEnd,
@@ -618,6 +628,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           highDetailBodyId={highDetailBodyId}
           fixedTerminator={fixedTerminator}
           hitboxScaleMultiplier={hitboxScaleMultiplier}
+          sunPosition={sunPosition}
           onPressStart={onBodyPressStart}
           onPressMove={onBodyPressMove}
           onPressEnd={onBodyPressEnd}

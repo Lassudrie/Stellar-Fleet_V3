@@ -48,10 +48,18 @@ import {
   applyMoonOrbitSpacing,
   applyPlanetOrbitSpacing,
   ATMOSPHERE_STYLE,
+  ATMOSPHERE_HALO_BOOST_MAX,
+  ATMOSPHERE_HALO_FAR_FACTOR,
+  ATMOSPHERE_HALO_K,
+  ATMOSPHERE_HALO_M,
+  ATMOSPHERE_HALO_NEAR_FACTOR,
+  ATMOSPHERE_HALO_STRENGTH,
+  ATMOSPHERE_HALO_THICKNESS,
   buildPlanetModel,
   computeFleetRingBaseRadius,
   computeInclinedOrbitPosition,
   computeOrbitAngle,
+  createAtmosphereHaloMaterial,
   createAtmosphereLayerMaterial,
   createCloudLayerMaterial,
   createFallbackStarOrbit,
@@ -83,6 +91,8 @@ import {
   POST_FX_MSAA_SAMPLES_MOBILE,
   RADIUS_VISIBILITY_BONUS,
   resolveAirMassIndex,
+  resolveAtmosphereHaloTint,
+  resolveStarHaloTint,
   resolveThermalTints,
   SOLAR_RADIUS_KM,
   STAR_SPIN_REFERENCE_RADIUS_FACTOR,
@@ -115,6 +125,11 @@ import type {
   PlanetSource,
   SystemCameraState
 } from './systemView3d';
+
+const envMeta =
+  typeof import.meta !== 'undefined'
+    ? (import.meta as ImportMeta & { env?: { DEV?: boolean } })
+    : undefined;
 
 interface SystemView3DProps {
   starSystem: StarSystem;
@@ -290,7 +305,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 }) => {
   const { t } = useI18n();
   const showSurfaceDebug = useMemo(() => {
-    if (!import.meta.env.DEV) return false;
+    if (!envMeta?.env?.DEV) return false;
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
     return params.get('surfaceDebug') === '1';
@@ -368,6 +383,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     () => new Vector3(...(primaryStar?.position ?? [0, 0, 0])),
     [primaryStar?.position]
   );
+  const starHaloTint = useMemo(
+    () => resolveStarHaloTint(primaryStar?.data.spectralType ?? astro?.primarySpectralType),
+    [astro?.primarySpectralType, primaryStar?.data.spectralType]
+  );
+  const starHaloKey = useMemo(() => {
+    const spectralType = primaryStar?.data.spectralType ?? astro?.primarySpectralType ?? 'G';
+    const key = spectralType.trim().charAt(0).toUpperCase() || 'G';
+    return `${key}:${starTintColor}`;
+  }, [astro?.primarySpectralType, primaryStar?.data.spectralType, starTintColor]);
   const orbitMassSun = Math.max(primaryStar?.data.massSun ?? 1, 0.1);
   const astroKey = useMemo(() => {
     if (!astro) return 'no-astro';
@@ -517,12 +541,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const disposeAtmosphereBundle = useCallback((bundle: AtmosphereLayerBundle) => {
     bundle.lower.material.dispose();
     bundle.haze.material.dispose();
+    bundle.halo?.material.dispose();
     bundle.clouds?.material.dispose();
   }, []);
   const clearAtmosphereCache = useCallback(() => {
     atmosphereBundleByBodyIdRef.current.forEach(entry => disposeAtmosphereBundle(entry));
     atmosphereBundleByBodyIdRef.current.clear();
-  }, [disposeAtmosphereBundle]);
+  }, [disposeAtmosphereBundle, starHaloKey, starHaloTint, sunPosition]);
   useEffect(() => () => clearAtmosphereCache(), [clearAtmosphereCache]);
   useEffect(() => {
     clearAtmosphereCache();
@@ -608,7 +633,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       }
     }
 
-    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}|${cloudsKey}`;
+    const thickness = style.baseThickness * MathUtils.lerp(0.55, 1.25, airMass);
+    const intensityFactor = MathUtils.lerp(0.65, 1.0, airMass);
+    const densityFactor = MathUtils.lerp(0.55, 1.0, airMass);
+    const haloStrength = ATMOSPHERE_HALO_STRENGTH * MathUtils.lerp(0.55, 1.15, airMass);
+    const haloScale = 1 + thickness * style.haze.thicknessMultiplier + ATMOSPHERE_HALO_THICKNESS;
+    const haloTint = resolveAtmosphereHaloTint(atmosphere);
+    const haloKey = `halo:${haloStrength.toFixed(3)}:${haloScale.toFixed(4)}:${starHaloKey}`;
+    const cacheKey = `${atmosphere}|${airMass.toFixed(3)}|${cloudsKey}|${haloKey}`;
 
     const existing = atmosphereBundleByBodyIdRef.current.get(body.id);
     if (existing && existing.key === cacheKey) return existing;
@@ -616,10 +648,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       disposeAtmosphereBundle(existing);
       atmosphereBundleByBodyIdRef.current.delete(body.id);
     }
-
-    const thickness = style.baseThickness * MathUtils.lerp(0.55, 1.25, airMass);
-    const intensityFactor = MathUtils.lerp(0.65, 1.0, airMass);
-    const densityFactor = MathUtils.lerp(0.55, 1.0, airMass);
 
     const bundle: AtmosphereBundleCacheEntry = {
       key: cacheKey,
@@ -656,6 +684,21 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           nightMin: style.haze.nightMin
         }),
         scale: 1 + thickness * style.haze.thicknessMultiplier
+      },
+      halo: {
+        material: createAtmosphereHaloMaterial({
+          sunPosition,
+          starTint: starHaloTint,
+          atmosphereTint: haloTint,
+          haloStrength,
+          rimPower: ATMOSPHERE_HALO_K,
+          dayPower: ATMOSPHERE_HALO_M,
+          boostMax: ATMOSPHERE_HALO_BOOST_MAX,
+          nearFactor: ATMOSPHERE_HALO_NEAR_FACTOR,
+          farFactor: ATMOSPHERE_HALO_FAR_FACTOR,
+          radius: body.radius
+        }),
+        scale: haloScale
       }
     };
 
@@ -1511,6 +1554,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
                 highDetailBodyId={highDetailBodyId}
                 fixedTerminator={fixedTerminator}
                 hitboxScaleMultiplier={hitboxScaleMultiplier}
+                sunPosition={sunPosition}
                 onBodyPressStart={handleBodyPressStart}
                 onBodyPressMove={handleBodyPressMove}
                 onBodyPressEnd={handleBodyPressEnd}
