@@ -1449,7 +1449,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }));
   const wantsBloom = !lowSpec;
   const wantsVignette = !lowSpec;
-  const needsPostFxForAa = !lowSpec && !rendererCaps.contextAntialias;
+  const needsPostFxForAa = !rendererCaps.contextAntialias;
   const enablePostFX = wantsBloom || wantsVignette || needsPostFxForAa;
   const enableShadows = !lowSpec;
   const enableAntialias = true;

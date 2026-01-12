@@ -119,7 +119,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     [orbitRadiiBright.inner, orbitRadiiBright.outer]
   );
   const orbitRotation = useMemo(() => {
-    const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
+    const inclination = MathUtils.degToRad(-moon.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
     return new Euler(inclination, ascendingNode, 0, 'YXZ');
   }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
@@ -375,7 +375,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     [orbitRadiiBright.inner, orbitRadiiBright.outer]
   );
   const orbitRotation = useMemo(() => {
-    const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
+    const inclination = MathUtils.degToRad(-planet.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
     return new Euler(inclination, ascendingNode, 0, 'YXZ');
   }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
