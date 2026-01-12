@@ -1016,7 +1016,19 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
-  const highDetailBodyId = lowSpec ? null : (selectedBodyId ?? hoveredBodyId ?? closeUpBodyId ?? null);
+  const resolveHighDetailBodyId = useCallback((bodyId: string | null): string | null => {
+    if (!bodyId) return null;
+    const body = bodyInfoMap[bodyId];
+    if (!body || body.bodyType === 'star') return null;
+    return bodyId;
+  }, [bodyInfoMap]);
+  const highDetailBodyId = lowSpec
+    ? null
+    : (
+      resolveHighDetailBodyId(selectedBodyId)
+      ?? resolveHighDetailBodyId(hoveredBodyId)
+      ?? resolveHighDetailBodyId(closeUpBodyId)
+    );
   const starSegments = lowSpec ? 48 : 64;
   const planetSegments = lowSpec ? 48 : 96;
   const moonSegments = lowSpec ? 32 : 64;
@@ -1098,6 +1110,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setContextMenuPosition(null);
   }, []);
   const handleBodyPressStart = useCallback((_bodyId: string, event: ThreeEvent<PointerEvent>) => {
+    bodyPressStateRef.current.suppressSelect = false;
     bodyPressStateRef.current.active = true;
     bodyPressStateRef.current.pointerId = event.pointerId ?? null;
     bodyPressStateRef.current.startX = event.clientX;
