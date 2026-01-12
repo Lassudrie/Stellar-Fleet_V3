@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { Select } from '@react-three/postprocessing';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import {
   BufferGeometry,
   Euler,
   Group,
-  LineBasicMaterial,
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  RingGeometry,
   SphereGeometry,
   Vector3
 } from 'three';
@@ -22,6 +23,7 @@ import {
   CLOUD_SPIN_MULTIPLIER_MIN,
   MOON_SPIN_SCALE_MAX,
   MOON_SPIN_SCALE_MIN,
+  ORBIT_THICKNESS,
   PLANET_SPIN_SCALE_MAX,
   PLANET_SPIN_SCALE_MIN
 } from './config';
@@ -36,24 +38,29 @@ import {
 } from './systemModel';
 import { StarMesh } from './stars';
 
-const buildOrbitLineGeometry = (radius: number, segments: number): BufferGeometry => {
-  const points: Vector3[] = [];
-  const step = (Math.PI * 2) / segments;
-  for (let i = 0; i < segments; i += 1) {
-    const angle = i * step;
-    points.push(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
-  }
-  const geometry = new BufferGeometry();
-  geometry.setFromPoints(points);
+const buildOrbitRingGeometry = (innerRadius: number, outerRadius: number, segments: number): BufferGeometry => {
+  const geometry = new RingGeometry(innerRadius, outerRadius, segments);
+  geometry.rotateX(-Math.PI / 2);
   return geometry;
+};
+
+const resolveOrbitRingRadii = (radius: number, thicknessScale = 1): { inner: number; outer: number } => {
+  if (radius <= 0) return { inner: 0.0001, outer: 0.0001 };
+  const offset = Math.min(Math.max(radius * 0.0025, ORBIT_THICKNESS) * thicknessScale, radius * 0.9) * 0.5;
+  return {
+    inner: radius - offset,
+    outer: radius + offset
+  };
 };
 
 interface MoonOrbitGroupProps {
   moon: OrbitingMoon;
-  orbitMaterial: LineBasicMaterial;
+  orbitMaterial: MeshBasicMaterial;
+  orbitMaterialShadow: MeshBasicMaterial;
   moonGeometry: SphereGeometry;
   moonMaterial: MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
+  enableBloom: boolean;
   spinReferenceRadius: number;
   fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
@@ -70,9 +77,11 @@ interface MoonOrbitGroupProps {
 const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string) => void }> = ({
   moon,
   orbitMaterial,
+  orbitMaterialShadow,
   moonGeometry,
   moonMaterial,
   resolveAtmosphereBundle,
+  enableBloom,
   spinReferenceRadius,
   fixedTerminator,
   hitboxScaleMultiplier,
@@ -93,14 +102,26 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     []
   );
   useEffect(() => () => hitboxMaterial.dispose(), [hitboxMaterial]);
-  const orbitGeometry = useDisposableMemo(
-    () => buildOrbitLineGeometry(moon.orbitRadius, 96),
+  const orbitRadii = useMemo(
+    () => resolveOrbitRingRadii(moon.orbitRadius),
     [moon.orbitRadius]
+  );
+  const orbitGeometryShadow = useDisposableMemo(
+    () => buildOrbitRingGeometry(orbitRadii.inner, orbitRadii.outer, 96),
+    [orbitRadii.inner, orbitRadii.outer]
+  );
+  const orbitRadiiBright = useMemo(
+    () => resolveOrbitRingRadii(moon.orbitRadius, 0.65),
+    [moon.orbitRadius]
+  );
+  const orbitGeometryBright = useDisposableMemo(
+    () => buildOrbitRingGeometry(orbitRadiiBright.inner, orbitRadiiBright.outer, 96),
+    [orbitRadiiBright.inner, orbitRadiiBright.outer]
   );
   const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
-    return new Euler(-Math.PI / 2 - inclination, -ascendingNode, 0, 'YXZ');
+    return new Euler(-inclination, ascendingNode, 0, 'YXZ');
   }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
@@ -142,6 +163,18 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
     const seed = hashStringToUnit(`${moon.id}-cloud-noise`);
     return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
   }, [moon.id]);
+  const atmosphereNode = atmosphereBundle
+    ? (
+      <AtmosphereStack
+        geometry={moonGeometry}
+        radius={moon.radius}
+        bundle={atmosphereBundle}
+        cloudSpinSpeed={cloudSpinSpeed}
+        cloudNoiseSpeed={cloudNoiseSpeed}
+        sunPosition={sunPosition}
+      />
+    )
+    : null;
   const spinGroupRef = useRef<Group>(null);
 
   useFrame((_, delta) => {
@@ -152,13 +185,21 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
 
   return (
     <group>
-      <lineLoop
-        geometry={orbitGeometry}
-        material={orbitMaterial}
+      <mesh
+        geometry={orbitGeometryShadow}
+        material={orbitMaterialShadow}
         rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={2}
+      />
+      <mesh
+        geometry={orbitGeometryBright}
+        material={orbitMaterial}
+        rotation={orbitRotation}
+        frustumCulled
+        raycast={() => null}
+        renderOrder={3}
       />
       <group position={moonPosition}>
         <group ref={spinGroupRef}>
@@ -248,16 +289,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             }}
             frustumCulled
           />
-          {atmosphereBundle && (
-            <AtmosphereStack
-              geometry={moonGeometry}
-              radius={moon.radius}
-              bundle={atmosphereBundle}
-              cloudSpinSpeed={cloudSpinSpeed}
-              cloudNoiseSpeed={cloudNoiseSpeed}
-              sunPosition={sunPosition}
-            />
-          )}
+          {atmosphereNode && (enableBloom ? <Select enabled>{atmosphereNode}</Select> : atmosphereNode)}
         </group>
       </group>
     </group>
@@ -266,14 +298,16 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
 
 interface PlanetOrbitGroupProps {
   planet: OrbitingPlanet;
-  orbitMaterial: LineBasicMaterial;
+  orbitMaterial: MeshBasicMaterial;
+  orbitMaterialShadow: MeshBasicMaterial;
   planetGeometry: SphereGeometry;
-  planetGeometryHigh: SphereGeometry;
+  planetGeometryHigh: SphereGeometry | null;
   moonGeometry: SphereGeometry;
-  moonGeometryHigh: SphereGeometry;
+  moonGeometryHigh: SphereGeometry | null;
   planetMaterial: MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
+  enableBloom: boolean;
   spinReferenceRadius: number;
   moonSpinReferenceRadius: number;
   highDetailBodyId: string | null;
@@ -293,6 +327,7 @@ interface PlanetOrbitGroupProps {
 const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   planet,
   orbitMaterial,
+  orbitMaterialShadow,
   planetGeometry,
   planetGeometryHigh,
   moonGeometry,
@@ -300,6 +335,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   planetMaterial,
   resolveMoonMaterial,
   resolveAtmosphereBundle,
+  enableBloom,
   spinReferenceRadius,
   moonSpinReferenceRadius,
   highDetailBodyId,
@@ -322,14 +358,26 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     []
   );
   useEffect(() => () => hitboxMaterial.dispose(), [hitboxMaterial]);
-  const orbitGeometry = useDisposableMemo(
-    () => buildOrbitLineGeometry(planet.orbitRadius, 128),
+  const orbitRadii = useMemo(
+    () => resolveOrbitRingRadii(planet.orbitRadius),
     [planet.orbitRadius]
+  );
+  const orbitGeometryShadow = useDisposableMemo(
+    () => buildOrbitRingGeometry(orbitRadii.inner, orbitRadii.outer, 128),
+    [orbitRadii.inner, orbitRadii.outer]
+  );
+  const orbitRadiiBright = useMemo(
+    () => resolveOrbitRingRadii(planet.orbitRadius, 0.65),
+    [planet.orbitRadius]
+  );
+  const orbitGeometryBright = useDisposableMemo(
+    () => buildOrbitRingGeometry(orbitRadiiBright.inner, orbitRadiiBright.outer, 128),
+    [orbitRadiiBright.inner, orbitRadiiBright.outer]
   );
   const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
-    return new Euler(-Math.PI / 2 - inclination, -ascendingNode, 0, 'YXZ');
+    return new Euler(-inclination, ascendingNode, 0, 'YXZ');
   }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
@@ -375,7 +423,21 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     return MathUtils.lerp(CLOUD_NOISE_SPEED_MIN, CLOUD_NOISE_SPEED_MAX, seed);
   }, [planet.id]);
   const spinGroupRef = useRef<Group>(null);
-  const planetGeometryActive = highDetailBodyId === planet.id ? planetGeometryHigh : planetGeometry;
+  const planetGeometryActive = highDetailBodyId === planet.id && planetGeometryHigh
+    ? planetGeometryHigh
+    : planetGeometry;
+  const atmosphereNode = atmosphereBundle
+    ? (
+      <AtmosphereStack
+        geometry={planetGeometryActive}
+        radius={planet.radius}
+        bundle={atmosphereBundle}
+        cloudSpinSpeed={cloudSpinSpeed}
+        cloudNoiseSpeed={cloudNoiseSpeed}
+        sunPosition={sunPosition}
+      />
+    )
+    : null;
 
   useFrame((_, delta) => {
     if (spinGroupRef.current) {
@@ -385,13 +447,21 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
 
   return (
     <group>
-      <lineLoop
-        geometry={orbitGeometry}
-        material={orbitMaterial}
+      <mesh
+        geometry={orbitGeometryShadow}
+        material={orbitMaterialShadow}
         rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={2}
+      />
+      <mesh
+        geometry={orbitGeometryBright}
+        material={orbitMaterial}
+        rotation={orbitRotation}
+        frustumCulled
+        raycast={() => null}
+        renderOrder={3}
       />
       <group position={planetPosition}>
         <group ref={spinGroupRef}>
@@ -481,27 +551,22 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             }}
             frustumCulled
           />
-          {atmosphereBundle && (
-            <AtmosphereStack
-              geometry={planetGeometryActive}
-              radius={planet.radius}
-              bundle={atmosphereBundle}
-              cloudSpinSpeed={cloudSpinSpeed}
-              cloudNoiseSpeed={cloudNoiseSpeed}
-              sunPosition={sunPosition}
-            />
-          )}
+          {atmosphereNode && (enableBloom ? <Select enabled>{atmosphereNode}</Select> : atmosphereNode)}
         </group>
         {planet.moons.map(moon => {
-          const moonGeometryActive = highDetailBodyId === moon.id ? moonGeometryHigh : moonGeometry;
+          const moonGeometryActive = highDetailBodyId === moon.id && moonGeometryHigh
+            ? moonGeometryHigh
+            : moonGeometry;
           return (
             <MoonOrbitGroup
               key={moon.id}
               moon={moon}
               orbitMaterial={orbitMaterial}
+              orbitMaterialShadow={orbitMaterialShadow}
               moonGeometry={moonGeometryActive}
               moonMaterial={resolveMoonMaterial(moon)}
               resolveAtmosphereBundle={resolveAtmosphereBundle}
+              enableBloom={enableBloom}
               spinReferenceRadius={moonSpinReferenceRadius}
               fixedTerminator={fixedTerminator}
               hitboxScaleMultiplier={hitboxScaleMultiplier}
@@ -526,11 +591,12 @@ interface SystemCelestialLayerProps {
   stars: OrbitingStar[];
   starGeometry: SphereGeometry;
   planets: OrbitingPlanet[];
-  orbitMaterial: LineBasicMaterial;
+  orbitMaterial: MeshBasicMaterial;
+  orbitMaterialShadow: MeshBasicMaterial;
   planetGeometry: SphereGeometry;
-  planetGeometryHigh: SphereGeometry;
+  planetGeometryHigh: SphereGeometry | null;
   moonGeometry: SphereGeometry;
-  moonGeometryHigh: SphereGeometry;
+  moonGeometryHigh: SphereGeometry | null;
   resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
@@ -541,6 +607,7 @@ interface SystemCelestialLayerProps {
   fixedTerminator: boolean;
   hitboxScaleMultiplier: number;
   sunPosition: Vector3;
+  enableBloom: boolean;
   onBodyPressStart: (bodyId: string, event: ThreeEvent<PointerEvent>) => void;
   onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onBodyPressEnd: () => void;
@@ -556,6 +623,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   starGeometry,
   planets,
   orbitMaterial,
+  orbitMaterialShadow,
   planetGeometry,
   planetGeometryHigh,
   moonGeometry,
@@ -570,6 +638,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   fixedTerminator,
   hitboxScaleMultiplier,
   sunPosition,
+  enableBloom,
   onBodyPressStart,
   onBodyPressMove,
   onBodyPressEnd,
@@ -583,22 +652,43 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
     <group name="SystemCelestialLayer">
       {stars.map((star) => (
         <group key={star.id} position={star.position}>
-          <StarMesh
-            radius={star.radius}
-            tintColor={star.tintColor}
-            surfaceTintColor={star.surfaceTintColor}
-            geometry={starGeometry}
-            seedKey={star.seedKey}
-            spinReferenceRadius={starSpinReferenceRadius}
-            enableLensFlare={star.data.role === 'primary'}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onFocusBody(star.id);
-            }}
-            onHover={() => onHoverBody(star.id)}
-            onBlur={() => onBlurBody(star.id)}
-            onSelect={(event) => onSelectBody(star.id, event)}
-          />
+          {enableBloom ? (
+            <Select enabled>
+              <StarMesh
+                radius={star.radius}
+                tintColor={star.tintColor}
+                surfaceTintColor={star.surfaceTintColor}
+                geometry={starGeometry}
+                seedKey={star.seedKey}
+                spinReferenceRadius={starSpinReferenceRadius}
+                enableLensFlare={star.data.role === 'primary'}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  onFocusBody(star.id);
+                }}
+                onHover={() => onHoverBody(star.id)}
+                onBlur={() => onBlurBody(star.id)}
+                onSelect={(event) => onSelectBody(star.id, event)}
+              />
+            </Select>
+          ) : (
+            <StarMesh
+              radius={star.radius}
+              tintColor={star.tintColor}
+              surfaceTintColor={star.surfaceTintColor}
+              geometry={starGeometry}
+              seedKey={star.seedKey}
+              spinReferenceRadius={starSpinReferenceRadius}
+              enableLensFlare={star.data.role === 'primary'}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                onFocusBody(star.id);
+              }}
+              onHover={() => onHoverBody(star.id)}
+              onBlur={() => onBlurBody(star.id)}
+              onSelect={(event) => onSelectBody(star.id, event)}
+            />
+          )}
         </group>
       ))}
       {planets.map(planet => (
@@ -606,6 +696,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           key={planet.id}
           planet={planet}
           orbitMaterial={orbitMaterial}
+          orbitMaterialShadow={orbitMaterialShadow}
           planetGeometry={planetGeometry}
           planetGeometryHigh={planetGeometryHigh}
           moonGeometry={moonGeometry}
@@ -613,6 +704,7 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           planetMaterial={resolvePlanetMaterial(planet)}
           resolveMoonMaterial={resolveMoonMaterial}
           resolveAtmosphereBundle={resolveAtmosphereBundle}
+          enableBloom={enableBloom}
           spinReferenceRadius={planetSpinReferenceRadius}
           moonSpinReferenceRadius={moonSpinReferenceRadius}
           highDetailBodyId={highDetailBodyId}

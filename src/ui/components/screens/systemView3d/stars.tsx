@@ -587,6 +587,9 @@ export const StarMesh: React.FC<StarMeshProps> = ({
       baseColors: [haloBaseColor, ringBaseColor, ghostBaseColor],
       sizeScales: [1, 0.75, 0.42],
       intensityScales: [1, 0.85, 0.65],
+      haloTexture,
+      ghostTexture,
+      ringTexture,
       smoothed: {
         intensity: 0,
         baseSizePx: LENS_FLARE_SIZE_MIN_PX
@@ -603,7 +606,11 @@ export const StarMesh: React.FC<StarMeshProps> = ({
 
   useEffect(() => {
     return () => {
-      lensFlareState?.lensflare.dispose();
+      if (!lensFlareState) return;
+      lensFlareState.lensflare.dispose();
+      lensFlareState.haloTexture.dispose();
+      lensFlareState.ghostTexture.dispose();
+      lensFlareState.ringTexture.dispose();
     };
   }, [lensFlareState]);
 

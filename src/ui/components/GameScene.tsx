@@ -148,7 +148,7 @@ const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boo
       {dashed ? (
           <lineDashedMaterial color={color} dashSize={1.5} gapSize={1.0} transparent opacity={0.6} />
       ) : (
-          <lineBasicMaterial color={color} transparent opacity={0.6} linewidth={1} />
+          <lineBasicMaterial color={color} transparent opacity={0.6} />
       )}
     </lineSegments>
   );

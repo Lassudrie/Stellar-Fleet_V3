@@ -51,9 +51,10 @@ export type TacticalPosition<T extends { id: string }> = {
 export const layoutTacticalRing = <T extends { id: string }>(
   entities: readonly T[],
   config: TacticalRingConfig,
-  day = 0
+  day = 0,
+  options?: { assumeSorted?: boolean }
 ): TacticalPosition<T>[] => {
-  const ordered = sorted(entities, compareIds);
+  const ordered = options?.assumeSorted ? entities : sorted(entities, compareIds);
   const ringCapacity = Math.max(1, Math.floor(config.maxPerRing));
   const ringSpacing = Math.max(config.ringSpacing, 0);
   const yOffset = config.yOffset ?? 0;

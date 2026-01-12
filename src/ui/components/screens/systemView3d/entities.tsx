@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Billboard, Text } from '@react-three/drei';
 import { type ThreeEvent } from '@react-three/fiber';
 import {
@@ -396,10 +396,15 @@ export const SystemEntitiesLayer: React.FC<SystemEntitiesLayerProps> = ({
   const stationGeometry = useDisposableMemo(() => new TorusGeometry(0.6, 0.18, 10, 24), []);
   const stationCoreGeometry = useDisposableMemo(() => new CylinderGeometry(0.35, 0.35, 0.8, 10), []);
   const selectionRingGeometry = useDisposableMemo(() => new RingGeometry(0.9, 1.15, 32), []);
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = 'auto';
+    };
+  }, []);
 
   const fleetLayouts = useMemo(() => layoutTacticalRing(fleets, {
     ...fleetLayoutConfig
-  }, day), [day, fleetLayoutConfig, fleets]);
+  }, day, { assumeSorted: true }), [day, fleetLayoutConfig, fleets]);
 
   const stationLayouts = useMemo(() => {
     const orderedStations = sorted(stations, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));

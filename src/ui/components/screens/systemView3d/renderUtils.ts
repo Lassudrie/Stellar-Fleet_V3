@@ -169,7 +169,6 @@ export const applyDayNightTerminator = (
       if (uniforms?.sunPosition) {
         uniforms.sunPosition.value.copy(material.userData.dayNightSunPosition);
       }
-      material.needsUpdate = true;
     }
     return;
   }

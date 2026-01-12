@@ -67,6 +67,14 @@ type SurfaceTextureDebugInfo = {
     isOnScreen: boolean;
   }>;
 };
+type BodyMetrics = { diameterPx: number; isOnScreen: boolean };
+type BodyInfo = {
+  isSolid: boolean;
+  isGasGiant: boolean;
+  planetType: PlanetType | null;
+  hasAtmosphere: boolean;
+  isMoon: boolean;
+};
 
 const SURFACE_TEXTURE_RESOLUTIONS: Array<SurfaceTextureResolution & { minDiameter: number }> = [
   { width: 256, height: 128, minDiameter: SURFACE_TEXTURE_MIN_DIAMETER_PX },
@@ -303,6 +311,9 @@ export const SystemSurfaceTextureManager: React.FC<{
   const inFlightRef = useRef<Map<string, { bodyId: string; epoch: number }>>(new Map());
   const desiredKeyByBodyIdRef = useRef<Map<string, string | null>>(new Map());
   const lastResolutionByBodyIdRef = useRef<Map<string, SurfaceTextureResolution>>(new Map());
+  const activeKeysRef = useRef<Set<string>>(new Set());
+  const bodyMetricsByIdRef = useRef<Map<string, BodyMetrics>>(new Map());
+  const bodyInfoByIdRef = useRef<Map<string, BodyInfo>>(new Map());
   const closeUpBodyIdRef = useRef<string | null>(null);
   const lastDebugUpdateRef = useRef(0);
   const requestStateRef = useRef<GameState | null>(null);
@@ -731,7 +742,12 @@ export const SystemSurfaceTextureManager: React.FC<{
     camera.updateMatrixWorld();
 
     const now = performance.now();
-    const activeKeys = new Set<string>();
+    const activeKeys = activeKeysRef.current;
+    const bodyMetricsById = bodyMetricsByIdRef.current;
+    const bodyInfoById = bodyInfoByIdRef.current;
+    activeKeys.clear();
+    bodyMetricsById.clear();
+    bodyInfoById.clear();
 
     const cameraFovRad = MathUtils.degToRad(camera.fov);
     const pixelRatio = (() => {
@@ -746,14 +762,6 @@ export const SystemSurfaceTextureManager: React.FC<{
     const pixelsPerWorldUnitAtZ1 = renderHeightPx / (2 * Math.tan(cameraFovRad / 2));
 
     const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
-    const bodyMetricsById = new Map<string, { diameterPx: number; isOnScreen: boolean }>();
-    const bodyInfoById = new Map<string, {
-      isSolid: boolean;
-      isGasGiant: boolean;
-      planetType: PlanetType | null;
-      hasAtmosphere: boolean;
-      isMoon: boolean;
-    }>();
     let ultraBodyId: string | null = null;
     let ultraDiameter = 0;
 

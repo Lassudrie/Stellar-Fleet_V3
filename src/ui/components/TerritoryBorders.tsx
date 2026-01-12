@@ -359,7 +359,6 @@ const TerritoryBorders: React.FC<TerritoryBordersProps> = React.memo(({ systems,
                             color={m.borderColor} 
                             transparent 
                             opacity={0.8} 
-                            linewidth={2} 
                             depthTest={false}
                             depthWrite={false}
                         />

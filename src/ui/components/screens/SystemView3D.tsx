@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, type ThreeEvent } from '@react-three/fiber';
-import { EffectComposer, Select, SelectiveBloom, Selection, SMAA, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, SelectiveBloom, Selection, SMAA, Vignette } from '@react-three/postprocessing';
 import {
   ACESFilmicToneMapping,
   AmbientLight,
   BufferAttribute,
   Color,
-  LineBasicMaterial,
+  DoubleSide,
   MathUtils,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PCFSoftShadowMap,
@@ -35,6 +36,7 @@ import type {
 import { sorted } from '../../../shared/shared';
 import { useI18n } from '../../i18n';
 import SystemBodyInfoPanel, { SystemBodyInfo } from '../ui/SystemBodyInfoPanel';
+import { computeConstrainedMenuPosition, type SafeAreaInsets, type ViewportRect } from '../ui/SystemContextMenu';
 import {
   getSystemFleets,
   hashStringToUnit,
@@ -224,19 +226,6 @@ type BodyContextMenuState = {
   position: { x: number; y: number };
 };
 
-type AnchorPoint = { x: number; y: number };
-type Size = { width: number; height: number };
-type ViewportRect = { left: number; top: number; width: number; height: number };
-type SafeAreaInsets = { top: number; right: number; bottom: number; left: number };
-type PositioningConstraints = {
-  anchor: AnchorPoint;
-  menuSize: Size;
-  viewport: ViewportRect;
-  safeInsets: SafeAreaInsets;
-  offset: number;
-  padding: number;
-};
-
 type BodyListItem = {
   id: string;
   name: string;
@@ -258,53 +247,13 @@ type SurfaceTextureDebugInfo = {
 const MENU_OFFSET = 12;
 const SAFE_PADDING = 8;
 const OVERLAY_ID = 'ui-overlay';
+const PRESS_DRAG_THRESHOLD_PX = 8;
 
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
     {children}
   </group>
 );
-
-const clamp = (value: number, min: number, max: number): number => {
-  if (min > max) return min;
-  return Math.min(Math.max(value, min), max);
-};
-
-const computeConstrainedMenuPosition = ({
-  anchor,
-  menuSize,
-  viewport,
-  safeInsets,
-  offset,
-  padding
-}: PositioningConstraints): AnchorPoint => {
-  const viewportRight = viewport.left + viewport.width;
-  const viewportBottom = viewport.top + viewport.height;
-
-  const minX = viewport.left + safeInsets.left + padding;
-  const minY = viewport.top + safeInsets.top + padding;
-  const maxX = viewportRight - safeInsets.right - padding - menuSize.width;
-  const maxY = viewportBottom - safeInsets.bottom - padding - menuSize.height;
-
-  let x = anchor.x + offset;
-  let y = anchor.y + offset;
-
-  const preferredRight = x + menuSize.width;
-  const preferredBottom = y + menuSize.height;
-
-  if (preferredRight > viewportRight - safeInsets.right - padding) {
-    x = anchor.x - menuSize.width - offset;
-  }
-
-  if (preferredBottom > viewportBottom - safeInsets.bottom - padding) {
-    y = anchor.y - menuSize.height - offset;
-  }
-
-  return {
-    x: clamp(x, minX, maxX),
-    y: clamp(y, minY, maxY)
-  };
-};
 
 const readSafeAreaInsets = (): SafeAreaInsets => {
   if (typeof document === 'undefined') {
@@ -380,6 +329,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
+  const lowSpec = prefersTouchFallback;
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
   const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
@@ -542,12 +492,26 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   ]);
 
   const orbitMaterial = useDisposableMemo(
-    () => new LineBasicMaterial({
-      color: '#334155',
+    () => new MeshBasicMaterial({
+      color: '#e2e8f0',
       transparent: true,
-      opacity: 0.75,
-      depthTest: false,
-      depthWrite: false
+      opacity: 0.9,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+      side: DoubleSide
+    }),
+    []
+  );
+  const orbitMaterialShadow = useDisposableMemo(
+    () => new MeshBasicMaterial({
+      color: '#0f172a',
+      transparent: true,
+      opacity: 0.45,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+      side: DoubleSide
     }),
     []
   );
@@ -891,28 +855,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return bodyMaterialByIdRef.current.get(bodyId) ?? null;
   }, []);
 
-  const starGeometry = useDisposableMemo(() => new SphereGeometry(1, 64, 64), []);
-  const planetGeometry = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 96, 96);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
-  }, []);
-  const planetGeometryHigh = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 128, 128);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
-  }, []);
-  const moonGeometry = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 64, 64);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
-  }, []);
-  const moonGeometryHigh = useDisposableMemo(() => {
-    const geometry = new SphereGeometry(1, 96, 96);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
-  }, []);
-
   const bodyWorldPositions = useMemo<Record<string, [number, number, number]>>(() => {
     const positions: Record<string, [number, number, number]> = {};
 
@@ -1042,6 +984,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const [closeUpBodyId, setCloseUpBodyId] = useState<string | null>(null);
   const [surfaceDebug, setSurfaceDebug] = useState<SurfaceTextureDebugInfo | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const bodyPressStateRef = useRef({
+    active: false,
+    pointerId: null as number | null,
+    startX: 0,
+    startY: 0,
+    moved: false,
+    suppressSelect: false
+  });
 
   useEffect(() => {
     if (selectedFleetId && fleetById.has(selectedFleetId)) {
@@ -1066,7 +1016,43 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     return parsed?.kind === 'body' ? parsed.id : null;
   }, [hoveredObjectId]);
   const infoBody = infoBodyId ? bodyInfoMap[infoBodyId] : null;
-  const highDetailBodyId = selectedBodyId ?? hoveredBodyId ?? closeUpBodyId ?? null;
+  const highDetailBodyId = lowSpec ? null : (selectedBodyId ?? hoveredBodyId ?? closeUpBodyId ?? null);
+  const starSegments = lowSpec ? 48 : 64;
+  const planetSegments = lowSpec ? 48 : 96;
+  const moonSegments = lowSpec ? 32 : 64;
+  const enableHighGeometry = !lowSpec && Boolean(highDetailBodyId);
+  const starGeometry = useDisposableMemo(
+    () => new SphereGeometry(1, starSegments, starSegments),
+    [starSegments]
+  );
+  const planetGeometry = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, planetSegments, planetSegments);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, [planetSegments]);
+  const moonGeometry = useDisposableMemo(() => {
+    const geometry = new SphereGeometry(1, moonSegments, moonSegments);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, [moonSegments]);
+  const planetGeometryHigh = useMemo(() => {
+    if (!enableHighGeometry) return null;
+    const geometry = new SphereGeometry(1, 128, 128);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, [enableHighGeometry]);
+  useEffect(() => () => {
+    planetGeometryHigh?.dispose();
+  }, [planetGeometryHigh]);
+  const moonGeometryHigh = useMemo(() => {
+    if (!enableHighGeometry) return null;
+    const geometry = new SphereGeometry(1, 96, 96);
+    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
+    return geometry;
+  }, [enableHighGeometry]);
+  useEffect(() => () => {
+    moonGeometryHigh?.dispose();
+  }, [moonGeometryHigh]);
 
   const handleHoverBody = useCallback((bodyId: string) => {
     setHoveredObjectId(makeObjectId('body', bodyId));
@@ -1076,6 +1062,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setHoveredObjectId(prev => (prev === objectId ? null : prev));
   }, []);
   const handleSelectBody = useCallback((bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => {
+    if (bodyPressStateRef.current.suppressSelect) {
+      bodyPressStateRef.current.suppressSelect = false;
+      return;
+    }
     const body = bodyInfoMap[bodyId];
     setSelectedObjectId(makeObjectId('body', bodyId));
     onSelectFleet?.(null);
@@ -1107,10 +1097,37 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     setBodyContextMenu(null);
     setContextMenuPosition(null);
   }, []);
-  const handleBodyPressStart = useCallback((_bodyId: string, _event: ThreeEvent<PointerEvent>) => {}, []);
-  const handleBodyPressMove = useCallback((_event: ThreeEvent<PointerEvent>) => {}, []);
-  const handleBodyPressEnd = useCallback(() => {}, []);
-  const handleBodyPressCancel = useCallback(() => {}, []);
+  const handleBodyPressStart = useCallback((_bodyId: string, event: ThreeEvent<PointerEvent>) => {
+    bodyPressStateRef.current.active = true;
+    bodyPressStateRef.current.pointerId = event.pointerId ?? null;
+    bodyPressStateRef.current.startX = event.clientX;
+    bodyPressStateRef.current.startY = event.clientY;
+    bodyPressStateRef.current.moved = false;
+  }, []);
+  const handleBodyPressMove = useCallback((event: ThreeEvent<PointerEvent>) => {
+    const state = bodyPressStateRef.current;
+    if (!state.active) return;
+    if (state.pointerId !== null && event.pointerId !== state.pointerId) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    if ((dx * dx + dy * dy) >= PRESS_DRAG_THRESHOLD_PX * PRESS_DRAG_THRESHOLD_PX) {
+      state.moved = true;
+    }
+  }, []);
+  const handleBodyPressEnd = useCallback(() => {
+    const state = bodyPressStateRef.current;
+    state.suppressSelect = state.moved;
+    state.active = false;
+    state.moved = false;
+    state.pointerId = null;
+  }, []);
+  const handleBodyPressCancel = useCallback(() => {
+    const state = bodyPressStateRef.current;
+    state.suppressSelect = state.moved;
+    state.active = false;
+    state.moved = false;
+    state.pointerId = null;
+  }, []);
   const recalcContextMenuPosition = useCallback(() => {
     if (!bodyContextMenu || !contextMenuRef.current) return;
     const viewport = readViewportRect();
@@ -1382,11 +1399,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     requestFocusOnPoint(position, radius, bodyId);
   }, [bodyRadii, bodyWorldPositions, focusDistanceFloor, requestFocusOnPoint]);
   const handleNavigateToBody = useCallback((bodyId: string) => {
-    setSelectedObjectId(makeObjectId('body', bodyId));
+    const objectId = makeObjectId('body', bodyId);
+    const isAlreadySelected = selectedObjectId === objectId;
+    setSelectedObjectId(objectId);
     setBodyContextMenu(null);
     onSelectFleet?.(null);
+    if (isAlreadySelected) return;
     requestFocusOnBody(bodyId);
-  }, [onSelectFleet, requestFocusOnBody]);
+  }, [onSelectFleet, requestFocusOnBody, selectedObjectId]);
   const initialCameraPosition = useMemo<[number, number, number]>(() => (
     positionFromSpherical(cameraInitialSpherical, anchoredTarget)
   ), [
@@ -1396,7 +1416,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     cameraInitialSpherical.theta
   ]);
 
-  const lowSpec = prefersTouchFallback;
   const hitboxScaleMultiplier = prefersTouchFallback ? 1.2 : 1;
   const [rendererCaps, setRendererCaps] = useState(() => ({
     contextAntialias: false,
@@ -1405,7 +1424,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }));
   const wantsBloom = !lowSpec;
   const wantsVignette = !lowSpec;
-  const enablePostFX = wantsBloom || wantsVignette || !rendererCaps.contextAntialias;
+  const needsPostFxForAa = !lowSpec && !rendererCaps.contextAntialias;
+  const enablePostFX = wantsBloom || wantsVignette || needsPostFxForAa;
   const enableShadows = !lowSpec;
   const enableAntialias = true;
   const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
@@ -1419,11 +1439,12 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const maxSamples = rendererCaps.maxSamples || targetSamples;
     return Math.min(targetSamples, maxSamples);
   }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
-  const enableSmaa = enablePostFX && postFxMultisampling === 0;
+  const enableSmaa = enablePostFX && !rendererCaps.contextAntialias && postFxMultisampling === 0;
   const bloomIntensity = prefersTouchFallback ? 0.14 : 0.25;
   const bloomThreshold = prefersTouchFallback ? 0.7 : 0.65;
   const bloomSmoothing = prefersTouchFallback ? 0.65 : 0.6;
   const bloomRadius = prefersTouchFallback ? 0.12 : 0.18;
+  const enableBloom = wantsBloom && enablePostFX;
   const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
   const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
   const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
@@ -1581,30 +1602,30 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
         />
 
         <Selection>
-          <Select enabled>
-            <SystemRoot>
-              <SystemSurfaceTextureManager
-                starSystem={starSystem}
-                astroKey={astroKey}
-                planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
-                ownerColorByBodyId={ownerColorByBodyId}
-                planets={planets}
-                bodyWorldPositions={bodyWorldPositions}
-                bodyRadii={bodyRadii}
-                selectedBodyId={selectedBodyId}
-                hoveredBodyId={hoveredBodyId}
-                lowSpec={lowSpec}
-                cloudShadowStrengthScale={cloudShadowStrengthScale}
-                debugEnabled={showSurfaceDebug}
-                onDebugUpdate={showSurfaceDebug ? setSurfaceDebug : undefined}
-                onCloseUpBodyIdChange={setCloseUpBodyId}
-                resolveMaterial={resolveBodyMaterial}
-              />
-              <SystemCelestialLayer
-                stars={starModels}
-                starGeometry={starGeometry}
-                planets={planets}
+          <SystemRoot>
+            <SystemSurfaceTextureManager
+              starSystem={starSystem}
+              astroKey={astroKey}
+              planetSurfaceDescriptorsByBodyId={planetSurfaceDescriptorsByBodyId ?? undefined}
+              ownerColorByBodyId={ownerColorByBodyId}
+              planets={planets}
+              bodyWorldPositions={bodyWorldPositions}
+              bodyRadii={bodyRadii}
+              selectedBodyId={selectedBodyId}
+              hoveredBodyId={hoveredBodyId}
+              lowSpec={lowSpec}
+              cloudShadowStrengthScale={cloudShadowStrengthScale}
+              debugEnabled={showSurfaceDebug}
+              onDebugUpdate={showSurfaceDebug ? setSurfaceDebug : undefined}
+              onCloseUpBodyIdChange={setCloseUpBodyId}
+              resolveMaterial={resolveBodyMaterial}
+            />
+            <SystemCelestialLayer
+              stars={starModels}
+              starGeometry={starGeometry}
+              planets={planets}
               orbitMaterial={orbitMaterial}
+              orbitMaterialShadow={orbitMaterialShadow}
               planetGeometry={planetGeometry}
               planetGeometryHigh={planetGeometryHigh}
               moonGeometry={moonGeometry}
@@ -1615,51 +1636,51 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               starSpinReferenceRadius={starSpinReferenceRadius}
               planetSpinReferenceRadius={planetSpinReferenceRadius}
               moonSpinReferenceRadius={moonSpinReferenceRadius}
-                highDetailBodyId={highDetailBodyId}
-                fixedTerminator={fixedTerminator}
-                hitboxScaleMultiplier={hitboxScaleMultiplier}
-                sunPosition={sunPosition}
-                onBodyPressStart={handleBodyPressStart}
-                onBodyPressMove={handleBodyPressMove}
-                onBodyPressEnd={handleBodyPressEnd}
-                onBodyPressCancel={handleBodyPressCancel}
-                onFocusBody={requestFocusOnBody}
-                onHoverBody={handleHoverBody}
-                onBlurBody={handleBlurBody}
-                onSelectBody={handleSelectBody}
+              highDetailBodyId={highDetailBodyId}
+              fixedTerminator={fixedTerminator}
+              hitboxScaleMultiplier={hitboxScaleMultiplier}
+              sunPosition={sunPosition}
+              enableBloom={enableBloom}
+              onBodyPressStart={handleBodyPressStart}
+              onBodyPressMove={handleBodyPressMove}
+              onBodyPressEnd={handleBodyPressEnd}
+              onBodyPressCancel={handleBodyPressCancel}
+              onFocusBody={requestFocusOnBody}
+              onHoverBody={handleHoverBody}
+              onBlurBody={handleBlurBody}
+              onSelectBody={handleSelectBody}
+            />
+            <SystemEntitiesLayer
+              starBodyId={starBodyId}
+              fleets={systemFleets}
+              stations={systemStations}
+              day={day}
+              starRadius={starRadius}
+              bodyWorldPositions={bodyWorldPositions}
+              bodyRadii={bodyRadii}
+              clampedScale={clampedScale}
+              selectedFleetId={selectedFleetId}
+              selectedObjectId={selectedObjectId}
+              hoveredObjectId={hoveredObjectId}
+              fleetIconScale={fleetIconScale}
+              fleetLayoutConfig={fleetLayoutConfig}
+              getFactionColor={getFactionColor}
+              onHoverObject={handleHoverObject}
+              onBlurObject={handleBlurObject}
+              onSelectObject={handleSelectObject}
+              onFocusPoint={requestFocusOnPoint}
+            />
+            {showBodyLabels && (
+              <SystemBodyLabels
+                labels={bodyLabels}
+                baseScale={clampedScale}
               />
-              <SystemEntitiesLayer
-                starBodyId={starBodyId}
-                fleets={systemFleets}
-                stations={systemStations}
-                day={day}
-                starRadius={starRadius}
-                bodyWorldPositions={bodyWorldPositions}
-                bodyRadii={bodyRadii}
-                clampedScale={clampedScale}
-                selectedFleetId={selectedFleetId}
-                selectedObjectId={selectedObjectId}
-                hoveredObjectId={hoveredObjectId}
-                fleetIconScale={fleetIconScale}
-                fleetLayoutConfig={fleetLayoutConfig}
-                getFactionColor={getFactionColor}
-                onHoverObject={handleHoverObject}
-                onBlurObject={handleBlurObject}
-                onSelectObject={handleSelectObject}
-                onFocusPoint={requestFocusOnPoint}
-              />
-              {showBodyLabels && (
-                <SystemBodyLabels
-                  labels={bodyLabels}
-                  baseScale={clampedScale}
-                />
-              )}
-            </SystemRoot>
-          </Select>
+            )}
+          </SystemRoot>
           {enablePostFX && (
             <EffectComposer enableNormalPass={false} multisampling={postFxMultisampling}>
               {enableSmaa && <SMAA />}
-              {wantsBloom && bloomLightsReady && (
+              {enableBloom && bloomLightsReady && (
                 <SelectiveBloom
                   intensity={bloomIntensity}
                   mipmapBlur={!prefersTouchFallback}
