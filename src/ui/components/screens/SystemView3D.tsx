@@ -1255,11 +1255,23 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     }, starExtent);
   }, [planets, starModels, starRadius]);
   const cameraMaxDistance = Math.max(maxOrbitRadius * SYSTEM_VIEW_CAMERA_MAX_DISTANCE_FACTOR, baseCameraDistance);
-  const ambientLightIntensity = MathUtils.clamp(0.05 + clampedScale * 0.02, 0.05, 0.15);
-  const starLightDistance = Math.max(maxOrbitRadius * 8, starRadius * 60);
-  const starLightIntensity = useMemo(() => getStarLightIntensityForRadius(starRadius), [starRadius]);
+  const ambientLightIntensity = MathUtils.clamp(0.08 + clampedScale * 0.03, 0.08, 0.22);
+  const fillLightIntensity = prefersTouchFallback ? 0.22 : 0.32;
+  const starLightIntensityScale = prefersTouchFallback ? 0.16 : 0.24;
+  const starLightIntensity = useMemo(
+    () => getStarLightIntensityForRadius(starRadius) * starLightIntensityScale,
+    [starLightIntensityScale, starRadius]
+  );
   const ambientLightColor = useMemo(
     () => new Color(starTintColor).lerp(new Color('#0b1020'), 0.7).getStyle(),
+    [starTintColor]
+  );
+  const fillLightSkyColor = useMemo(
+    () => new Color('#dbe7ff').lerp(new Color(starTintColor), 0.35).getStyle(),
+    [starTintColor]
+  );
+  const fillLightGroundColor = useMemo(
+    () => new Color('#0b1020').lerp(new Color(starTintColor), 0.1).getStyle(),
     [starTintColor]
   );
   const starLightColor = useMemo(
@@ -1273,10 +1285,10 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     starModels.slice(1).map((star) => ({
       id: star.id,
       position: star.position,
-      intensity: getStarLightIntensityForRadius(star.radius),
+      intensity: getStarLightIntensityForRadius(star.radius) * starLightIntensityScale,
       color: new Color('#ffffff').lerp(new Color(star.tintColor), 0.2).getStyle()
     }))
-  ), [starModels]);
+  ), [starLightIntensityScale, starModels]);
   const starIdSet = useMemo(() => new Set(starModels.map(star => star.id)), [starModels]);
   const cameraZoomConstraints = useMemo(() => {
     const anchorId = anchoredBodyId ?? starBodyId;
@@ -1448,7 +1460,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
   const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
   const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
-  const rimLightIntensity = prefersTouchFallback ? 0.12 : 0.18;
+  const rimLightIntensity = prefersTouchFallback ? 0.16 : 0.24;
   const rimLightDistance = Math.max(cameraFar * 0.8, maxOrbitRadius * 3.2);
   const rimLightColor = useMemo(
     () => new Color('#e6ecff').lerp(new Color(starTintColor), 0.3).getStyle(),
@@ -1560,12 +1572,17 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           target={anchoredTarget}
         />
         <ambientLight ref={ambientLightRef} intensity={ambientLightIntensity} color={ambientLightColor} />
+        <hemisphereLight
+          intensity={fillLightIntensity}
+          color={fillLightSkyColor}
+          groundColor={fillLightGroundColor}
+        />
         <pointLight
           ref={starLightRef}
           position={primaryStar?.position ?? [0, 0, 0]}
           intensity={starLightIntensity}
-          distance={starLightDistance}
-          decay={2}
+          distance={0}
+          decay={0}
           color={starLightColor}
           castShadow={enableShadows}
           shadow-mapSize={[shadowMapSize, shadowMapSize]}
@@ -1579,8 +1596,8 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
             key={light.id}
             position={light.position}
             intensity={light.intensity}
-            distance={starLightDistance}
-            decay={2}
+            distance={0}
+            decay={0}
             color={light.color}
             castShadow={false}
           />
