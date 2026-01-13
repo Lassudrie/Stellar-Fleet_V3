@@ -2,13 +2,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Select } from '@react-three/postprocessing';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import {
+  BufferAttribute,
   BufferGeometry,
-  Euler,
   Group,
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  RingGeometry,
   SphereGeometry,
   Vector3
 } from 'three';
@@ -38,9 +37,58 @@ import {
 } from './systemModel';
 import { StarMesh } from './stars';
 
-const buildOrbitRingGeometry = (innerRadius: number, outerRadius: number, segments: number): BufferGeometry => {
-  const geometry = new RingGeometry(innerRadius, outerRadius, segments);
-  geometry.rotateX(-Math.PI / 2);
+const buildOrbitRingGeometry = (
+  innerRadius: number,
+  outerRadius: number,
+  segments: number,
+  inclinationDeg: number,
+  ascendingNodeDeg: number
+): BufferGeometry => {
+  const segmentCount = Math.max(12, Math.floor(segments));
+  const vertexCount = (segmentCount + 1) * 2;
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = new Uint16Array(segmentCount * 6);
+
+  for (let i = 0; i <= segmentCount; i += 1) {
+    const t = i / segmentCount;
+    const angle = t * Math.PI * 2;
+    const inner = computeInclinedOrbitPosition(innerRadius, angle, inclinationDeg, ascendingNodeDeg);
+    const outer = computeInclinedOrbitPosition(outerRadius, angle, inclinationDeg, ascendingNodeDeg);
+    const base = i * 2;
+    const posIdx = base * 3;
+    positions[posIdx] = inner[0];
+    positions[posIdx + 1] = inner[1];
+    positions[posIdx + 2] = inner[2];
+    positions[posIdx + 3] = outer[0];
+    positions[posIdx + 4] = outer[1];
+    positions[posIdx + 5] = outer[2];
+    const uvIdx = base * 2;
+    uvs[uvIdx] = t;
+    uvs[uvIdx + 1] = 0;
+    uvs[uvIdx + 2] = t;
+    uvs[uvIdx + 3] = 1;
+  }
+
+  for (let i = 0; i < segmentCount; i += 1) {
+    const base = i * 6;
+    const a = i * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    indices[base] = a;
+    indices[base + 1] = b;
+    indices[base + 2] = d;
+    indices[base + 3] = a;
+    indices[base + 4] = d;
+    indices[base + 5] = c;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(new BufferAttribute(indices, 1));
+  geometry.computeVertexNormals();
   return geometry;
 };
 
@@ -104,22 +152,29 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
     [moon.orbitRadius]
   );
   const orbitGeometryShadow = useDisposableMemo(
-    () => buildOrbitRingGeometry(orbitRadii.inner, orbitRadii.outer, 96),
-    [orbitRadii.inner, orbitRadii.outer]
+    () => buildOrbitRingGeometry(
+      orbitRadii.inner,
+      orbitRadii.outer,
+      96,
+      moon.orbitInclinationDeg,
+      moon.orbitAscendingNodeDeg
+    ),
+    [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg, orbitRadii.inner, orbitRadii.outer]
   );
   const orbitRadiiBright = useMemo(
     () => resolveOrbitRingRadii(moon.orbitRadius, 0.65),
     [moon.orbitRadius]
   );
   const orbitGeometryBright = useDisposableMemo(
-    () => buildOrbitRingGeometry(orbitRadiiBright.inner, orbitRadiiBright.outer, 96),
-    [orbitRadiiBright.inner, orbitRadiiBright.outer]
+    () => buildOrbitRingGeometry(
+      orbitRadiiBright.inner,
+      orbitRadiiBright.outer,
+      96,
+      moon.orbitInclinationDeg,
+      moon.orbitAscendingNodeDeg
+    ),
+    [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg, orbitRadiiBright.inner, orbitRadiiBright.outer]
   );
-  const orbitRotation = useMemo(() => {
-    const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
-    const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
-    return new Euler(inclination, ascendingNode, 0, 'XYZ');
-  }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
       moon.orbitRadius,
@@ -185,7 +240,6 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
       <mesh
         geometry={orbitGeometryShadow}
         material={orbitMaterialShadow}
-        rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={2}
@@ -193,7 +247,6 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
       <mesh
         geometry={orbitGeometryBright}
         material={orbitMaterial}
-        rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={3}
@@ -324,22 +377,29 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
     [planet.orbitRadius]
   );
   const orbitGeometryShadow = useDisposableMemo(
-    () => buildOrbitRingGeometry(orbitRadii.inner, orbitRadii.outer, 128),
-    [orbitRadii.inner, orbitRadii.outer]
+    () => buildOrbitRingGeometry(
+      orbitRadii.inner,
+      orbitRadii.outer,
+      128,
+      planet.orbitInclinationDeg,
+      planet.orbitAscendingNodeDeg
+    ),
+    [orbitRadii.inner, orbitRadii.outer, planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]
   );
   const orbitRadiiBright = useMemo(
     () => resolveOrbitRingRadii(planet.orbitRadius, 0.65),
     [planet.orbitRadius]
   );
   const orbitGeometryBright = useDisposableMemo(
-    () => buildOrbitRingGeometry(orbitRadiiBright.inner, orbitRadiiBright.outer, 128),
-    [orbitRadiiBright.inner, orbitRadiiBright.outer]
+    () => buildOrbitRingGeometry(
+      orbitRadiiBright.inner,
+      orbitRadiiBright.outer,
+      128,
+      planet.orbitInclinationDeg,
+      planet.orbitAscendingNodeDeg
+    ),
+    [orbitRadiiBright.inner, orbitRadiiBright.outer, planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]
   );
-  const orbitRotation = useMemo(() => {
-    const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
-    const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
-    return new Euler(inclination, ascendingNode, 0, 'XYZ');
-  }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
       planet.orbitRadius,
@@ -411,7 +471,6 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
       <mesh
         geometry={orbitGeometryShadow}
         material={orbitMaterialShadow}
-        rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={2}
@@ -419,7 +478,6 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
       <mesh
         geometry={orbitGeometryBright}
         material={orbitMaterial}
-        rotation={orbitRotation}
         frustumCulled
         raycast={() => null}
         renderOrder={3}
