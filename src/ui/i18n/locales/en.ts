@@ -191,8 +191,6 @@ export const en = {
   'surfaceView.backToSystem': 'Back to system view',
   'surfaceView.bodyHeader': 'Surface — {{name}}',
   'surfaceView.mapSize': 'Grid {{width}} × {{height}}',
-  'surfaceView.mapModeHex': 'Hex',
-  'surfaceView.mapModeProjection': 'Projection',
   'surfaceView.zoomIn': 'Zoom in',
   'surfaceView.zoomOut': 'Zoom out',
   'surfaceView.resetView': 'Reset view',
