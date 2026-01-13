@@ -11,6 +11,7 @@ import {
 import { useI18n } from '../../i18n';
 import type { GameCommand } from '../../../engine/commands';
 import type { EngagementPreview } from '../../../engine/ground';
+import { SurfaceMapMode } from './surfaceViewCore';
 
 type TileInfo = PlanetSurfaceMap['tiles'][number];
 
@@ -63,6 +64,8 @@ export type SurfaceViewHudProps = {
   onBackToSystem?: () => void;
   showLoadingOverlay: boolean;
   showTouchBadge: boolean;
+  mapMode: SurfaceMapMode;
+  setMapMode: React.Dispatch<React.SetStateAction<SurfaceMapMode>>;
   activeCoord: HexCoord | null;
   activeTile: TileInfo | null;
   cameraZoom: number;
@@ -99,6 +102,8 @@ export const SurfaceViewHud: React.FC<SurfaceViewHudProps> = ({
   onBackToSystem,
   showLoadingOverlay,
   showTouchBadge,
+  mapMode,
+  setMapMode,
   activeCoord,
   activeTile,
   cameraZoom,
@@ -122,6 +127,11 @@ export const SurfaceViewHud: React.FC<SurfaceViewHudProps> = ({
   playerFactionId
 }) => {
   const { t } = useI18n();
+  const modeButtonClass = (active: boolean) => (
+    `rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+      active ? 'bg-slate-100 text-slate-900' : 'text-slate-200 hover:bg-slate-800'
+    }`
+  );
 
   return (
     <>
@@ -137,7 +147,23 @@ export const SurfaceViewHud: React.FC<SurfaceViewHudProps> = ({
         <div className="pointer-events-auto rounded border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm font-semibold text-slate-100 backdrop-blur">
           {t('surfaceView.bodyHeader', { name: bodyName })}
         </div>
-        <div className="pointer-events-auto flex justify-start sm:justify-end">
+        <div className="pointer-events-auto flex items-center gap-2 justify-start sm:justify-end">
+          <div className="flex items-center gap-1 rounded border border-slate-700 bg-slate-900/80 p-0.5 text-slate-100 backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setMapMode('hex')}
+              className={modeButtonClass(mapMode === 'hex')}
+            >
+              {t('surfaceView.mapModeHex')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapMode('projection')}
+              className={modeButtonClass(mapMode === 'projection')}
+            >
+              {t('surfaceView.mapModeProjection')}
+            </button>
+          </div>
           {onBackToSystem ? (
             <button
               onClick={onBackToSystem}

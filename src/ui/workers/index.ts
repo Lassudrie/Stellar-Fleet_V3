@@ -183,12 +183,6 @@ export class SurfaceMapWorkerClient {
     const map = generateSurfaceMapForState(state, request.bodyId);
     if (!descriptor || !astro || !map) return null;
 
-    const terrain = createTerrainField({
-      descriptor,
-      planetData: astro.planetData,
-      moonData: astro.moonData
-    });
-
     const { w, h, wrapX } = map.descriptor.config;
     const width = Math.max(1, Math.floor(resolution.width));
     const height = Math.max(1, Math.floor(resolution.height));
@@ -197,6 +191,7 @@ export class SurfaceMapWorkerClient {
     const includeRoughnessMap = request.textureOptions?.includeRoughnessMap ?? true;
     const includeHeightMap = request.textureOptions?.includeHeightMap ?? false;
     const includeEmissiveMap = request.textureOptions?.includeEmissiveMap ?? false;
+    const textureSource = request.textureOptions?.source ?? 'field';
     const roughnessRgba = includeRoughnessMap ? new Uint8Array(width * height * 4) : null;
     const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
     const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
@@ -352,6 +347,7 @@ export class SurfaceMapWorkerClient {
           return 0.7;
       }
     };
+    const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
 
     const CITY_LIGHTS_COLOR = '#fbd38d';
     const POLE_BLEND_ROWS = 2;
@@ -510,6 +506,284 @@ export class SurfaceMapWorkerClient {
     const settlementField = includeEmissiveMap ? buildSettlementField(map, width, height) : null;
     let hasEmissive = false;
     const cityMask = FeatureBits.City | FeatureBits.Capital;
+
+    if (textureSource === 'tiles') {
+      const rgba = new Uint8Array(width * height * 4);
+      const seaLevel = map.seaLevelElev * 0.001;
+
+      let heightMin = 0;
+      let heightMax = 0;
+      if (heightField) {
+        heightMin = Number.POSITIVE_INFINITY;
+        heightMax = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < map.tiles.length; i += 1) {
+          const elev = (map.tiles[i]?.elev ?? 0) * 0.001;
+          heightMin = Math.min(heightMin, elev);
+          heightMax = Math.max(heightMax, elev);
+        }
+        if (!Number.isFinite(heightMin) || !Number.isFinite(heightMax)) {
+          heightMin = 0;
+          heightMax = 0;
+        }
+      }
+
+      for (let y = 0; y < height; y += 1) {
+        const v = (y + 0.5) / height;
+        const latNorm = Math.abs(v - 0.5) * 2;
+        const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+        const detailFactor = lerp(0.35, 1, poleBlend);
+        const rIndex = Math.max(0, Math.min(h - 1, Math.floor(v * h)));
+
+        for (let x = 0; x < width; x += 1) {
+          const u = (x + 0.5) / width;
+          const qBase = Math.floor(u * w);
+          const qIndex = useWrap ? wrapIndex(qBase, w) : Math.max(0, Math.min(w - 1, qBase));
+          const tile = map.tiles[rIndex * w + qIndex];
+          const baseColor = biomeLinearRgb[tile?.biome ?? 'rocky'];
+          let rLin = baseColor[0];
+          let gLin = baseColor[1];
+          let bLin = baseColor[2];
+
+          let cloudShadowFactor = 1;
+          if (cloudShadowConfig) {
+            const shadowStrength = cloudShadowConfig.strength * detailFactor;
+            if (shadowStrength > 0.001) {
+              const shadowX = u * cloudNoiseScaleX;
+              const shadowY = v * cloudNoiseScaleY;
+              const wrapPeriod = useWrap ? cloudNoiseScaleX : undefined;
+              const n1 = valueNoise2D(shadowX, shadowY, cloudShadowConfig.seed, wrapPeriod);
+              const n2 = valueNoise2D(shadowX * 1.9, shadowY * 1.9, cloudShadowConfig.seed2, wrapPeriod ? wrapPeriod * 2 : undefined);
+              let field = lerp(n1, n2, 0.35);
+              if (cloudShadowConfig.bandStrength > 0 && cloudShadowConfig.bandFrequency > 0) {
+                const lat = Math.sin((v - 0.5) * Math.PI);
+                const stripe = 0.5 + 0.5 * Math.sin((lat + cloudShadowConfig.bandOffset) * cloudShadowConfig.bandFrequency);
+                const band = smoothstep(0.25, 0.78, stripe);
+                field *= lerp(1, band, clamp01(cloudShadowConfig.bandStrength));
+              }
+              const shadow = smoothstep(cloudShadowConfig.threshold, cloudShadowConfig.threshold + cloudShadowConfig.softness, field);
+              cloudShadowFactor = 1 - shadowStrength * shadow;
+            }
+          }
+
+          rLin *= cloudShadowFactor;
+          gLin *= cloudShadowFactor;
+          bLin *= cloudShadowFactor;
+
+          const pixelIndex = y * width + x;
+          const idx = pixelIndex * 4;
+          rgba[idx] = linearToSrgbByte(rLin);
+          rgba[idx + 1] = linearToSrgbByte(gLin);
+          rgba[idx + 2] = linearToSrgbByte(bLin);
+          rgba[idx + 3] = 255;
+
+          const landWeight = isWaterBiome(tile?.biome ?? 'ocean') ? 0 : 1;
+          const waterWeight = 1 - landWeight;
+
+          if (roughnessRgba) {
+            const roughness = clamp01(biomeRoughness(tile?.biome ?? 'rocky'));
+            const roughByte = Math.round(roughness * 255);
+            roughnessRgba[idx] = roughByte;
+            roughnessRgba[idx + 1] = roughByte;
+            roughnessRgba[idx + 2] = roughByte;
+            roughnessRgba[idx + 3] = Math.round(clamp01(waterWeight) * 255);
+          }
+
+          if (heightField) {
+            heightField[pixelIndex] = (tile?.elev ?? 0) * 0.001;
+          }
+
+          if (emissiveRgba) {
+            const rFloat = v * (h - 1);
+            const r0 = Math.max(0, Math.min(h - 1, Math.floor(rFloat)));
+            const r1 = Math.min(r0 + 1, h - 1);
+            const rFrac = rFloat - r0;
+            const wR0 = 1 - rFrac;
+            const wR1 = rFrac;
+
+            let qFloat: number;
+            let q0: number;
+            let q1: number;
+            let qFrac: number;
+            if (useWrap) {
+              qFloat = u * w;
+              const qFloor = Math.floor(qFloat);
+              q0 = wrapIndex(qFloor, w);
+              q1 = wrapIndex(qFloor + 1, w);
+              qFrac = qFloat - qFloor;
+            } else {
+              qFloat = u * (w - 1);
+              q0 = Math.max(0, Math.min(w - 1, Math.floor(qFloat)));
+              q1 = Math.min(q0 + 1, w - 1);
+              qFrac = qFloat - q0;
+            }
+
+            const wQ0 = 1 - qFrac;
+            const wQ1 = qFrac;
+
+            const t00 = map.tiles[r0 * w + q0];
+            const t10 = map.tiles[r0 * w + q1];
+            const t01 = map.tiles[r1 * w + q0];
+            const t11 = map.tiles[r1 * w + q1];
+            const w00 = wQ0 * wR0;
+            const w10 = wQ1 * wR0;
+            const w01 = wQ0 * wR1;
+            const w11 = wQ1 * wR1;
+
+            const cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
+              + ((t10.featureBits & cityMask) !== 0 ? w10 : 0)
+              + ((t01.featureBits & cityMask) !== 0 ? w01 : 0)
+              + ((t11.featureBits & cityMask) !== 0 ? w11 : 0);
+
+            const settlementGlow = settlementField ? settlementField[pixelIndex] : 0;
+            const featureGlow = cityWeight * 0.4;
+            let emissiveLevel = (settlementGlow + featureGlow) * landWeight;
+            emissiveLevel = clamp01(emissiveLevel);
+            if (emissiveLevel > 0.001) {
+              hasEmissive = true;
+              emissiveRgba[idx] = linearToSrgbByte(cityLightLinearRgb[0] * emissiveLevel);
+              emissiveRgba[idx + 1] = linearToSrgbByte(cityLightLinearRgb[1] * emissiveLevel);
+              emissiveRgba[idx + 2] = linearToSrgbByte(cityLightLinearRgb[2] * emissiveLevel);
+              emissiveRgba[idx + 3] = 255;
+            } else {
+              emissiveRgba[idx] = 0;
+              emissiveRgba[idx + 1] = 0;
+              emissiveRgba[idx + 2] = 0;
+              emissiveRgba[idx + 3] = 0;
+            }
+          }
+        }
+      }
+
+      let heightRange = 0;
+      let invHeightRange = 0;
+      let seaLevelNorm = 0;
+      if (heightField) {
+        heightRange = Math.max(1e-6, heightMax - heightMin);
+        invHeightRange = 1 / heightRange;
+        for (let i = 0; i < heightField.length; i += 1) {
+          heightField[i] = (heightField[i] - heightMin) * invHeightRange;
+        }
+        seaLevelNorm = (seaLevel - heightMin) * invHeightRange;
+      }
+
+      if (heightRgba && heightField) {
+        for (let i = 0; i < heightField.length; i += 1) {
+          const heightNorm = heightField[i];
+          const landBlend = clamp01((heightNorm - (seaLevelNorm - 0.02)) / 0.04);
+          const heightForMap = lerp(seaLevelNorm, heightNorm, landBlend);
+          const heightEncoded = clamp01(0.5 + (heightForMap - seaLevelNorm) * 0.85);
+          const heightByte = Math.round(heightEncoded * 255);
+          const idx = i * 4;
+          heightRgba[idx] = heightByte;
+          heightRgba[idx + 1] = heightByte;
+          heightRgba[idx + 2] = heightByte;
+          heightRgba[idx + 3] = 255;
+        }
+      }
+
+      const finalEmissiveRgba = emissiveRgba && hasEmissive ? emissiveRgba : null;
+
+      const shouldComputeRelief = Boolean(heightField) && (includeNormalMap || includeAoMap) && width >= 256 && height >= 128;
+      if (!shouldComputeRelief) {
+        return {
+          width,
+          height,
+          rgba,
+          normalRgba: null,
+          aoRgba: null,
+          roughnessRgba,
+          heightRgba,
+          emissiveRgba: finalEmissiveRgba
+        };
+      }
+
+      const normalRgba = includeNormalMap ? new Uint8Array(width * height * 4) : null;
+      const aoRgba = includeAoMap ? new Uint8Array(width * height * 4) : null;
+      const elevRange = heightRange * 1000;
+      const heightScale = Math.min(1.6, Math.max(0.55, elevRange / 1200));
+      const normalStrength = 1.1 * heightScale;
+      const aoStrength = 1.5 * heightScale;
+      const heightFieldData = heightField as Float32Array;
+
+      for (let y = 0; y < height; y += 1) {
+        const v = (y + 0.5) / height;
+        const latNorm = Math.abs(v - 0.5) * 2;
+        const poleBlend = 1 - smoothstep(0.55, 0.92, latNorm);
+        const detailFactor = lerp(0.35, 1, poleBlend);
+        const rowNormalStrength = normalStrength * detailFactor;
+        const rowAoStrength = aoStrength * detailFactor;
+        const y0 = y > 0 ? y - 1 : 0;
+        const y1 = y < height - 1 ? y + 1 : height - 1;
+        const row = y * width;
+        const row0 = y0 * width;
+        const row1 = y1 * width;
+
+        for (let x = 0; x < width; x += 1) {
+          const x0 = useWrap ? (x === 0 ? width - 1 : x - 1) : Math.max(0, x - 1);
+          const x1 = useWrap ? (x === width - 1 ? 0 : x + 1) : Math.min(width - 1, x + 1);
+
+          const idx = row + x;
+          const hC = heightFieldData[idx];
+          const hL = heightFieldData[row + x0];
+          const hR = heightFieldData[row + x1];
+          const hU = heightFieldData[row0 + x];
+          const hD = heightFieldData[row1 + x];
+
+          const dx = hR - hL;
+          const dy = hD - hU;
+          let nx = -dx * rowNormalStrength;
+          let ny = -dy * rowNormalStrength;
+          let nz = 1.0;
+          const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+          nx *= invLen;
+          ny *= invLen;
+          nz *= invLen;
+
+          const nIdx = idx * 4;
+          if (normalRgba) {
+            normalRgba[nIdx] = Math.round((nx * 0.5 + 0.5) * 255);
+            normalRgba[nIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+            normalRgba[nIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+            normalRgba[nIdx + 3] = 255;
+          }
+
+          const hUL = heightFieldData[row0 + x0];
+          const hUR = heightFieldData[row0 + x1];
+          const hDL = heightFieldData[row1 + x0];
+          const hDR = heightFieldData[row1 + x1];
+          const neighborAvg = (hL + hR + hU + hD + hUL + hUR + hDL + hDR) / 8;
+          const concavity = Math.max(0, neighborAvg - hC);
+          const waterFactor = hC < seaLevelNorm ? 0.55 : 1;
+          let ao = 1 - concavity * (2.1 * rowAoStrength) * waterFactor;
+          ao = Math.min(1, Math.max(0.6, ao));
+
+          if (aoRgba) {
+            const aoByte = Math.round(ao * 255);
+            aoRgba[nIdx] = aoByte;
+            aoRgba[nIdx + 1] = aoByte;
+            aoRgba[nIdx + 2] = aoByte;
+            aoRgba[nIdx + 3] = 255;
+          }
+        }
+      }
+
+      return {
+        width,
+        height,
+        rgba,
+        normalRgba,
+        aoRgba,
+        roughnessRgba,
+        heightRgba,
+        emissiveRgba: finalEmissiveRgba
+      };
+    }
+
+    const terrain = createTerrainField({
+      descriptor,
+      planetData: astro.planetData,
+      moonData: astro.moonData
+    });
     const coastColor = biomeLinearRgb.coast;
     const seaLevel = terrain.seaLevelElev;
 

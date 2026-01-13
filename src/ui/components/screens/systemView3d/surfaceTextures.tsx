@@ -325,29 +325,25 @@ export const SystemSurfaceTextureManager: React.FC<{
   const planetsRef = useRef(planets);
   const maxCacheEntries = lowSpec ? 4 : SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
   const maxInflight = lowSpec ? 1 : SURFACE_TEXTURE_MAX_INFLIGHT;
-  const baseTextureOptions = useMemo<SurfaceTextureOptions | null>(() => (
+  const baseTextureOptions = useMemo<SurfaceTextureOptions>(() => (
     lowSpec
       ? {
+        source: 'tiles',
         includeNormalMap: true,
         includeAoMap: false,
         includeRoughnessMap: false,
         includeHeightMap: false,
         includeEmissiveMap: false
       }
-      : null
+      : { source: 'tiles' }
   ), [lowSpec]);
   const resolveTextureOptions = useCallback(
-    (wantsHeightMap: boolean, wantsEmissiveMap: boolean): SurfaceTextureOptions | null => {
+    (wantsHeightMap: boolean, wantsEmissiveMap: boolean): SurfaceTextureOptions => {
       if (!wantsHeightMap && !wantsEmissiveMap) {
         return baseTextureOptions;
       }
-      const includeNormalMap = baseTextureOptions?.includeNormalMap ?? true;
-      const includeAoMap = baseTextureOptions?.includeAoMap ?? true;
-      const includeRoughnessMap = baseTextureOptions?.includeRoughnessMap ?? true;
       return {
-        includeNormalMap,
-        includeAoMap,
-        includeRoughnessMap,
+        ...baseTextureOptions,
         includeHeightMap: lowSpec ? false : wantsHeightMap,
         includeEmissiveMap: wantsEmissiveMap
       };
@@ -379,7 +375,7 @@ export const SystemSurfaceTextureManager: React.FC<{
     texture.magFilter = LinearFilter;
     texture.generateMipmaps = useMipmaps;
     texture.anisotropy = useMipmaps ? Math.min(maxSurfaceAnisotropy, Math.max(1, maxAnisotropy)) : 1;
-    texture.flipY = true;
+    texture.flipY = false;
     texture.needsUpdate = true;
     return texture;
   }, [lowSpec, maxAnisotropy]);
@@ -508,7 +504,8 @@ export const SystemSurfaceTextureManager: React.FC<{
     const includeRoughnessMap = options?.includeRoughnessMap ?? true;
     const includeHeightMap = options?.includeHeightMap ?? false;
     const includeEmissiveMap = options?.includeEmissiveMap ?? false;
-    return `maps:n${includeNormalMap ? 1 : 0}a${includeAoMap ? 1 : 0}r${includeRoughnessMap ? 1 : 0}h${includeHeightMap ? 1 : 0}e${includeEmissiveMap ? 1 : 0}`;
+    const source = options?.source ?? 'field';
+    return `maps:${source}:n${includeNormalMap ? 1 : 0}a${includeAoMap ? 1 : 0}r${includeRoughnessMap ? 1 : 0}h${includeHeightMap ? 1 : 0}e${includeEmissiveMap ? 1 : 0}`;
   }, []);
 
   const buildGasGiantTextureKey = useCallback((

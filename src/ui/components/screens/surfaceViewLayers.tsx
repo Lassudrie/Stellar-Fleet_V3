@@ -9,12 +9,13 @@ import {
   MeshBasicMaterial,
   Object3D,
   OrthographicCamera,
+  PlaneGeometry,
   Shape,
   ShapeGeometry
 } from 'three';
 import { Biome, HexCoord, PlanetSurfaceMap, Settlement, SettlementType } from '../../../shared/shared';
 import { isPassable } from '../../../engine/planetSurface';
-import { clamp, drawHex, gridToPixel, HEX_SIZE } from './surfaceViewCore';
+import { clamp, drawHex, gridToPixel, gridToProjectionPixel, HEX_SIZE, PROJECTION_CELL_SIZE, SurfaceMapMode } from './surfaceViewCore';
 
 export type CameraState = { zoom: number; offset: { x: number; y: number } };
 
@@ -28,6 +29,7 @@ type FactionMarker = {
 export type SurfaceOverlayData = {
   map: PlanetSurfaceMap;
   activeMapConfig: PlanetSurfaceMap['descriptor']['config'];
+  mapMode: SurfaceMapMode;
   camera: CameraState;
   viewport: { width: number; height: number };
   renderDpr: number;
@@ -360,10 +362,100 @@ export const SurfaceTerrainLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: stri
   );
 });
 
+export const SurfaceProjectionLayer: React.FC<{ map: PlanetSurfaceMap; mapKey: string }> = React.memo(({ map, mapKey }) => {
+  const config = map.descriptor.config;
+  const count = config.w * config.h;
+  const fillRef = useRef<InstancedMesh>(null);
+  const temp = useMemo(() => new Object3D(), []);
+  const color = useMemo(() => new Color(), []);
+  const invalidate = useThree(state => state.invalidate);
+
+  const fillGeometry = useDisposableMemo(() => {
+    const geometry = new PlaneGeometry(PROJECTION_CELL_SIZE, PROJECTION_CELL_SIZE);
+    const vertexCount = geometry.attributes.position.count;
+    const colors = new Float32Array(vertexCount * 3);
+    colors.fill(1);
+    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    return geometry;
+  }, []);
+  const fillMaterial = useDisposableMemo(
+    () => new MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
+    []
+  );
+  const gridGeometry = useDisposableMemo(() => {
+    const positions: number[] = [];
+    const z = 0.02;
+    const mapWidth = config.w * PROJECTION_CELL_SIZE;
+    const mapHeight = config.h * PROJECTION_CELL_SIZE;
+
+    for (let q = 0; q <= config.w; q += 1) {
+      const x = q * PROJECTION_CELL_SIZE;
+      positions.push(x, 0, z, x, -mapHeight, z);
+    }
+    for (let r = 0; r <= config.h; r += 1) {
+      const y = r * PROJECTION_CELL_SIZE;
+      positions.push(0, -y, z, mapWidth, -y, z);
+    }
+
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(new Float32Array(positions), 3));
+    return geometry;
+  }, [config.h, config.w, mapKey]);
+
+  const gridMaterial = useDisposableMemo(() => new LineBasicMaterial({
+    color: '#94a3b8',
+    transparent: true,
+    opacity: 0.28,
+    depthTest: false,
+    depthWrite: false
+  }), []);
+
+  useLayoutEffect(() => {
+    const fill = fillRef.current;
+    if (!fill) return;
+
+    for (let r = 0; r < config.h; r += 1) {
+      for (let q = 0; q < config.w; q += 1) {
+        const index = r * config.w + q;
+        const tile = map.tiles[index] ?? null;
+        const { x, y } = gridToProjectionPixel({ q, r }, config, PROJECTION_CELL_SIZE);
+
+        temp.position.set(x, -y, 0);
+        temp.rotation.set(0, 0, 0);
+        temp.scale.set(1, 1, 1);
+        temp.updateMatrix();
+        fill.setMatrixAt(index, temp.matrix);
+
+        color.set(tile ? (biomeColors[tile.biome] ?? '#334155') : '#1f2937');
+        fill.setColorAt(index, color);
+      }
+    }
+
+    fill.count = count;
+    fill.instanceMatrix.needsUpdate = true;
+    if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
+
+    invalidate();
+  }, [color, config.h, config.w, count, invalidate, map.tiles, mapKey, temp]);
+
+  return (
+    <group>
+      <instancedMesh ref={fillRef} args={[fillGeometry, fillMaterial, count]} frustumCulled={false} />
+      <lineSegments
+        geometry={gridGeometry}
+        material={gridMaterial}
+        frustumCulled={false}
+        renderOrder={1}
+      />
+    </group>
+  );
+});
+
 export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceOverlayData) => {
   const {
     map,
     activeMapConfig,
+    mapMode,
     camera,
     viewport,
     renderDpr,
@@ -383,7 +475,38 @@ export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceO
   ctx.scale(renderDpr, renderDpr);
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-  const hexSize = HEX_SIZE * camera.zoom;
+  const cellSize = mapMode === 'projection' ? PROJECTION_CELL_SIZE : HEX_SIZE;
+  const cellSizePx = cellSize * camera.zoom;
+  const coordToWorld = (coord: HexCoord) => (
+    mapMode === 'projection'
+      ? gridToProjectionPixel(coord, activeMapConfig, cellSize)
+      : gridToPixel(coord, cellSize)
+  );
+  const coordToScreen = (coord: HexCoord) => {
+    const { x, y } = coordToWorld(coord);
+    return {
+      x: x * camera.zoom + camera.offset.x,
+      y: y * camera.zoom + camera.offset.y
+    };
+  };
+  const drawCell = (center: { x: number; y: number }, options: { fill?: string; stroke?: string; lineWidth?: number }) => {
+    if (mapMode !== 'projection') {
+      drawHex(ctx, center, cellSizePx, options);
+      return;
+    }
+    const half = cellSizePx / 2;
+    ctx.beginPath();
+    ctx.rect(center.x - half, center.y - half, cellSizePx, cellSizePx);
+    if (options.fill) {
+      ctx.fillStyle = options.fill;
+      ctx.fill();
+    }
+    if (options.stroke) {
+      ctx.strokeStyle = options.stroke;
+      if (typeof options.lineWidth === 'number') ctx.lineWidth = options.lineWidth;
+      ctx.stroke();
+    }
+  };
 
   if (reachableCosts) {
     reachableCosts.forEach((_cost, key) => {
@@ -393,38 +516,33 @@ export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceO
       if (!Number.isFinite(q) || !Number.isFinite(r)) return;
       const tile = map.tiles[r * activeMapConfig.w + q];
       if (!tile || !isPassable(tile.biome)) return;
-      const { x, y } = gridToPixel({ q, r }, HEX_SIZE);
-      const center = { x: x * camera.zoom + camera.offset.x, y: y * camera.zoom + camera.offset.y };
-      drawHex(ctx, center, hexSize, { fill: 'rgba(56, 189, 248, 0.10)' });
+      const center = coordToScreen({ q, r });
+      drawCell(center, { fill: 'rgba(56, 189, 248, 0.10)' });
     });
   }
 
   if (movePreviewPath && movePreviewPath.length > 1) {
     ctx.beginPath();
     movePreviewPath.forEach((c, i) => {
-      const { x, y } = gridToPixel(c, HEX_SIZE);
+      const { x, y } = coordToWorld(c);
       const px = x * camera.zoom + camera.offset.x;
       const py = y * camera.zoom + camera.offset.y;
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     });
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
-    ctx.lineWidth = Math.max(2, hexSize * 0.08);
+    ctx.lineWidth = Math.max(2, cellSizePx * 0.08);
     ctx.stroke();
   }
 
   const labelGrid = new Set<string>();
-  const labelCell = Math.max(70, hexSize * 3.2);
+  const labelCell = Math.max(70, cellSizePx * 3.2);
 
   settlements.forEach(settlement => {
-    const { x, y } = gridToPixel(settlement.coord, HEX_SIZE);
-    const center = {
-      x: x * camera.zoom + camera.offset.x,
-      y: y * camera.zoom + camera.offset.y
-    };
+    const center = coordToScreen(settlement.coord);
 
     const style = SETTLEMENT_MARKER_STYLE[settlement.type] ?? SETTLEMENT_MARKER_STYLE.city;
-    const size = Math.max(3, hexSize * style.sizeFactor);
+    const size = Math.max(3, cellSizePx * style.sizeFactor);
     const stroke = SETTLEMENT_MARKER_STROKE;
 
     if (style.shape === 'hex') {
@@ -481,7 +599,7 @@ export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceO
     }
 
     if (showLabels && camera.zoom >= style.labelZoom) {
-      const fontPx = Math.round(clamp(hexSize * 0.45 * style.labelScale, 9, 18));
+      const fontPx = Math.round(clamp(cellSizePx * 0.45 * style.labelScale, 9, 18));
       const lx = center.x;
       const ly = center.y - size * 1.2;
 
@@ -501,12 +619,8 @@ export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceO
   });
 
   buildingMarkers.forEach(marker => {
-    const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-    const center = {
-      x: x * camera.zoom + camera.offset.x,
-      y: y * camera.zoom + camera.offset.y
-    };
-    const size = Math.max(3, hexSize * 0.2);
+    const center = coordToScreen(marker.coord);
+    const size = Math.max(3, cellSizePx * 0.2);
     ctx.fillStyle = marker.faction?.color ?? '#e2e8f0';
     ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 1;
@@ -516,41 +630,29 @@ export const drawSurfaceOverlay = (ctx: CanvasRenderingContext2D, data: SurfaceO
     ctx.stroke();
   });
 
-  const iconWidth = clamp(hexSize * 1.25, 10, 22);
+  const iconWidth = clamp(cellSizePx * 1.25, 10, 22);
   const showSymbol = iconWidth >= 12;
   const showEchelon = iconWidth >= 15;
 
   armyMarkers.forEach(marker => {
-    const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-    const center = {
-      x: x * camera.zoom + camera.offset.x,
-      y: y * camera.zoom + camera.offset.y
-    };
+    const center = coordToScreen(marker.coord);
     const frameColor = marker.faction?.color ?? '#93c5fd';
-    drawOtanInfantry(ctx, center, hexSize, frameColor, showSymbol, showEchelon);
+    drawOtanInfantry(ctx, center, cellSizePx, frameColor, showSymbol, showEchelon);
   });
 
   landingMarkers.forEach(marker => {
-    const { x, y } = gridToPixel(marker.coord, HEX_SIZE);
-    const center = {
-      x: x * camera.zoom + camera.offset.x,
-      y: y * camera.zoom + camera.offset.y
-    };
+    const center = coordToScreen(marker.coord);
     const frameColor = marker.faction?.color ?? '#93c5fd';
     ctx.save();
-    ctx.setLineDash([Math.max(4, hexSize * 0.35), Math.max(3, hexSize * 0.25)]);
-    drawHex(ctx, center, hexSize * 0.92, { stroke: hexToRgba(frameColor, 0.95), lineWidth: Math.max(1.5, hexSize * 0.1) });
+    ctx.setLineDash([Math.max(4, cellSizePx * 0.35), Math.max(3, cellSizePx * 0.25)]);
+    drawCell(center, { stroke: hexToRgba(frameColor, 0.95), lineWidth: Math.max(1.5, cellSizePx * 0.1) });
     ctx.setLineDash([]);
     ctx.restore();
   });
 
   const drawHighlight = (coord: HexCoord, color: string) => {
-    const { x, y } = gridToPixel(coord, HEX_SIZE);
-    const center = {
-      x: x * camera.zoom + camera.offset.x,
-      y: y * camera.zoom + camera.offset.y
-    };
-    drawHex(ctx, center, hexSize * 1.02, { stroke: color, lineWidth: 2 });
+    const center = coordToScreen(coord);
+    drawCell(center, { stroke: color, lineWidth: 2 });
   };
 
   if (hovered) drawHighlight(hovered, 'rgba(94, 234, 212, 0.9)');

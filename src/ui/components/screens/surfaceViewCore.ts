@@ -2,12 +2,15 @@ import { HexCoord, PlanetSurfaceMap, SurfacePos } from '../../../shared/shared';
 import { fnv1a32 } from '../../../engine/planetSurface';
 
 export const HEX_SIZE = 12;
+export const PROJECTION_CELL_SIZE = HEX_SIZE * 1.5;
 export const MIN_ZOOM = 0.20;
 export const MAX_ZOOM = 4.00;
 export const CLICK_DRAG_THRESHOLD_PX = 6;
 export const CLICK_DRAG_THRESHOLD_SQ = CLICK_DRAG_THRESHOLD_PX * CLICK_DRAG_THRESHOLD_PX;
 export const PAN_MARGIN_PX = 40;
 export const CENTER_SLOP_PX = 24; // tolerance to prevent hard snapping when map is smaller than viewport
+
+export type SurfaceMapMode = 'hex' | 'projection';
 
 export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -74,10 +77,29 @@ export const gridToPixel = (coord: HexCoord, size: number): { x: number; y: numb
   return axialToPixel(axial.q, axial.r, size);
 };
 
+export const gridToProjectionPixel = (
+  coord: HexCoord,
+  config: PlanetSurfaceMap['descriptor']['config'],
+  size: number
+): { x: number; y: number } => ({
+  x: (coord.q + 0.5) * size,
+  y: (config.h - 1 - coord.r + 0.5) * size
+});
+
 export const pixelToGrid = (x: number, y: number, size: number): HexCoord => {
   const axial = roundAxial(pixelToAxial(x, y, size));
   return axialToOffset(axial);
 };
+
+export const pixelToProjectionGrid = (
+  x: number,
+  y: number,
+  config: PlanetSurfaceMap['descriptor']['config'],
+  size: number
+): HexCoord => ({
+  q: Math.floor(x / size),
+  r: config.h - 1 - Math.floor(y / size)
+});
 
 export type MapBoundsPx = {
   minX: number;
@@ -129,6 +151,22 @@ export const computeMapBoundsPx = (config: PlanetSurfaceMap['descriptor']['confi
     maxY,
     width: maxX - minX,
     height: maxY - minY
+  };
+};
+
+export const computeMapBoundsPxProjection = (
+  config: PlanetSurfaceMap['descriptor']['config'],
+  size: number
+): MapBoundsPx => {
+  const width = config.w * size;
+  const height = config.h * size;
+  return {
+    minX: 0,
+    maxX: width,
+    minY: 0,
+    maxY: height,
+    width,
+    height
   };
 };
 

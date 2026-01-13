@@ -190,6 +190,8 @@ export const fr = {
   'surfaceView.backToSystem': 'Retour à la vue système',
   'surfaceView.bodyHeader': 'Surface — {{name}}',
   'surfaceView.mapSize': 'Grille {{width}} × {{height}}',
+  'surfaceView.mapModeHex': 'Hex',
+  'surfaceView.mapModeProjection': 'Projection',
   'surfaceView.zoomIn': 'Zoom avant',
   'surfaceView.zoomOut': 'Zoom arrière',
   'surfaceView.resetView': 'Réinitialiser la vue',

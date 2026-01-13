@@ -45,14 +45,19 @@ import {
   clamp,
   clampAffinity,
   computeMapBoundsPx,
+  computeMapBoundsPxProjection,
   deriveFallbackPos,
   getTileAt,
   gridToPixel,
+  gridToProjectionPixel,
   HEX_SIZE,
   MAX_ZOOM,
   MIN_ZOOM,
   normalizePos,
   pixelToGrid,
+  pixelToProjectionGrid,
+  PROJECTION_CELL_SIZE,
+  SurfaceMapMode,
   sameHex,
   surfaceMapKey,
   PAN_MARGIN_PX
@@ -60,6 +65,7 @@ import {
 import {
   CameraState,
   SurfaceMapCameraSync,
+  SurfaceProjectionLayer,
   SurfaceTerrainLayer,
   drawSurfaceOverlay
 } from './surfaceViewLayers';
@@ -123,6 +129,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
   const lastFittedBodyIdRef = useRef<string | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [camera, setCamera] = useState<CameraState>({ zoom: 1, offset: { x: 0, y: 0 } });
+  const [mapMode, setMapMode] = useState<SurfaceMapMode>('hex');
   const [hovered, setHovered] = useState<HexCoord | null>(null);
   const [selected, setSelected] = useState<HexCoord | null>(null);
   const [selectedArmyId, setSelectedArmyId] = useState<string | null>(null);
@@ -222,13 +229,19 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     setLandingArmyId(null);
   }, [body?.id]);
 
+  useEffect(() => {
+    userCameraRef.current = false;
+  }, [mapMode]);
+
   const activeMapConfig = map?.descriptor.config ?? null;
 
   const clampOffset = useCallback(
     (offset: { x: number; y: number }, zoom: number): { x: number; y: number } => {
       if (!activeMapConfig) return offset;
 
-      const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
+      const bounds = mapMode === 'projection'
+        ? computeMapBoundsPxProjection(activeMapConfig, PROJECTION_CELL_SIZE)
+        : computeMapBoundsPx(activeMapConfig, HEX_SIZE);
       const mapW = bounds.width * zoom;
       const mapH = bounds.height * zoom;
 
@@ -256,7 +269,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
 
       return { x, y };
     },
-    [activeMapConfig, viewport.height, viewport.width]
+    [activeMapConfig, mapMode, viewport.height, viewport.width]
   );
 
   useEffect(() => {
@@ -311,10 +324,16 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     // If the user already interacted with the camera, do not re-center on every viewport change.
     if (userCameraRef.current && !mapChanged) return;
 
-    const bounds = computeMapBoundsPx(activeMapConfig, HEX_SIZE);
+    const bounds = mapMode === 'projection'
+      ? computeMapBoundsPxProjection(activeMapConfig, PROJECTION_CELL_SIZE)
+      : computeMapBoundsPx(activeMapConfig, HEX_SIZE);
     const targetZoom = clamp(1, MIN_ZOOM, MAX_ZOOM);
     const focusWorld = primarySettlement
-      ? gridToPixel(primarySettlement.coord, HEX_SIZE)
+      ? (
+        mapMode === 'projection'
+          ? gridToProjectionPixel(primarySettlement.coord, activeMapConfig, PROJECTION_CELL_SIZE)
+          : gridToPixel(primarySettlement.coord, HEX_SIZE)
+      )
       : {
         x: (bounds.minX + bounds.maxX) / 2,
         y: (bounds.minY + bounds.maxY) / 2
@@ -329,7 +348,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     setCamera({ zoom: targetZoom, offset });
     setHovered(null);
     setSelected(null);
-  }, [map?.bodyId, activeMapConfig, viewport.width, viewport.height, primarySettlement, clampOffset]);
+  }, [map?.bodyId, activeMapConfig, mapMode, viewport.width, viewport.height, primarySettlement, clampOffset]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -571,13 +590,17 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     const worldX = (x - camera.offset.x) / camera.zoom;
     const worldY = (y - camera.offset.y) / camera.zoom;
 
-    const bounds = computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
+    const bounds = mapMode === 'projection'
+      ? computeMapBoundsPxProjection(map.descriptor.config, PROJECTION_CELL_SIZE)
+      : computeMapBoundsPx(map.descriptor.config, HEX_SIZE);
     if (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY || worldY > bounds.maxY) return null;
 
-    const rounded = pixelToGrid(worldX, worldY, HEX_SIZE);
+    const rounded = mapMode === 'projection'
+      ? pixelToProjectionGrid(worldX, worldY, map.descriptor.config, PROJECTION_CELL_SIZE)
+      : pixelToGrid(worldX, worldY, HEX_SIZE);
     const normalized = normalizePos({ ...rounded, bodyId: map.bodyId }, map.descriptor.config);
     return normalized;
-  }, [camera.offset.x, camera.offset.y, camera.zoom, map]);
+  }, [camera.offset.x, camera.offset.y, camera.zoom, map, mapMode]);
 
   // draw() is defined later, after overlay computations.
 
@@ -1024,6 +1047,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     drawSurfaceOverlay(ctx, {
       map,
       activeMapConfig,
+      mapMode,
       camera,
       viewport,
       renderDpr,
@@ -1044,6 +1068,7 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
     hovered,
     isInteractionActive,
     map,
+    mapMode,
     movePreview,
     normalizedArmies,
     normalizedBuildings,
@@ -1140,7 +1165,11 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
           style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
         >
           <SurfaceMapCameraSync cameraState={camera} />
-          {map && currentMapKey && <SurfaceTerrainLayer key={currentMapKey} map={map} mapKey={currentMapKey} />}
+          {map && currentMapKey && (
+            mapMode === 'projection'
+              ? <SurfaceProjectionLayer key={`${currentMapKey}:projection`} map={map} mapKey={currentMapKey} />
+              : <SurfaceTerrainLayer key={currentMapKey} map={map} mapKey={currentMapKey} />
+          )}
         </Canvas>
 
         <canvas
@@ -1176,6 +1205,8 @@ const SurfaceView: React.FC<SurfaceViewProps> = ({
         onBackToSystem={onBackToSystem}
         showLoadingOverlay={showLoadingOverlay}
         showTouchBadge={touchFallbackEnabled}
+        mapMode={mapMode}
+        setMapMode={setMapMode}
         activeCoord={activeCoord}
         activeTile={activeTile}
         cameraZoom={camera.zoom}
