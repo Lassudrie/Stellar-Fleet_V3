@@ -6,9 +6,8 @@ import {
   AmbientLight,
   BufferAttribute,
   Color,
-  DoubleSide,
+  LineBasicMaterial,
   MathUtils,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PCFSoftShadowMap,
@@ -493,26 +492,13 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   ]);
 
   const orbitMaterial = useDisposableMemo(
-    () => new MeshBasicMaterial({
+    () => new LineBasicMaterial({
       color: '#e2e8f0',
       transparent: true,
       opacity: 0.9,
       depthTest: true,
       depthWrite: false,
-      toneMapped: false,
-      side: DoubleSide
-    }),
-    []
-  );
-  const orbitMaterialShadow = useDisposableMemo(
-    () => new MeshBasicMaterial({
-      color: '#0f172a',
-      transparent: true,
-      opacity: 0.45,
-      depthTest: true,
-      depthWrite: false,
-      toneMapped: false,
-      side: DoubleSide
+      toneMapped: false
     }),
     []
   );
@@ -1673,7 +1659,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               starGeometry={starGeometry}
               planets={planets}
               orbitMaterial={orbitMaterial}
-              orbitMaterialShadow={orbitMaterialShadow}
               planetGeometry={planetGeometry}
               planetGeometryHigh={planetGeometryHigh}
               moonGeometry={moonGeometry}
