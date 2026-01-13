@@ -51,12 +51,9 @@ const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
 const SURFACE_TEXTURE_UPSHIFT_DESKTOP = 1.18;
 const SURFACE_TEXTURE_DOWNSHIFT_DESKTOP = 0.84;
-const SURFACE_TEXTURE_UPSHIFT_MOBILE = 1.32;
-const SURFACE_TEXTURE_DOWNSHIFT_MOBILE = 0.78;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
-const SURFACE_MIPMAP_ANISOTROPY_MOBILE = 4;
 
 type SurfaceTextureResolution = { width: number; height: number };
 type SurfaceTextureDebugInfo = {
@@ -277,7 +274,6 @@ export const SystemSurfaceTextureManager: React.FC<{
   bodyRadii: Record<string, number>;
   selectedBodyId: string | null;
   hoveredBodyId: string | null;
-  lowSpec: boolean;
   cloudShadowStrengthScale: number;
   debugEnabled?: boolean;
   onDebugUpdate?: (info: SurfaceTextureDebugInfo) => void;
@@ -293,7 +289,6 @@ export const SystemSurfaceTextureManager: React.FC<{
   bodyRadii,
   selectedBodyId,
   hoveredBodyId,
-  lowSpec,
   cloudShadowStrengthScale,
   debugEnabled = false,
   onDebugUpdate,
@@ -323,20 +318,9 @@ export const SystemSurfaceTextureManager: React.FC<{
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
-  const maxCacheEntries = lowSpec ? 4 : SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
-  const maxInflight = lowSpec ? 1 : SURFACE_TEXTURE_MAX_INFLIGHT;
-  const baseTextureOptions = useMemo<SurfaceTextureOptions>(() => (
-    lowSpec
-      ? {
-        source: 'tiles',
-        includeNormalMap: true,
-        includeAoMap: false,
-        includeRoughnessMap: false,
-        includeHeightMap: false,
-        includeEmissiveMap: false
-      }
-      : { source: 'tiles' }
-  ), [lowSpec]);
+  const maxCacheEntries = SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
+  const maxInflight = SURFACE_TEXTURE_MAX_INFLIGHT;
+  const baseTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'field' }), []);
   const resolveTextureOptions = useCallback(
     (wantsHeightMap: boolean, wantsEmissiveMap: boolean): SurfaceTextureOptions => {
       if (!wantsHeightMap && !wantsEmissiveMap) {
@@ -344,11 +328,11 @@ export const SystemSurfaceTextureManager: React.FC<{
       }
       return {
         ...baseTextureOptions,
-        includeHeightMap: lowSpec ? false : wantsHeightMap,
+        includeHeightMap: wantsHeightMap,
         includeEmissiveMap: wantsEmissiveMap
       };
     },
-    [baseTextureOptions, lowSpec]
+    [baseTextureOptions]
   );
   const scratch = useMemo(() => ({
     world: new Vector3(),
@@ -370,7 +354,7 @@ export const SystemSurfaceTextureManager: React.FC<{
     texture.wrapS = RepeatWrapping;
     texture.wrapT = ClampToEdgeWrapping;
     const useMipmaps = true;
-    const maxSurfaceAnisotropy = lowSpec ? SURFACE_MIPMAP_ANISOTROPY_MOBILE : SURFACE_MIPMAP_ANISOTROPY_DESKTOP;
+    const maxSurfaceAnisotropy = SURFACE_MIPMAP_ANISOTROPY_DESKTOP;
     texture.minFilter = useMipmaps ? LinearMipmapLinearFilter : LinearFilter;
     texture.magFilter = LinearFilter;
     texture.generateMipmaps = useMipmaps;
@@ -378,11 +362,11 @@ export const SystemSurfaceTextureManager: React.FC<{
     texture.flipY = false;
     texture.needsUpdate = true;
     return texture;
-  }, [lowSpec, maxAnisotropy]);
+  }, [maxAnisotropy]);
 
   const cloudShadowByBodyId = useMemo(() => {
     const map = new Map<string, CloudShadowSettings>();
-    if (cloudShadowStrengthScale <= 0 || lowSpec) return map;
+    if (cloudShadowStrengthScale <= 0) return map;
 
     const addShadow = (
       body: { id: string; atmosphere?: AtmosphereType; airMassIndex?: number; pressureBar?: number; temperatureK?: number },
@@ -446,7 +430,7 @@ export const SystemSurfaceTextureManager: React.FC<{
     });
 
     return map;
-  }, [cloudShadowStrengthScale, lowSpec, planets]);
+  }, [cloudShadowStrengthScale, planets]);
 
   useEffect(() => {
     requestStateRef.current = ({
@@ -731,7 +715,7 @@ export const SystemSurfaceTextureManager: React.FC<{
         }
       });
     });
-  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, lowSpec, onCloseUpBodyIdChange, resolveMaterial]);
+  }, [astroKey, clearTextureFromMaterial, disposeTextureBundle, onCloseUpBodyIdChange, resolveMaterial]);
 
   useFrame(() => {
     if (!(camera instanceof PerspectiveCamera)) return;
@@ -845,14 +829,14 @@ export const SystemSurfaceTextureManager: React.FC<{
         nextCloseUpBodyId = bodyId;
       }
     });
-    const resolvedCloseUpBodyId = lowSpec ? null : nextCloseUpBodyId;
+    const resolvedCloseUpBodyId = nextCloseUpBodyId;
     if (resolvedCloseUpBodyId !== closeUpBodyIdRef.current) {
       closeUpBodyIdRef.current = resolvedCloseUpBodyId;
       onCloseUpBodyIdChange?.(resolvedCloseUpBodyId);
     }
 
     const preferUltraBodyId = selectedBodyId ?? ultraBodyId;
-    const shouldPreferUltra = (bodyId: string) => !lowSpec && bodyId === preferUltraBodyId;
+    const shouldPreferUltra = (bodyId: string) => bodyId === preferUltraBodyId;
 
     const touchKey = (key: string) => {
       cacheLastUsedRef.current.set(key, now);
@@ -878,19 +862,13 @@ export const SystemSurfaceTextureManager: React.FC<{
       const { diameterPx, isOnScreen } = metrics;
 
       const lastResolution = lastResolutionByBodyIdRef.current.get(bodyId) ?? null;
-      const upshift = lowSpec ? SURFACE_TEXTURE_UPSHIFT_MOBILE : SURFACE_TEXTURE_UPSHIFT_DESKTOP;
-      const downshift = lowSpec ? SURFACE_TEXTURE_DOWNSHIFT_MOBILE : SURFACE_TEXTURE_DOWNSHIFT_DESKTOP;
+      const upshift = SURFACE_TEXTURE_UPSHIFT_DESKTOP;
+      const downshift = SURFACE_TEXTURE_DOWNSHIFT_DESKTOP;
       let resolution = isOnScreen
         ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution, upshift, downshift)
         : null;
       if (!resolution && isPriorityBody(bodyId)) {
         resolution = lastResolution ?? SURFACE_TEXTURE_RESOLUTIONS[0];
-      }
-      if (lowSpec && resolution) {
-        const maxMobileWidth = isPriorityBody(bodyId) ? 1024 : 512;
-        if (resolution.width > maxMobileWidth) {
-          resolution = { width: maxMobileWidth, height: maxMobileWidth / 2 };
-        }
       }
       if (resolution) {
         lastResolutionByBodyIdRef.current.set(bodyId, resolution);
@@ -906,9 +884,7 @@ export const SystemSurfaceTextureManager: React.FC<{
         return;
       }
 
-      const emissiveIntensity = !lowSpec && !isGasGiant
-        ? resolveCityLightsIntensity(diameterPx)
-        : 0;
+      const emissiveIntensity = !isGasGiant ? resolveCityLightsIntensity(diameterPx) : 0;
       const material = resolveMaterial(bodyId);
       if (material) {
         if (typeof material.userData.ownerTintStrength !== 'number') {
@@ -952,8 +928,7 @@ export const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
-      const wantsHeightMap = !lowSpec
-        && !isGasGiant
+      const wantsHeightMap = !isGasGiant
         && isOnScreen
         && resolution.width >= 512
         && bodyId === closeUpBodyIdRef.current;
@@ -1000,9 +975,6 @@ export const SystemSurfaceTextureManager: React.FC<{
       }
       if (textureOptionsForBody) {
         workerRequest.textureOptions = textureOptionsForBody;
-      }
-      if (lowSpec) {
-        workerRequest.allowSync = false;
       }
       const worker = workerRef.current;
       if (!worker) return;

@@ -75,7 +75,6 @@ import {
   KM_PER_AU,
   KM_TO_SCENE_SCALE,
   MAX_DPR_DESKTOP,
-  MAX_DPR_MOBILE,
   MIN_PLANET_RADIUS,
   MIN_STAR_RADIUS,
   MOON_SPIN_REFERENCE_RADIUS_FACTOR,
@@ -84,7 +83,6 @@ import {
   PLANET_TYPE_COLORS,
   positionFromSpherical,
   POST_FX_MSAA_SAMPLES_DESKTOP,
-  POST_FX_MSAA_SAMPLES_MOBILE,
   RADIUS_VISIBILITY_BONUS,
   resolveAirMassIndex,
   resolveThermalTints,
@@ -329,7 +327,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
     || (typeof window.matchMedia !== 'function' && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
-  const lowSpec = prefersTouchFallback;
   const clampedScale = Math.max(scaleFactor, 0.1);
   const sceneScale = KM_TO_SCENE_SCALE * clampedScale;
   const minPlanetRadius = MIN_PLANET_RADIUS * clampedScale;
@@ -1010,17 +1007,15 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     if (!body || body.bodyType === 'star') return null;
     return bodyId;
   }, [bodyInfoMap]);
-  const highDetailBodyId = lowSpec
-    ? null
-    : (
-      resolveHighDetailBodyId(selectedBodyId)
-      ?? resolveHighDetailBodyId(hoveredBodyId)
-      ?? resolveHighDetailBodyId(closeUpBodyId)
-    );
-  const starSegments = lowSpec ? 48 : 64;
-  const planetSegments = lowSpec ? 48 : 96;
-  const moonSegments = lowSpec ? 32 : 64;
-  const enableHighGeometry = !lowSpec && Boolean(highDetailBodyId);
+  const highDetailBodyId = (
+    resolveHighDetailBodyId(selectedBodyId)
+    ?? resolveHighDetailBodyId(hoveredBodyId)
+    ?? resolveHighDetailBodyId(closeUpBodyId)
+  );
+  const starSegments = 64;
+  const planetSegments = 96;
+  const moonSegments = 64;
+  const enableHighGeometry = Boolean(highDetailBodyId);
   const starGeometry = useDisposableMemo(
     () => new SphereGeometry(1, starSegments, starSegments),
     [starSegments]
@@ -1438,33 +1433,33 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     isWebGL2: false,
     maxSamples: 0
   }));
-  const wantsBloom = !lowSpec;
-  const wantsVignette = !lowSpec;
+  const wantsBloom = true;
+  const wantsVignette = true;
   const needsPostFxForAa = !rendererCaps.contextAntialias;
   const enablePostFX = wantsBloom || wantsVignette || needsPostFxForAa;
-  const enableShadows = !lowSpec;
+  const enableShadows = true;
   const enableAntialias = true;
-  const maxDpr = prefersTouchFallback ? MAX_DPR_MOBILE : MAX_DPR_DESKTOP;
-  const toneMappingExposure = prefersTouchFallback ? 0.8 : 0.75;
-  const shadowMapSize = prefersTouchFallback ? 512 : 1024;
+  const maxDpr = MAX_DPR_DESKTOP;
+  const toneMappingExposure = 0.75;
+  const shadowMapSize = 1024;
   const shadowCameraFar = Math.max(maxOrbitRadius * 2.2, starRadius * 120);
   const shadowCameraNear = Math.max(0.02 * clampedScale, 0.005);
   const postFxMultisampling = useMemo(() => {
     if (!enablePostFX || !rendererCaps.isWebGL2) return 0;
-    const targetSamples = prefersTouchFallback ? POST_FX_MSAA_SAMPLES_MOBILE : POST_FX_MSAA_SAMPLES_DESKTOP;
+    const targetSamples = POST_FX_MSAA_SAMPLES_DESKTOP;
     const maxSamples = rendererCaps.maxSamples || targetSamples;
     return Math.min(targetSamples, maxSamples);
-  }, [enablePostFX, prefersTouchFallback, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
+  }, [enablePostFX, rendererCaps.isWebGL2, rendererCaps.maxSamples]);
   const enableSmaa = enablePostFX && !rendererCaps.contextAntialias && postFxMultisampling === 0;
-  const bloomIntensity = prefersTouchFallback ? 0.14 : 0.25;
-  const bloomThreshold = prefersTouchFallback ? 0.7 : 0.65;
-  const bloomSmoothing = prefersTouchFallback ? 0.65 : 0.6;
-  const bloomRadius = prefersTouchFallback ? 0.12 : 0.18;
+  const bloomIntensity = 0.25;
+  const bloomThreshold = 0.65;
+  const bloomSmoothing = 0.6;
+  const bloomRadius = 0.18;
   const enableBloom = wantsBloom && enablePostFX;
-  const vignetteOffset = prefersTouchFallback ? 0.68 : 0.62;
-  const vignetteDarkness = prefersTouchFallback ? 0.14 : 0.2;
-  const cloudShadowStrengthScale = prefersTouchFallback ? 0.2 : 1;
-  const rimLightIntensity = prefersTouchFallback ? 0.16 : 0.24;
+  const vignetteOffset = 0.62;
+  const vignetteDarkness = 0.2;
+  const cloudShadowStrengthScale = 1;
+  const rimLightIntensity = 0.24;
   const rimLightDistance = Math.max(cameraFar * 0.8, maxOrbitRadius * 3.2);
   const rimLightColor = useMemo(
     () => new Color('#e6ecff').lerp(new Color(starTintColor), 0.3).getStyle(),
@@ -1572,7 +1567,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
           antialias: enableAntialias,
           depth: true,
           stencil: false,
-          powerPreference: lowSpec ? 'low-power' : 'high-performance'
+          powerPreference: 'high-performance'
         }}
         dpr={[1, maxDpr]}
       >
@@ -1647,7 +1642,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               bodyRadii={bodyRadii}
               selectedBodyId={selectedBodyId}
               hoveredBodyId={hoveredBodyId}
-              lowSpec={lowSpec}
               cloudShadowStrengthScale={cloudShadowStrengthScale}
               debugEnabled={showSurfaceDebug}
               onDebugUpdate={showSurfaceDebug ? setSurfaceDebug : undefined}
