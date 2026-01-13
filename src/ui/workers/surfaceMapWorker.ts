@@ -201,6 +201,12 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+const mixRgb = (a: [number, number, number], b: [number, number, number], t: number): [number, number, number] => ([
+  lerp(a[0], b[0], t),
+  lerp(a[1], b[1], t),
+  lerp(a[2], b[2], t)
+]);
+
 const smoothstep = (edge0: number, edge1: number, x: number): number => {
   if (edge0 === edge1) return x < edge0 ? 0 : 1;
   const t = clamp01((x - edge0) / (edge1 - edge0));
@@ -234,6 +240,26 @@ const biomeLinearRgb = (() => {
   });
   return out;
 })();
+
+const ICE_PALETTE = {
+  snow: mixRgb(biomeLinearRgb.ice, [1, 1, 1], 0.35),
+  compact: biomeLinearRgb.ice,
+  old: biomeLinearRgb.fractured_ice,
+  dusty: biomeLinearRgb.dusty_ice,
+  cryo: biomeLinearRgb.cryovolcanic,
+  fracture: biomeLinearRgb.cryovolcanic,
+  rock: biomeLinearRgb.rocky
+};
+
+const ICE_ROUGHNESS = {
+  snow: 0.82,
+  compact: 0.28,
+  old: 0.54,
+  dusty: 0.62,
+  cryo: 0.58,
+  fracture: 0.6,
+  rock: 0.72
+};
 
 const CITY_LIGHTS_COLOR = '#fbd38d';
 const POLE_BLEND_ROWS = 2;
@@ -270,6 +296,33 @@ const createSeededRandom = (seed: number): (() => number) => {
     result ^= result + Math.imul(result ^ (result >>> 7), 61 | result);
     return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
   };
+};
+
+const randomUnitDir = (rand: () => number): { x: number; y: number; z: number } => {
+  const u = rand();
+  const v = rand();
+  const theta = u * Math.PI * 2;
+  const z = v * 2 - 1;
+  const r = Math.sqrt(Math.max(0, 1 - z * z));
+  return { x: r * Math.cos(theta), y: z, z: r * Math.sin(theta) };
+};
+
+const buildFracturePlanes = (
+  seed: number,
+  count: number,
+  tectonicsIndex: number
+): Array<{ dir: { x: number; y: number; z: number }; width: number; strength: number }> => {
+  const rand = createSeededRandom(seed);
+  const planes: Array<{ dir: { x: number; y: number; z: number }; width: number; strength: number }> = [];
+  const widthScale = 0.75 + tectonicsIndex * 0.5;
+  for (let i = 0; i < count; i += 1) {
+    planes.push({
+      dir: randomUnitDir(rand),
+      width: lerp(0.008, 0.02, rand()) * widthScale,
+      strength: lerp(0.55, 1, rand())
+    });
+  }
+  return planes;
 };
 
 const blendPolarRows = (buffer: Uint8Array, width: number, height: number): void => {
@@ -486,6 +539,9 @@ const biomeRoughness = (biome: Biome): number => {
 
 const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
 
+const isIceBiome = (biome: Biome): boolean =>
+  biome === 'ice' || biome === 'fractured_ice' || biome === 'dusty_ice' || biome === 'cryovolcanic';
+
 const getTile = (tiles: PlanetSurfaceTile[], w: number, q: number, r: number): PlanetSurfaceTile => {
   return tiles[r * w + q];
 };
@@ -517,6 +573,18 @@ const renderSurfaceTextureFromTiles = (
   const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
   const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
   const useWrap = Boolean(wrapX);
+  const env = terrain.env;
+  const baseSeed = map.descriptor.seed >>> 0;
+  const iceAgeScaleX = 3;
+  const iceAgeScaleY = 2;
+  const iceAgeSeed = baseSeed ^ 0x2b9947b1;
+  const iceAgeWrap = useWrap ? iceAgeScaleX : undefined;
+  const fractureNoiseScaleX = 7;
+  const fractureNoiseScaleY = 4;
+  const fractureNoiseSeed = baseSeed ^ 0x51f0c9d3;
+  const fractureNoiseWrap = useWrap ? fractureNoiseScaleX : undefined;
+  const fracturePlaneCount = Math.max(2, Math.round(2 + env.tectonicsIndex * 2));
+  const fracturePlanes = buildFracturePlanes(baseSeed ^ 0x7f4a7c15, fracturePlaneCount, env.tectonicsIndex);
 
   const cloudShadowConfig = cloudShadow && cloudShadow.strength > 0 ? cloudShadow : null;
   const cloudNoiseScaleX = cloudShadowConfig ? Math.max(2, Math.round(cloudShadowConfig.noiseScale)) : 0;
@@ -832,15 +900,98 @@ const renderSurfaceTexture = (
       const sample = terrain.sample(dir);
 
       const baseColor = biomeLinearRgb[sample.biome];
-      const shoreMix = sample.coast * (sample.isWater ? 0.65 : 0.35);
+      const isFrozenSurface = sample.isWater && terrain.hydrologyMode === 'frozen';
+      const shoreMix = sample.coast * (sample.isWater && !isFrozenSurface ? 0.65 : 0.35);
       let rLin = lerp(baseColor[0], coastColor[0], shoreMix);
       let gLin = lerp(baseColor[1], coastColor[1], shoreMix);
       let bLin = lerp(baseColor[2], coastColor[2], shoreMix);
 
-      const landWeight = sample.isWater ? 0 : 1;
-      const waterWeight = 1 - landWeight;
       const tempNorm = clamp01((sample.tempC + 50) / 100);
       const moistNorm = clamp01(sample.moist);
+      const isIceSurface = isFrozenSurface || isIceBiome(sample.biome);
+      const landWeight = sample.isWater && !isFrozenSurface ? 0 : 1;
+      const waterWeight = 1 - landWeight;
+
+      let iceRoughnessOverride: number | null = null;
+      let iceHeightOffset = 0;
+      let iceFracture = 0;
+
+      if (isIceSurface) {
+        const cold = clamp01((-sample.tempC - 4) / 44);
+        const warm = 1 - cold;
+        const altitude = clamp01(sample.landness);
+        const slope = clamp01(sample.relief * 1.1 + Math.abs(sample.detail) * 0.45);
+        const stability = clamp01((1 - slope) * (0.6 + 0.4 * (1 - env.tectonicsIndex)) * (0.7 + 0.3 * (1 - env.erosionIndex)));
+        const ageNoise = valueNoise2D(u * iceAgeScaleX, v * iceAgeScaleY, iceAgeSeed, iceAgeWrap);
+        const age = clamp01((cold * 0.65 + stability * 0.35) * (0.65 + 0.35 * ageNoise));
+        const snowWeight = clamp01((cold - 0.55) / 0.35)
+          * clamp01((altitude - 0.25) / 0.55)
+          * clamp01(moistNorm * 1.1 + 0.1);
+        const oldWeight = clamp01((age - 0.6) / 0.35) * (1 - snowWeight);
+        const rockWeight = clamp01((warm - 0.25) * 1.4 + slope * 0.7);
+        const dustyBias = sample.biome === 'dusty_ice' ? 0.65 : 0;
+        const cryoBias = sample.biome === 'cryovolcanic' ? 0.75 : 0;
+
+        let rIce = ICE_PALETTE.compact[0];
+        let gIce = ICE_PALETTE.compact[1];
+        let bIce = ICE_PALETTE.compact[2];
+
+        rIce = lerp(rIce, ICE_PALETTE.snow[0], snowWeight);
+        gIce = lerp(gIce, ICE_PALETTE.snow[1], snowWeight);
+        bIce = lerp(bIce, ICE_PALETTE.snow[2], snowWeight);
+
+        rIce = lerp(rIce, ICE_PALETTE.old[0], oldWeight);
+        gIce = lerp(gIce, ICE_PALETTE.old[1], oldWeight);
+        bIce = lerp(bIce, ICE_PALETTE.old[2], oldWeight);
+
+        rIce = lerp(rIce, ICE_PALETTE.dusty[0], dustyBias);
+        gIce = lerp(gIce, ICE_PALETTE.dusty[1], dustyBias);
+        bIce = lerp(bIce, ICE_PALETTE.dusty[2], dustyBias);
+
+        rIce = lerp(rIce, ICE_PALETTE.cryo[0], cryoBias);
+        gIce = lerp(gIce, ICE_PALETTE.cryo[1], cryoBias);
+        bIce = lerp(bIce, ICE_PALETTE.cryo[2], cryoBias);
+
+        rIce = lerp(rIce, ICE_PALETTE.rock[0], rockWeight);
+        gIce = lerp(gIce, ICE_PALETTE.rock[1], rockWeight);
+        bIce = lerp(bIce, ICE_PALETTE.rock[2], rockWeight);
+
+        if (fracturePlanes.length) {
+          let fractureBase = 0;
+          for (const plane of fracturePlanes) {
+            const d = Math.abs(dir.x * plane.dir.x + dir.y * plane.dir.y + dir.z * plane.dir.z);
+            const line = 1 - smoothstep(0, plane.width, d);
+            fractureBase = Math.max(fractureBase, line * plane.strength);
+          }
+          const breakNoise = valueNoise2D(u * fractureNoiseScaleX, v * fractureNoiseScaleY, fractureNoiseSeed, fractureNoiseWrap);
+          const breakMask = smoothstep(0.32, 0.78, breakNoise);
+          let fracture = clamp01(fractureBase * breakMask);
+          if (sample.biome === 'fractured_ice') {
+            fracture = clamp01(fracture + 0.25);
+          }
+          fracture *= oldWeight * (0.35 + 0.65 * env.tectonicsIndex);
+          iceFracture = fracture;
+
+          rIce = lerp(rIce, ICE_PALETTE.fracture[0], fracture);
+          gIce = lerp(gIce, ICE_PALETTE.fracture[1], fracture);
+          bIce = lerp(bIce, ICE_PALETTE.fracture[2], fracture);
+        }
+
+        rLin = rIce;
+        gLin = gIce;
+        bLin = bIce;
+
+        let roughness = ICE_ROUGHNESS.compact;
+        roughness = lerp(roughness, ICE_ROUGHNESS.snow, snowWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.old, oldWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.dusty, dustyBias);
+        roughness = lerp(roughness, ICE_ROUGHNESS.cryo, cryoBias);
+        roughness = lerp(roughness, ICE_ROUGHNESS.rock, rockWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.fracture, iceFracture);
+        iceRoughnessOverride = roughness;
+        iceHeightOffset = -iceFracture * 0.02;
+      }
+
       const climateShade = 1 + landWeight * ((moistNorm - 0.5) * 0.05 + (tempNorm - 0.5) * 0.03);
       const reliefShade = 1 + (sample.relief - 0.5) * 0.14 * detailFactor;
       const detailShade = 1 + sample.detail * 0.08 * detailFactor;
@@ -888,14 +1039,20 @@ const renderSurfaceTexture = (
       rgba[idx + 3] = 255;
 
       if (roughnessRgba) {
-        const baseRough = biomeRoughness(sample.biome);
+        const baseRough = iceRoughnessOverride ?? biomeRoughness(sample.biome);
         const dryness = clamp01(1 - moistNorm);
-        let landRoughness = baseRough + (sample.relief - 0.5) * 0.18 * detailFactor + dryness * 0.08;
+        let landRoughness = baseRough;
+        if (iceRoughnessOverride === null) {
+          landRoughness += (sample.relief - 0.5) * 0.18 * detailFactor + dryness * 0.08;
+        } else {
+          landRoughness += (sample.relief - 0.5) * 0.12 * detailFactor;
+        }
         landRoughness += sample.detail * 0.04 * detailFactor;
         landRoughness = clamp01(landRoughness);
         const waterRoughness = clamp01(0.04 + shallow * 0.06 + sample.detail * 0.02);
         const coastBlend = sample.coast * 0.6;
-        let roughness = lerp(landRoughness, waterRoughness, sample.isWater ? 1 - coastBlend : coastBlend);
+        const waterBlend = sample.isWater && !isFrozenSurface ? 1 - coastBlend : coastBlend;
+        let roughness = lerp(landRoughness, waterRoughness, waterBlend);
         if (sample.crater < 0) {
           roughness = clamp01(roughness + (-sample.crater) * 0.22);
         }
@@ -908,9 +1065,10 @@ const renderSurfaceTexture = (
       }
 
       if (heightField) {
-        heightField[pixelIndex] = sample.height;
-        if (sample.height < heightMin) heightMin = sample.height;
-        if (sample.height > heightMax) heightMax = sample.height;
+        const heightValue = sample.height + iceHeightOffset;
+        heightField[pixelIndex] = heightValue;
+        if (heightValue < heightMin) heightMin = heightValue;
+        if (heightValue > heightMax) heightMax = heightValue;
       }
 
       if (emissiveRgba) {
