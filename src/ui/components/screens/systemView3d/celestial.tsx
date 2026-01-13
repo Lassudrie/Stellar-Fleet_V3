@@ -118,7 +118,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
   const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(moon.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(moon.orbitAscendingNodeDeg);
-    return new Euler(inclination, ascendingNode, 0, 'YXZ');
+    return new Euler(inclination, ascendingNode, 0, 'XYZ');
   }, [moon.orbitAscendingNodeDeg, moon.orbitInclinationDeg]);
   const moonPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
@@ -338,7 +338,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   const orbitRotation = useMemo(() => {
     const inclination = MathUtils.degToRad(planet.orbitInclinationDeg);
     const ascendingNode = MathUtils.degToRad(planet.orbitAscendingNodeDeg);
-    return new Euler(inclination, ascendingNode, 0, 'YXZ');
+    return new Euler(inclination, ascendingNode, 0, 'XYZ');
   }, [planet.orbitAscendingNodeDeg, planet.orbitInclinationDeg]);
   const planetPosition = useMemo<[number, number, number]>(
     () => computeInclinedOrbitPosition(
