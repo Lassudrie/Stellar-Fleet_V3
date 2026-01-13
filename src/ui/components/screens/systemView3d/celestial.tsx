@@ -9,7 +9,6 @@ import {
   MathUtils,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  SphereGeometry,
   Vector3
 } from 'three';
 import { hashStringToUnit } from '../systemViewLayout';
@@ -75,7 +74,7 @@ const resolveOrbitLineRadius = (radius: number): number => (radius <= 0 ? 0.0001
 interface MoonOrbitGroupProps {
   moon: OrbitingMoon;
   orbitMaterial: LineBasicMaterial;
-  moonGeometry: SphereGeometry;
+  moonGeometry: BufferGeometry;
   moonMaterial: MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
   enableBloom: boolean;
@@ -264,10 +263,10 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
 interface PlanetOrbitGroupProps {
   planet: OrbitingPlanet;
   orbitMaterial: LineBasicMaterial;
-  planetGeometry: SphereGeometry;
-  planetGeometryHigh: SphereGeometry | null;
-  moonGeometry: SphereGeometry;
-  moonGeometryHigh: SphereGeometry | null;
+  planetGeometry: BufferGeometry;
+  planetGeometryHigh: BufferGeometry | null;
+  moonGeometry: BufferGeometry;
+  moonGeometryHigh: BufferGeometry | null;
   planetMaterial: MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;
@@ -497,13 +496,13 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
 
 interface SystemCelestialLayerProps {
   stars: OrbitingStar[];
-  starGeometry: SphereGeometry;
+  starGeometry: BufferGeometry;
   planets: OrbitingPlanet[];
   orbitMaterial: LineBasicMaterial;
-  planetGeometry: SphereGeometry;
-  planetGeometryHigh: SphereGeometry | null;
-  moonGeometry: SphereGeometry;
-  moonGeometryHigh: SphereGeometry | null;
+  planetGeometry: BufferGeometry;
+  planetGeometryHigh: BufferGeometry | null;
+  moonGeometry: BufferGeometry;
+  moonGeometryHigh: BufferGeometry | null;
   resolvePlanetMaterial: (planet: OrbitingPlanet) => MeshStandardMaterial;
   resolveMoonMaterial: (moon: OrbitingMoon) => MeshStandardMaterial;
   resolveAtmosphereBundle: (body: OrbitingPlanet | OrbitingMoon) => AtmosphereLayerBundle | null;

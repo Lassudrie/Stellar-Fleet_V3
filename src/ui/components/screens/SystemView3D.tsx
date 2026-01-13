@@ -64,6 +64,7 @@ import {
   DAY_NIGHT_TERMINATOR_SOFTNESS,
   DAY_NIGHT_TERMINATOR_SOFTNESS_ATMOSPHERE,
   deriveScatteringCoeffs,
+  buildCubeSphereGeometry,
   deriveSphericalState,
   getMoonRadiusKm,
   getMoonType,
@@ -1037,18 +1038,14 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   }, [moonSegments]);
   const planetGeometryHigh = useMemo(() => {
     if (!enableHighGeometry) return null;
-    const geometry = new SphereGeometry(1, 128, 128);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
+    return buildCubeSphereGeometry(96);
   }, [enableHighGeometry]);
   useEffect(() => () => {
     planetGeometryHigh?.dispose();
   }, [planetGeometryHigh]);
   const moonGeometryHigh = useMemo(() => {
     if (!enableHighGeometry) return null;
-    const geometry = new SphereGeometry(1, 96, 96);
-    geometry.setAttribute('uv2', new BufferAttribute(geometry.attributes.uv.array, 2));
-    return geometry;
+    return buildCubeSphereGeometry(72);
   }, [enableHighGeometry]);
   useEffect(() => () => {
     moonGeometryHigh?.dispose();

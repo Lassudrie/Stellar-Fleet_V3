@@ -131,3 +131,98 @@ Objectif: zoom tres rapproche sans artefacts.
 - Verifier la coherence worker/sync (meme seed -> meme textures) sur 2 resolutions.
 - Encadrer les budgets texture (max size + fallback mobile) et consigner dans la doc.
 - Confirmer que le canal roughness alpha encode bien le water mask (doc de rendu).
+
+---
+
+# Plan d'action - Surface 3D "Orbit-to-Ground" (SystemView3D)
+
+## Objectif
+Mettre en place une surface planétaire 3D zoomable et procédurale, de l’orbite jusqu’au sol, en s’appuyant sur une architecture cube-sphere + quadtree déterministe, avec LOD adaptatif, streaming par tuiles et transitions visuelles sans rupture.
+
+## Invariants a respecter
+- Determinisme strict: tout bruit et génération dérivent d’un seed stable.
+- Immutabilite: pas de mutation in-place dans l’engine et les structures d’état.
+- Ordre stable: tri explicite pour toute boucle qui consomme du RNG.
+- Frontieres de dependances: UI peut consommer engine; pas d’aller-retour.
+- Save-format: pas de rupture sans migration documentee.
+
+## Architecture cible (orbit -> sol)
+
+### A. Base mesh "orbitale"
+- Sphère basse résolution (ou cube-sphere LOD0) pour l’affichage lointain.
+- Textures existantes (albedo/normal/height) utilisées comme fallback.
+- Atmosphère simple + nuages en overlay pour le macro-rendu.
+
+### B. Cube-sphere + quadtree par face
+- 6 faces, chacune en quadtree (face, lod, i, j).
+- Mapping cube->sphere pour une grille stable sans pôles.
+- Tuiles générées à la volée: maillage + hauteur via sampleTerrain(dir).
+
+### C. LOD adaptatif par erreur écran
+- Calcul d’erreur projetée (hauteur max / distance * facteur FOV).
+- Subdivision si erreur > seuil; sinon rendu du patch courant.
+- Delta LOD entre voisins borné à 1 pour limiter les fissures.
+
+### D. Culling hiérarchique
+- Frustum culling par bounding sphere de tuile.
+- Horizon culling via test de cône (caméra vs sphère planète).
+- Culling par face entière si opposée à la caméra.
+
+### E. Streaming et budget
+- File de tâches de génération des patches (prio par distance + angle).
+- Time-slicing (budget ms par frame) + cache LRU des meshes.
+- Budgets: triangles max, patches max, temps CPU max.
+
+### F. Transitions sans pop
+- Geomorphing (morph factor par distance) entre parent/enfants.
+- Skirts pour masquer les fissures entre LOD.
+- Option: cross-fade de textures multi-résolutions pour les détails fins.
+
+## Plan d'action par phases
+
+### Phase 0 - Cadrage et instrumentation
+- Lister les composants 3D actuels dans `SystemView3D`.
+- Ajouter un overlay debug (LOD/patch count/temps worker).
+- Capturer 3-4 cas visuels de reference (planete, lune, airless).
+
+### Phase 1 - Cube-sphere LOD0 + sampling canonique
+- Construire la sphère via cube-sphere (6 faces).
+- Echantillonnage hauteur en 3D (dir normalisee) via TerrainField.
+- Verifier continuites aux coutures (faces adjacentes).
+
+### Phase 2 - Quadtree + selection LOD
+- Implémenter quadtree par face (structure UI, pas d’état moteur).
+- Selection adaptative par erreur écran.
+- Forcer delta LOD <= 1 entre voisins.
+
+### Phase 3 - Generation et cache de tuiles
+- Générer un patch (mesh + attributes) par tuile.
+- Cache LRU des geometries + eviction par distance.
+- Scheduler de generation (time-slice).
+
+### Phase 4 - Transitions (geomorph + skirts)
+- Ajouter skirts paramétrés par erreur max de tuile.
+- Ajouter morph factor par tuile (distance -> morph).
+- Valider l’absence de cracks au zoom rapide.
+
+### Phase 5 - Optimisations perf
+- Culling horizon + frustum hiérarchique.
+- Limiter draw calls (instancing ou batching par material).
+- Ajuster budgets selon framerate cible (mobile/desktop).
+
+### Phase 6 - Micro-details au sol
+- Normales de detail + blend de textures (biome-driven).
+- Displacement local optionnel (zone proche caméra).
+- Brouillard et shading atmosphérique pour masquer transitions lointaines.
+
+## Tests et validation
+- `npm run typecheck`
+- `npm test`
+- Comparaisons visuelles (same seed): coutures, pops, flicker.
+- Verifier determinisme: une tuile identique (face/LOD/i/j) reste stable.
+
+## Risques & mitigations
+- Surcharge CPU: generation des patches -> time-slicing + cache.
+- Pops visibles: morph + skirts + delta LOD limite.
+- Coups de memoire: eviction LRU + budgets stricts.
+- Divergence 2D/3D: TerrainField reste la source de verite.
