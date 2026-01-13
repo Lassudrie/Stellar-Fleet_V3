@@ -248,6 +248,7 @@ const MENU_OFFSET = 12;
 const SAFE_PADDING = 8;
 const OVERLAY_ID = 'ui-overlay';
 const PRESS_DRAG_THRESHOLD_PX = 8;
+const BODY_LIST_DOUBLE_TAP_MAX_DELAY_MS = 350;
 
 const SystemRoot: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <group name="SystemRoot">
@@ -992,6 +993,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     moved: false,
     suppressSelect: false
   });
+  const bodyListTapRef = useRef<{ bodyId: string | null; time: number }>({ bodyId: null, time: 0 });
 
   useEffect(() => {
     if (selectedFleetId && fleetById.has(selectedFleetId)) {
@@ -1423,15 +1425,18 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
     const radius = bodyRadii[bodyId] ?? focusDistanceFloor;
     requestFocusOnPoint(position, radius, bodyId);
   }, [bodyRadii, bodyWorldPositions, focusDistanceFloor, requestFocusOnPoint]);
-  const handleNavigateToBody = useCallback((bodyId: string) => {
+  const handleSelectBodyFromList = useCallback((bodyId: string) => {
     const objectId = makeObjectId('body', bodyId);
-    const isAlreadySelected = selectedObjectId === objectId;
-    setSelectedObjectId(objectId);
+    if (selectedObjectId !== objectId) {
+      setSelectedObjectId(objectId);
+    }
     setBodyContextMenu(null);
     onSelectFleet?.(null);
-    if (isAlreadySelected) return;
+  }, [onSelectFleet, selectedObjectId]);
+  const handleFocusBodyFromList = useCallback((bodyId: string) => {
+    handleSelectBodyFromList(bodyId);
     requestFocusOnBody(bodyId);
-  }, [onSelectFleet, requestFocusOnBody, selectedObjectId]);
+  }, [handleSelectBodyFromList, requestFocusOnBody]);
   const initialCameraPosition = useMemo<[number, number, number]>(() => (
     positionFromSpherical(cameraInitialSpherical, anchoredTarget)
   ), [
@@ -1525,7 +1530,20 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       <button
         key={item.id}
         type="button"
-        onClick={() => handleNavigateToBody(item.id)}
+        onClick={() => handleSelectBodyFromList(item.id)}
+        onDoubleClick={() => handleFocusBodyFromList(item.id)}
+        onPointerDown={(event) => {
+          if (event.pointerType !== 'touch') return;
+          const now = performance.now();
+          const lastTap = bodyListTapRef.current;
+          if (lastTap.bodyId === item.id && (now - lastTap.time) < BODY_LIST_DOUBLE_TAP_MAX_DELAY_MS) {
+            bodyListTapRef.current = { bodyId: null, time: 0 };
+            event.preventDefault();
+            handleFocusBodyFromList(item.id);
+            return;
+          }
+          bodyListTapRef.current = { bodyId: item.id, time: now };
+        }}
         className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm transition ${
           isSelected ? 'bg-slate-700/80 text-white' : 'text-slate-200 hover:bg-slate-700/60 hover:text-white'
         }`}

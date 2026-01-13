@@ -49,8 +49,10 @@ const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
 const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
 const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
 const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
-const SURFACE_TEXTURE_UPSHIFT = 1.18;
-const SURFACE_TEXTURE_DOWNSHIFT = 0.84;
+const SURFACE_TEXTURE_UPSHIFT_DESKTOP = 1.18;
+const SURFACE_TEXTURE_DOWNSHIFT_DESKTOP = 0.84;
+const SURFACE_TEXTURE_UPSHIFT_MOBILE = 1.32;
+const SURFACE_TEXTURE_DOWNSHIFT_MOBILE = 0.78;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
 const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
@@ -97,7 +99,9 @@ const getSurfaceResolutionIndex = (resolution: SurfaceTextureResolution | null):
 const pickSurfaceTextureResolution = (
   diameterPx: number,
   preferUltra: boolean,
-  lastResolution: SurfaceTextureResolution | null
+  lastResolution: SurfaceTextureResolution | null,
+  upshift: number,
+  downshift: number
 ): SurfaceTextureResolution | null => {
   if (!Number.isFinite(diameterPx) || diameterPx <= 0) return null;
   const maxIndex = preferUltra ? SURFACE_TEXTURE_RESOLUTIONS.length - 1 : SURFACE_TEXTURE_RESOLUTIONS.length - 2;
@@ -112,8 +116,8 @@ const pickSurfaceTextureResolution = (
     const lastIndex = Math.min(lastIndexRaw, maxIndex);
     const upIndex = Math.min(lastIndex + 1, maxIndex);
     const downIndex = Math.max(lastIndex - 1, 0);
-    const upThreshold = SURFACE_TEXTURE_RESOLUTIONS[upIndex].minDiameter * SURFACE_TEXTURE_UPSHIFT;
-    const downThreshold = SURFACE_TEXTURE_RESOLUTIONS[lastIndex].minDiameter * SURFACE_TEXTURE_DOWNSHIFT;
+    const upThreshold = SURFACE_TEXTURE_RESOLUTIONS[upIndex].minDiameter * upshift;
+    const downThreshold = SURFACE_TEXTURE_RESOLUTIONS[lastIndex].minDiameter * downshift;
     if (lastIndex < maxIndex && diameterPx >= upThreshold) {
       return SURFACE_TEXTURE_RESOLUTIONS[upIndex];
     }
@@ -344,11 +348,11 @@ export const SystemSurfaceTextureManager: React.FC<{
         includeNormalMap,
         includeAoMap,
         includeRoughnessMap,
-        includeHeightMap: wantsHeightMap,
+        includeHeightMap: lowSpec ? false : wantsHeightMap,
         includeEmissiveMap: wantsEmissiveMap
       };
     },
-    [baseTextureOptions]
+    [baseTextureOptions, lowSpec]
   );
   const scratch = useMemo(() => ({
     world: new Vector3(),
@@ -761,7 +765,7 @@ export const SystemSurfaceTextureManager: React.FC<{
     const renderHeightPx = size.height * pixelRatio;
     const pixelsPerWorldUnitAtZ1 = renderHeightPx / (2 * Math.tan(cameraFovRad / 2));
 
-    const shouldForceLowRes = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
+    const isPriorityBody = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
     let ultraBodyId: string | null = null;
     let ultraDiameter = 0;
 
@@ -877,14 +881,19 @@ export const SystemSurfaceTextureManager: React.FC<{
       const { diameterPx, isOnScreen } = metrics;
 
       const lastResolution = lastResolutionByBodyIdRef.current.get(bodyId) ?? null;
+      const upshift = lowSpec ? SURFACE_TEXTURE_UPSHIFT_MOBILE : SURFACE_TEXTURE_UPSHIFT_DESKTOP;
+      const downshift = lowSpec ? SURFACE_TEXTURE_DOWNSHIFT_MOBILE : SURFACE_TEXTURE_DOWNSHIFT_DESKTOP;
       let resolution = isOnScreen
-        ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution)
+        ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution, upshift, downshift)
         : null;
-      if (!resolution && shouldForceLowRes(bodyId)) {
+      if (!resolution && isPriorityBody(bodyId)) {
         resolution = lastResolution ?? SURFACE_TEXTURE_RESOLUTIONS[0];
       }
-      if (lowSpec && resolution && resolution.width > 1024) {
-        resolution = { width: 1024, height: 512 };
+      if (lowSpec && resolution) {
+        const maxMobileWidth = isPriorityBody(bodyId) ? 1024 : 512;
+        if (resolution.width > maxMobileWidth) {
+          resolution = { width: maxMobileWidth, height: maxMobileWidth / 2 };
+        }
       }
       if (resolution) {
         lastResolutionByBodyIdRef.current.set(bodyId, resolution);
@@ -946,7 +955,11 @@ export const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
-      const wantsHeightMap = !isGasGiant && isOnScreen && resolution.width >= 512;
+      const wantsHeightMap = !lowSpec
+        && !isGasGiant
+        && isOnScreen
+        && resolution.width >= 512
+        && bodyId === closeUpBodyIdRef.current;
       const wantsEmissiveMap = !isGasGiant && isOnScreen && resolution.width >= 256 && emissiveIntensity > 0;
       const textureOptionsForBody = resolveTextureOptions(wantsHeightMap, wantsEmissiveMap);
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
