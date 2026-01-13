@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type DependencyList } from 'react';
-import { Color, MathUtils, Material, MeshStandardMaterial, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Color, MathUtils, Material, MeshStandardMaterial, Vector3 } from 'three';
 import {
   DAY_NIGHT_NIGHT_MIN,
   DAY_NIGHT_TERMINATOR_SOFTNESS,
@@ -33,6 +33,97 @@ export const useDisposableMemo = <T extends { dispose: () => void }>(
     resource.dispose();
   }, [resource]);
   return resource;
+};
+
+type CubeSphereFace = {
+  normal: Vector3;
+  axisU: Vector3;
+  axisV: Vector3;
+};
+
+const CUBE_SPHERE_FACES: CubeSphereFace[] = [
+  { normal: new Vector3(1, 0, 0), axisU: new Vector3(0, 0, -1), axisV: new Vector3(0, 1, 0) },
+  { normal: new Vector3(-1, 0, 0), axisU: new Vector3(0, 0, 1), axisV: new Vector3(0, 1, 0) },
+  { normal: new Vector3(0, 1, 0), axisU: new Vector3(1, 0, 0), axisV: new Vector3(0, 0, -1) },
+  { normal: new Vector3(0, -1, 0), axisU: new Vector3(1, 0, 0), axisV: new Vector3(0, 0, 1) },
+  { normal: new Vector3(0, 0, 1), axisU: new Vector3(1, 0, 0), axisV: new Vector3(0, 1, 0) },
+  { normal: new Vector3(0, 0, -1), axisU: new Vector3(-1, 0, 0), axisV: new Vector3(0, 1, 0) }
+];
+
+const toSphereUv = (direction: Vector3): [number, number] => {
+  const normalized = direction.clone().normalize();
+  const u = 0.5 + Math.atan2(normalized.z, normalized.x) / (Math.PI * 2);
+  const v = 0.5 - Math.asin(MathUtils.clamp(normalized.y, -1, 1)) / Math.PI;
+  return [u, v];
+};
+
+export const buildCubeSphereGeometry = (segments: number): BufferGeometry => {
+  const safeSegments = Math.max(2, Math.floor(segments));
+  const faceVertexCount = (safeSegments + 1) * (safeSegments + 1);
+  const totalVertices = faceVertexCount * CUBE_SPHERE_FACES.length;
+  const positions = new Float32Array(totalVertices * 3);
+  const normals = new Float32Array(totalVertices * 3);
+  const uvs = new Float32Array(totalVertices * 2);
+  const indices = new Uint32Array(CUBE_SPHERE_FACES.length * safeSegments * safeSegments * 6);
+
+  let vertexOffset = 0;
+  let uvOffset = 0;
+  let indexOffset = 0;
+  let baseVertex = 0;
+
+  CUBE_SPHERE_FACES.forEach((face) => {
+    for (let y = 0; y <= safeSegments; y += 1) {
+      const v = y / safeSegments;
+      const vCoord = v * 2 - 1;
+      for (let x = 0; x <= safeSegments; x += 1) {
+        const u = x / safeSegments;
+        const uCoord = u * 2 - 1;
+        const point = new Vector3()
+          .copy(face.normal)
+          .addScaledVector(face.axisU, uCoord)
+          .addScaledVector(face.axisV, vCoord)
+          .normalize();
+        positions[vertexOffset] = point.x;
+        positions[vertexOffset + 1] = point.y;
+        positions[vertexOffset + 2] = point.z;
+        normals[vertexOffset] = point.x;
+        normals[vertexOffset + 1] = point.y;
+        normals[vertexOffset + 2] = point.z;
+        const [uTex, vTex] = toSphereUv(point);
+        uvs[uvOffset] = uTex;
+        uvs[uvOffset + 1] = vTex;
+        vertexOffset += 3;
+        uvOffset += 2;
+      }
+    }
+
+    for (let y = 0; y < safeSegments; y += 1) {
+      for (let x = 0; x < safeSegments; x += 1) {
+        const a = baseVertex + y * (safeSegments + 1) + x;
+        const b = baseVertex + (y + 1) * (safeSegments + 1) + x;
+        const c = baseVertex + (y + 1) * (safeSegments + 1) + (x + 1);
+        const d = baseVertex + y * (safeSegments + 1) + (x + 1);
+        indices[indexOffset] = a;
+        indices[indexOffset + 1] = b;
+        indices[indexOffset + 2] = d;
+        indices[indexOffset + 3] = b;
+        indices[indexOffset + 4] = c;
+        indices[indexOffset + 5] = d;
+        indexOffset += 6;
+      }
+    }
+
+    baseVertex += faceVertexCount;
+  });
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setAttribute('uv2', new BufferAttribute(uvs.slice(), 2));
+  geometry.setIndex(new BufferAttribute(indices, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
 };
 
 export const createSeededRandom = (seed: number): (() => number) => {

@@ -3,13 +3,13 @@ import { useFrame, useThree } from '@react-three/fiber';
 import {
   AdditiveBlending,
   BackSide,
+  BufferGeometry,
   Color,
   FrontSide,
   MathUtils,
   Mesh,
   NormalBlending,
   ShaderMaterial,
-  SphereGeometry,
   Vector2,
   Vector3
 } from 'three';
@@ -626,7 +626,7 @@ export const createCloudLayerMaterial = (params: {
 };
 
 export const AtmosphereStack: React.FC<{
-  geometry: SphereGeometry;
+  geometry: BufferGeometry;
   radius: number;
   bundle: AtmosphereLayerBundle;
   cloudSpinSpeed?: number;

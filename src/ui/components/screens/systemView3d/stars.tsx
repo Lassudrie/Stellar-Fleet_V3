@@ -16,7 +16,6 @@ import {
   Object3D,
   PerspectiveCamera,
   PointsMaterial,
-  SphereGeometry,
   SRGBColorSpace,
   Vector3
 } from 'three';
@@ -469,7 +468,7 @@ interface StarMeshProps {
   radius: number;
   tintColor: string;
   surfaceTintColor: string;
-  geometry: SphereGeometry;
+  geometry: BufferGeometry;
   seedKey: string;
   spinReferenceRadius: number;
   enableLensFlare?: boolean;
