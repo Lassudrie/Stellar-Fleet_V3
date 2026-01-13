@@ -1693,7 +1693,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               onBodyPressMove={handleBodyPressMove}
               onBodyPressEnd={handleBodyPressEnd}
               onBodyPressCancel={handleBodyPressCancel}
-              onFocusBody={requestFocusOnBody}
               onHoverBody={handleHoverBody}
               onBlurBody={handleBlurBody}
               onSelectBody={handleSelectBody}

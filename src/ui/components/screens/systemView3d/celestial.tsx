@@ -74,7 +74,7 @@ interface MoonOrbitGroupProps {
   onSelect: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
 }
 
-const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string) => void }> = ({
+const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
   moon,
   orbitMaterial,
   orbitMaterialShadow,
@@ -90,13 +90,10 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
   onPressMove,
   onPressEnd,
   onPressCancel,
-  onFocus,
   onHover,
   onBlur,
   onSelect
 }) => {
-  const lastTouchRef = useRef<number>(0);
-  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   const hitboxMaterial = useMemo(
     () => new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
     []
@@ -209,23 +206,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             scale={moonHitboxScale}
             castShadow={false}
             receiveShadow={false}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onFocus(moon.id);
-            }}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              const now = performance.now();
-              if (event.pointerType === 'touch' && now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-                lastTouchRef.current = 0;
-                event.stopPropagation();
-                event.nativeEvent.preventDefault();
-                onPressCancel();
-                onFocus(moon.id);
-                return;
-              }
-              if (event.pointerType === 'touch') {
-                lastTouchRef.current = now;
-              }
               onPressStart(moon.id, event);
             }}
             onPointerUp={() => {
@@ -259,22 +240,6 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps & { onFocus: (bodyId: string)
             scale={moonScale}
             castShadow
             receiveShadow
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onFocus(moon.id);
-            }}
-            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              if (event.pointerType !== 'touch') return;
-              const now = performance.now();
-              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-                lastTouchRef.current = 0;
-                event.stopPropagation();
-                event.nativeEvent.preventDefault();
-                onFocus(moon.id);
-              } else {
-                lastTouchRef.current = now;
-              }
-            }}
             onPointerOver={(event) => {
               event.stopPropagation();
               onHover(moon.id);
@@ -318,7 +283,6 @@ interface PlanetOrbitGroupProps {
   onPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onPressEnd: () => void;
   onPressCancel: () => void;
-  onFocus: (bodyId: string) => void;
   onHover: (bodyId: string) => void;
   onBlur: (bodyId: string) => void;
   onSelect: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
@@ -346,13 +310,10 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
   onPressMove,
   onPressEnd,
   onPressCancel,
-  onFocus,
   onHover,
   onBlur,
   onSelect
 }) => {
-  const lastTouchRef = useRef<number>(0);
-  const DOUBLE_TAP_MAX_DELAY_MS = 350;
   const hitboxMaterial = useMemo(
     () => new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
     []
@@ -471,23 +432,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             scale={planetHitboxScale}
             castShadow={false}
             receiveShadow={false}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onFocus(planet.id);
-            }}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              const now = performance.now();
-              if (event.pointerType === 'touch' && now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-                lastTouchRef.current = 0;
-                event.stopPropagation();
-                event.nativeEvent.preventDefault();
-                onPressCancel();
-                onFocus(planet.id);
-                return;
-              }
-              if (event.pointerType === 'touch') {
-                lastTouchRef.current = now;
-              }
               onPressStart(planet.id, event);
             }}
             onPointerUp={() => {
@@ -521,22 +466,6 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             scale={planetScale}
             castShadow
             receiveShadow
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              onFocus(planet.id);
-            }}
-            onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-              if (event.pointerType !== 'touch') return;
-              const now = performance.now();
-              if (now - lastTouchRef.current < DOUBLE_TAP_MAX_DELAY_MS) {
-                lastTouchRef.current = 0;
-                event.stopPropagation();
-                event.nativeEvent.preventDefault();
-                onFocus(planet.id);
-              } else {
-                lastTouchRef.current = now;
-              }
-            }}
             onPointerOver={(event) => {
               event.stopPropagation();
               onHover(planet.id);
@@ -575,7 +504,6 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               onPressMove={onPressMove}
               onPressEnd={onPressEnd}
               onPressCancel={onPressCancel}
-              onFocus={onFocus}
               onHover={onHover}
               onBlur={onBlur}
               onSelect={onSelect}
@@ -612,7 +540,6 @@ interface SystemCelestialLayerProps {
   onBodyPressMove: (event: ThreeEvent<PointerEvent>) => void;
   onBodyPressEnd: () => void;
   onBodyPressCancel: () => void;
-  onFocusBody: (bodyId: string) => void;
   onHoverBody: (bodyId: string) => void;
   onBlurBody: (bodyId: string) => void;
   onSelectBody: (bodyId: string, event: ThreeEvent<MouseEvent | PointerEvent>) => void;
@@ -643,7 +570,6 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
   onBodyPressMove,
   onBodyPressEnd,
   onBodyPressCancel,
-  onFocusBody,
   onHoverBody,
   onBlurBody,
   onSelectBody
@@ -662,10 +588,6 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
                 seedKey={star.seedKey}
                 spinReferenceRadius={starSpinReferenceRadius}
                 enableLensFlare={star.data.role === 'primary'}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  onFocusBody(star.id);
-                }}
                 onHover={() => onHoverBody(star.id)}
                 onBlur={() => onBlurBody(star.id)}
                 onSelect={(event) => onSelectBody(star.id, event)}
@@ -680,10 +602,6 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
               seedKey={star.seedKey}
               spinReferenceRadius={starSpinReferenceRadius}
               enableLensFlare={star.data.role === 'primary'}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                onFocusBody(star.id);
-              }}
               onHover={() => onHoverBody(star.id)}
               onBlur={() => onBlurBody(star.id)}
               onSelect={(event) => onSelectBody(star.id, event)}
@@ -715,7 +633,6 @@ export const SystemCelestialLayer: React.FC<SystemCelestialLayerProps> = ({
           onPressMove={onBodyPressMove}
           onPressEnd={onBodyPressEnd}
           onPressCancel={onBodyPressCancel}
-          onFocus={onFocusBody}
           onHover={onHoverBody}
           onBlur={onBlurBody}
           onSelect={onSelectBody}
