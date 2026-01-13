@@ -573,6 +573,20 @@ const renderSurfaceTextureFromTiles = (
   const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
   const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
   const useWrap = Boolean(wrapX);
+  const baseSeed = map.descriptor.seed >>> 0;
+  const envRand = createSeededRandom(baseSeed ^ 0x61c88647);
+  const tectonicsIndex = clamp01(0.25 + envRand() * 0.6);
+  const erosionIndex = clamp01(0.2 + envRand() * 0.5);
+  const iceAgeScaleX = 3;
+  const iceAgeScaleY = 2;
+  const iceAgeSeed = baseSeed ^ 0x2b9947b1;
+  const iceAgeWrap = useWrap ? iceAgeScaleX : undefined;
+  const fractureNoiseScaleX = 7;
+  const fractureNoiseScaleY = 4;
+  const fractureNoiseSeed = baseSeed ^ 0x51f0c9d3;
+  const fractureNoiseWrap = useWrap ? fractureNoiseScaleX : undefined;
+  const fracturePlaneCount = Math.max(2, Math.round(2 + tectonicsIndex * 2));
+  const fracturePlanes = buildFracturePlanes(baseSeed ^ 0x7f4a7c15, fracturePlaneCount, tectonicsIndex);
 
   const cloudShadowConfig = cloudShadow && cloudShadow.strength > 0 ? cloudShadow : null;
   const cloudNoiseScaleX = cloudShadowConfig ? Math.max(2, Math.round(cloudShadowConfig.noiseScale)) : 0;
@@ -582,21 +596,19 @@ const renderSurfaceTextureFromTiles = (
   const cityMask = FeatureBits.City | FeatureBits.Capital;
   const seaLevel = map.seaLevelElev * 0.001;
 
-  let heightMin = 0;
-  let heightMax = 0;
-  if (heightField) {
-    heightMin = Number.POSITIVE_INFINITY;
-    heightMax = Number.NEGATIVE_INFINITY;
-    for (let i = 0; i < map.tiles.length; i += 1) {
-      const elev = (map.tiles[i]?.elev ?? 0) * 0.001;
-      heightMin = Math.min(heightMin, elev);
-      heightMax = Math.max(heightMax, elev);
-    }
-    if (!Number.isFinite(heightMin) || !Number.isFinite(heightMax)) {
-      heightMin = 0;
-      heightMax = 0;
-    }
+  let heightMin = Number.POSITIVE_INFINITY;
+  let heightMax = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < map.tiles.length; i += 1) {
+    const elev = (map.tiles[i]?.elev ?? 0) * 0.001;
+    heightMin = Math.min(heightMin, elev);
+    heightMax = Math.max(heightMax, elev);
   }
+  if (!Number.isFinite(heightMin) || !Number.isFinite(heightMax)) {
+    heightMin = 0;
+    heightMax = 0;
+  }
+  const heightRange = Math.max(1e-6, heightMax - heightMin);
+  const invHeightRange = 1 / heightRange;
 
   for (let y = 0; y < height; y += 1) {
     const v = (y + 0.5) / height;
@@ -610,10 +622,115 @@ const renderSurfaceTextureFromTiles = (
       const qBase = Math.floor(u * w);
       const qIndex = useWrap ? wrapIndex(qBase, w) : Math.max(0, Math.min(w - 1, qBase));
       const tile = getTile(map.tiles, w, qIndex, rIndex);
-      const baseColor = biomeLinearRgb[tile?.biome ?? 'rocky'];
+      const biome = tile?.biome ?? 'rocky';
+      const baseColor = biomeLinearRgb[biome];
       let rLin = baseColor[0];
       let gLin = baseColor[1];
       let bLin = baseColor[2];
+
+      const isWater = isWaterBiome(biome);
+      const isIceSurface = isIceBiome(biome);
+      const landWeight = isWater ? 0 : 1;
+      const waterWeight = 1 - landWeight;
+      const elev = (tile?.elev ?? 0) * 0.001;
+      const heightNorm = clamp01((elev - heightMin) * invHeightRange);
+      const landness = elev >= seaLevel ? clamp01((elev - seaLevel) * invHeightRange) : 0;
+      const oceanness = elev < seaLevel ? clamp01((seaLevel - elev) * invHeightRange) : 0;
+      const tempC = (tile?.tempC2 ?? 0) / 2;
+      const moistNorm = clamp01((tile?.moist ?? 0) / 255);
+
+      let iceRoughnessOverride: number | null = null;
+      let iceHeightOffset = 0;
+      let iceFracture = 0;
+
+      if (isIceSurface) {
+        const qLeft = useWrap ? wrapIndex(qIndex - 1, w) : Math.max(0, qIndex - 1);
+        const qRight = useWrap ? wrapIndex(qIndex + 1, w) : Math.min(w - 1, qIndex + 1);
+        const rUp = Math.max(0, rIndex - 1);
+        const rDown = Math.min(h - 1, rIndex + 1);
+        const elevL = (getTile(map.tiles, w, qLeft, rIndex)?.elev ?? 0) * 0.001;
+        const elevR = (getTile(map.tiles, w, qRight, rIndex)?.elev ?? 0) * 0.001;
+        const elevU = (getTile(map.tiles, w, qIndex, rUp)?.elev ?? 0) * 0.001;
+        const elevD = (getTile(map.tiles, w, qIndex, rDown)?.elev ?? 0) * 0.001;
+        const dx = elevR - elevL;
+        const dy = elevD - elevU;
+        const slope = clamp01(Math.sqrt(dx * dx + dy * dy) * invHeightRange * 1.6);
+        const cold = clamp01((-tempC - 4) / 44);
+        const warm = 1 - cold;
+        const stability = clamp01((1 - slope)
+          * (0.6 + 0.4 * (1 - tectonicsIndex))
+          * (0.7 + 0.3 * (1 - erosionIndex))
+          * (0.8 + 0.2 * (1 - oceanness)));
+        const ageNoise = valueNoise2D(u * iceAgeScaleX, v * iceAgeScaleY, iceAgeSeed, iceAgeWrap);
+        const age = clamp01((cold * 0.65 + stability * 0.35) * (0.65 + 0.35 * ageNoise));
+        const snowWeight = clamp01((cold - 0.55) / 0.35)
+          * clamp01((heightNorm - 0.25) / 0.55)
+          * clamp01(moistNorm * 1.1 + 0.1);
+        const oldWeight = clamp01((age - 0.6) / 0.35) * (1 - snowWeight);
+        const rockWeight = clamp01((warm - 0.25) * 1.4 + slope * 0.7);
+        const dustyBias = biome === 'dusty_ice' ? 0.65 : 0;
+        const cryoBias = biome === 'cryovolcanic' ? 0.75 : 0;
+
+        let rIce = ICE_PALETTE.compact[0];
+        let gIce = ICE_PALETTE.compact[1];
+        let bIce = ICE_PALETTE.compact[2];
+
+        rIce = lerp(rIce, ICE_PALETTE.snow[0], snowWeight);
+        gIce = lerp(gIce, ICE_PALETTE.snow[1], snowWeight);
+        bIce = lerp(bIce, ICE_PALETTE.snow[2], snowWeight);
+
+        rIce = lerp(rIce, ICE_PALETTE.old[0], oldWeight);
+        gIce = lerp(gIce, ICE_PALETTE.old[1], oldWeight);
+        bIce = lerp(bIce, ICE_PALETTE.old[2], oldWeight);
+
+        rIce = lerp(rIce, ICE_PALETTE.dusty[0], dustyBias);
+        gIce = lerp(gIce, ICE_PALETTE.dusty[1], dustyBias);
+        bIce = lerp(bIce, ICE_PALETTE.dusty[2], dustyBias);
+
+        rIce = lerp(rIce, ICE_PALETTE.cryo[0], cryoBias);
+        gIce = lerp(gIce, ICE_PALETTE.cryo[1], cryoBias);
+        bIce = lerp(bIce, ICE_PALETTE.cryo[2], cryoBias);
+
+        rIce = lerp(rIce, ICE_PALETTE.rock[0], rockWeight);
+        gIce = lerp(gIce, ICE_PALETTE.rock[1], rockWeight);
+        bIce = lerp(bIce, ICE_PALETTE.rock[2], rockWeight);
+
+        if (fracturePlanes.length) {
+          const dir = surfaceDirFromUv(u, v);
+          let fractureBase = 0;
+          for (const plane of fracturePlanes) {
+            const d = Math.abs(dir.x * plane.dir.x + dir.y * plane.dir.y + dir.z * plane.dir.z);
+            const line = 1 - smoothstep(0, plane.width, d);
+            fractureBase = Math.max(fractureBase, line * plane.strength);
+          }
+          const breakNoise = valueNoise2D(u * fractureNoiseScaleX, v * fractureNoiseScaleY, fractureNoiseSeed, fractureNoiseWrap);
+          const breakMask = smoothstep(0.32, 0.78, breakNoise);
+          let fracture = clamp01(fractureBase * breakMask);
+          if (biome === 'fractured_ice') {
+            fracture = clamp01(fracture + 0.25);
+          }
+          fracture *= oldWeight * (0.35 + 0.65 * tectonicsIndex);
+          iceFracture = fracture;
+
+          rIce = lerp(rIce, ICE_PALETTE.fracture[0], fracture);
+          gIce = lerp(gIce, ICE_PALETTE.fracture[1], fracture);
+          bIce = lerp(bIce, ICE_PALETTE.fracture[2], fracture);
+        }
+
+        rLin = rIce;
+        gLin = gIce;
+        bLin = bIce;
+
+        let roughness = ICE_ROUGHNESS.compact;
+        roughness = lerp(roughness, ICE_ROUGHNESS.snow, snowWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.old, oldWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.dusty, dustyBias);
+        roughness = lerp(roughness, ICE_ROUGHNESS.cryo, cryoBias);
+        roughness = lerp(roughness, ICE_ROUGHNESS.rock, rockWeight);
+        roughness = lerp(roughness, ICE_ROUGHNESS.fracture, iceFracture);
+        iceRoughnessOverride = roughness;
+        iceHeightOffset = -iceFracture * 0.02;
+      }
 
       let cloudShadowFactor = 1;
       if (cloudShadowConfig) {
@@ -647,11 +764,11 @@ const renderSurfaceTextureFromTiles = (
       rgba[idx + 2] = linearToSrgbByte(bLin);
       rgba[idx + 3] = 255;
 
-      const landWeight = isWaterBiome(tile?.biome ?? 'ocean') ? 0 : 1;
-      const waterWeight = 1 - landWeight;
-
       if (roughnessRgba) {
-        const roughness = clamp01(biomeRoughness(tile?.biome ?? 'rocky'));
+        let roughness = clamp01(iceRoughnessOverride ?? biomeRoughness(biome));
+        if (iceRoughnessOverride !== null) {
+          roughness = clamp01(roughness + (1 - landness) * 0.04);
+        }
         const roughByte = Math.round(roughness * 255);
         roughnessRgba[idx] = roughByte;
         roughnessRgba[idx + 1] = roughByte;
@@ -660,7 +777,7 @@ const renderSurfaceTextureFromTiles = (
       }
 
       if (heightField) {
-        heightField[pixelIndex] = (tile?.elev ?? 0) * 0.001;
+        heightField[pixelIndex] = elev + iceHeightOffset;
       }
 
       if (emissiveRgba) {
@@ -725,12 +842,8 @@ const renderSurfaceTextureFromTiles = (
     }
   }
 
-  let heightRange = 0;
-  let invHeightRange = 0;
   let seaLevelNorm = 0;
   if (heightField) {
-    heightRange = Math.max(1e-6, heightMax - heightMin);
-    invHeightRange = 1 / heightRange;
     for (let i = 0; i < heightField.length; i += 1) {
       heightField[i] = (heightField[i] - heightMin) * invHeightRange;
     }
