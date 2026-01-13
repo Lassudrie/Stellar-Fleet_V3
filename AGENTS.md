@@ -194,10 +194,10 @@ UI / i18n :
 
 ## Checklist avant PR
 
+- `npm run lint`
 - `npm run typecheck`
+- `npm run typecheck:strict`
 - `npm test`
-- Si changement moteur : `npm run typecheck:strict`
-- Si changement de style/refactor : `npm run lint`
 - Si changement UI/build : `npm run build` (et éventuellement `npm run preview`)
 
 Dans la description/summary, mentionner explicitement :
