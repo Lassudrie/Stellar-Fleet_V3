@@ -10,6 +10,8 @@ import {
   NormalBlending,
   ShaderMaterial,
   SphereGeometry,
+  type Blending,
+  type Side,
   Vector2,
   Vector3
 } from 'three';
@@ -18,6 +20,7 @@ import { CLOUD_NOISE_SPEED_MIN, DAY_NIGHT_TERMINATOR_SOFTNESS } from './config';
 
 export type AtmosphereLayerBundle = {
   shell: { material: ShaderMaterial; scale: number };
+  haze?: { material: ShaderMaterial; scale: number };
   clouds?: { material: ShaderMaterial; scale: number };
 };
 
@@ -369,12 +372,18 @@ export const createAtmosphereShellMaterial = (params: {
   distanceNear: number;
   distanceFar: number;
   boostMax: number;
+  hazeBase?: number;
+  alphaScale?: number;
+  side?: Side;
+  blending?: Blending;
 }): ShaderMaterial => {
+  const side: Side = params.side ?? BackSide;
+  const blending: Blending = params.blending ?? AdditiveBlending;
   return new ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    blending: AdditiveBlending,
-    side: BackSide,
+    blending,
+    side,
     uniforms: {
       uSunColor: { value: params.sunColor },
       uSunPosition: { value: params.sunPosition.clone() },
@@ -389,7 +398,9 @@ export const createAtmosphereShellMaterial = (params: {
       uCamDist: { value: params.distanceFar },
       uDistParams: { value: new Vector2(params.distanceNear, params.distanceFar) },
       uBoostMax: { value: params.boostMax },
-      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS }
+      uTerminatorSoftness: { value: DAY_NIGHT_TERMINATOR_SOFTNESS },
+      uHazeBase: { value: params.hazeBase ?? 0 },
+      uAlphaScale: { value: params.alphaScale ?? 1 }
     },
     vertexShader: `
       varying vec3 vWorldPosition;
@@ -416,6 +427,8 @@ export const createAtmosphereShellMaterial = (params: {
       uniform vec2 uDistParams;
       uniform float uBoostMax;
       uniform float uTerminatorSoftness;
+      uniform float uHazeBase;
+      uniform float uAlphaScale;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
 
@@ -442,7 +455,8 @@ export const createAtmosphereShellMaterial = (params: {
         float distanceBoost = remap(uCamDist, uDistParams.x, uDistParams.y, uBoostMax, 1.0);
         float lat = abs(N.y);
         float gasBand = mix(1.0, 0.8, smoothstep(0.2, 0.9, lat));
-        float optical = rim * distanceBoost * mix(1.0, gasBand, uGasStrength);
+        float baseHaze = uHazeBase * (0.3 + 0.7 * NdotL) * (0.35 + 0.65 * NdotV);
+        float optical = (rim + baseHaze) * distanceBoost * mix(1.0, gasBand, uGasStrength);
 
         float cosTheta = clamp(dot(V, L), -1.0, 1.0);
         float g = clamp(uMieG, 0.0, 0.95);
@@ -464,6 +478,7 @@ export const createAtmosphereShellMaterial = (params: {
 
         float alpha = clamp((scatter.r + scatter.g + scatter.b) / 3.0, 0.0, 1.0);
         alpha *= night;
+        alpha *= uAlphaScale;
         if (alpha <= 0.002) discard;
 
         gl_FragColor = vec4(color, alpha);
@@ -637,7 +652,9 @@ export const AtmosphereStack: React.FC<{
   const shellMeshRef = useRef<Mesh>(null);
   const cloudRadius = bundle.clouds ? radius * bundle.clouds.scale : 0;
   const shellRadius = radius * bundle.shell.scale;
+  const hazeRadius = bundle.haze ? radius * bundle.haze.scale : 0;
   const cloudMeshRef = useRef<Mesh>(null);
+  const hazeMeshRef = useRef<Mesh>(null);
   const cloudTimeRef = useRef(0);
   const shellWorldRef = useRef(new Vector3());
   const cameraWorldRef = useRef(new Vector3());
@@ -652,10 +669,13 @@ export const AtmosphereStack: React.FC<{
     if (bundle.shell.material.uniforms.uSunPosition) {
       bundle.shell.material.uniforms.uSunPosition.value.copy(sunPosition);
     }
+    if (bundle.haze?.material.uniforms.uSunPosition) {
+      bundle.haze.material.uniforms.uSunPosition.value.copy(sunPosition);
+    }
     if (bundle.clouds?.material.uniforms.uSunPosition) {
       bundle.clouds.material.uniforms.uSunPosition.value.copy(sunPosition);
     }
-  }, [bundle.clouds?.material, bundle.shell.material, sunPosition]);
+  }, [bundle.clouds?.material, bundle.haze?.material, bundle.shell.material, sunPosition]);
 
   useFrame((_, delta) => {
     if (bundle.clouds) {
@@ -668,15 +688,34 @@ export const AtmosphereStack: React.FC<{
         bundle.clouds.material.uniforms.uTime.value = cloudTimeRef.current;
       }
     }
-    if (bundle.shell.material.uniforms.uCamDist && shellMeshRef.current) {
+    if (shellMeshRef.current) {
       camera.getWorldPosition(cameraWorldRef.current);
       shellMeshRef.current.getWorldPosition(shellWorldRef.current);
-      bundle.shell.material.uniforms.uCamDist.value = cameraWorldRef.current.distanceTo(shellWorldRef.current);
+      const camDist = cameraWorldRef.current.distanceTo(shellWorldRef.current);
+      if (bundle.shell.material.uniforms.uCamDist) {
+        bundle.shell.material.uniforms.uCamDist.value = camDist;
+      }
+      if (bundle.haze?.material.uniforms.uCamDist) {
+        bundle.haze.material.uniforms.uCamDist.value = camDist;
+      }
     }
   });
 
   return (
     <group raycast={() => null}>
+      {bundle.haze && (
+        <mesh
+          geometry={geometry}
+          material={bundle.haze.material}
+          scale={[hazeRadius, hazeRadius, hazeRadius]}
+          castShadow={false}
+          receiveShadow={false}
+          frustumCulled
+          raycast={() => null}
+          renderOrder={3.2}
+          ref={hazeMeshRef}
+        />
+      )}
       {bundle.clouds && (
         <mesh
           geometry={geometry}

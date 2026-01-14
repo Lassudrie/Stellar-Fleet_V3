@@ -6,9 +6,11 @@ import {
   AmbientLight,
   BufferAttribute,
   Color,
+  FrontSide,
   LineBasicMaterial,
   MathUtils,
   MeshStandardMaterial,
+  NormalBlending,
   Object3D,
   PCFSoftShadowMap,
   PointLight,
@@ -539,6 +541,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
   const atmosphereBundleByBodyIdRef = useRef<Map<string, AtmosphereBundleCacheEntry>>(new Map());
   const disposeAtmosphereBundle = useCallback((bundle: AtmosphereLayerBundle) => {
     bundle.shell.material.dispose();
+    bundle.haze?.material.dispose();
     bundle.clouds?.material.dispose();
   }, []);
   const clearAtmosphereCache = useCallback(() => {
@@ -673,6 +676,47 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       };
     }
 
+    let hazeKey = 'haze:none';
+    let haze: AtmosphereLayerBundle['haze'] = undefined;
+    if (!isGasBody && params.pressureAtm > 0.08) {
+      const pressureNorm = MathUtils.clamp(Math.log10(params.pressureAtm + 0.1) / 2, 0, 1);
+      const scaleNorm = MathUtils.clamp(params.scaleHeightKm / 80, 0, 1);
+      const hazeBase = MathUtils.clamp(0.12 + pressureNorm * 0.32 + params.aerosols * 0.2, 0.08, 0.6);
+      const hazeAlphaScale = MathUtils.clamp(0.22 + pressureNorm * 0.35 + params.aerosols * 0.18, 0.18, 0.6);
+      const hazeCoeffs = {
+        betaRayleigh: coeffs.betaRayleigh.clone().multiplyScalar(0.35 + pressureNorm * 0.25),
+        betaMie: coeffs.betaMie.clone().multiplyScalar(0.6 + pressureNorm * 0.7 + params.aerosols * 0.35),
+        absorption: coeffs.absorption.clone().multiplyScalar(0.5 + params.aerosols * 0.25),
+        hazeTint: coeffs.hazeTint.clone().lerp(new Color('#ffffff'), 0.15 + params.aerosols * 0.15),
+        mieG: MathUtils.clamp(coeffs.mieG + 0.04 + params.aerosols * 0.08, 0.55, 0.92),
+        rimPower: MathUtils.lerp(1.6, 2.4, 1 - pressureNorm),
+        gasStrength: coeffs.gasStrength,
+        thickness: MathUtils.clamp(
+          coeffs.thickness * MathUtils.lerp(0.4, 0.8, pressureNorm) * MathUtils.lerp(0.8, 1.1, scaleNorm),
+          0.005,
+          0.08
+        ),
+        nightMin: MathUtils.clamp(coeffs.nightMin + pressureNorm * 0.05, 0.04, 0.18)
+      };
+      const hazeScale = 1 + hazeCoeffs.thickness;
+      hazeKey = `haze:${hazeScale.toFixed(4)}:${hazeBase.toFixed(3)}:${hazeAlphaScale.toFixed(3)}`;
+      haze = {
+        material: createAtmosphereShellMaterial({
+          sunColor: sunColorRef.current,
+          sunPosition,
+          coeffs: hazeCoeffs,
+          distanceNear,
+          distanceFar,
+          boostMax: ATMOSPHERE_SHELL_DISTANCE_BOOST_MAX * 0.6,
+          hazeBase,
+          alphaScale: hazeAlphaScale,
+          side: FrontSide,
+          blending: NormalBlending
+        }),
+        scale: hazeScale
+      };
+    }
+
     const shellKey = [
       atmosphere,
       params.planetClass,
@@ -684,7 +728,7 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
       params.albedoBoost.toFixed(2),
       body.radius.toFixed(3)
     ].join('|');
-    const cacheKey = `${shellKey}|${cloudsKey}`;
+    const cacheKey = `${shellKey}|${cloudsKey}|${hazeKey}`;
 
     const existing = atmosphereBundleByBodyIdRef.current.get(body.id);
     if (existing && existing.key === cacheKey) return existing;
@@ -710,6 +754,9 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
 
     if (clouds) {
       bundle.clouds = clouds;
+    }
+    if (haze) {
+      bundle.haze = haze;
     }
 
     atmosphereBundleByBodyIdRef.current.set(body.id, bundle);
