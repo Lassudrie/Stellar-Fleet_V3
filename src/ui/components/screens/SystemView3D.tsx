@@ -1641,7 +1641,6 @@ const SystemView3D: React.FC<SystemView3DProps> = ({
               bodyWorldPositions={bodyWorldPositions}
               bodyRadii={bodyRadii}
               selectedBodyId={selectedBodyId}
-              hoveredBodyId={hoveredBodyId}
               cloudShadowStrengthScale={cloudShadowStrengthScale}
               debugEnabled={showSurfaceDebug}
               onDebugUpdate={showSurfaceDebug ? setSurfaceDebug : undefined}

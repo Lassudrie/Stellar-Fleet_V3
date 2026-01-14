@@ -45,10 +45,10 @@ import {
 import { createSeededRandom, linearToSrgbByte, smoothstep } from './renderUtils';
 import type { OrbitingPlanet } from './systemModel';
 
-const SURFACE_TEXTURE_MIN_DIAMETER_PX = 120;
-const SURFACE_TEXTURE_MED_DIAMETER_PX = 220;
-const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 420;
-const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 820;
+const SURFACE_TEXTURE_MIN_DIAMETER_PX = 80;
+const SURFACE_TEXTURE_MED_DIAMETER_PX = 160;
+const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 320;
+const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 640;
 const SURFACE_TEXTURE_UPSHIFT_DESKTOP = 1.18;
 const SURFACE_TEXTURE_DOWNSHIFT_DESKTOP = 0.84;
 const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
@@ -273,7 +273,6 @@ export const SystemSurfaceTextureManager: React.FC<{
   bodyWorldPositions: Record<string, [number, number, number]>;
   bodyRadii: Record<string, number>;
   selectedBodyId: string | null;
-  hoveredBodyId: string | null;
   cloudShadowStrengthScale: number;
   debugEnabled?: boolean;
   onDebugUpdate?: (info: SurfaceTextureDebugInfo) => void;
@@ -288,7 +287,6 @@ export const SystemSurfaceTextureManager: React.FC<{
   bodyWorldPositions,
   bodyRadii,
   selectedBodyId,
-  hoveredBodyId,
   cloudShadowStrengthScale,
   debugEnabled = false,
   onDebugUpdate,
@@ -320,19 +318,21 @@ export const SystemSurfaceTextureManager: React.FC<{
   const planetsRef = useRef(planets);
   const maxCacheEntries = SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
   const maxInflight = SURFACE_TEXTURE_MAX_INFLIGHT;
-  const baseTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'field' }), []);
+  const fieldTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'field' }), []);
+  const tileTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'tiles' }), []);
   const resolveTextureOptions = useCallback(
-    (wantsHeightMap: boolean, wantsEmissiveMap: boolean): SurfaceTextureOptions => {
+    (wantsHeightMap: boolean, wantsEmissiveMap: boolean, source: 'field' | 'tiles'): SurfaceTextureOptions => {
+      const baseOptions = source === 'field' ? fieldTextureOptions : tileTextureOptions;
       if (!wantsHeightMap && !wantsEmissiveMap) {
-        return baseTextureOptions;
+        return baseOptions;
       }
       return {
-        ...baseTextureOptions,
+        ...baseOptions,
         includeHeightMap: wantsHeightMap,
         includeEmissiveMap: wantsEmissiveMap
       };
     },
-    [baseTextureOptions]
+    [fieldTextureOptions, tileTextureOptions]
   );
   const scratch = useMemo(() => ({
     world: new Vector3(),
@@ -746,7 +746,6 @@ export const SystemSurfaceTextureManager: React.FC<{
     const renderHeightPx = size.height * pixelRatio;
     const pixelsPerWorldUnitAtZ1 = renderHeightPx / (2 * Math.tan(cameraFovRad / 2));
 
-    const isPriorityBody = (bodyId: string) => bodyId === selectedBodyId || bodyId === hoveredBodyId;
     let ultraBodyId: string | null = null;
     let ultraDiameter = 0;
 
@@ -860,15 +859,27 @@ export const SystemSurfaceTextureManager: React.FC<{
       const metrics = bodyMetricsById.get(bodyId);
       if (!metrics) return;
       const { diameterPx, isOnScreen } = metrics;
+      if (diameterPx < 10) {
+        desiredKeyByBodyIdRef.current.set(bodyId, null);
+        const material = resolveMaterial(bodyId);
+        if (material && material.userData.surfaceTextureKey) {
+          clearTextureFromMaterial(material);
+        }
+        return;
+      }
 
       const lastResolution = lastResolutionByBodyIdRef.current.get(bodyId) ?? null;
       const upshift = SURFACE_TEXTURE_UPSHIFT_DESKTOP;
       const downshift = SURFACE_TEXTURE_DOWNSHIFT_DESKTOP;
+      const isFocusBody = bodyId === closeUpBodyIdRef.current;
       let resolution = isOnScreen
         ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution, upshift, downshift)
         : null;
-      if (!resolution && isPriorityBody(bodyId)) {
+      if (!resolution && isFocusBody) {
         resolution = lastResolution ?? SURFACE_TEXTURE_RESOLUTIONS[0];
+      }
+      if (resolution && !isFocusBody && resolution.width > 256) {
+        resolution = { width: 256, height: 128 };
       }
       if (resolution) {
         lastResolutionByBodyIdRef.current.set(bodyId, resolution);
@@ -933,7 +944,8 @@ export const SystemSurfaceTextureManager: React.FC<{
         && resolution.width >= 512
         && bodyId === closeUpBodyIdRef.current;
       const wantsEmissiveMap = !isGasGiant && isOnScreen && resolution.width >= 256 && emissiveIntensity > 0;
-      const textureOptionsForBody = resolveTextureOptions(wantsHeightMap, wantsEmissiveMap);
+      const textureSource = isGasGiant ? 'field' : (bodyId === closeUpBodyIdRef.current ? 'field' : 'tiles');
+      const textureOptionsForBody = resolveTextureOptions(wantsHeightMap, wantsEmissiveMap, textureSource);
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
         ? buildGasGiantTextureKey(bodyId, planetType, resolution, textureOptionsForBody)
