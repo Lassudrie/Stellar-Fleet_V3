@@ -61,6 +61,18 @@ const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_VIEW_CONTEXT: ViewContext = { tier: 'galaxy', focus: {}, desiredZoom: null };
+const DEFAULT_VIEW_ZOOM = 0.12;
+const ZOOM_THRESHOLDS = {
+  system: 0.28,
+  planet: 0.62,
+  surface: 0.86
+};
+const ZOOM_PRESETS = {
+  galaxy: 0.12,
+  system: 0.38,
+  planet: 0.7,
+  surface: 0.93
+};
 const LOADING_FLOW_STAGES: Record<LoadingFlow, LoadingStage[]> = {
   newGame: ['prepare', 'worldgen', 'engine', 'render'],
   loadGame: ['read', 'deserialize', 'engine', 'render']
@@ -194,6 +206,7 @@ const App: React.FC = () => {
   useButtonClickSound();
   const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO'>('MENU');
   const [viewContext, setViewContext] = useState<ViewContext>(DEFAULT_VIEW_CONTEXT);
+  const [viewZoom, setViewZoom] = useState<number>(DEFAULT_VIEW_ZOOM);
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>({
@@ -229,6 +242,14 @@ const App: React.FC = () => {
       planetId: string | null;
   };
   const [invasionDecision, setInvasionDecision] = useState<InvasionDecisionContext | null>(null);
+
+  const resolvedZoomTier = useMemo<ViewTier>(() => {
+      if (!viewContext.focus.systemId) return 'galaxy';
+      if (viewZoom >= ZOOM_THRESHOLDS.surface && viewContext.focus.bodyId) return 'surface';
+      if (viewZoom >= ZOOM_THRESHOLDS.planet && viewContext.focus.bodyId) return 'planet';
+      if (viewZoom >= ZOOM_THRESHOLDS.system) return 'system';
+      return 'galaxy';
+  }, [viewContext.focus.bodyId, viewContext.focus.systemId, viewZoom]);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
@@ -616,6 +637,7 @@ const App: React.FC = () => {
     setUiMode('NONE');
     setSelectedBattleId(null);
     setViewContext(DEFAULT_VIEW_CONTEXT);
+    setViewZoom(DEFAULT_VIEW_ZOOM);
     updateLoadingStage('prepare', 1);
 
     try {
@@ -727,6 +749,7 @@ const App: React.FC = () => {
           setUiMessages([]);
           setSelectedBattleId(null);
           setViewContext(DEFAULT_VIEW_CONTEXT);
+          setViewZoom(DEFAULT_VIEW_ZOOM);
           
           updateViewState(newEngine.state);
           
@@ -868,6 +891,7 @@ const App: React.FC = () => {
       }
       setTargetSystem(resolvedSystem);
       setFocusTarget(resolvedSystem.position);
+      setViewZoom(ZOOM_PRESETS.system);
       setViewContext({
           tier: 'system',
           focus: { systemId: resolvedSystem.id },
@@ -898,6 +922,7 @@ const App: React.FC = () => {
       });
       setTargetSystem(context.system);
       setFocusTarget(context.system.position);
+      setViewZoom(ZOOM_PRESETS.planet);
       setUiMode('NONE');
       setMenuPosition(null);
   }, [targetSystem, viewGameState]);
@@ -923,13 +948,14 @@ const App: React.FC = () => {
       });
       setTargetSystem(context.system);
       setFocusTarget(context.system.position);
+      setViewZoom(ZOOM_PRESETS.surface);
       setUiMode('NONE');
       setMenuPosition(null);
   }, [targetSystem, viewGameState]);
 
   const handleZoomOut = useCallback(() => {
       setViewContext((prev) => {
-          if (prev.tier === 'surface' || prev.tier === 'planet') {
+          if (resolvedZoomTier === 'surface' || resolvedZoomTier === 'planet') {
               const nextSystemId = prev.focus.systemId ?? targetSystem?.id ?? null;
               return {
                   tier: 'system',
@@ -937,19 +963,29 @@ const App: React.FC = () => {
                   desiredZoom: null
               };
           }
-          if (prev.tier === 'system') {
+          if (resolvedZoomTier === 'system') {
               return { tier: 'galaxy', focus: {}, desiredZoom: null };
           }
           return prev;
       });
-  }, [targetSystem?.id]);
+      setViewZoom((prev) => {
+          if (resolvedZoomTier === 'surface' || resolvedZoomTier === 'planet') return ZOOM_PRESETS.system;
+          if (resolvedZoomTier === 'system') return ZOOM_PRESETS.galaxy;
+          return prev;
+      });
+  }, [resolvedZoomTier, targetSystem?.id]);
 
   const handleZoomIn = useCallback(() => {
-      if (viewContext.tier !== 'planet') return;
+      if (resolvedZoomTier !== 'planet') return;
       const bodyId = viewContext.focus.bodyId ?? null;
       if (!bodyId) return;
       handleFocusSurface(bodyId);
-  }, [handleFocusSurface, viewContext.focus.bodyId, viewContext.tier]);
+  }, [handleFocusSurface, resolvedZoomTier, viewContext.focus.bodyId]);
+
+  const handleViewZoomChange = useCallback((nextZoom: number) => {
+      const clamped = Math.max(0, Math.min(1, nextZoom));
+      setViewZoom(prev => (Math.abs(prev - clamped) < 0.002 ? prev : clamped));
+  }, []);
 
   const handleOpenSystemDetails = () => {
       if (!targetSystem || !viewGameState) {
@@ -1292,8 +1328,8 @@ const App: React.FC = () => {
   }, [engine, viewGameState, uiMode, invasionDecision]);
 
   const activeSurfaceBodyId = useMemo(() => (
-      viewContext.tier === 'surface' ? viewContext.focus.bodyId ?? null : null
-  ), [viewContext.focus.bodyId, viewContext.tier]);
+      resolvedZoomTier === 'surface' ? viewContext.focus.bodyId ?? null : null
+  ), [resolvedZoomTier, viewContext.focus.bodyId]);
 
   const surfaceSystem = useMemo(() => {
       if (!viewGameState || !activeSurfaceBodyId) return null;
@@ -1360,7 +1396,7 @@ const surfaceMapKey = useMemo(() => {
 }, [activeSurfaceBodyId, surfaceDescriptor, viewGameState]);
 
 useEffect(() => {
-    const shouldLoad = viewContext.tier === 'surface';
+    const shouldLoad = resolvedZoomTier === 'surface';
     if (!shouldLoad) return;
 
     if (!surfaceMapKey || !surfaceDescriptor || !activeSurfaceBodyId) {
@@ -1434,13 +1470,13 @@ useEffect(() => {
     return () => {
         cancelled = true;
     };
-}, [activeSurfaceBodyId, surfaceDescriptor, surfaceMapKey, viewContext.tier]);
+}, [activeSurfaceBodyId, resolvedZoomTier, surfaceDescriptor, surfaceMapKey]);
 
 useEffect(() => {
-    if (viewContext.tier !== 'surface') {
+    if (resolvedZoomTier !== 'surface') {
         setSurfaceSelection(null);
     }
-}, [viewContext.tier]);
+}, [resolvedZoomTier]);
 
 useEffect(() => {
     if (!surfaceSelection) return;
@@ -1472,21 +1508,21 @@ useEffect(() => {
   }, [surfaceMap, surfaceSelection]);
 
   const zoomOutLabel = useMemo(() => {
-      if (viewContext.tier === 'surface' || viewContext.tier === 'planet') {
+      if (resolvedZoomTier === 'surface' || resolvedZoomTier === 'planet') {
           return t('surfaceView.backToSystem');
       }
-      if (viewContext.tier === 'system') {
+      if (resolvedZoomTier === 'system') {
           return t('surfaceView.backToGalaxy');
       }
       return null;
-  }, [t, viewContext.tier]);
+  }, [resolvedZoomTier, t]);
 
   const zoomInLabel = useMemo(() => {
-      if (viewContext.tier === 'planet') {
+      if (resolvedZoomTier === 'planet') {
           return t('surfaceView.zoomIn');
       }
       return null;
-  }, [t, viewContext.tier]);
+  }, [resolvedZoomTier, t]);
 
   const isGameInteractionLocked = loadingState.active || screen !== 'GAME';
 
@@ -1520,6 +1556,8 @@ useEffect(() => {
                     focusTarget={focusTarget}
                     isInteractive={!isGameInteractionLocked}
                     viewContext={viewContext}
+                    viewZoom={viewZoom}
+                    onViewZoomChange={handleViewZoomChange}
                     onFocusSystem={handleFocusSystem}
                     onFocusPlanet={handleFocusPlanet}
                     onFocusSurface={handleFocusSurface}
@@ -1635,7 +1673,7 @@ useEffect(() => {
                         </div>
                     </div>
                 ) : null}
-                {viewContext.tier === 'surface' && surfaceBody ? (
+                {resolvedZoomTier === 'surface' && surfaceBody ? (
                     <div className="pointer-events-none absolute inset-0">
                         <div className="pointer-events-auto absolute right-4 bottom-4 w-full max-w-xs rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur">
                             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">

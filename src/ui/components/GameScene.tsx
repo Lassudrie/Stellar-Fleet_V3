@@ -136,6 +136,8 @@ interface GameSceneProps {
   onSystemClick: (sys: StarSystem, event: ThreeEvent<MouseEvent>) => void;
   onBackgroundClick: () => void;
   viewContext?: ViewContext;
+  viewZoom?: number;
+  onViewZoomChange?: (zoom: number) => void;
   onFocusSystem?: (systemId: string) => void;
   onFocusPlanet?: (bodyId: string) => void;
   onFocusSurface?: (bodyId: string) => void;
@@ -358,6 +360,88 @@ const isTierAtLeast = (tier: ViewTier, target: ViewTier): boolean => TIER_INDEX[
 
 const SYSTEM_LAYER_SCALE = 35;
 const PLANET_LAYER_SCALE = 120;
+const ZOOM_THRESHOLDS = {
+  system: 0.28,
+  planet: 0.62,
+  surface: 0.86
+};
+const ZOOM_PRESETS: Record<ViewTier, number> = {
+  galaxy: 0.12,
+  system: 0.38,
+  planet: 0.7,
+  surface: 0.93
+};
+const CAMERA_FOV_DEG = 35;
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const smoothProgress = (value: number, start: number, end: number) => {
+  if (start === end) return value >= end ? 1 : 0;
+  const t = clamp01((value - start) / (end - start));
+  return t * t * (3 - 2 * t);
+};
+
+type ZoomStop = { zoom: number; distance: number };
+
+const resolveMaxDistance = (radius: number): number => {
+  const safeRadius = Math.max(radius, DEFAULT_RADIUS, 1);
+  const halfFovRad = (CAMERA_FOV_DEG * Math.PI) / 360;
+  const fitDistance = safeRadius / Math.sin(halfFovRad);
+  return Math.max(safeRadius * 2.5, DEFAULT_RADIUS * 2, fitDistance);
+};
+
+const resolveZoomStops = (radius: number): ZoomStop[] => {
+  const maxDistance = resolveMaxDistance(radius);
+  const systemDistance = Math.min(140, maxDistance * 0.7);
+  const planetDistance = Math.min(60, systemDistance * 0.65);
+  const surfaceDistance = Math.min(35, planetDistance * 0.65);
+  const closeDistance = Math.max(1.2, Math.min(8, surfaceDistance * 0.6));
+  return [
+    { zoom: 0, distance: maxDistance },
+    { zoom: ZOOM_THRESHOLDS.system, distance: systemDistance },
+    { zoom: ZOOM_THRESHOLDS.planet, distance: planetDistance },
+    { zoom: ZOOM_THRESHOLDS.surface, distance: surfaceDistance },
+    { zoom: 1, distance: closeDistance }
+  ];
+};
+
+const zoomToDistance = (stops: ZoomStop[], zoom: number): number => {
+  const z = clamp01(zoom);
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const start = stops[i];
+    const end = stops[i + 1];
+    if (z <= end.zoom) {
+      const span = end.zoom - start.zoom;
+      const t = span <= 0 ? 0 : (z - start.zoom) / span;
+      return MathUtils.lerp(start.distance, end.distance, t);
+    }
+  }
+  return stops[stops.length - 1].distance;
+};
+
+const distanceToZoom = (stops: ZoomStop[], distance: number): number => {
+  const maxDistance = stops[0].distance;
+  const minDistance = stops[stops.length - 1].distance;
+  const clamped = Math.max(minDistance, Math.min(maxDistance, distance));
+
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const start = stops[i];
+    const end = stops[i + 1];
+    if (clamped <= start.distance && clamped >= end.distance) {
+      const span = start.distance - end.distance;
+      const t = span <= 0 ? 0 : (start.distance - clamped) / span;
+      return MathUtils.lerp(start.zoom, end.zoom, t);
+    }
+  }
+  return stops[stops.length - 1].zoom;
+};
+
+const resolveZoomTier = (zoom: number, focus: ViewContext['focus']): ViewTier => {
+  if (!focus.systemId) return 'galaxy';
+  if (zoom >= ZOOM_THRESHOLDS.surface && focus.bodyId) return 'surface';
+  if (zoom >= ZOOM_THRESHOLDS.planet && focus.bodyId) return 'planet';
+  if (zoom >= ZOOM_THRESHOLDS.system) return 'system';
+  return 'galaxy';
+};
 
 const resolvePlanetColor = (planet: PlanetBody): string => {
   if (planet.class === 'gas_giant') return '#f2b880';
@@ -1674,7 +1758,6 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
   }, [gameState.scenarioId]);
 
   const mapMetrics = useMapMetrics(gameState.systems, scenarioRadius);
-
   const ownershipSignature = useMemo(() => {
       const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
       return sorted(owners).join('|');
@@ -1815,12 +1898,17 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   isInteractive = true,
   onReady,
   viewContext,
+  viewZoom,
+  onViewZoomChange,
   onFocusSystem,
   onFocusPlanet,
   onFocusSurface,
   onSurfaceTileSelect
 }) => {
   const resolvedView = viewContext ?? { tier: 'galaxy', focus: {} };
+  const fallbackZoom = ZOOM_PRESETS[resolvedView.tier] ?? ZOOM_PRESETS.galaxy;
+  const zoomValue = clamp01(viewZoom ?? fallbackZoom);
+  const zoomTier = viewZoom === undefined ? resolvedView.tier : resolveZoomTier(zoomValue, resolvedView.focus);
 
   const playerHomeworld = useMemo(() => {
     const ownedHomeworld = gameState.systems.find(
@@ -1854,34 +1942,36 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     if (resolvedView.focus.systemId) {
       return gameState.systems.find(system => system.id === resolvedView.focus.systemId) ?? null;
     }
-    if (resolvedView.tier !== 'galaxy') {
+    if (zoomTier !== 'galaxy') {
       return gameState.systems[0] ?? null;
     }
     return null;
-  }, [gameState.systems, resolvedView.focus.systemId, resolvedView.tier]);
+  }, [gameState.systems, resolvedView.focus.systemId, zoomTier]);
+  const hasSystemFocus = Boolean(resolvedSystem);
 
   const resolvedPlanet = useMemo(() => {
     if (!resolvedSystem) return null;
     if (resolvedView.focus.bodyId) {
       return resolvedSystem.planets.find(planet => planet.id === resolvedView.focus.bodyId) ?? null;
     }
-    if (isTierAtLeast(resolvedView.tier, 'planet')) {
+    if (isTierAtLeast(zoomTier, 'planet')) {
       return resolvedSystem.planets.find(planet => planet.isSolid) ?? resolvedSystem.planets[0] ?? null;
     }
     return null;
-  }, [resolvedSystem, resolvedView.focus.bodyId, resolvedView.tier]);
+  }, [resolvedSystem, resolvedView.focus.bodyId, zoomTier]);
+  const hasPlanetFocus = Boolean(resolvedPlanet);
   const planetRadius = useMemo(
     () => (resolvedPlanet ? Math.max(4, resolvedPlanet.size * 2.5) : 0),
     [resolvedPlanet]
   );
 
   const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
-  const focusBase = resolvedView.tier === 'galaxy' || !resolvedSystem
+  const focusBase = zoomTier === 'galaxy' || !resolvedSystem
     ? homeworldForCamera
     : resolvedSystem.position;
 
   const cameraOffset = useMemo(() => {
-    switch (resolvedView.tier) {
+    switch (zoomTier) {
       case 'system':
         return { y: 45, z: 30 };
       case 'planet':
@@ -1891,7 +1981,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
       default:
         return { y: 80, z: 50 };
     }
-  }, [resolvedView.tier]);
+  }, [zoomTier]);
 
   const cameraTarget = useMemo(
     () => [focusBase.x, focusBase.y, focusBase.z] as [number, number, number],
@@ -1904,7 +1994,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   );
 
   useEffect(() => {
-    if (resolvedView.tier === 'galaxy') {
+    if (zoomTier === 'galaxy') {
       if (focusTarget) {
         setLastFocusedTarget({ x: focusTarget.x, y: 0, z: focusTarget.z });
       }
@@ -1913,7 +2003,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     if (resolvedSystem) {
       setLastFocusedTarget({ x: resolvedSystem.position.x, y: 0, z: resolvedSystem.position.z });
     }
-  }, [focusTarget, resolvedSystem, resolvedView.tier]);
+  }, [focusTarget, resolvedSystem, zoomTier]);
 
   const cameraFocusTarget = lastFocusedTarget;
 
@@ -1923,6 +2013,21 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   }, [gameState.scenarioId]);
 
   const mapMetrics = useMapMetrics(gameState.systems, scenarioRadius);
+  const zoomStops = useMemo(() => resolveZoomStops(mapMetrics.radius), [mapMetrics.radius]);
+  const zoomDistanceLimits = useMemo(() => {
+    const minDistance = zoomStops[zoomStops.length - 1].distance;
+    const maxDistance = zoomStops[0].distance;
+    return { min: minDistance, max: maxDistance };
+  }, [zoomStops]);
+  const zoomTargetDistance = useMemo(() => {
+    if (viewZoom === undefined) return null;
+    return zoomToDistance(zoomStops, zoomValue);
+  }, [viewZoom, zoomStops, zoomValue]);
+  const handleDistanceChange = useCallback((distance: number) => {
+    if (!onViewZoomChange) return;
+    const nextZoom = distanceToZoom(zoomStops, distance);
+    onViewZoomChange(nextZoom);
+  }, [onViewZoomChange, zoomStops]);
 
   const ownershipSignature = useMemo(() => {
     const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
@@ -1975,6 +2080,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   const distanceLimits = useMemo(() => {
+    if (viewZoom !== undefined) return zoomDistanceLimits;
     if (resolvedView.tier === 'system') {
       return { min: 8, max: 140 };
     }
@@ -1985,19 +2091,36 @@ const UniverseScene: React.FC<GameSceneProps> = ({
       return { min: 1.2, max: 35 };
     }
     return undefined;
-  }, [resolvedView.tier]);
+  }, [resolvedView.tier, viewZoom, zoomDistanceLimits]);
 
-  const mapBounds = resolvedView.tier === 'galaxy' ? mapMetrics.bounds : null;
-  const allowRotate = isTierAtLeast(resolvedView.tier, 'planet');
+  const mapBounds = viewZoom === undefined
+    ? (resolvedView.tier === 'galaxy' ? mapMetrics.bounds : null)
+    : (!hasSystemFocus || zoomValue < ZOOM_THRESHOLDS.system ? mapMetrics.bounds : null);
+  const allowRotate = viewZoom === undefined
+    ? isTierAtLeast(resolvedView.tier, 'planet')
+    : (hasPlanetFocus && zoomValue >= ZOOM_THRESHOLDS.planet);
 
-  const showGalaxyLayer = resolvedView.tier === 'galaxy';
-  const showSystemLayer = resolvedView.tier === 'system';
-  const showPlanetLayer = isTierAtLeast(resolvedView.tier, 'planet');
-  const showSurfaceLayer = resolvedView.tier === 'surface';
+  const systemZoomT = hasSystemFocus
+    ? smoothProgress(zoomValue, ZOOM_THRESHOLDS.system, ZOOM_THRESHOLDS.planet)
+    : 0;
+  const planetZoomT = hasSystemFocus
+    ? smoothProgress(zoomValue, ZOOM_THRESHOLDS.planet, ZOOM_THRESHOLDS.surface)
+    : 0;
+  const surfaceZoomT = hasSystemFocus
+    ? smoothProgress(zoomValue, ZOOM_THRESHOLDS.surface, 1)
+    : 0;
 
-  const systemScaleTarget = showSystemLayer ? SYSTEM_LAYER_SCALE : 0;
+  const showGalaxyLayer = viewZoom === undefined
+    ? resolvedView.tier === 'galaxy'
+    : (!hasSystemFocus || zoomValue < ZOOM_THRESHOLDS.planet);
+  const showSystemLayer = hasSystemFocus && systemZoomT > 0.01;
+  const showPlanetLayer = hasPlanetFocus && planetZoomT > 0.01;
+  const showSurfaceLayer = hasPlanetFocus && surfaceZoomT > 0.01;
+
+  const systemScaleTarget = showSystemLayer ? SYSTEM_LAYER_SCALE * systemZoomT : 0;
+  const planetScaleBoost = MathUtils.lerp(1, 1.6, surfaceZoomT);
   const planetScaleTarget = showPlanetLayer
-    ? PLANET_LAYER_SCALE * (showSurfaceLayer ? 1.6 : 1)
+    ? PLANET_LAYER_SCALE * planetZoomT * planetScaleBoost
     : 0;
 
   return (
@@ -2020,6 +2143,8 @@ const UniverseScene: React.FC<GameSceneProps> = ({
             mapBounds={mapBounds ?? undefined}
             distanceLimits={distanceLimits}
             enableRotate={allowRotate}
+            zoomTargetDistance={zoomTargetDistance ?? undefined}
+            onDistanceChange={viewZoom === undefined ? undefined : handleDistanceChange}
           />
           <ambientLight intensity={0.4} color="#aaccff" />
           <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />

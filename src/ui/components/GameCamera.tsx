@@ -13,6 +13,8 @@ interface GameCameraProps {
   mapRadius?: number;
   mapBounds?: ClampBounds;
   distanceLimits?: { min: number; max: number };
+  zoomTargetDistance?: number;
+  onDistanceChange?: (distance: number) => void;
   enableRotate?: boolean;
   minPolarAngle?: number;
   maxPolarAngle?: number;
@@ -28,6 +30,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
   mapRadius,
   mapBounds,
   distanceLimits,
+  zoomTargetDistance,
+  onDistanceChange,
   enableRotate = false,
   minPolarAngle,
   maxPolarAngle
@@ -69,7 +73,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
     const minDistance = Math.min(Math.max(20, radius * 0.3), maxDistance * 0.8);
 
     return { minDistance, maxDistance };
-  }, [mapRadius]);
+  }, [distanceLimits, mapRadius]);
 
   const polarLimits = useMemo(() => ({
     min: minPolarAngle ?? Math.PI / 8,
@@ -204,6 +208,51 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
     };
   }, [focusTarget, ready]);
 
+  useEffect(() => {
+    if (!ready || zoomTargetDistance === undefined || !controlsRef.current) return;
+
+    const controls = controlsRef.current;
+    const desiredDistance = Math.max(
+      distanceConfig.minDistance,
+      Math.min(distanceConfig.maxDistance, zoomTargetDistance)
+    );
+    const currentDistance = controls.object.position.distanceTo(controls.target);
+
+    if (Math.abs(currentDistance - desiredDistance) < 0.01) return;
+
+    let frameId: number | null = null;
+
+    const animate = () => {
+      if (!controlsRef.current) return;
+
+      const camera = controlsRef.current.object;
+      const target = controlsRef.current.target;
+
+      offsetRef.current.copy(camera.position).sub(target);
+      const distance = offsetRef.current.length();
+      if (distance === 0) return;
+
+      const nextDistance = distance + (desiredDistance - distance) * 0.18;
+      offsetRef.current.multiplyScalar(nextDistance / distance);
+      camera.position.copy(target).add(offsetRef.current);
+
+      controlsRef.current.update();
+      clampControlsRef.current();
+
+      if (Math.abs(nextDistance - desiredDistance) > 0.02) {
+        frameId = requestAnimationFrame(animate);
+      }
+    };
+
+    frameId = requestAnimationFrame(animate);
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [distanceConfig.maxDistance, distanceConfig.minDistance, ready, zoomTargetDistance]);
+
   return (
     <>
       {/*
@@ -231,7 +280,12 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
         minPolarAngle={polarLimits.min}
         maxPolarAngle={polarLimits.max}
         screenSpacePanning={false}
-        onChange={() => clampControls({ skipUpdate: true })}
+        onChange={() => {
+          clampControls({ skipUpdate: true });
+          if (!ready || !onDistanceChange || !controlsRef.current) return;
+          const { object, target } = controlsRef.current;
+          onDistanceChange(object.position.distanceTo(target));
+        }}
       />
     </>
   );
