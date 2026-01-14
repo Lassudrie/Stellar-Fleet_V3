@@ -51,8 +51,10 @@ const SURFACE_TEXTURE_HIGH_DIAMETER_PX = 320;
 const SURFACE_TEXTURE_ULTRA_DIAMETER_PX = 640;
 const SURFACE_TEXTURE_UPSHIFT_DESKTOP = 1.18;
 const SURFACE_TEXTURE_DOWNSHIFT_DESKTOP = 0.84;
-const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 12;
-const SURFACE_TEXTURE_MAX_INFLIGHT = 2;
+const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 24;
+const SURFACE_TEXTURE_MAX_INFLIGHT = 4;
+const SURFACE_TEXTURE_WORKER_POOL_SIZE = 3;
+const MAX_BODY_UPDATES_PER_FRAME = 3;
 const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
 
 type SurfaceTextureResolution = { width: number; height: number };
@@ -294,7 +296,8 @@ export const SystemSurfaceTextureManager: React.FC<{
   resolveMaterial
 }) => {
   const { camera, gl, size } = useThree();
-  const workerRef = useRef<SurfaceMapWorkerClient | null>(null);
+  const workerPoolRef = useRef<SurfaceMapWorkerClient[]>([]);
+  const workerIndexRef = useRef(0);
   type SurfaceTextureBundle = {
     color: DataTexture;
     normal: DataTexture | null;
@@ -312,28 +315,13 @@ export const SystemSurfaceTextureManager: React.FC<{
   const bodyMetricsByIdRef = useRef<Map<string, BodyMetrics>>(new Map());
   const bodyInfoByIdRef = useRef<Map<string, BodyInfo>>(new Map());
   const closeUpBodyIdRef = useRef<string | null>(null);
+  const updateCursorRef = useRef(0);
   const lastDebugUpdateRef = useRef(0);
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
   const maxCacheEntries = SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
   const maxInflight = SURFACE_TEXTURE_MAX_INFLIGHT;
-  const fieldTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'field' }), []);
-  const tileTextureOptions = useMemo<SurfaceTextureOptions>(() => ({ source: 'tiles' }), []);
-  const resolveTextureOptions = useCallback(
-    (wantsHeightMap: boolean, wantsEmissiveMap: boolean, source: 'field' | 'tiles'): SurfaceTextureOptions => {
-      const baseOptions = source === 'field' ? fieldTextureOptions : tileTextureOptions;
-      if (!wantsHeightMap && !wantsEmissiveMap) {
-        return baseOptions;
-      }
-      return {
-        ...baseOptions,
-        includeHeightMap: wantsHeightMap,
-        includeEmissiveMap: wantsEmissiveMap
-      };
-    },
-    [fieldTextureOptions, tileTextureOptions]
-  );
   const scratch = useMemo(() => ({
     world: new Vector3(),
     view: new Vector3(),
@@ -453,10 +441,13 @@ export const SystemSurfaceTextureManager: React.FC<{
   }, []);
 
   useEffect(() => {
-    workerRef.current = new SurfaceMapWorkerClient();
+    workerPoolRef.current = Array.from(
+      { length: SURFACE_TEXTURE_WORKER_POOL_SIZE },
+      () => new SurfaceMapWorkerClient()
+    );
     return () => {
-      workerRef.current?.dispose();
-      workerRef.current = null;
+      workerPoolRef.current.forEach(worker => worker.dispose());
+      workerPoolRef.current = [];
       cacheRef.current.forEach(bundle => disposeTextureBundle(bundle));
       cacheRef.current.clear();
       cacheLastUsedRef.current.clear();
@@ -942,10 +933,18 @@ export const SystemSurfaceTextureManager: React.FC<{
       const wantsHeightMap = !isGasGiant
         && isOnScreen
         && resolution.width >= 512
-        && bodyId === closeUpBodyIdRef.current;
+        && isFocusBody;
       const wantsEmissiveMap = !isGasGiant && isOnScreen && resolution.width >= 256 && emissiveIntensity > 0;
-      const textureSource = isGasGiant ? 'field' : (bodyId === closeUpBodyIdRef.current ? 'field' : 'tiles');
-      const textureOptionsForBody = resolveTextureOptions(wantsHeightMap, wantsEmissiveMap, textureSource);
+      const textureSource = isGasGiant ? 'field' : (isFocusBody ? 'field' : 'tiles');
+      const includeHeavyMaps = isFocusBody;
+      const textureOptionsForBody: SurfaceTextureOptions = {
+        source: textureSource,
+        includeNormalMap: includeHeavyMaps && resolution.width >= 512,
+        includeAoMap: includeHeavyMaps && !isGasGiant && resolution.width >= 512,
+        includeRoughnessMap: true,
+        includeHeightMap: includeHeavyMaps && wantsHeightMap,
+        includeEmissiveMap: includeHeavyMaps && wantsEmissiveMap
+      };
       const optionsKey = buildTextureOptionsKey(textureOptionsForBody);
       const key = isGasGiant
         ? buildGasGiantTextureKey(bodyId, planetType, resolution, textureOptionsForBody)
@@ -988,8 +987,10 @@ export const SystemSurfaceTextureManager: React.FC<{
       if (textureOptionsForBody) {
         workerRequest.textureOptions = textureOptionsForBody;
       }
-      const worker = workerRef.current;
-      if (!worker) return;
+      const workers = workerPoolRef.current;
+      if (!workers.length) return;
+      const worker = workers[workerIndexRef.current % workers.length];
+      workerIndexRef.current = (workerIndexRef.current + 1) % workers.length;
 
       const requestEpoch = requestEpochRef.current;
       inFlightRef.current.set(key, { bodyId, epoch: requestEpoch });
@@ -1038,10 +1039,58 @@ export const SystemSurfaceTextureManager: React.FC<{
         });
     };
 
-    planets.forEach((planet) => {
-      updateBody(planet.id);
-      planet.moons.forEach(moon => updateBody(moon.id));
+    const visibleEntries = Array.from(bodyMetricsById.entries())
+      .filter(([, metrics]) => metrics.isOnScreen);
+    // Manual stable sort to avoid in-place .sort() lint rule.
+    for (let i = 1; i < visibleEntries.length; i += 1) {
+      const entry = visibleEntries[i];
+      let j = i - 1;
+      while (j >= 0 && visibleEntries[j][1].diameterPx < entry[1].diameterPx) {
+        visibleEntries[j + 1] = visibleEntries[j];
+        j -= 1;
+      }
+      visibleEntries[j + 1] = entry;
+    }
+    const visibleBodies = visibleEntries.map(([bodyId]) => bodyId);
+
+    visibleBodies.forEach((bodyId) => {
+      const material = resolveMaterial(bodyId);
+      const activeKey = material?.userData.surfaceTextureKey;
+      if (activeKey) {
+        touchKey(activeKey);
+      }
     });
+
+    const updateQueue: string[] = [];
+    const queued = new Set<string>();
+    const pushVisible = (bodyId: string | null) => {
+      if (!bodyId) return;
+      if (queued.has(bodyId)) return;
+      const metrics = bodyMetricsById.get(bodyId);
+      if (!metrics || !metrics.isOnScreen) return;
+      queued.add(bodyId);
+      updateQueue.push(bodyId);
+    };
+
+    pushVisible(resolvedCloseUpBodyId);
+    pushVisible(selectedBodyId);
+
+    const rotationStart = visibleBodies.length ? (updateCursorRef.current % visibleBodies.length) : 0;
+    const rotatedBodies = visibleBodies.length
+      ? visibleBodies.slice(rotationStart).concat(visibleBodies.slice(0, rotationStart))
+      : [];
+    rotatedBodies.forEach(bodyId => pushVisible(bodyId));
+
+    let remainingUpdates = MAX_BODY_UPDATES_PER_FRAME;
+    for (const bodyId of updateQueue) {
+      if (remainingUpdates <= 0) break;
+      updateBody(bodyId);
+      remainingUpdates -= 1;
+    }
+
+    if (visibleBodies.length) {
+      updateCursorRef.current = (rotationStart + MAX_BODY_UPDATES_PER_FRAME) % visibleBodies.length;
+    }
 
     if (cacheRef.current.size <= maxCacheEntries) return;
 

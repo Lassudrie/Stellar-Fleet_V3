@@ -213,6 +213,14 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+type TerrainDetailLevel = 'full' | 'medium' | 'low';
+
+const resolveTerrainDetailLevel = (resolution: SurfaceTextureResolution): TerrainDetailLevel => {
+  if (resolution.width <= 256) return 'low';
+  if (resolution.width <= 512) return 'medium';
+  return 'full';
+};
+
 const hexToRgb8 = (hex: string): { r: number; g: number; b: number } => {
   const raw = hex.startsWith('#') ? hex.slice(1) : hex;
   const int = Number.parseInt(raw, 16);
@@ -1474,7 +1482,8 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
           createTerrainField({
             descriptor,
             planetData: astro.planetData,
-            moonData: astro.moonData
+            moonData: astro.moonData,
+            detailLevel: resolveTerrainDetailLevel(payload.resolution)
           }),
           payload.resolution,
           payload.cloudShadow ?? null,

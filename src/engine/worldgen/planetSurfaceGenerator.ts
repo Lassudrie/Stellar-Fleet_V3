@@ -1152,8 +1152,51 @@ export const createTerrainField = (params: {
   descriptor: PlanetSurfaceDescriptor;
   planetData?: PlanetData;
   moonData?: MoonData;
+  detailLevel?: 'full' | 'medium' | 'low';
 }): TerrainField => {
   const { descriptor } = params;
+  const detailLevel = params.detailLevel ?? 'full';
+  const noiseProfile = detailLevel === 'low'
+    ? {
+        macroBaseOctaves: 2,
+        macroDetailOctaves: 1,
+        coastOctaves: 1,
+        reliefHillsOctaves: 2,
+        reliefRidgesOctaves: 2,
+        seabedOctaves: 2,
+        moistNoiseOctaves: 1,
+        tempJitterOctaves: 1,
+        moistJitterOctaves: 1,
+        hotSpotOctaves: 2,
+        detailOctaves: 1
+      }
+    : detailLevel === 'medium'
+      ? {
+          macroBaseOctaves: 3,
+          macroDetailOctaves: 1,
+          coastOctaves: 1,
+          reliefHillsOctaves: 3,
+          reliefRidgesOctaves: 3,
+          seabedOctaves: 2,
+          moistNoiseOctaves: 1,
+          tempJitterOctaves: 1,
+          moistJitterOctaves: 1,
+          hotSpotOctaves: 3,
+          detailOctaves: 1
+        }
+      : {
+          macroBaseOctaves: 3,
+          macroDetailOctaves: 2,
+          coastOctaves: 2,
+          reliefHillsOctaves: 4,
+          reliefRidgesOctaves: 4,
+          seabedOctaves: 3,
+          moistNoiseOctaves: 2,
+          tempJitterOctaves: 2,
+          moistJitterOctaves: 2,
+          hotSpotOctaves: 4,
+          detailOctaves: 2
+        };
   const baseSeed = descriptor.seed >>> 0;
   const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
   const hydrologyMode = resolveHydrologyMode({ atmosphere, pressureBar, baseT0K, maxLiquidWaterK });
@@ -1202,8 +1245,30 @@ export const createTerrainField = (params: {
     const dy = dir.y + macroShift.y;
     const dz = dir.z + macroShift.z;
     const warped = macroNoise.warp(baseSeed ^ 0x1b873593, dx, dy, dz, 0.42, 0.55, 0.45, 0.5);
-    const macroBase = macroNoise.fbm(baseSeed ^ 0xa2b3c4d5, warped.x, warped.y, warped.z, 3, 0.55, 0.42, 0.48, 2.05, 0.5);
-    const macroDetail = macroNoise.fbm(baseSeed ^ 0x8f1bbcdc, warped.x, warped.y, warped.z, 2, 1.25, 0.95, 1.1, 2.2, 0.5);
+    const macroBase = macroNoise.fbm(
+      baseSeed ^ 0xa2b3c4d5,
+      warped.x,
+      warped.y,
+      warped.z,
+      noiseProfile.macroBaseOctaves,
+      0.55,
+      0.42,
+      0.48,
+      2.05,
+      0.5
+    );
+    const macroDetail = macroNoise.fbm(
+      baseSeed ^ 0x8f1bbcdc,
+      warped.x,
+      warped.y,
+      warped.z,
+      noiseProfile.macroDetailOctaves,
+      1.25,
+      0.95,
+      1.1,
+      2.2,
+      0.5
+    );
 
     let coreSum = 0;
     for (const core of cores) {
@@ -1265,7 +1330,18 @@ export const createTerrainField = (params: {
       const dx = dir.x + detailShift.x;
       const dy = dir.y + detailShift.y;
       const dz = dir.z + detailShift.z;
-      const coastNoise = detailNoise.fbm(baseSeed ^ 0x2c1b3c6d, dx, dy, dz, 2, 4.6, 3.4, 4.0, 2.1, 0.5);
+      const coastNoise = detailNoise.fbm(
+        baseSeed ^ 0x2c1b3c6d,
+        dx,
+        dy,
+        dz,
+        noiseProfile.coastOctaves,
+        4.6,
+        3.4,
+        4.0,
+        2.1,
+        0.5
+      );
       const dist = Math.abs(macroVal - macroSeaBase);
       const t = dist < coastBand ? 1 - dist / coastBand : 0;
       const coastWeight = fade(clamp(t, 0, 1));
@@ -1294,7 +1370,18 @@ export const createTerrainField = (params: {
     const dxDetail = dir.x + detailShift.x;
     const dyDetail = dir.y + detailShift.y;
     const dzDetail = dir.z + detailShift.z;
-    const coastNoise = detailNoise.fbm(baseSeed ^ 0x2c1b3c6d, dxDetail, dyDetail, dzDetail, 2, 4.6, 3.4, 4.0, 2.1, 0.5);
+    const coastNoise = detailNoise.fbm(
+      baseSeed ^ 0x2c1b3c6d,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      noiseProfile.coastOctaves,
+      4.6,
+      3.4,
+      4.0,
+      2.1,
+      0.5
+    );
     const macroAdjusted = macro + coastNoise * coastStrength * coast;
 
     const isWater = hydrologyMode === 'none' ? false : macroAdjusted <= seaLevelMacro;
@@ -1313,14 +1400,45 @@ export const createTerrainField = (params: {
 
     if (!isWater) {
       const warped = reliefNoise.warp(baseSeed ^ 0x9e3779b9, dxRelief, dyRelief, dzRelief, 0.3, 1.8, 1.4, 1.5);
-      const hills = reliefNoise.fbm(baseSeed ^ 0x3c6ef372, warped.x, warped.y, warped.z, 4, 2.4, 2.1, 2.2, 2.05, 0.5);
-      const ridges = reliefNoise.ridged(baseSeed ^ 0x1f123bb5, warped.x, warped.y, warped.z, 4, 3.2, 3.0, 3.1);
+      const hills = reliefNoise.fbm(
+        baseSeed ^ 0x3c6ef372,
+        warped.x,
+        warped.y,
+        warped.z,
+        noiseProfile.reliefHillsOctaves,
+        2.4,
+        2.1,
+        2.2,
+        2.05,
+        0.5
+      );
+      const ridges = reliefNoise.ridged(
+        baseSeed ^ 0x1f123bb5,
+        warped.x,
+        warped.y,
+        warped.z,
+        noiseProfile.reliefRidgesOctaves,
+        3.2,
+        3.0,
+        3.1
+      );
       const reliefMask = (0.2 + 0.55 * landness + 0.25 * coreBias) * reliefScale;
       const reliefRaw = (hills * 0.4 + ridges * 0.6) * reliefMask * 0.35;
       base += reliefRaw;
       relief = clamp01(0.5 + reliefRaw * 1.8);
     } else {
-      const seabed = reliefNoise.fbm(baseSeed ^ 0x7f4a7c15, dxRelief, dyRelief, dzRelief, 3, 1.4, 1.2, 1.3, 2.1, 0.5);
+      const seabed = reliefNoise.fbm(
+        baseSeed ^ 0x7f4a7c15,
+        dxRelief,
+        dyRelief,
+        dzRelief,
+        noiseProfile.seabedOctaves,
+        1.4,
+        1.2,
+        1.3,
+        2.1,
+        0.5
+      );
       base += seabed * 0.05;
       relief = clamp01(0.45 + seabed * 0.35);
     }
@@ -1344,7 +1462,18 @@ export const createTerrainField = (params: {
     const localK = baseT0K + latTerm + altTerm + albedoOffset;
     const tempC = localK - 273.15;
 
-    const moistNoise = detailNoise.fbm(baseSeed ^ 0x27d4eb2d, dxDetail, dyDetail, dzDetail, 2, 1.15, 1.1, 1.2, 2.0, 0.5);
+    const moistNoise = detailNoise.fbm(
+      baseSeed ^ 0x27d4eb2d,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      noiseProfile.moistNoiseOctaves,
+      1.15,
+      1.1,
+      1.2,
+      2.0,
+      0.5
+    );
     const equatorBias = 1 - latValue;
     const dryness = landness * 0.6 + relief * 0.2 + (1 - env.humidityFactor) * 0.2;
     let moist = clamp01(
@@ -1359,8 +1488,30 @@ export const createTerrainField = (params: {
       moist = hydrologyMode === 'none' ? moist : hydrologyMode === 'frozen' ? 0.85 : 1;
     }
 
-    const tempJitter = detailNoise.fbm(baseSeed ^ 0x5bd1e995, dxDetail, dyDetail, dzDetail, 2, 6.4, 5.2, 6.0, 2.1, 0.5);
-    const moistJitter = detailNoise.fbm(baseSeed ^ 0x2a86f283, dxDetail, dyDetail, dzDetail, 2, 7.1, 6.3, 6.6, 2.1, 0.5);
+    const tempJitter = detailNoise.fbm(
+      baseSeed ^ 0x5bd1e995,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      noiseProfile.tempJitterOctaves,
+      6.4,
+      5.2,
+      6.0,
+      2.1,
+      0.5
+    );
+    const moistJitter = detailNoise.fbm(
+      baseSeed ^ 0x2a86f283,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      noiseProfile.moistJitterOctaves,
+      7.1,
+      6.3,
+      6.6,
+      2.1,
+      0.5
+    );
     const tempForBiome = tempC + tempJitter * 1.6;
     const moistForBiome = clamp(moist * 255 + moistJitter * 12, 0, 255);
     let biome: Biome = isWater ? 'ocean' : 'rocky';
@@ -1378,13 +1529,35 @@ export const createTerrainField = (params: {
     }
 
     if (!isWater && env.volcanismIndex > 0.55) {
-      const hot = detailNoise.fbm(baseSeed ^ 0xdeadbeef, dxDetail, dyDetail, dzDetail, 4, 4.0, 4.0, 4.1, 2.0, 0.5);
+      const hot = detailNoise.fbm(
+        baseSeed ^ 0xdeadbeef,
+        dxDetail,
+        dyDetail,
+        dzDetail,
+        noiseProfile.hotSpotOctaves,
+        4.0,
+        4.0,
+        4.1,
+        2.0,
+        0.5
+      );
       if (hot > 0.72 + (1 - env.volcanismIndex) * 0.25) {
         biome = 'volcanic';
       }
     }
 
-    const detail = detailNoise.fbm(baseSeed ^ 0x9e3779b1, dxDetail, dyDetail, dzDetail, 2, 8.4, 7.2, 7.8, 2.1, 0.5);
+    const detail = detailNoise.fbm(
+      baseSeed ^ 0x9e3779b1,
+      dxDetail,
+      dyDetail,
+      dzDetail,
+      noiseProfile.detailOctaves,
+      8.4,
+      7.2,
+      7.8,
+      2.1,
+      0.5
+    );
 
     return {
       height,

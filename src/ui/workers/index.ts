@@ -26,6 +26,14 @@ export type { CloudShadowSettings, SurfaceTextureOptions } from './surfaceMapWor
 
 const canUseWorker = typeof window !== 'undefined' && typeof Worker !== 'undefined';
 
+type TerrainDetailLevel = 'full' | 'medium' | 'low';
+
+const resolveTerrainDetailLevel = (resolution: SurfaceTextureResolution): TerrainDetailLevel => {
+  if (resolution.width <= 256) return 'low';
+  if (resolution.width <= 512) return 'medium';
+  return 'full';
+};
+
 type PendingRequest = {
   kind: 'surfaceMap';
   resolve: (map: PlanetSurfaceMap | null) => void;
@@ -782,7 +790,8 @@ export class SurfaceMapWorkerClient {
     const terrain = createTerrainField({
       descriptor,
       planetData: astro.planetData,
-      moonData: astro.moonData
+      moonData: astro.moonData,
+      detailLevel: resolveTerrainDetailLevel(resolution)
     });
     const coastColor = biomeLinearRgb.coast;
     const seaLevel = terrain.seaLevelElev;
