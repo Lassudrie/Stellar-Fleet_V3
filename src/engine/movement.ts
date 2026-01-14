@@ -8,8 +8,8 @@ import { add, clone, len, normalize, scale, sub } from './math/vec3';
 import { isOrbitContested } from './orbit';
 import { RNG } from './rng';
 import { getDefaultSolidPlanet } from './planets';
-import { generateSurfaceMapForState, pickLandingSurfacePosForArmy } from './planetSurface';
-import { STACKING_CAP } from './ground';
+import { generateSurfaceMapForState, pickLandingSurfacePosForArmy, resolveSurfaceTileId } from './planetSurface';
+import { STACKING_CAP, tileKey } from './ground';
 
 // -----------------------------------------
 // Fleet speed (was: movement/fleetSpeed.ts)
@@ -170,11 +170,17 @@ export const executeArrivalOperations = (
 
       if (map && embarkedArmies.length > 0) {
         const occupancy = new Map<string, { enemy: boolean; friendlyCount: number }>();
+        const toOccupancyKey = (pos: Army['surfacePos'] | null | undefined): string | null => {
+          if (!pos) return null;
+          const tileId = resolveSurfaceTileId(map.descriptor, pos);
+          return tileId === null ? null : tileKey(tileId);
+        };
         armiesAfterOps.forEach(other => {
           if (other.state !== ArmyState.DEPLOYED) return;
           if (other.containerId !== defaultPlanet.id) return;
           if (!other.surfacePos) return;
-          const key = `${other.surfacePos.q}|${other.surfacePos.r}`;
+          const key = toOccupancyKey(other.surfacePos);
+          if (!key) return;
           const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
           if (other.factionId === currentFleet.factionId) {
             occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -185,7 +191,8 @@ export const executeArrivalOperations = (
         armiesAfterOps.forEach(other => {
           if (other.state !== ArmyState.EMBARKED) return;
           if (!other.landingOrder || other.landingOrder.to.bodyId !== defaultPlanet.id) return;
-          const key = `${Math.floor(other.landingOrder.to.q)}|${Math.floor(other.landingOrder.to.r)}`;
+          const key = toOccupancyKey(other.landingOrder.to);
+          if (!key) return;
           const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
           if (other.factionId === currentFleet.factionId) {
             occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -194,21 +201,23 @@ export const executeArrivalOperations = (
           }
         });
 
-        const isOccupied = (q: number, r: number): boolean => {
-          const entry = occupancy.get(`${q}|${r}`);
+        const isOccupied = (tileId: number): boolean => {
+          const entry = occupancy.get(tileKey(tileId));
           if (!entry) return false;
           if (entry.enemy) return true;
           return entry.friendlyCount >= STACKING_CAP;
         };
 
-        const landingPosByArmyId = new Map<string, { bodyId: string; q: number; r: number }>();
+        const landingPosByArmyId = new Map<string, Army['surfacePos']>();
         embarkedArmies.forEach(army => {
           const chosen =
             pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
             pickLandingSurfacePosForArmy({ state, map, army });
           if (!chosen) return;
+          const chosenTileId = resolveSurfaceTileId(map.descriptor, chosen);
+          if (chosenTileId === null) return;
           landingPosByArmyId.set(army.id, chosen);
-          const key = `${chosen.q}|${chosen.r}`;
+          const key = tileKey(chosenTileId);
           const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
           occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
         });
@@ -318,11 +327,22 @@ export const executeArrivalOperations = (
           const cached = occupancyByPlanetId.get(planetId);
           if (cached) return cached;
           const occ = new Map<string, { enemy: boolean; friendlyCount: number }>();
+          const map = getMap(planetId);
+          if (!map) {
+            occupancyByPlanetId.set(planetId, occ);
+            return occ;
+          }
+          const toOccupancyKey = (pos: Army['surfacePos'] | null | undefined): string | null => {
+            if (!pos) return null;
+            const tileId = resolveSurfaceTileId(map.descriptor, pos);
+            return tileId === null ? null : tileKey(tileId);
+          };
           armiesAfterOps.forEach(other => {
             if (other.state !== ArmyState.DEPLOYED) return;
             if (other.containerId !== planetId) return;
             if (!other.surfacePos) return;
-            const key = `${other.surfacePos.q}|${other.surfacePos.r}`;
+            const key = toOccupancyKey(other.surfacePos);
+            if (!key) return;
             const current = occ.get(key) ?? { enemy: false, friendlyCount: 0 };
             if (other.factionId === currentFleet.factionId) {
               occ.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -333,7 +353,8 @@ export const executeArrivalOperations = (
           armiesAfterOps.forEach(other => {
             if (other.state !== ArmyState.EMBARKED) return;
             if (!other.landingOrder || other.landingOrder.to.bodyId !== planetId) return;
-            const key = `${Math.floor(other.landingOrder.to.q)}|${Math.floor(other.landingOrder.to.r)}`;
+            const key = toOccupancyKey(other.landingOrder.to);
+            if (!key) return;
             const current = occ.get(key) ?? { enemy: false, friendlyCount: 0 };
             if (other.factionId === currentFleet.factionId) {
               occ.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -345,14 +366,14 @@ export const executeArrivalOperations = (
           return occ;
         };
 
-        const landingPosByArmyId = new Map<string, { bodyId: string; q: number; r: number }>();
+        const landingPosByArmyId = new Map<string, Army['surfacePos']>();
         carriedEmbarkedArmies.forEach((army, index) => {
           const targetPlanet = targetQueue[index % targetQueue.length];
           const map = getMap(targetPlanet.id);
           if (!map) return;
           const occ = getOccupancy(targetPlanet.id);
-          const isOccupied = (q: number, r: number): boolean => {
-            const entry = occ.get(`${q}|${r}`);
+          const isOccupied = (tileId: number): boolean => {
+            const entry = occ.get(tileKey(tileId));
             if (!entry) return false;
             if (entry.enemy) return true;
             return entry.friendlyCount >= STACKING_CAP;
@@ -361,8 +382,10 @@ export const executeArrivalOperations = (
             pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
             pickLandingSurfacePosForArmy({ state, map, army });
           if (!chosen) return;
+          const chosenTileId = resolveSurfaceTileId(map.descriptor, chosen);
+          if (chosenTileId === null) return;
           landingPosByArmyId.set(army.id, chosen);
-          const key = `${chosen.q}|${chosen.r}`;
+          const key = tileKey(chosenTileId);
           const current = occ.get(key) ?? { enemy: false, friendlyCount: 0 };
           occ.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
         });

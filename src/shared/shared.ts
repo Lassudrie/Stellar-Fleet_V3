@@ -253,12 +253,23 @@ export interface HexCoord {
   r: number;
 }
 
-export interface PlanetSurfaceConfig {
+export type SurfaceGridKind = 'rect' | 'geodesic';
+
+export type RectSurfaceConfig = {
+  gridKind?: 'rect';
   w: number; // ex: 96
   h: number; // ex: 48
   wrapX: boolean; // true (cylindrical)
   generatorVersion: number; // ex: 1 (bump on breaking changes)
-}
+};
+
+export type GeodesicSurfaceConfig = {
+  gridKind: 'geodesic';
+  frequency: number; // subdivision frequency (icosphere)
+  generatorVersion: number; // ex: 1 (bump on breaking changes)
+};
+
+export type PlanetSurfaceConfig = RectSurfaceConfig | GeodesicSurfaceConfig;
 
 export interface PlanetSurfaceDescriptor {
   seed: number; // uint32
@@ -295,7 +306,8 @@ export interface SettlementGenerationConfig {
 export interface Settlement {
   id: string;
   name: string;
-  coord: HexCoord;
+  tileId: number;
+  coord?: HexCoord;
   factionId?: string; // undefined if neutral
   type: SettlementType;
   population: number;
@@ -325,8 +337,9 @@ export interface PlanetSurfaceMap {
 
 export interface SurfacePos {
   bodyId: string; // planetId or moonId
-  q: number;
-  r: number;
+  tileId?: number;
+  q?: number;
+  r?: number;
 }
 
 export type GroundBuildingType = 'city' | 'outpost' | 'factory' | 'mine' | 'fortification' | 'bunker';
@@ -658,9 +671,9 @@ export interface GameState {
    */
   settlementControl?: Record<SettlementId, SettlementControlState>;
   /**
-   * Hexes bombarded during the current turn, keyed by bodyId.
+   * Tiles bombarded during the current turn, keyed by bodyId.
    */
-  bombardedHexesByBodyId?: Record<string, HexCoord[]>;
+  bombardedTilesByBodyId?: Record<string, number[]>;
   objectives: GameObjectives;
   rules: GameplayRules;
 }

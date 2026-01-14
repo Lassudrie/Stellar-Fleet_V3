@@ -12,7 +12,7 @@ import {
   SphereGeometry,
   Vector3
 } from 'three';
-import { hashStringToUnit } from '../systemViewLayout';
+import { hashStringToUnit } from '../../screens';
 import {
   BODY_SPIN_SPEED_MAX,
   BODY_SPIN_SPEED_MIN,

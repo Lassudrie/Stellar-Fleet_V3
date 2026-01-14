@@ -21,7 +21,7 @@ import {
   Vector3
 } from 'three';
 import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
-import { hashStringToUnit } from '../systemViewLayout';
+import { hashStringToUnit } from '../../screens';
 import {
   LENS_FLARE_BASE_SIZE_MULTIPLIER,
   LENS_FLARE_BASE_STRENGTH,

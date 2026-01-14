@@ -6,21 +6,31 @@ import type {
   GameState,
   GroundBuilding,
   GroundUnitType,
-  HexCoord,
   PlanetSurfaceMap,
-  SettlementControlState
+  SettlementControlState,
+  SurfacePos
 } from '../shared/shared';
 import { FeatureBits, sorted } from '../shared/shared';
 import { RNG } from './rng';
-import { generateSurfaceMapForState, hashJoin32, isPassable, neighborsAxial } from './planetSurface';
+import {
+  generateSurfaceMapForState,
+  getSurfaceTileCoordFromId,
+  getSurfaceTileDir,
+  getSurfaceTileNeighbors,
+  hashJoin32,
+  isPassable,
+  resolveSurfaceTileId
+} from './planetSurface';
 
 // ----------------------------
 // Utils (was: ground/utils.ts)
 // ----------------------------
 
+type TileId = number;
+
 export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
-export const hexKey = (coord: HexCoord): string => `${coord.q}|${coord.r}`;
+export const tileKey = (tileId: TileId): string => `${tileId}`;
 
 // Wrap-safe modulo for wrapX maps.
 const mod = (n: number, m: number): number => {
@@ -32,23 +42,14 @@ const mod = (n: number, m: number): number => {
  * Normalizes a coordinate for a map with optional wrapX. Returns null if out-of-bounds on r,
  * or on q when wrapX is false.
  */
-const normalizeCoord = (coord: HexCoord, w: number, h: number, wrapX: boolean): HexCoord | null => {
-  if (w <= 0 || h <= 0) return null;
-  const r = coord.r;
-  if (r < 0 || r >= h) return null;
-  const q = wrapX ? mod(coord.q, w) : coord.q;
-  if (q < 0 || q >= w) return null;
-  return { q, r };
-};
-
-const axialToCube = (coord: HexCoord): { x: number; y: number; z: number } => {
+const axialToCube = (coord: { q: number; r: number }): { x: number; y: number; z: number } => {
   const x = coord.q;
   const z = coord.r;
   const y = -x - z;
   return { x, y, z };
 };
 
-const cubeToAxial = (cube: { x: number; y: number; z: number }): HexCoord => ({ q: cube.x, r: cube.z });
+const cubeToAxial = (cube: { x: number; y: number; z: number }): { q: number; r: number } => ({ q: cube.x, r: cube.z });
 
 const cubeRound = (cube: { x: number; y: number; z: number }): { x: number; y: number; z: number } => {
   let rx = Math.round(cube.x);
@@ -76,7 +77,7 @@ const cubeLerp = (a: { x: number; y: number; z: number }, b: { x: number; y: num
   z: a.z + (b.z - a.z) * t
 });
 
-export const hexDistance = (a: HexCoord, b: HexCoord, w: number, wrapX: boolean): number => {
+const hexDistance = (a: { q: number; r: number }, b: { q: number; r: number }, w: number, wrapX: boolean): number => {
   const dqRaw = b.q - a.q;
   const dq = wrapX && w > 0
     ? (() => {
@@ -90,7 +91,7 @@ export const hexDistance = (a: HexCoord, b: HexCoord, w: number, wrapX: boolean)
   return Math.floor((Math.abs(dq) + Math.abs(dr) + Math.abs(ds)) / 2);
 };
 
-const adjustTargetForWrap = (from: HexCoord, to: HexCoord, w: number, wrapX: boolean): HexCoord => {
+const adjustTargetForWrap = (from: { q: number; r: number }, to: { q: number; r: number }, w: number, wrapX: boolean): { q: number; r: number } => {
   if (!wrapX || w <= 0) return to;
   const dqRaw = to.q - from.q;
   const modded = mod(dqRaw, w);
@@ -99,35 +100,100 @@ const adjustTargetForWrap = (from: HexCoord, to: HexCoord, w: number, wrapX: boo
 };
 
 export const lineOfSight = (params: {
-  from: HexCoord;
-  to: HexCoord;
+  fromTileId: TileId;
+  toTileId: TileId;
   map: PlanetSurfaceMap;
-  isBlocked: (coord: HexCoord) => boolean;
+  isBlocked: (tileId: TileId) => boolean;
 }): boolean => {
-  const { from, to, map, isBlocked } = params;
-  const { w, h, wrapX } = map.descriptor.config;
-  const fromNorm = normalizeCoord(from, w, h, wrapX);
-  const toNorm = normalizeCoord(to, w, h, wrapX);
-  if (!fromNorm || !toNorm) return false;
+  const { fromTileId, toTileId, map, isBlocked } = params;
+  if (fromTileId === toTileId) return true;
 
-  // For wrapX maps, unroll "to" so that dq is the minimal delta before rasterization.
-  // We still normalize sampled points back into [0..w) for tile access and blockers.
-  const toUnwrapped = adjustTargetForWrap(fromNorm, toNorm, w, wrapX);
+  const fromCoord = getSurfaceTileCoordFromId(map.descriptor, fromTileId);
+  const toCoord = getSurfaceTileCoordFromId(map.descriptor, toTileId);
 
-  const a = axialToCube(fromNorm);
-  const b = axialToCube(toUnwrapped);
-  const dist = hexDistance(fromNorm, toUnwrapped, w, false);
-  if (dist <= 1) return true;
+  if (fromCoord && toCoord && 'w' in map.descriptor.config) {
+    const { w, wrapX } = map.descriptor.config;
+    const toUnwrapped = adjustTargetForWrap(fromCoord, toCoord, w, wrapX ?? false);
+    const a = axialToCube(fromCoord);
+    const b = axialToCube(toUnwrapped);
+    const dist = hexDistance(fromCoord, toUnwrapped, w, false);
+    if (dist <= 1) return true;
 
-  for (let i = 1; i < dist; i += 1) {
-    const t = dist === 0 ? 0 : i / dist;
-    const cube = cubeRound(cubeLerp(a, b, t));
-    const axial = cubeToAxial(cube);
-    const norm = normalizeCoord(axial, w, h, wrapX);
-    if (!norm) return false;
-    if (isBlocked(norm)) return false;
+    for (let i = 1; i < dist; i += 1) {
+      const t = dist === 0 ? 0 : i / dist;
+      const cube = cubeRound(cubeLerp(a, b, t));
+      const axial = cubeToAxial(cube);
+      const tileId = resolveSurfaceTileId(map.descriptor, { bodyId: map.bodyId, q: axial.q, r: axial.r });
+      if (tileId === null) return false;
+      if (isBlocked(tileId)) return false;
+    }
+    return true;
   }
-  return true;
+
+  const targetDir = getSurfaceTileDir(map.descriptor, toTileId);
+  if (!targetDir) return false;
+  let current = fromTileId;
+  const visited = new Set<TileId>();
+
+  for (let step = 0; step < 128; step += 1) {
+    if (current === toTileId) return true;
+    visited.add(current);
+    const ns = getSurfaceTileNeighbors(map.descriptor, current);
+    let best = -1;
+    let bestDot = -Infinity;
+    for (const next of ns) {
+      if (visited.has(next)) continue;
+      const dir = getSurfaceTileDir(map.descriptor, next);
+      if (!dir) continue;
+      const dot = dir.x * targetDir.x + dir.y * targetDir.y + dir.z * targetDir.z;
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = next;
+      }
+    }
+    if (best < 0) return false;
+    if (isBlocked(best)) return false;
+    current = best;
+  }
+  return false;
+};
+
+export const tileDistance = (map: PlanetSurfaceMap, fromTileId: TileId, toTileId: TileId): number => {
+  if (fromTileId === toTileId) return 0;
+  const fromCoord = getSurfaceTileCoordFromId(map.descriptor, fromTileId);
+  const toCoord = getSurfaceTileCoordFromId(map.descriptor, toTileId);
+  if (fromCoord && toCoord && 'w' in map.descriptor.config) {
+    const { w, wrapX } = map.descriptor.config;
+    return hexDistance(fromCoord, toCoord, w, wrapX ?? false);
+  }
+
+  const tileCount = map.tiles.length;
+  if (fromTileId < 0 || toTileId < 0 || fromTileId >= tileCount || toTileId >= tileCount) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const dist = new Int16Array(tileCount);
+  dist.fill(-1);
+  const queue = new Int32Array(tileCount);
+  let head = 0;
+  let tail = 0;
+  dist[fromTileId] = 0;
+  queue[tail++] = fromTileId;
+
+  while (head < tail) {
+    const cur = queue[head++];
+    const d = dist[cur];
+    if (cur === toTileId) return d;
+    const ns = getSurfaceTileNeighbors(map.descriptor, cur);
+    for (const next of ns) {
+      if (next < 0 || next >= tileCount) continue;
+      if (dist[next] !== -1) continue;
+      dist[next] = d + 1;
+      queue[tail++] = next;
+    }
+  }
+
+  return Number.POSITIVE_INFINITY;
 };
 
 // -----------------------------
@@ -293,40 +359,37 @@ export const biomeToTerrainType = (biome: Biome): TerrainType => {
   }
 };
 
-export const deriveTerrainTypeFromSurfaceMap = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): TerrainType => {
-  const { w, h, wrapX } = map.descriptor.config;
-  const norm = normalizeCoord(coord, w, h, wrapX);
-  if (!norm) return 'Open';
-  const { q, r } = norm;
+export const deriveTerrainTypeFromSurfaceMap = (map: PlanetSurfaceMap, buildings: GroundBuilding[], tileId: TileId): TerrainType => {
+  if (!Number.isFinite(tileId)) return 'Open';
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= map.tiles.length) return 'Open';
 
-  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === map.bodyId && b.surfacePos.q === q && b.surfacePos.r === r);
+  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === map.bodyId && resolveSurfaceTileId(map.descriptor, b.surfacePos) === idx);
   if (hasBuilding) return 'Urban';
 
-  const hasSettlement = map.settlements.some(s => s.coord.q === q && s.coord.r === r);
+  const hasSettlement = map.settlements.some(s => s.tileId === idx);
   if (hasSettlement) return 'Urban';
 
-  const tile = map.tiles[r * w + q];
+  const tile = map.tiles[idx];
   if (!tile) return 'Open';
   return biomeToTerrainType(tile.biome);
 };
 
-export const deriveTerrainType = (state: GameState, bodyId: string, coord: HexCoord): TerrainType => {
+export const deriveTerrainType = (state: GameState, bodyId: string, tileId: TileId): TerrainType => {
   const buildings = state.groundBuildings ?? [];
   const surfaceMap = generateSurfaceMapForState(state, bodyId);
-  if (surfaceMap) return deriveTerrainTypeFromSurfaceMap(surfaceMap, buildings, coord);
+  if (surfaceMap) return deriveTerrainTypeFromSurfaceMap(surfaceMap, buildings, tileId);
 
-  // Fallback when surface map is unavailable: urban buildings only.
-  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.q === coord.q && b.surfacePos.r === coord.r);
+  const hasBuilding = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.tileId === tileId);
   return hasBuilding ? 'Urban' : 'Open';
 };
 
-export const isUrbanHex = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): boolean => {
-  const { w, h, wrapX } = map.descriptor.config;
-  const norm = normalizeCoord(coord, w, h, wrapX);
-  if (!norm) return false;
-  const { q, r } = norm;
-  if (buildings.some(b => b.surfacePos.bodyId === map.bodyId && b.surfacePos.q === q && b.surfacePos.r === r)) return true;
-  return map.settlements.some(s => s.coord.q === q && s.coord.r === r);
+export const isUrbanHex = (map: PlanetSurfaceMap, buildings: GroundBuilding[], tileId: TileId): boolean => {
+  if (!Number.isFinite(tileId)) return false;
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= map.tiles.length) return false;
+  if (buildings.some(b => b.surfacePos.bodyId === map.bodyId && resolveSurfaceTileId(map.descriptor, b.surfacePos) === idx)) return true;
+  return map.settlements.some(s => s.tileId === idx);
 };
 
 export const coverFactorForBiome = (biome: Biome): number => {
@@ -381,41 +444,50 @@ export const isLosBlockingBiome = (biome: Biome): boolean => {
 
 export interface ZocSnapshot {
   bodyId: string;
-  w: number;
-  h: number;
-  wrapX: boolean;
+  tileCount: number;
   zocByFactionId: Map<FactionId, Uint8Array>;
 }
 
-const forEachCoordInRange = (
-  center: HexCoord,
+const forEachTileInRange = (
+  centerTileId: TileId,
   range: number,
-  w: number,
-  h: number,
-  wrapX: boolean,
-  cb: (coord: HexCoord) => void
+  map: PlanetSurfaceMap,
+  cb: (tileId: TileId) => void
 ) => {
-  if (range <= 0) return;
-  for (let dq = -range; dq <= range; dq += 1) {
-    const rMin = Math.max(-range, -dq - range);
-    const rMax = Math.min(range, -dq + range);
-    for (let dr = rMin; dr <= rMax; dr += 1) {
-      const coord = normalizeCoord({ q: center.q + dq, r: center.r + dr }, w, h, wrapX);
-      if (!coord) continue;
-      cb(coord);
+  if (range < 0) return;
+  const tileCount = map.tiles.length;
+  if (centerTileId < 0 || centerTileId >= tileCount) return;
+  const visited = new Int16Array(tileCount);
+  visited.fill(-1);
+  const queue = new Int32Array(tileCount);
+  let head = 0;
+  let tail = 0;
+  visited[centerTileId] = 0;
+  queue[tail++] = centerTileId;
+
+  while (head < tail) {
+    const tileId = queue[head++];
+    const dist = visited[tileId];
+    if (dist > range) continue;
+    cb(tileId);
+    if (dist === range) continue;
+    const ns = getSurfaceTileNeighbors(map.descriptor, tileId);
+    for (const next of ns) {
+      if (next < 0 || next >= tileCount) continue;
+      if (visited[next] !== -1) continue;
+      visited[next] = dist + 1;
+      queue[tail++] = next;
     }
   }
 };
 
 export const computeZocSnapshotFromArmies = (params: {
   bodyId: string;
-  w: number;
-  h: number;
-  wrapX: boolean;
+  map: PlanetSurfaceMap;
   armies: Army[];
 }): ZocSnapshot => {
-  const { bodyId, w, h, wrapX, armies } = params;
-  const size = w * h;
+  const { bodyId, map, armies } = params;
+  const size = map.tiles.length;
   const zocByFactionId = new Map<FactionId, Uint8Array>();
 
   const getArr = (factionId: FactionId): Uint8Array => {
@@ -432,21 +504,21 @@ export const computeZocSnapshotFromArmies = (params: {
     if (!army.surfacePos) continue;
     if (army.members <= 0) continue;
     if (isRouted(army)) continue;
-    const norm = normalizeCoord({ q: army.surfacePos.q, r: army.surfacePos.r }, w, h, wrapX);
-    if (!norm) continue;
+    const tileId = resolveSurfaceTileId(map.descriptor, army.surfacePos);
+    if (tileId === null) continue;
     const arr = getArr(army.factionId);
-    forEachCoordInRange(norm, Math.max(0, Math.floor(army.projectionRange)), w, h, wrapX, coord => {
-      arr[coord.r * w + coord.q] = 1;
+    forEachTileInRange(tileId, Math.max(0, Math.floor(army.projectionRange)), map, idx => {
+      arr[idx] = 1;
     });
   }
 
-  return { bodyId, w, h, wrapX, zocByFactionId };
+  return { bodyId, tileCount: size, zocByFactionId };
 };
 
-export const isInEnemyZoc = (snapshot: ZocSnapshot, coord: HexCoord, ownFactionId: FactionId): boolean => {
-  const norm = normalizeCoord(coord, snapshot.w, snapshot.h, snapshot.wrapX);
-  if (!norm) return false;
-  const idx = norm.r * snapshot.w + norm.q;
+export const isInEnemyZoc = (snapshot: ZocSnapshot, tileId: TileId, ownFactionId: FactionId): boolean => {
+  if (!Number.isFinite(tileId)) return false;
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= snapshot.tileCount) return false;
   for (const [factionId, arr] of snapshot.zocByFactionId.entries()) {
     if (factionId === ownFactionId) continue;
     if (arr[idx]) return true;
@@ -466,23 +538,20 @@ export const computeSupplyDistanceMapFromSurfaceMap = (
   settlementControl: Record<string, SettlementControlState> | undefined,
   factionId: FactionId
 ): Uint16Array => {
-  const { w, h, wrapX } = map.descriptor.config;
-  const size = w * h;
+  const size = map.tiles.length;
   const dist = new Uint16Array(size);
   dist.fill(INF);
 
-  const queueQ = new Int32Array(size);
-  const queueR = new Int32Array(size);
+  const queue = new Int32Array(size);
   let head = 0;
   let tail = 0;
 
-  const enqueue = (coord: HexCoord, d: number) => {
-    const idx = coord.r * w + coord.q;
+  const enqueue = (tileId: number, d: number) => {
+    if (tileId < 0 || tileId >= size) return;
     if (d >= INF) return;
-    if (dist[idx] <= d) return;
-    dist[idx] = d;
-    queueQ[tail] = coord.q;
-    queueR[tail] = coord.r;
+    if (dist[tileId] <= d) return;
+    dist[tileId] = d;
+    queue[tail] = tileId;
     tail += 1;
   };
 
@@ -491,33 +560,28 @@ export const computeSupplyDistanceMapFromSurfaceMap = (
     const control = settlementControl?.[s.id];
     const controller = control?.factionId ?? s.factionId ?? null;
     if (controller !== factionId) continue;
-    const norm = normalizeCoord(s.coord, w, h, wrapX);
-    if (!norm) continue;
-    enqueue(norm, 0);
+    enqueue(s.tileId, 0);
   }
 
   for (const b of buildings) {
     if (b.factionId !== factionId) continue;
     if (b.surfacePos.bodyId !== map.bodyId) continue;
     if (b.tags && !b.tags.includes('supply_node')) continue;
-    const norm = normalizeCoord({ q: b.surfacePos.q, r: b.surfacePos.r }, w, h, wrapX);
-    if (!norm) continue;
-    enqueue(norm, 0);
+    const tileId = resolveSurfaceTileId(map.descriptor, b.surfacePos);
+    if (tileId === null) continue;
+    enqueue(tileId, 0);
   }
 
   // If no sources, leave INF everywhere.
   while (head < tail) {
-    const q = queueQ[head];
-    const r = queueR[head];
-    head += 1;
-    const baseIdx = r * w + q;
-    const baseDist = dist[baseIdx];
-    const nextDist = (baseDist + 1) as number;
+    const baseTileId = queue[head++];
+    const baseDist = dist[baseTileId];
+    const nextDist = baseDist + 1;
     if (nextDist >= INF) continue;
 
-    const ns = neighborsAxial({ q, r }, w, h, wrapX);
+    const ns = getSurfaceTileNeighbors(map.descriptor, baseTileId);
     for (const n of ns) {
-      const tile = map.tiles[n.r * w + n.q];
+      const tile = map.tiles[n];
       if (!tile) continue;
       if (!isPassable(tile.biome)) continue;
       enqueue(n, nextDist);
@@ -527,21 +591,20 @@ export const computeSupplyDistanceMapFromSurfaceMap = (
   return dist;
 };
 
-export const isSupplied = (distanceMap: Uint16Array | null, coord: HexCoord, bodyMap: PlanetSurfaceMap, radius = SUPPLY_RADIUS): boolean => {
+export const isSupplied = (distanceMap: Uint16Array | null, tileId: TileId, bodyMap: PlanetSurfaceMap, radius = SUPPLY_RADIUS): boolean => {
   if (!distanceMap) return false;
-  const { w, h, wrapX } = bodyMap.descriptor.config;
-  const norm = normalizeCoord(coord, w, h, wrapX);
-  if (!norm) return false;
-  const idx = norm.r * w + norm.q;
+  if (!Number.isFinite(tileId)) return false;
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= bodyMap.tiles.length) return false;
   const d = distanceMap[idx];
-  return d <= radius;
+  return d !== INF && d <= radius;
 };
 
 // --------------------------------
 // Pathfinding (was: ground/pathfinding.ts)
 // --------------------------------
 
-type Node = { q: number; r: number; cost: number };
+type Node = { tileId: TileId; cost: number };
 
 class MinHeap {
   private heap: Node[] = [];
@@ -596,70 +659,62 @@ class MinHeap {
   }
 
   private less(a: Node, b: Node): boolean {
-    // Tie-break for determinism: cost, then r, then q.
+    // Tie-break for determinism: cost, then tileId.
     if (a.cost !== b.cost) return a.cost < b.cost;
-    if (a.r !== b.r) return a.r < b.r;
-    return a.q < b.q;
+    return a.tileId < b.tileId;
   }
 }
 
 export interface FindPathParams {
-  from: HexCoord;
-  to: HexCoord;
-  w: number;
-  h: number;
-  wrapX: boolean;
-  isBlocked: (coord: HexCoord) => boolean;
-  stepCostCenti: (from: HexCoord, to: HexCoord) => number; // includes ZOC modifiers etc.
+  map: PlanetSurfaceMap;
+  fromTileId: TileId;
+  toTileId: TileId;
+  isBlocked: (tileId: TileId) => boolean;
+  stepCostCenti: (from: TileId, to: TileId) => number; // includes ZOC modifiers etc.
 }
 
 export interface PathResult {
-  path: HexCoord[]; // includes start and end
+  path: TileId[]; // includes start and end
   costCenti: number;
 }
 
 export interface ReachableParams {
-  from: HexCoord;
-  w: number;
-  h: number;
-  wrapX: boolean;
-  isBlocked: (coord: HexCoord) => boolean;
-  stepCostCenti: (from: HexCoord, to: HexCoord) => number;
+  map: PlanetSurfaceMap;
+  fromTileId: TileId;
+  isBlocked: (tileId: TileId) => boolean;
+  stepCostCenti: (from: TileId, to: TileId) => number;
   maxCostCenti: number;
-  canExpand?: (coord: HexCoord) => boolean;
+  canExpand?: (tileId: TileId) => boolean;
 }
 
-export const computeReachable = (params: ReachableParams): Map<string, number> => {
-  const { from, w, h, wrapX, isBlocked, stepCostCenti, maxCostCenti, canExpand } = params;
-  const startKey = hexKey(from);
-  const dist = new Map<string, number>();
-  dist.set(startKey, 0);
+export const computeReachable = (params: ReachableParams): Map<TileId, number> => {
+  const { map, fromTileId, isBlocked, stepCostCenti, maxCostCenti, canExpand } = params;
+  const dist = new Map<TileId, number>();
+  dist.set(fromTileId, 0);
 
   const heap = new MinHeap();
-  heap.push({ q: from.q, r: from.r, cost: 0 });
+  heap.push({ tileId: fromTileId, cost: 0 });
 
   while (heap.size > 0) {
     const cur = heap.pop()!;
-    const curCoord: HexCoord = { q: cur.q, r: cur.r };
-    const curKey = hexKey(curCoord);
-    const best = dist.get(curKey);
+    const curTileId = cur.tileId;
+    const best = dist.get(curTileId);
     if (best === undefined || cur.cost !== best) continue;
     if (cur.cost > maxCostCenti) continue;
 
-    if (canExpand && !canExpand(curCoord)) continue;
+    if (canExpand && !canExpand(curTileId)) continue;
 
-    const ns = neighborsAxial(curCoord, w, h, wrapX);
+    const ns = getSurfaceTileNeighbors(map.descriptor, curTileId);
     for (const n of ns) {
-      const nKey = hexKey(n);
-      if (nKey !== startKey && isBlocked(n)) continue;
-      const step = stepCostCenti(curCoord, n);
+      if (n !== fromTileId && isBlocked(n)) continue;
+      const step = stepCostCenti(curTileId, n);
       if (!Number.isFinite(step) || step <= 0) continue;
       const nextCost = cur.cost + step;
       if (nextCost > maxCostCenti) continue;
-      const known = dist.get(nKey);
+      const known = dist.get(n);
       if (known === undefined || nextCost < known) {
-        dist.set(nKey, nextCost);
-        heap.push({ q: n.q, r: n.r, cost: nextCost });
+        dist.set(n, nextCost);
+        heap.push({ tileId: n, cost: nextCost });
       }
     }
   }
@@ -668,58 +723,55 @@ export const computeReachable = (params: ReachableParams): Map<string, number> =
 };
 
 export const findPathWithCost = (params: FindPathParams): PathResult | null => {
-  const { from, to, w, h, wrapX, isBlocked, stepCostCenti } = params;
-  const startKey = hexKey(from);
-  const goalKey = hexKey(to);
+  const { map, fromTileId, toTileId, isBlocked, stepCostCenti } = params;
+  if (fromTileId === toTileId) return { path: [fromTileId], costCenti: 0 };
 
-  const dist = new Map<string, number>();
-  const prev = new Map<string, HexCoord>();
-  dist.set(startKey, 0);
+  const dist = new Map<TileId, number>();
+  const prev = new Map<TileId, TileId>();
+  dist.set(fromTileId, 0);
 
   const heap = new MinHeap();
-  heap.push({ q: from.q, r: from.r, cost: 0 });
+  heap.push({ tileId: fromTileId, cost: 0 });
 
   while (heap.size > 0) {
     const cur = heap.pop()!;
-    const curCoord: HexCoord = { q: cur.q, r: cur.r };
-    const curKey = hexKey(curCoord);
-    const best = dist.get(curKey);
+    const curTileId = cur.tileId;
+    const best = dist.get(curTileId);
     if (best === undefined || cur.cost !== best) continue;
-    if (curKey === goalKey) break;
+    if (curTileId === toTileId) break;
 
-    const ns = neighborsAxial(curCoord, w, h, wrapX);
+    const ns = getSurfaceTileNeighbors(map.descriptor, curTileId);
     for (const n of ns) {
-      const nKey = hexKey(n);
-      if (nKey !== goalKey && isBlocked(n)) continue;
-      const step = stepCostCenti(curCoord, n);
+      if (n !== toTileId && isBlocked(n)) continue;
+      const step = stepCostCenti(curTileId, n);
       if (!Number.isFinite(step) || step <= 0) continue;
       const nextCost = cur.cost + step;
-      const known = dist.get(nKey);
+      const known = dist.get(n);
       if (known === undefined || nextCost < known) {
-        dist.set(nKey, nextCost);
-        prev.set(nKey, curCoord);
-        heap.push({ q: n.q, r: n.r, cost: nextCost });
+        dist.set(n, nextCost);
+        prev.set(n, curTileId);
+        heap.push({ tileId: n, cost: nextCost });
       }
     }
   }
 
-  const total = dist.get(goalKey);
+  const total = dist.get(toTileId);
   if (total === undefined) return null;
 
   // Reconstruct
-  const path: HexCoord[] = [];
-  let cur: HexCoord = to;
+  const path: TileId[] = [];
+  let cur: TileId = toTileId;
   path.push(cur);
-  while (hexKey(cur) !== startKey) {
-    const p = prev.get(hexKey(cur));
-    if (!p) break;
+  while (cur !== fromTileId) {
+    const p = prev.get(cur);
+    if (p === undefined) break;
     cur = p;
     path.push(cur);
   }
   path.reverse();
 
   // Ensure start present
-  if (path.length === 0 || hexKey(path[0]) !== startKey) {
+  if (path.length === 0 || path[0] !== fromTileId) {
     return null;
   }
 
@@ -828,8 +880,8 @@ export const clampAffinity = (v: number | undefined): number => clamp(v ?? 1, 0.
 
 export interface MoveExecutionResult {
   moved: boolean;
-  from: HexCoord;
-  to: HexCoord;
+  fromTileId: TileId;
+  toTileId: TileId;
   steps: number;
   mpEff: number;
   mpUsedCenti: number;
@@ -841,24 +893,22 @@ export interface MoveExecutionResult {
 export const executeMoveOrder = (params: {
   state: GameState;
   army: Army;
-  to: HexCoord;
+  toTileId: TileId;
   supplied: boolean;
   zocSnapshot: ZocSnapshot | null;
-  getOccupants: (coord: HexCoord) => Army[];
+  getOccupants: (tileId: TileId) => Army[];
   stackingCap?: number;
 }): MoveExecutionResult => {
-  const { state, army, to, supplied, zocSnapshot, getOccupants } = params;
+  const { state, army, toTileId, supplied, zocSnapshot, getOccupants } = params;
   const stackingCap = params.stackingCap ?? STACKING_CAP;
   const map = generateSurfaceMapForState(state, army.containerId);
   const mpEff = computeEffectiveMP(army, supplied);
 
-  const fromRaw: HexCoord = army.surfacePos ? { q: army.surfacePos.q, r: army.surfacePos.r } : to;
-
   if (!map || !army.surfacePos) {
     return {
       moved: false,
-      from: fromRaw,
-      to: fromRaw,
+      fromTileId: toTileId,
+      toTileId: toTileId,
       steps: 0,
       mpEff: 0,
       mpUsedCenti: 0,
@@ -867,14 +917,12 @@ export const executeMoveOrder = (params: {
       updatedArmy: army
     };
   }
-  const { w, h, wrapX } = map.descriptor.config;
-
-  const fromNorm = normalizeCoord(fromRaw, w, h, wrapX);
-  if (!fromNorm) {
+  const fromRawTileId = resolveSurfaceTileId(map.descriptor, army.surfacePos);
+  if (fromRawTileId === null || fromRawTileId < 0 || fromRawTileId >= map.tiles.length) {
     return {
       moved: false,
-      from: fromRaw,
-      to: fromRaw,
+      fromTileId: toTileId,
+      toTileId: toTileId,
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
@@ -884,12 +932,11 @@ export const executeMoveOrder = (params: {
     };
   }
 
-  const toNorm = normalizeCoord(to, w, h, wrapX);
-  if (!toNorm) {
+  if (!Number.isFinite(toTileId) || toTileId < 0 || toTileId >= map.tiles.length) {
     return {
       moved: false,
-      from: fromNorm,
-      to: fromNorm,
+      fromTileId: fromRawTileId,
+      toTileId: fromRawTileId,
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
@@ -899,19 +946,19 @@ export const executeMoveOrder = (params: {
     };
   }
 
-  const from: HexCoord = fromNorm;
-  const target: HexCoord = toNorm;
+  const from: TileId = fromRawTileId;
+  const target: TileId = Math.floor(toTileId);
   const mpCenti = mpEff * 100;
 
-  const tile = map.tiles[target.r * w + target.q];
+  const tile = map.tiles[target];
   const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
   const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
   const isPassableForArmy = (biome: Biome): boolean => isPassable(biome) || (isAmphibious && isWaterBiome(biome));
   if (!tile || !isPassableForArmy(tile.biome)) {
     return {
       moved: false,
-      from,
-      to: from,
+      fromTileId: from,
+      toTileId: from,
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
@@ -921,35 +968,34 @@ export const executeMoveOrder = (params: {
     };
   }
 
-  const isPassableAt = (c: HexCoord): boolean => {
-    const tileAt = map.tiles[c.r * w + c.q];
+  const isPassableAt = (tileId: TileId): boolean => {
+    const tileAt = map.tiles[tileId];
     return !!tileAt && isPassableForArmy(tileAt.biome);
   };
 
-  const isEnemyOccupied = (coord: HexCoord): boolean => getOccupants(coord).some(o => o.factionId !== army.factionId);
-  const friendlyCount = (coord: HexCoord): number => getOccupants(coord).filter(o => o.factionId === army.factionId).length;
+  const isEnemyOccupied = (tileId: TileId): boolean => getOccupants(tileId).some(o => o.factionId !== army.factionId);
+  const friendlyCount = (tileId: TileId): number => getOccupants(tileId).filter(o => o.factionId === army.factionId).length;
 
-  const size = w * h;
+  const size = map.tiles.length;
   const urbanMask = new Uint8Array(size);
   const buildings = state.groundBuildings ?? [];
 
   for (const s of map.settlements) {
-    const norm = normalizeCoord(s.coord, w, h, wrapX);
-    if (!norm) continue;
-    urbanMask[norm.r * w + norm.q] = 1;
+    if (s.tileId < 0 || s.tileId >= size) continue;
+    urbanMask[s.tileId] = 1;
   }
   for (const b of buildings) {
     if (b.surfacePos.bodyId !== map.bodyId) continue;
-    const norm = normalizeCoord({ q: b.surfacePos.q, r: b.surfacePos.r }, w, h, wrapX);
-    if (!norm) continue;
-    urbanMask[norm.r * w + norm.q] = 1;
+    const tileId = resolveSurfaceTileId(map.descriptor, b.surfacePos);
+    if (tileId === null) continue;
+    urbanMask[tileId] = 1;
   }
 
   const terrainCache: Array<TerrainType | null> = new Array(size).fill(null);
   const baseCostCacheCenti = new Int32Array(size);
 
-  const getTerrainTypeAt = (c: HexCoord): TerrainType => {
-    const idx = c.r * w + c.q;
+  const getTerrainTypeAt = (tileId: TileId): TerrainType => {
+    const idx = tileId;
     const cached = terrainCache[idx];
     if (cached) return cached;
     let terrain: TerrainType;
@@ -963,11 +1009,11 @@ export const executeMoveOrder = (params: {
     return terrain;
   };
 
-  const getBaseMoveCostCenti = (c: HexCoord): number => {
-    const idx = c.r * w + c.q;
+  const getBaseMoveCostCenti = (tileId: TileId): number => {
+    const idx = tileId;
     const cached = baseCostCacheCenti[idx];
     if (cached !== 0) return cached;
-    const terrain = getTerrainTypeAt(c);
+    const terrain = getTerrainTypeAt(tileId);
     const tileAt = map.tiles[idx];
     const featureBits = tileAt?.featureBits ?? 0;
     const hasRoad = (featureBits & FeatureBits.Road) !== 0;
@@ -983,27 +1029,25 @@ export const executeMoveOrder = (params: {
     return cost;
   };
 
-  const stepCostCenti = (_from: HexCoord, b: HexCoord): number => {
+  const stepCostCenti = (_from: TileId, b: TileId): number => {
     let cost = getBaseMoveCostCenti(b);
     if (friendlyCount(b) > 0) cost *= 2;
     return cost;
   };
 
   const pathResult = findPathWithCost({
-    from,
-    to: target,
-    w,
-    h,
-    wrapX,
-    isBlocked: c => !isPassableAt(c) || isEnemyOccupied(c),
+    map,
+    fromTileId: from,
+    toTileId: target,
+    isBlocked: tileId => !isPassableAt(tileId) || isEnemyOccupied(tileId),
     stepCostCenti
   });
 
   if (!pathResult || pathResult.path.length <= 1) {
     return {
       moved: false,
-      from,
-      to: from,
+      fromTileId: from,
+      toTileId: from,
       steps: 0,
       mpEff,
       mpUsedCenti: 0,
@@ -1040,10 +1084,15 @@ export const executeMoveOrder = (params: {
   const moved = steps > 0;
   const fatigue = steps === 0 ? 0 : Math.min(FATIGUE_MOVE_PER_HEX * steps, 0.4);
 
+  const toSurfacePos = (tileId: TileId): SurfacePos => {
+    const coord = getSurfaceTileCoordFromId(map.descriptor, tileId);
+    return coord ? { bodyId: army.containerId, tileId, q: coord.q, r: coord.r } : { bodyId: army.containerId, tileId };
+  };
+
   const updatedArmy: Army = moved
     ? {
         ...army,
-        surfacePos: { bodyId: army.containerId, q: pos.q, r: pos.r },
+        surfacePos: toSurfacePos(pos),
         fatigue: clamp(army.fatigue + fatigue, 0, 1),
         ...(army.posture === 'prepared_defense' ? { posture: 'normal', postureSetTurn: undefined } : {})
       }
@@ -1051,8 +1100,8 @@ export const executeMoveOrder = (params: {
 
   return {
     moved,
-    from,
-    to: pos,
+    fromTileId: from,
+    toTileId: pos,
     steps,
     mpEff,
     mpUsedCenti,
@@ -1092,21 +1141,22 @@ export interface EngagementResult extends EngagementPreview {
   defenderAfter: Army;
 }
 
-export const computeCoverFactorAtCoord = (map: PlanetSurfaceMap, buildings: GroundBuilding[], coord: HexCoord): number => {
-  if (isUrbanHex(map, buildings, coord)) return 1.25;
-  const { w, h, wrapX } = map.descriptor.config;
-  const norm = normalizeCoord(coord, w, h, wrapX);
-  if (!norm) return 1.05;
-  const tile = map.tiles[norm.r * w + norm.q];
+export const computeCoverFactorAtCoord = (map: PlanetSurfaceMap, buildings: GroundBuilding[], tileId: TileId): number => {
+  if (isUrbanHex(map, buildings, tileId)) return 1.25;
+  if (!Number.isFinite(tileId)) return 1.05;
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= map.tiles.length) return 1.05;
+  const tile = map.tiles[idx];
   if (!tile) return 1.05;
   return coverFactorForBiome(tile.biome);
 };
 
-export const computeFortifFactorAtCoord = (buildings: GroundBuilding[], bodyId: string, coord: HexCoord): number => {
+export const computeFortifFactorAtCoord = (map: PlanetSurfaceMap, buildings: GroundBuilding[], tileId: TileId): number => {
   let factor = 1;
   for (const b of buildings) {
-    if (b.surfacePos.bodyId !== bodyId) continue;
-    if (b.surfacePos.q !== coord.q || b.surfacePos.r !== coord.r) continue;
+    if (b.surfacePos.bodyId !== map.bodyId) continue;
+    const bTileId = resolveSurfaceTileId(map.descriptor, b.surfacePos);
+    if (bTileId === null || bTileId !== tileId) continue;
     if (b.tags?.includes('bunker') || b.type === 'bunker') {
       factor = Math.max(factor, 1.25);
       continue;
@@ -1121,20 +1171,18 @@ export const computeFortifFactorAtCoord = (buildings: GroundBuilding[], bodyId: 
 export const hasLineOfSight = (params: {
   map: PlanetSurfaceMap;
   buildings: GroundBuilding[];
-  from: HexCoord;
-  to: HexCoord;
+  fromTileId: TileId;
+  toTileId: TileId;
 }): boolean => {
-  const { map, buildings, from, to } = params;
+  const { map, buildings, fromTileId, toTileId } = params;
   return lineOfSight({
-    from,
-    to,
+    fromTileId,
+    toTileId,
     map,
-    isBlocked: coord => {
-      if (isUrbanHex(map, buildings, coord)) return true;
-      const { w, h, wrapX } = map.descriptor.config;
-      const norm = normalizeCoord(coord, w, h, wrapX);
-      if (!norm) return true;
-      const tile = map.tiles[norm.r * w + norm.q];
+    isBlocked: tileId => {
+      if (isUrbanHex(map, buildings, tileId)) return true;
+      if (tileId < 0 || tileId >= map.tiles.length) return true;
+      const tile = map.tiles[tileId];
       if (!tile) return true;
       return isLosBlockingBiome(tile.biome);
     }
@@ -1292,33 +1340,35 @@ const computeEngagementMetrics = (params: {
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
   turn?: number;
-  bombardedKeys?: Set<string> | null;
+  bombardedTileIds?: Set<number> | null;
 }): EngagementPreview => {
   const { rngAtk, rngDef, map, buildings, attackers, defender } = params;
-  const bombardedKeys = params.bombardedKeys ?? null;
+  const bombardedTileIds = params.bombardedTileIds ?? null;
   const defenderArmy = defender.army;
-  const defenderPos = defenderArmy.surfacePos ? { q: defenderArmy.surfacePos.q, r: defenderArmy.surfacePos.r } : { q: 0, r: 0 };
-  const defenderTerrain = deriveTerrainTypeFromSurfaceMap(map, buildings, defenderPos);
-  const coverFactor = computeCoverFactorAtCoord(map, buildings, defenderPos);
-  const fortifFactor = computeFortifFactorAtCoord(buildings, map.bodyId, defenderPos);
-  const { w, h, wrapX } = map.descriptor.config;
-  const isBombardedAt = (coord: HexCoord): boolean => {
-    if (!bombardedKeys) return false;
-    const norm = normalizeCoord(coord, w, h, wrapX);
-    if (!norm) return false;
-    return bombardedKeys.has(hexKey(norm));
+  const defenderTileId = defenderArmy.surfacePos
+    ? resolveSurfaceTileId(map.descriptor, defenderArmy.surfacePos)
+    : null;
+  const safeDefenderTileId = defenderTileId ?? 0;
+  const defenderTerrain = deriveTerrainTypeFromSurfaceMap(map, buildings, safeDefenderTileId);
+  const coverFactor = computeCoverFactorAtCoord(map, buildings, safeDefenderTileId);
+  const fortifFactor = computeFortifFactorAtCoord(map, buildings, safeDefenderTileId);
+  const isBombardedAt = (tileId: TileId | null | undefined): boolean => {
+    if (!bombardedTileIds || tileId === null || tileId === undefined) return false;
+    return bombardedTileIds.has(tileId);
   };
 
   const attackerEntries = attackers.map(attacker => {
-    const pos = attacker.army.surfacePos ? { q: attacker.army.surfacePos.q, r: attacker.army.surfacePos.r } : { q: 0, r: 0 };
-    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, pos);
+    const posTileId = attacker.army.surfacePos
+      ? resolveSurfaceTileId(map.descriptor, attacker.army.surfacePos)
+      : null;
+    const terrain = deriveTerrainTypeFromSurfaceMap(map, buildings, posTileId ?? 0);
     const basePower = computeAttackPowerBase({
       army: attacker.army,
       terrainType: terrain,
       supplied: attacker.supplied,
       stackingFactor: attacker.stackingFactor,
       frontAssault: attacker.frontAssault
-    }) * (isBombardedAt(pos) ? BOMBARD_COMBAT_MULT : 1);
+    }) * (isBombardedAt(posTileId) ? BOMBARD_COMBAT_MULT : 1);
     return { id: attacker.army.id, members: attacker.army.members, basePower };
   });
 
@@ -1331,7 +1381,7 @@ const computeEngagementMetrics = (params: {
     supplied: defender.supplied,
     stackingFactor: defender.stackingFactor,
     turn: params.turn
-  }) * (isBombardedAt(defenderPos) ? BOMBARD_COMBAT_MULT : 1);
+  }) * (isBombardedAt(defenderTileId) ? BOMBARD_COMBAT_MULT : 1);
   const defensePower = defenseBase * coverFactor * fortifFactor * rngDef;
 
   const totalPower = attackPower + defensePower;
@@ -1369,7 +1419,7 @@ export const previewEngagement = (params: {
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
   turn?: number;
-  bombardedKeys?: Set<string> | null;
+  bombardedTileIds?: Set<number> | null;
 }): EngagementPreview => {
   return computeEngagementMetrics({
     rngAtk: 1,
@@ -1379,7 +1429,7 @@ export const previewEngagement = (params: {
     attackers: params.attackers,
     defender: params.defender,
     turn: params.turn,
-    bombardedKeys: params.bombardedKeys
+    bombardedTileIds: params.bombardedTileIds
   });
 };
 
@@ -1389,7 +1439,7 @@ export const resolveEngagement = (params: {
   buildings: GroundBuilding[];
   attackers: EngagementParticipant[];
   defender: EngagementParticipant;
-  bombardedKeys?: Set<string> | null;
+  bombardedTileIds?: Set<number> | null;
 }): EngagementResult => {
   const attackerIds = sorted(
     params.attackers.map(attacker => attacker.army.id),
@@ -1408,26 +1458,25 @@ export const resolveEngagement = (params: {
     attackers: params.attackers,
     defender: params.defender,
     turn: params.turn,
-    bombardedKeys: params.bombardedKeys
+    bombardedTileIds: params.bombardedTileIds
   });
 
-  const { w, h, wrapX } = params.map.descriptor.config;
-  const isBombardedAt = (coord: HexCoord | null | undefined): boolean => {
-    if (!params.bombardedKeys || !coord) return false;
-    const norm = normalizeCoord(coord, w, h, wrapX);
-    if (!norm) return false;
-    return params.bombardedKeys.has(hexKey(norm));
+  const isBombardedAt = (tileId: TileId | null | undefined): boolean => {
+    if (!params.bombardedTileIds || tileId === null || tileId === undefined) return false;
+    return params.bombardedTileIds.has(tileId);
   };
 
   const attackersAfter = params.attackers.map(attacker => {
     const losses = metrics.lossesByAttackerId[attacker.army.id] ?? 0;
-    const coord = attacker.army.surfacePos ? { q: attacker.army.surfacePos.q, r: attacker.army.surfacePos.r } : null;
-    return applyCombatLosses(attacker.army, losses, params.turn, { bombarded: isBombardedAt(coord) });
+    const tileId = attacker.army.surfacePos
+      ? resolveSurfaceTileId(params.map.descriptor, attacker.army.surfacePos)
+      : null;
+    return applyCombatLosses(attacker.army, losses, params.turn, { bombarded: isBombardedAt(tileId) });
   });
-  const defenderCoord = params.defender.army.surfacePos
-    ? { q: params.defender.army.surfacePos.q, r: params.defender.army.surfacePos.r }
+  const defenderTileId = params.defender.army.surfacePos
+    ? resolveSurfaceTileId(params.map.descriptor, params.defender.army.surfacePos)
     : null;
-  const defenderAfter = applyCombatLosses(params.defender.army, metrics.lossesDef, params.turn, { bombarded: isBombardedAt(defenderCoord) });
+  const defenderAfter = applyCombatLosses(params.defender.army, metrics.lossesDef, params.turn, { bombarded: isBombardedAt(defenderTileId) });
 
   return {
     ...metrics,

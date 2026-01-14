@@ -40,8 +40,7 @@ interface UIProps {
     | 'INVASION_DECISION_MODAL'
     | 'ORBIT_FLEET_PICKER'
     | 'SHIP_DETAIL_MODAL'
-    | 'GROUND_OPS_MODAL'
-    | 'SYSTEM_VIEW';
+    | 'GROUND_OPS_MODAL';
   menuPosition: { x: number, y: number } | null;
   targetSystem: StarSystem | null;
   systems: StarSystem[];
@@ -68,8 +67,8 @@ interface UIProps {
   onCloseMenu: () => void;
   onSelectFleet: (fleetId: string) => void;
   onInspectFleet: (fleetId: string) => void;
-  onOpenSystemView: () => void;
-  onOpenSurfaceView: (bodyId: string) => void;
+  onFocusSystem: (systemId: string) => void;
+  onFocusSurface: (bodyId: string) => void;
   onOpenSystemDetails: () => void;
   systemDetailSystem: StarSystem | null;
   onCloseSystemDetails: () => void;
@@ -105,7 +104,7 @@ const UI: React.FC<UIProps> = ({
     selectedBattleId, gameState,
     onMoveCommand, onAttackCommand, onLoadCommand, onUnloadCommand, onOpenFleetPicker, onOpenOrbitingFleetPicker, onOpenGroundOps, onCloseMenu, onSelectFleet,
     onInspectFleet,
-    onOpenSystemView, onOpenSurfaceView, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
+    onFocusSystem, onFocusSurface, onOpenSystemDetails, systemDetailSystem, onCloseSystemDetails, fleetPickerMode,
     onOpenBattle, onInvade, onCommitInvasion,
     invasionDecision, onCloseInvasionDecision, onConfirmInvasionDecisionSiege, onConfirmInvasionDecisionAttack,
     onSave, onExportAiLogs, onClearAiLogs, onCloseShipDetail,
@@ -373,8 +372,8 @@ const UI: React.FC<UIProps> = ({
             showUnloadOption={showUnloadOption}
             showGroundOpsOption={showGroundOpsOption}
             canSelectFleet={orbitingPlayerFleets.length > 0}
-            onOpenSystemView={onOpenSystemView}
-            onOpenSurfaceView={onOpenSurfaceView}
+            onFocusSystem={onFocusSystem}
+            onFocusSurface={onFocusSurface}
             onOpenSystemDetails={onOpenSystemDetails}
             onSelectFleetAtSystem={handleSelectFleetAtSystem}
             onOpenFleetPicker={() => onOpenFleetPicker('MOVE')}
@@ -420,7 +419,7 @@ const UI: React.FC<UIProps> = ({
             onConfirm={onCommitInvasion}
             onClose={onCloseMenu}
             playerFactionId={playerFactionId}
-            onOpenSurfaceView={onOpenSurfaceView}
+            onFocusSurface={onFocusSurface}
         />
       )}
 
@@ -447,7 +446,7 @@ const UI: React.FC<UIProps> = ({
             onTransfer={(armyId, fromPlanetId, toPlanetId) =>
                 onTransferArmy(targetSystem.id, armyId, fromPlanetId, toPlanetId)
             }
-            onOpenSurfaceView={onOpenSurfaceView}
+            onFocusSurface={onFocusSurface}
             onClose={onCloseMenu}
         />
       )}

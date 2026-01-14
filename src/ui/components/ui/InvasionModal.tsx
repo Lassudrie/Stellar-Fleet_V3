@@ -15,10 +15,10 @@ interface InvasionModalProps {
   onConfirm: (fleetId: string, planetId: string | null) => void; // Changed: returns FleetID now
   onClose: () => void;
   playerFactionId: string;
-  onOpenSurfaceView: (planetId: string) => void;
+  onFocusSurface: (planetId: string) => void;
 }
 
-const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId, onOpenSurfaceView }) => {
+const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onConfirm, onClose, playerFactionId, onFocusSurface }) => {
   const { t } = useI18n();
   const getFleetName = useFleetName();
   const solidPlanets = useMemo(() => targetSystem.planets.filter(planet => planet.isSolid), [targetSystem]);
@@ -84,7 +84,7 @@ const InvasionModal: React.FC<InvasionModalProps> = ({ targetSystem, fleets, onC
             </select>
             <button
               disabled={!selectedPlanetId}
-              onClick={() => selectedPlanetId && onOpenSurfaceView(selectedPlanetId)}
+              onClick={() => selectedPlanetId && onFocusSurface(selectedPlanetId)}
               className="text-[10px] uppercase rounded border border-slate-600 px-2 py-1 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {t('invasion.viewSurface')}

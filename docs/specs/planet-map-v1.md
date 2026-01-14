@@ -1,9 +1,8 @@
-# Planet Map — carte planète 2D hex — Stellar Fleet V3
+# Planet Map — surface planétaire (legacy rect) — Stellar Fleet V3
 
-Version: **1.0** (générateur déterministe, carte cylindrique “wrap X”, compatible save)
+Version: **1.1** (legacy rect + note géodésique)
 
-> Ce document est la spécification consolidée du système **Planet Map** (surface 2D hex) et sert de contrat d’implémentation:
-> types stables, pipeline ordonné, invariants testables, et points d’intégration UI.
+> Ce document décrit le modèle **rectangulaire legacy** (wrap X). Depuis `generatorVersion >= 7`, la surface par défaut est **géodésique** (icosphère, `tileId`), la grille `w×h` restant supportée pour compatibilité. Voir `docs/specs/surface-view.md` et `src/shared/shared.ts` pour les types actuels.
 
 ## 1. Objectif et périmètre
 
@@ -33,26 +32,32 @@ par surface (voir `docs/specs/worldgen-audit-log.md`).
 
 ## 2. Représentation de la surface (topologie et grille)
 
-Choix pragmatique (4X) : projection 2D cylindrique.
+Deux topologies sont supportées :
+- **Géodésique (défaut)** : icosphère subdivisée, cellules majoritairement hexagonales + 12 pentagones, indexées par `tileId`.
+- **Rectangulaire (legacy)** : projection 2D cylindrique pour compatibilité.
 
+Choix rect legacy (4X) : projection 2D cylindrique.
 - Wrap Est-Ouest (wrapX = true).
 - Pas de wrap Nord-Sud.
 - Pôles gérés par latitude (froid + biomes polaires), sans topologie sphérique complexe.
 
 ### Taille de grille
 
-- Ratio ~2:1 (W ≈ 2×H) pour limiter l’étirement visuel des pôles.
-- Valeurs typiques : 64×32, 96×48, 128×64.
-- Règle de dimensionnement recommandée (si planet.size disponible) :
-  - w = clamp(round(60 * sqrt(size)), 64, 128)
-  - h = clamp(round(w / 2), 32, 64)
-  - Sinon, défaut global : 96×48.
+- **Géodésique** : fréquence `f` (subdivision) avec `tileCount = 10 * f^2 + 2`.
+- **Rect legacy** : ratio ~2:1 (W ≈ 2×H) pour limiter l’étirement visuel des pôles.
+  - Valeurs typiques : 64×32, 96×48, 128×64.
+  - Règle de dimensionnement recommandée (si planet.size disponible) :
+    - w = clamp(round(60 * sqrt(size)), 64, 128)
+    - h = clamp(round(w / 2), 32, 64)
+    - Sinon, défaut global : 96×48.
 
 ### Système de coordonnées
 
-- Interne : axial (q, r) recommandé (standard hex).
-- Stockage/itération : index linéaire i = r*w + q (avec q ∈ [0..w-1], r ∈ [0..h-1]).
-- Voisinage : 6 voisins axiaux, avec wrapX appliqué sur q.
+- **Géodésique** : `tileId` (index dans la liste des sommets de l’icosphère).
+- **Rect legacy** :
+  - Interne : axial (q, r) (standard hex).
+  - Stockage/itération : index linéaire i = r*w + q (avec q ∈ [0..w-1], r ∈ [0..h-1]).
+  - Voisinage : 6 voisins axiaux, avec wrapX appliqué sur q.
 
 ### Latitude normalisée (pour température/biomes)
 
@@ -76,12 +81,23 @@ export type Biome =
 
 export interface HexCoord { q: number; r: number; }
 
-export interface PlanetSurfaceConfig {
+export type SurfaceGridKind = 'rect' | 'geodesic';
+
+export type RectSurfaceConfig = {
+  gridKind?: 'rect';
   w: number;              // ex 96
   h: number;              // ex 48
   wrapX: boolean;         // true
   generatorVersion: number; // ex 1
-}
+};
+
+export type GeodesicSurfaceConfig = {
+  gridKind: 'geodesic';
+  frequency: number;      // ex 12
+  generatorVersion: number;
+};
+
+export type PlanetSurfaceConfig = RectSurfaceConfig | GeodesicSurfaceConfig;
 
 export interface PlanetSurfaceDescriptor {
   seed: number;                 // uint32
@@ -113,7 +129,8 @@ export interface PlanetSurfaceTile {
 export interface Settlement {
   id: string;
   name: string;
-  coord: HexCoord;
+  tileId: number;
+  coord?: HexCoord; // uniquement pour surfaces rect legacy
   factionId?: string;       // undefined si neutre
   type: 'outpost' | 'colony' | 'frontierTown' | 'city' | 'metropolis' | 'megalopolis';
   population: number;
@@ -126,14 +143,15 @@ export interface PlanetSurfaceMap {
   bodyId: string;                  // planetId (ou moonId)
   descriptor: PlanetSurfaceDescriptor;
   seaLevelElev: number;            // seuil “mer” pour cohérence et rivières
-  tiles: PlanetSurfaceTile[];      // longueur w*h (ou buffers typés internes)
+  tiles: PlanetSurfaceTile[];      // longueur tileCount (rect ou geodesic)
   settlements: Settlement[];
 }
 
 export interface SurfacePos {
   bodyId: string; // planetId (ou moonId)
-  q: number;
-  r: number;
+  tileId?: number;
+  q?: number;
+  r?: number;
 }
 ```
 
@@ -171,10 +189,11 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
   - ou maintenir la compat bit-for-bit (rarement souhaitable).
 
 ### Implémentation actuelle (repo)
-- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v6 par défaut).
+- Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v7 par défaut).
 - Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
 - Spécificités v4/v5 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
 - Spécificités v6 (terrain-first) : champ de terrain continu échantillonné sur la sphère (dir unitaire), bruit 3D sans couture, carte 2D dérivée par sampling multi-points, textures 3D dérivées du même champ (source de vérité unique).
+- Spécificités v7 : grille géodésique (icosphère), `tileId` comme index stable, 12 pentagones implicites.
 
 ## 5. Pipeline de génération (cohérence environnementale)
 
@@ -218,7 +237,7 @@ Puis : classification biomes + rivières + features (villes).
 À sauvegarder (recommandé minimal) :
 
 - PlanetSurfaceDescriptor par planète/lune solide :
-  - seed, w, h, wrapX, generatorVersion
+  - seed, gridKind + (w/h/wrapX ou frequency), generatorVersion
   - astroRef recommandé
 
 À ne pas stocker par défaut :

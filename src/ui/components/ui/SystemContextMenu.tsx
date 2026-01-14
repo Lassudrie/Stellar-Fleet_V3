@@ -90,8 +90,8 @@ interface SystemContextMenuProps {
   showUnloadOption: boolean;
   showGroundOpsOption: boolean;
   canSelectFleet: boolean;
-  onOpenSystemView: () => void;
-  onOpenSurfaceView: (bodyId: string) => void;
+  onFocusSystem: (systemId: string) => void;
+  onFocusSurface: (bodyId: string) => void;
   onOpenSystemDetails: () => void;
   onSelectFleetAtSystem: () => void;
   onOpenFleetPicker: () => void;
@@ -149,7 +149,7 @@ const readViewportRect = (): ViewportRect => {
 
 const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
     position, system, groundForces, showInvadeOption, showAttackOption, showLoadOption, showUnloadOption, showGroundOpsOption,
-    canSelectFleet, onOpenSystemView, onOpenSurfaceView, onOpenSystemDetails, onSelectFleetAtSystem,
+    canSelectFleet, onFocusSystem, onFocusSurface, onOpenSystemDetails, onSelectFleetAtSystem,
     onOpenFleetPicker, onOpenLoadPicker, onOpenUnloadPicker, onOpenGroundOps, onInvade, onAttack, onClose
 }) => {
   const { t } = useI18n();
@@ -291,7 +291,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
           {t('ctx.section.overview')}
       </div>
       <button
-          onClick={onOpenSystemView}
+          onClick={() => onFocusSystem(system.id)}
           className="text-left px-3 py-2 rounded transition-colors text-sm font-semibold tracking-wide flex items-center gap-2 hover:bg-sky-700/30 text-sky-200 hover:text-white"
       >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
@@ -303,7 +303,7 @@ const SystemContextMenu: React.FC<SystemContextMenuProps> = ({
 
       {defaultSurfaceBodyId && (
           <button
-              onClick={() => { onOpenSurfaceView(defaultSurfaceBodyId); onClose(); }}
+              onClick={() => { onFocusSurface(defaultSurfaceBodyId); onClose(); }}
               className="text-left px-3 py-2 rounded transition-colors text-sm font-semibold tracking-wide flex items-center gap-2 hover:bg-indigo-700/30 text-indigo-200 hover:text-white"
           >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">

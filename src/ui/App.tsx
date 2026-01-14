@@ -8,10 +8,7 @@ import { FleetNameProvider } from './context/FleetNames';
 import {
   LoadGameScreen,
   MainMenu,
-  ScenarioSelectScreen,
-  SurfaceView,
-  SystemView3D,
-  type SystemCameraState
+  ScenarioSelectScreen
 } from './components/screens';
 import { buildScenario } from '../content/scenarios';
 import { useI18n } from './i18n';
@@ -20,7 +17,7 @@ import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower } from '../engine/world';
 import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState } from '../engine/serialization';
-import { generateSurfaceMapForState } from '../engine/planetSurface';
+import { generateSurfaceMapForState, getSurfaceTileCoordFromId, getSurfaceTileCount, getSurfaceTileDir } from '../engine/planetSurface';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
@@ -40,8 +37,13 @@ type UiMode =
   | 'INVASION_DECISION_MODAL'
   | 'ORBIT_FLEET_PICKER'
   | 'SHIP_DETAIL_MODAL'
-  | 'GROUND_OPS_MODAL'
-  | 'SYSTEM_VIEW';
+  | 'GROUND_OPS_MODAL';
+type ViewTier = 'galaxy' | 'system' | 'planet' | 'surface';
+type ViewContext = {
+  tier: ViewTier;
+  focus: { systemId?: string | null; bodyId?: string | null };
+  desiredZoom?: number | null;
+};
 type LoadingStage = 'prepare' | 'read' | 'worldgen' | 'deserialize' | 'engine' | 'assets' | 'render';
 type LoadingStatus = 'loading' | 'error' | 'done';
 type LoadingFlow = 'newGame' | 'loadGame';
@@ -58,8 +60,7 @@ type LoadingState = {
 const ENEMY_SIGHTING_MAX_AGE_DAYS = 30;
 const ENEMY_SIGHTING_LIMIT = 200;
 const MAX_SAVE_BYTES = 25 * 1024 * 1024;
-const SCREEN_TRANSITION_MS = 400;
-const SYSTEM_VIEW_SCALE_FACTOR = 1.15;
+const DEFAULT_VIEW_CONTEXT: ViewContext = { tier: 'galaxy', focus: {}, desiredZoom: null };
 const LOADING_FLOW_STAGES: Record<LoadingFlow, LoadingStage[]> = {
   newGame: ['prepare', 'worldgen', 'engine', 'render'],
   loadGame: ['read', 'deserialize', 'engine', 'render']
@@ -168,10 +169,31 @@ const collectSurfaceWarmupBodyIds = (state: GameState): string[] => {
   return sorted(filtered, (a, b) => a.localeCompare(b));
 };
 
+const resolveSurfaceTileIdFromDir = (
+  descriptor: PlanetSurfaceMap['descriptor'],
+  dir: Vec3
+): number | null => {
+  const tileCount = getSurfaceTileCount(descriptor);
+  if (tileCount <= 0) return null;
+  let best = 0;
+  let bestDot = -Infinity;
+  for (let i = 0; i < tileCount; i += 1) {
+    const tileDir = getSurfaceTileDir(descriptor, i);
+    if (!tileDir) continue;
+    const dot = tileDir.x * dir.x + tileDir.y * dir.y + tileDir.z * dir.z;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = i;
+    }
+  }
+  return best;
+};
+
 const App: React.FC = () => {
   const { t } = useI18n();
   useButtonClickSound();
-  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO' | 'SYSTEM_VIEW' | 'SURFACE_VIEW'>('MENU');
+  const [screen, setScreen] = useState<'MENU' | 'NEW_GAME' | 'LOAD_GAME' | 'GAME' | 'SCENARIO'>('MENU');
+  const [viewContext, setViewContext] = useState<ViewContext>(DEFAULT_VIEW_CONTEXT);
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [viewGameState, setViewGameState] = useState<GameState | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>({
@@ -187,13 +209,6 @@ const App: React.FC = () => {
   const loadingSessionRef = useRef(0);
   const loadingFlowRef = useRef<LoadingFlow | null>(null);
   const bootstrapWorkerRef = useRef<BootstrapWorkerClient | null>(null);
-  const [systemViewSystem, setSystemViewSystem] = useState<StarSystem | null>(null);
-  const [surfaceViewBodyId, setSurfaceViewBodyId] = useState<string | null>(null);
-  const [surfaceViewSystem, setSurfaceViewSystem] = useState<StarSystem | null>(null);
-  const [systemViewCameraBySystem, setSystemViewCameraBySystem] = useState<Record<string, SystemCameraState>>({});
-  const [transitionPhase, setTransitionPhase] = useState<'idle' | 'fadeOut' | 'fadeIn'>('idle');
-  const [pendingScreen, setPendingScreen] = useState<'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW' | null>(null);
-  const transitionTimerRef = useRef<number | null>(null);
 
   // UI State
   const [uiMode, setUiMode] = useState<UiMode>('NONE');
@@ -205,6 +220,7 @@ const App: React.FC = () => {
   const [focusTarget, setFocusTarget] = useState<Vec3 | null>(null);
   const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
   const [fleetPickerMode, setFleetPickerMode] = useState<'MOVE' | 'LOAD' | 'UNLOAD' | 'ATTACK' | null>(null);
+  const [surfaceSelection, setSurfaceSelection] = useState<{ bodyId: string; tileId: number; dir: Vec3 } | null>(null);
 
   type InvasionDecisionContext = {
       messageId: string;
@@ -308,41 +324,12 @@ const App: React.FC = () => {
       inspectedFleetIdRef.current = inspectedFleetId;
   }, [inspectedFleetId]);
 
-  const clearTransitionTimer = useCallback(() => {
-      if (transitionTimerRef.current !== null) {
-          window.clearTimeout(transitionTimerRef.current);
-          transitionTimerRef.current = null;
-      }
-  }, []);
-
-  useEffect(() => {
-      return () => clearTransitionTimer();
-  }, [clearTransitionTimer]);
-
   useEffect(() => {
       return () => {
           bootstrapWorkerRef.current?.dispose();
           bootstrapWorkerRef.current = null;
       };
   }, []);
-
-  const beginScreenTransition = useCallback((nextScreen: 'GAME' | 'SYSTEM_VIEW' | 'SURFACE_VIEW', prepare?: () => void) => {
-      clearTransitionTimer();
-      prepare?.();
-      setPendingScreen(nextScreen);
-      setTransitionPhase('fadeOut');
-
-      transitionTimerRef.current = window.setTimeout(() => {
-          setScreen(nextScreen);
-          setTransitionPhase('fadeIn');
-
-          transitionTimerRef.current = window.setTimeout(() => {
-              setTransitionPhase('idle');
-              setPendingScreen(null);
-              transitionTimerRef.current = null;
-          }, SCREEN_TRANSITION_MS);
-      }, SCREEN_TRANSITION_MS);
-  }, [clearTransitionTimer]);
 
   const startLoadingFlow = useCallback((flow: LoadingFlow, stage: LoadingStage) => {
       const nextSessionId = loadingSessionRef.current + 1;
@@ -628,6 +615,7 @@ const App: React.FC = () => {
     setFleetPickerMode(null);
     setUiMode('NONE');
     setSelectedBattleId(null);
+    setViewContext(DEFAULT_VIEW_CONTEXT);
     updateLoadingStage('prepare', 1);
 
     try {
@@ -738,6 +726,7 @@ const App: React.FC = () => {
           setUiMode('NONE');
           setUiMessages([]);
           setSelectedBattleId(null);
+          setViewContext(DEFAULT_VIEW_CONTEXT);
           
           updateViewState(newEngine.state);
           
@@ -867,71 +856,100 @@ const App: React.FC = () => {
       setUiMode('GROUND_OPS_MODAL');
   };
 
-  const handleOpenSystemView = () => {
-      if (!targetSystem || !viewGameState) {
-          console.warn('[App] handleOpenSystemView: Missing targetSystem or viewGameState');
-          return;
-      }
-      const latestSystem = viewGameState.systems.find(s => s.id === targetSystem.id) || targetSystem;
-      setTargetSystem(latestSystem);
-      setSystemViewSystem(latestSystem);
-      beginScreenTransition('SYSTEM_VIEW', () => {
-          setUiMode('NONE');
-          setMenuPosition(null);
-      });
-  };
-
-  const handleOpenSurfaceView = (bodyId?: string | null, options?: { systemHint?: StarSystem | null; returnTo?: 'GAME' | 'SYSTEM_VIEW' }) => {
+  const handleFocusSystem = useCallback((systemId: string) => {
       if (!viewGameState) {
-          console.warn('[App] handleOpenSurfaceView: viewGameState not ready');
+          console.warn('[App] handleFocusSystem: viewGameState not ready');
           return;
       }
+      const resolvedSystem = viewGameState.systems.find(system => system.id === systemId) ?? null;
+      if (!resolvedSystem) {
+          console.warn('[App] handleFocusSystem: System not found', { systemId });
+          return;
+      }
+      setTargetSystem(resolvedSystem);
+      setFocusTarget(resolvedSystem.position);
+      setViewContext({
+          tier: 'system',
+          focus: { systemId: resolvedSystem.id },
+          desiredZoom: null
+      });
+      setUiMode('NONE');
+      setMenuPosition(null);
+  }, [viewGameState]);
 
+  const handleFocusPlanet = useCallback((bodyId: string) => {
+      if (!viewGameState) {
+          console.warn('[App] handleFocusPlanet: viewGameState not ready');
+          return;
+      }
       const context = resolveSurfaceContext({
           systems: viewGameState.systems,
-          bodyId: bodyId ?? null,
-          preferredSystemId: options?.systemHint?.id ?? targetSystem?.id ?? systemViewSystem?.id ?? null
+          bodyId,
+          preferredSystemId: targetSystem?.id ?? null
       });
-
       if (!context) {
-          console.warn('[App] handleOpenSurfaceView: No solid body available for surface view');
+          console.warn('[App] handleFocusPlanet: No solid body available for surface view');
           return;
       }
-
-      setSurfaceViewSystem(context.system);
-      setSystemViewSystem(context.system);
-      setSurfaceViewBodyId(context.body.id);
-
-      beginScreenTransition('SURFACE_VIEW', () => {
-          setUiMode('NONE');
-          setMenuPosition(null);
+      setViewContext({
+          tier: 'planet',
+          focus: { systemId: context.system.id, bodyId: context.body.id },
+          desiredZoom: null
       });
-  };
+      setTargetSystem(context.system);
+      setFocusTarget(context.system.position);
+      setUiMode('NONE');
+      setMenuPosition(null);
+  }, [targetSystem, viewGameState]);
 
-  const handleLeaveSurfaceView = (destination: 'GAME' | 'SYSTEM_VIEW') => {
-      const nextSystem = surfaceViewSystem;
-      beginScreenTransition(destination, () => {
-          setUiMode('NONE');
-          setMenuPosition(null);
-          if (destination === 'SYSTEM_VIEW' && nextSystem) {
-              setSystemViewSystem(nextSystem);
+  const handleFocusSurface = useCallback((bodyId: string) => {
+      if (!viewGameState) {
+          console.warn('[App] handleFocusSurface: viewGameState not ready');
+          return;
+      }
+      const context = resolveSurfaceContext({
+          systems: viewGameState.systems,
+          bodyId,
+          preferredSystemId: targetSystem?.id ?? null
+      });
+      if (!context) {
+          console.warn('[App] handleFocusSurface: No solid body available for surface view');
+          return;
+      }
+      setViewContext({
+          tier: 'surface',
+          focus: { systemId: context.system.id, bodyId: context.body.id },
+          desiredZoom: null
+      });
+      setTargetSystem(context.system);
+      setFocusTarget(context.system.position);
+      setUiMode('NONE');
+      setMenuPosition(null);
+  }, [targetSystem, viewGameState]);
+
+  const handleZoomOut = useCallback(() => {
+      setViewContext((prev) => {
+          if (prev.tier === 'surface' || prev.tier === 'planet') {
+              const nextSystemId = prev.focus.systemId ?? targetSystem?.id ?? null;
+              return {
+                  tier: 'system',
+                  focus: nextSystemId ? { systemId: nextSystemId } : {},
+                  desiredZoom: null
+              };
           }
+          if (prev.tier === 'system') {
+              return { tier: 'galaxy', focus: {}, desiredZoom: null };
+          }
+          return prev;
       });
-  };
+  }, [targetSystem?.id]);
 
-  const handleSystemCameraStateChange = useCallback((systemId: string, state: SystemCameraState) => {
-      setSystemViewCameraBySystem(prev => ({
-          ...prev,
-          [systemId]: state
-      }));
-  }, []);
-
-  const handleReturnToGalaxy = () => {
-      beginScreenTransition('GAME', () => {
-          setUiMode('NONE');
-          setMenuPosition(null);
-      });
-  };
+  const handleZoomIn = useCallback(() => {
+      if (viewContext.tier !== 'planet') return;
+      const bodyId = viewContext.focus.bodyId ?? null;
+      if (!bodyId) return;
+      handleFocusSurface(bodyId);
+  }, [handleFocusSurface, viewContext.focus.bodyId, viewContext.tier]);
 
   const handleOpenSystemDetails = () => {
       if (!targetSystem || !viewGameState) {
@@ -1249,7 +1267,7 @@ const App: React.FC = () => {
       setUiMode('NONE');
 
       if (anyLanded) {
-          handleOpenSurfaceView(targetPlanet.id, { systemHint: system, returnTo: 'GAME' });
+          handleFocusSurface(targetPlanet.id);
       }
   };
 
@@ -1273,23 +1291,26 @@ const App: React.FC = () => {
       }
   }, [engine, viewGameState, uiMode, invasionDecision]);
 
+  const activeSurfaceBodyId = useMemo(() => (
+      viewContext.tier === 'surface' ? viewContext.focus.bodyId ?? null : null
+  ), [viewContext.focus.bodyId, viewContext.tier]);
+
   const surfaceSystem = useMemo(() => {
-      if (!surfaceViewSystem) return null;
-      if (!viewGameState) return surfaceViewSystem;
-      return viewGameState.systems.find(sys => sys.id === surfaceViewSystem.id) ?? surfaceViewSystem;
-  }, [surfaceViewSystem, viewGameState]);
+      if (!viewGameState || !activeSurfaceBodyId) return null;
+      return getPlanetById(viewGameState.systems, activeSurfaceBodyId)?.system ?? null;
+  }, [activeSurfaceBodyId, viewGameState]);
 
 const surfaceBody = useMemo(() => {
-    if (!surfaceSystem || !surfaceViewBodyId) return null;
-    return surfaceSystem.planets.find(planet => planet.id === surfaceViewBodyId) ?? null;
-}, [surfaceSystem, surfaceViewBodyId]);
+    if (!surfaceSystem || !activeSurfaceBodyId) return null;
+    return surfaceSystem.planets.find(planet => planet.id === activeSurfaceBodyId) ?? null;
+}, [activeSurfaceBodyId, surfaceSystem]);
 
 const [surfaceMap, setSurfaceMap] = useState<PlanetSurfaceMap | null>(null);
 const [surfaceMapStatus, setSurfaceMapStatus] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>('idle');
 const surfaceDescriptor = useMemo(() => {
-    if (!viewGameState || !surfaceViewBodyId) return null;
-    return viewGameState.planetSurfaceDescriptorsByBodyId?.[surfaceViewBodyId] ?? null;
-}, [surfaceViewBodyId, viewGameState?.planetSurfaceDescriptorsByBodyId]);
+    if (!viewGameState || !activeSurfaceBodyId) return null;
+    return viewGameState.planetSurfaceDescriptorsByBodyId?.[activeSurfaceBodyId] ?? null;
+}, [activeSurfaceBodyId, viewGameState?.planetSurfaceDescriptorsByBodyId]);
 const surfaceMapRef = useRef<PlanetSurfaceMap | null>(null);
 const surfaceMapCacheRef = useRef<Map<string, PlanetSurfaceMap>>(new Map());
 const surfaceMapKeyRef = useRef<string | null>(null);
@@ -1312,36 +1333,37 @@ useEffect(() => {
 }, [viewGameState]);
 
 const surfaceMapKey = useMemo(() => {
-    if (!viewGameState || !surfaceDescriptor || !surfaceViewBodyId) return null;
-    const match = getPlanetById(viewGameState.systems, surfaceViewBodyId);
+    if (!viewGameState || !surfaceDescriptor || !activeSurfaceBodyId) return null;
+    const match = getPlanetById(viewGameState.systems, activeSurfaceBodyId);
     if (!match) return null;
     const { system, planet } = match;
     const config = surfaceDescriptor.config;
+    const configKey =
+        config.gridKind === 'geodesic'
+          ? `geo:${config.frequency}`
+          : `rect:${config.w}x${config.h}:${config.wrapX ? 'wrap' : 'nowrap'}`;
     const astro = system.astro;
     const astroKey = astro ? `${astro.seed}|${astro.starCount}|${astro.planets.length}` : 'no-astro';
     const ownerKey = planet.ownerFactionId ?? 'neutral';
     const { planetIndex, moonIndex } = surfaceDescriptor.astroRef;
 
     return [
-        surfaceViewBodyId,
+        activeSurfaceBodyId,
         surfaceDescriptor.seed,
-        config.w,
-        config.h,
-        config.wrapX ? 'wrap' : 'nowrap',
+        configKey,
         config.generatorVersion,
         planetIndex,
         moonIndex ?? 'no-moon',
         astroKey,
         ownerKey
     ].join('|');
-}, [surfaceDescriptor, surfaceViewBodyId, viewGameState]);
+}, [activeSurfaceBodyId, surfaceDescriptor, viewGameState]);
 
 useEffect(() => {
-    // Start generation during transition (pendingScreen) for smoother entry
-    const shouldLoad = screen === 'SURFACE_VIEW' || pendingScreen === 'SURFACE_VIEW';
+    const shouldLoad = viewContext.tier === 'surface';
     if (!shouldLoad) return;
 
-    if (!surfaceMapKey || !surfaceDescriptor || !surfaceViewBodyId) {
+    if (!surfaceMapKey || !surfaceDescriptor || !activeSurfaceBodyId) {
         surfaceMapKeyRef.current = null;
         surfaceMapRef.current = null;
         setSurfaceMap(null);
@@ -1370,7 +1392,7 @@ useEffect(() => {
         return;
     }
 
-    const workerRequest = buildSurfaceMapWorkerRequest(state, surfaceViewBodyId);
+    const workerRequest = buildSurfaceMapWorkerRequest(state, activeSurfaceBodyId);
     if (!workerRequest) {
         surfaceMapRef.current = null;
         setSurfaceMap(null);
@@ -1412,7 +1434,24 @@ useEffect(() => {
     return () => {
         cancelled = true;
     };
-}, [screen, pendingScreen, surfaceDescriptor, surfaceMapKey, surfaceViewBodyId]);
+}, [activeSurfaceBodyId, surfaceDescriptor, surfaceMapKey, viewContext.tier]);
+
+useEffect(() => {
+    if (viewContext.tier !== 'surface') {
+        setSurfaceSelection(null);
+    }
+}, [viewContext.tier]);
+
+useEffect(() => {
+    if (!surfaceSelection) return;
+    if (!activeSurfaceBodyId) {
+        setSurfaceSelection(null);
+        return;
+    }
+    if (surfaceSelection.bodyId !== activeSurfaceBodyId) {
+        setSurfaceSelection(null);
+    }
+}, [activeSurfaceBodyId, surfaceSelection]);
 
   const surfaceArmies = useMemo(() => {
       if (!viewGameState) return [];
@@ -1420,26 +1459,36 @@ useEffect(() => {
   }, [viewGameState]);
 
   const surfaceBuildings = useMemo(() => {
-      if (!viewGameState || !surfaceViewBodyId) return [];
-      return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === surfaceViewBodyId);
-  }, [surfaceViewBodyId, viewGameState]);
+      if (!viewGameState || !activeSurfaceBodyId) return [];
+      return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === activeSurfaceBodyId);
+  }, [activeSurfaceBodyId, viewGameState]);
 
-  const isGameInteractionLocked =
-    loadingState.active ||
-    screen !== 'GAME' ||
-    transitionPhase !== 'idle' ||
-    pendingScreen === 'SYSTEM_VIEW' ||
-    pendingScreen === 'SURFACE_VIEW';
+  const surfaceSelectionInfo = useMemo(() => {
+      if (!surfaceSelection || !surfaceMap) return null;
+      const tileId = surfaceSelection.tileId;
+      const tile = surfaceMap.tiles[tileId] ?? null;
+      const coord = getSurfaceTileCoordFromId(surfaceMap.descriptor, tileId);
+      return { tileId, coord, tile };
+  }, [surfaceMap, surfaceSelection]);
 
-  const transitionOverlayElement = (
-    <div
-      className={`${transitionPhase === 'idle' ? 'pointer-events-none' : 'pointer-events-auto'} absolute inset-0 z-50 bg-black`}
-      style={{
-          opacity: transitionPhase === 'fadeOut' ? 1 : 0,
-          transition: `opacity ${SCREEN_TRANSITION_MS}ms ease`
-      }}
-    />
-  );
+  const zoomOutLabel = useMemo(() => {
+      if (viewContext.tier === 'surface' || viewContext.tier === 'planet') {
+          return t('surfaceView.backToSystem');
+      }
+      if (viewContext.tier === 'system') {
+          return t('surfaceView.backToGalaxy');
+      }
+      return null;
+  }, [t, viewContext.tier]);
+
+  const zoomInLabel = useMemo(() => {
+      if (viewContext.tier === 'planet') {
+          return t('surfaceView.zoomIn');
+      }
+      return null;
+  }, [t, viewContext.tier]);
+
+  const isGameInteractionLocked = loadingState.active || screen !== 'GAME';
 
   const loadingStageLabel = loadingState.stage ? t(`loading.stage.${loadingState.stage}`) : t('loading.init');
   const loadingDetailText = loadingState.detail
@@ -1454,53 +1503,6 @@ useEffect(() => {
       screenContent = <ScenarioSelectScreen onBack={() => setScreen('MENU')} onLaunch={handleLaunchGame} />;
   } else if (screen === 'LOAD_GAME') {
       screenContent = <LoadGameScreen onBack={() => setScreen('MENU')} onLoad={handleLoad} />;
-  } else if (screen === 'SYSTEM_VIEW' && systemViewSystem) {
-      screenContent = (
-        <div className="relative w-full h-screen bg-black text-white">
-            <FleetNameProvider fleets={viewGameState?.fleets ?? []}>
-                <SystemView3D
-                  starSystem={systemViewSystem}
-                  astro={systemViewSystem.astro}
-                  fleets={viewGameState?.fleets ?? []}
-                  stations={viewGameState?.stations ?? []}
-                  factions={viewGameState?.factions ?? []}
-                  playerFactionId={viewGameState?.playerFactionId}
-                  planetSurfaceDescriptorsByBodyId={viewGameState?.planetSurfaceDescriptorsByBodyId}
-                  day={viewGameState?.day ?? 0}
-                  selectedFleetId={selectedFleetId}
-                  onSelectFleet={handleFleetSelect}
-                  onInspectFleet={handleFleetInspect}
-                  initialCameraState={systemViewCameraBySystem[systemViewSystem.id]}
-                  onCameraStateChange={(state) => handleSystemCameraStateChange(systemViewSystem.id, state)}
-                  scaleFactor={SYSTEM_VIEW_SCALE_FACTOR}
-                  onOpenSurfaceView={(bodyId) => handleOpenSurfaceView(bodyId, { systemHint: systemViewSystem, returnTo: 'SYSTEM_VIEW' })}
-                  onBack={handleReturnToGalaxy}
-                />
-            </FleetNameProvider>
-            {transitionOverlayElement}
-        </div>
-      );
-  } else if (screen === 'SURFACE_VIEW') {
-      screenContent = viewGameState ? (
-        <div className="relative w-full h-screen">
-            <SurfaceView
-              map={surfaceMap}
-              mapStatus={surfaceMapStatus}
-              system={surfaceSystem}
-              body={surfaceBody}
-              armies={surfaceArmies}
-              fleets={viewGameState.fleets}
-              buildings={surfaceBuildings}
-              settlementControl={viewGameState.settlementControl}
-              factions={viewGameState.factions}
-              playerFactionId={viewGameState.playerFactionId}
-              onBackToGalaxy={() => handleLeaveSurfaceView('GAME')}
-              onBackToSystem={surfaceSystem ? () => handleLeaveSurfaceView('SYSTEM_VIEW') : undefined}
-              onIssueCommand={handleSurfaceIssueCommand}
-            />
-            {transitionOverlayElement}
-        </div>
-      ) : null;
   } else if (screen === 'GAME' && viewGameState && engine) {
       const playerFactionId = viewGameState.playerFactionId;
       const blueFleets = viewGameState.fleets.filter(f => f.factionId === playerFactionId);
@@ -1517,6 +1519,17 @@ useEffect(() => {
                     selectedFleetId={selectedFleetId}
                     focusTarget={focusTarget}
                     isInteractive={!isGameInteractionLocked}
+                    viewContext={viewContext}
+                    onFocusSystem={handleFocusSystem}
+                    onFocusPlanet={handleFocusPlanet}
+                    onFocusSurface={handleFocusSurface}
+                    onSurfaceTileSelect={(selection) => {
+                        const descriptor = viewGameState.planetSurfaceDescriptorsByBodyId?.[selection.bodyId];
+                        if (!descriptor) return;
+                        const resolvedTileId = resolveSurfaceTileIdFromDir(descriptor, selection.dir);
+                        if (resolvedTileId === null) return;
+                        setSurfaceSelection({ ...selection, tileId: resolvedTileId });
+                    }}
                     onFleetSelect={handleFleetSelect}
                     onFleetInspect={handleFleetInspect}
                     onSystemClick={handleSystemClick}
@@ -1559,8 +1572,8 @@ useEffect(() => {
                     onOpenOrbitingFleetPicker={handleOpenOrbitingFleetPicker}
                     onOpenGroundOps={handleOpenGroundOps}
                     onCloseMenu={handleCloseMenu}
-                    onOpenSystemView={handleOpenSystemView}
-                    onOpenSurfaceView={(bodyId) => handleOpenSurfaceView(bodyId, { systemHint: targetSystem, returnTo: 'GAME' })}
+                    onFocusSystem={handleFocusSystem}
+                    onFocusSurface={handleFocusSurface}
                     fleetPickerMode={fleetPickerMode}
                     onOpenSystemDetails={handleOpenSystemDetails}
                     systemDetailSystem={systemDetailSystem}
@@ -1598,7 +1611,85 @@ useEffect(() => {
                     onMarkMessageRead={handleMarkMessageRead}
                     onMarkAllMessagesRead={handleMarkAllMessagesRead}
                 />
-                {transitionOverlayElement}
+                {(zoomOutLabel || zoomInLabel) ? (
+                    <div className="pointer-events-none absolute left-4 bottom-4 z-20">
+                        <div className="flex flex-col gap-2">
+                            {zoomInLabel ? (
+                                <button
+                                    type="button"
+                                    onClick={handleZoomIn}
+                                    className="pointer-events-auto rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-2 text-xs uppercase tracking-widest text-slate-200 shadow-lg transition hover:bg-slate-800"
+                                >
+                                    {zoomInLabel}
+                                </button>
+                            ) : null}
+                            {zoomOutLabel ? (
+                                <button
+                                    type="button"
+                                    onClick={handleZoomOut}
+                                    className="pointer-events-auto rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-2 text-xs uppercase tracking-widest text-slate-200 shadow-lg transition hover:bg-slate-800"
+                                >
+                                    {zoomOutLabel}
+                                </button>
+                            ) : null}
+                        </div>
+                    </div>
+                ) : null}
+                {viewContext.tier === 'surface' && surfaceBody ? (
+                    <div className="pointer-events-none absolute inset-0">
+                        <div className="pointer-events-auto absolute right-4 bottom-4 w-full max-w-xs rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                {t('surfaceView.bodyHeader', { name: surfaceBody.name })}
+                            </div>
+                            {surfaceMapStatus === 'loading' && (
+                                <div className="mt-2 text-xs text-slate-300">
+                                    {t('surfaceView.loadingOverlay')}
+                                </div>
+                            )}
+                            {surfaceSelectionInfo ? (
+                                <>
+                                    <div className="mt-2 text-sm font-semibold text-white">
+                                        {surfaceSelectionInfo.coord
+                                          ? t('surfaceView.tileCoordinate', { q: surfaceSelectionInfo.coord.q, r: surfaceSelectionInfo.coord.r })
+                                          : t('surfaceView.tileId', { id: surfaceSelectionInfo.tileId })}
+                                    </div>
+                                    {surfaceSelectionInfo.tile && (
+                                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-200">
+                                            <div>
+                                                <div className="text-[10px] uppercase text-slate-400">
+                                                    {t('surfaceView.tileBiome')}
+                                                </div>
+                                                <div className="font-semibold">{surfaceSelectionInfo.tile.biome}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] uppercase text-slate-400">
+                                                    {t('surfaceView.tileElevation')}
+                                                </div>
+                                                <div className="font-semibold">{surfaceSelectionInfo.tile.elev.toFixed(0)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] uppercase text-slate-400">
+                                                    {t('surfaceView.tileTemperature')}
+                                                </div>
+                                                <div className="font-semibold">
+                                                    {(surfaceSelectionInfo.tile.tempC2 / 2).toFixed(1)} C
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] uppercase text-slate-400">
+                                                    {t('surfaceView.tileMoisture')}
+                                                </div>
+                                                <div className="font-semibold">{surfaceSelectionInfo.tile.moist}</div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="mt-2 text-xs text-slate-500">{t('surfaceView.hoverHint')}</div>
+                            )}
+                        </div>
+                    </div>
+                ) : null}
             </FleetNameProvider>
         </div>
       );

@@ -328,18 +328,18 @@ Post-battle normalization:
 
 ### 14.2 Occupation des hex
 
-- Hex ami: autorise si stackingCap respecte, sinon ordre invalide.
-- Hex ennemi: interdit en V2.
+- Tuile amie: autorise si stackingCap respecte, sinon ordre invalide.
+- Tuile ennemie: interdit en V2.
 
 ### 14.3 Pertes de debarquement
 
-LandingForce = sum(members * landingResistance) sur l'hex
-DefenseProjection = sum(defenseProjection ennemie + forts) sur l'hex
+LandingForce = sum(members * landingResistance) sur la tuile
+DefenseProjection = sum(defenseProjection ennemie + forts) sur la tuile
 AntiOrbitalProjection = somme des antiOrbital des unites/buildings ennemis en projectionRange
 BaseLoss = LANDING_BASE
 VariableLoss = LANDING_VAR * (DefenseProjection / (DefenseProjection + LandingForce))
 OrbitPenalty = ORBIT_CONTESTED ? ORBIT_CONTESTED_LANDING_PENALTY : 0
-BombardedPenalty = HEX_BOMBARDED_THIS_TURN ? BOMBARD_LANDING_PENALTY : 0
+BombardedPenalty = TILE_BOMBARDED_THIS_TURN ? BOMBARD_LANDING_PENALTY : 0
 AntiOrbitalPenalty = min(AO_LANDING_MAX, AO_LANDING_COEFF * AntiOrbitalProjection)
 TotalLossRate = clamp(BaseLoss + VariableLoss + OrbitPenalty + BombardedPenalty + AntiOrbitalPenalty, 0, LANDING_MAX)
 
@@ -349,8 +349,8 @@ TotalLossRate = clamp(BaseLoss + VariableLoss + OrbitPenalty + BombardedPenalty 
 ## 15) Interaction orbite / sol
 
 - Bombardement orbital a chaque tour, avant debarquement.
-- Bombardement tagge les hex bombardes du tour via `bombardedHexesByBodyId` (state).
-- Combat au sol: une unite sur un hex bombarde ce tour subit un malus (BOMBARD_COMBAT_MULT) et une perte de condition (BOMBARD_COMBAT_CONDITION_LOSS) lors d'un engagement.
+- Bombardement tagge les tuiles bombardees du tour via `bombardedTilesByBodyId` (state).
+- Combat au sol: une unite sur une tuile bombarde ce tour subit un malus (BOMBARD_COMBAT_MULT) et une perte de condition (BOMBARD_COMBAT_CONDITION_LOSS) lors d'un engagement.
 - Orbite contestee augmente les pertes de debarquement.
 - Anti-orbital:
   - AntiOrbitalProjection = somme des antiOrbital des unites/buildings dans projectionRange
@@ -377,9 +377,9 @@ System view 3D:
 - Indicateur des debarquements planifies sur le tour.
 
 Surface view:
-- Overlays: ZOC, supply, stacking, controle settlements, bombardedHexesByBodyId (tour courant).
+- Overlays: ZOC, supply, stacking, controle settlements, bombardedTilesByBodyId (tour courant).
 - Details unite: morale, fatigue, condition, supply, ordre courant, portee.
-- Ordre de rendu sur un hex: tri par id (determinisme).
+- Ordre de rendu sur une tuile: tri par id (determinisme).
 
 ## 18) IA
 

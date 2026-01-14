@@ -3,6 +3,7 @@ import {
   generateSurfaceMapForState,
   getAstroForBody,
   getSurfaceDescriptor,
+  getSurfaceTileDir,
   surfaceDirFromUv
 } from '../../engine/planetSurface';
 import { generateWorld } from '../../engine/worldgen/worldGenerator';
@@ -213,6 +214,14 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+const surfaceUvFromDir = (dir: { x: number; y: number; z: number }): { u: number; v: number } => {
+  const lon = Math.atan2(dir.z, dir.x);
+  const lat = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+  const u = (lon + Math.PI) / (Math.PI * 2);
+  const v = (lat + Math.PI / 2) / Math.PI;
+  return { u, v };
+};
+
 type TerrainDetailLevel = 'full' | 'medium' | 'low';
 
 const resolveTerrainDetailLevel = (resolution: SurfaceTextureResolution): TerrainDetailLevel => {
@@ -397,16 +406,30 @@ const buildSettlementField = (
   height: number
 ): Float32Array | null => {
   if (!map.settlements.length) return null;
-  const { w, h, wrapX } = map.descriptor.config;
+  const config = map.descriptor.config;
+  const wrapX = config.gridKind === 'geodesic' ? false : Boolean(config.wrapX);
   const field = new Float32Array(width * height);
   const seedBase = map.descriptor.seed >>> 0;
 
   map.settlements.forEach((settlement, index) => {
     const coord = settlement.coord;
-    const seed = Math.floor(hash2(coord.q + index * 17, coord.r, seedBase) * 0xffffffff);
+    let u: number | null = null;
+    let v: number | null = null;
+    if (config.gridKind === 'geodesic') {
+      const dir = getSurfaceTileDir(map.descriptor, settlement.tileId);
+      if (!dir) return;
+      const uv = surfaceUvFromDir(dir);
+      u = uv.u;
+      v = uv.v;
+    } else if (coord) {
+      u = (coord.q + 0.5) / config.w;
+      v = (coord.r + 0.5) / config.h;
+    }
+    if (u === null || v === null) return;
+    const seedX = coord ? coord.q : settlement.tileId;
+    const seedY = coord ? coord.r : settlement.tileId;
+    const seed = Math.floor(hash2(seedX + index * 17, seedY, seedBase) * 0xffffffff);
     const rand = createSeededRandom(seed);
-    const u = (coord.q + 0.5) / w;
-    const v = (coord.r + 0.5) / h;
     const cx = u * width;
     const cy = v * height;
     const pop = Math.max(0, settlement.population ?? 0);
@@ -567,7 +590,11 @@ const renderSurfaceTextureFromTiles = (
   heightRgba: Uint8Array | null;
   emissiveRgba: Uint8Array | null;
 } => {
-  const { w, h, wrapX } = map.descriptor.config;
+  const config = map.descriptor.config;
+  if (config.gridKind === 'geodesic') {
+    throw new Error('Tile-based textures are not supported for geodesic grids.');
+  }
+  const { w, h, wrapX } = config;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
@@ -967,10 +994,10 @@ const renderSurfaceTexture = (
   heightRgba: Uint8Array | null;
   emissiveRgba: Uint8Array | null;
 } => {
-  if (textureOptions?.source === 'tiles') {
+  const config = map.descriptor.config;
+  if (textureOptions?.source === 'tiles' && config.gridKind !== 'geodesic') {
     return renderSurfaceTextureFromTiles(map, resolution, cloudShadow, textureOptions);
   }
-  const { w, h, wrapX } = map.descriptor.config;
   const width = Math.max(1, Math.floor(resolution.width));
   const height = Math.max(1, Math.floor(resolution.height));
   const rgba = new Uint8Array(width * height * 4);
@@ -983,7 +1010,7 @@ const renderSurfaceTexture = (
   const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
   const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
   const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
-  const useWrap = Boolean(wrapX);
+  const useWrap = config.gridKind === 'geodesic' ? false : Boolean(config.wrapX);
   const env = terrain.env;
   const baseSeed = map.descriptor.seed >>> 0;
   const iceAgeScaleX = 3;

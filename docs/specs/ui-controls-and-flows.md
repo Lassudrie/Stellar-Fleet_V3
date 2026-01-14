@@ -19,8 +19,9 @@
 - Le `ready` gate empêche toute interaction tant que le scénario n’est pas complètement chargé, évitant les sauts de position.
 
 ### 2.2 Pan et zoom
-- Pan fluide avec inertie (`dampingFactor 0.05`), verrouillé sur le plan XZ (`screenSpacePanning=false`) pour garder l’horizon stable. Aucune rotation n’est autorisée (`enableRotate=false`).
-- Zoom par molette/pinch borné par la taille de la carte : `minDistance ≈ max(mapRadius×0.3, 20)`. `maxDistance` est relevé pour garantir la visibilité de la carte entière (au moins `mapRadius / sin(fov/2)`, plancher 240).
+- Pan fluide avec inertie (`dampingFactor 0.05`), verrouillé sur le plan XZ (`screenSpacePanning=false`) pour garder l’horizon stable. La rotation est désactivée en tiers galaxie/système et activée en tiers planète/surface pour l’inspection locale.
+- Zoom par molette/pinch avec bornes dynamiques selon le tier : en galaxie les limites dérivent de `mapRadius`, tandis que les tiers système/planète/surface appliquent des min/max dédiés pour éviter les sur-zooms.
+- En tier planète, un bouton « Zoom in » bascule vers la surface; en tiers planète/surface, « Zoom out » remonte vers le système.
 
 ### 2.3 Bornes et clamping
 - Les bornes sont dérivées du rayon de scénario (generation.radius) et du nuage de systèmes, avec une marge minimale de 40 unités (`useMapMetrics`).
@@ -74,7 +75,7 @@
 - Action : `Invade` ouvre l’`INVASION_MODAL`, puis `ORDER_INVASION` au système cible. En cas de succès, un log « invasion » est ajouté, sinon l’erreur est remontée à l’UI.
 - À l’arrivée en orbite du système cible (message `INVASION_DECISION`), l’UI ouvre une fenêtre proposant :
   - **Siège** : ne pas débarquer ; le bombardement orbital reste automatique si l’orbite est non contestée et des vaisseaux capables sont présents.
-  - **Attaque** : débarquer les armées embarquées via `UNLOAD_ARMY` vers la planète choisie (autorisé même en orbite contestée, avec pertes), puis ouvrir la `SurfaceView` correspondante.
+  - **Attaque** : débarquer les armées embarquées via `UNLOAD_ARMY` vers la planète choisie (autorisé même en orbite contestée, avec pertes), puis basculer la vue unifiée sur la surface de cette planète.
 
 ### 5.5 Opérations terrestres
 - Lorsque des forces au sol sont détectées, le menu peut exposer `Ground Ops` pour ouvrir le module dédié et déclencher des transferts ou vérifications.

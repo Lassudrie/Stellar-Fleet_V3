@@ -28,7 +28,7 @@ import type {
   PlanetType,
   StarSystem
 } from '../../../../shared/shared';
-import { hashStringToUnit } from '../systemViewLayout';
+import { hashStringToUnit } from '../../screens';
 import { ATMOSPHERE_PRESETS, resolveAirMassIndex } from './atmosphere';
 import {
   CITY_LIGHTS_DIAMETER_FULL_PX,
@@ -603,12 +603,14 @@ export const SystemSurfaceTextureManager: React.FC<{
   const buildTextureKey = useCallback((bodyId: string, descriptor: PlanetSurfaceDescriptor, resolution: SurfaceTextureResolution): string => {
     const config = descriptor.config;
     const { planetIndex, moonIndex } = descriptor.astroRef;
+    const configKey =
+      config.gridKind === 'geodesic'
+        ? `geo:${config.frequency}`
+        : `rect:${config.w}x${config.h}:${config.wrapX ? 'wrap' : 'nowrap'}`;
     return [
       bodyId,
       descriptor.seed,
-      config.w,
-      config.h,
-      config.wrapX ? 'wrap' : 'nowrap',
+      configKey,
       config.generatorVersion,
       planetIndex,
       moonIndex ?? 'no-moon',
@@ -1125,7 +1127,8 @@ export const SystemSurfaceTextureManager: React.FC<{
         && resolution.width >= SURFACE_TEXTURE_MIN_RESOLUTION.width
         && emissiveIntensity > 0
         && allowHeavyMaps;
-      const textureSource = isGasGiant ? 'field' : (isFocusBody ? 'field' : 'tiles');
+      const isGeodesic = descriptor?.config.gridKind === 'geodesic';
+      const textureSource = (isGasGiant || isGeodesic) ? 'field' : (isFocusBody ? 'field' : 'tiles');
       const includeHeavyMaps = allowHeavyMaps;
       const textureOptionsForBody: SurfaceTextureOptions = {
         source: textureSource,

@@ -19,7 +19,7 @@ interface SystemBodyInfoPanelProps {
   isSelected: boolean;
   onClearSelection?: () => void;
   onCenter?: (bodyId: string) => void;
-  onOpenSurfaceView?: (bodyId: string) => void;
+  onFocusSurface?: (bodyId: string) => void;
 }
 
 const formatRadius = (radiusKm: number | undefined, unknown: string): string => {
@@ -38,7 +38,7 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({
   isSelected,
   onClearSelection,
   onCenter,
-  onOpenSurfaceView
+  onFocusSurface
 }) => {
   const { t } = useI18n();
   const unknown = t('systemView.bodyInfo.unknown');
@@ -56,7 +56,7 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({
   const isHover = !isSelected;
   const surfaceTargetId = body.surfaceBodyId ?? body.id;
   const showSurfaceButton = Boolean(
-    onOpenSurfaceView
+    onFocusSurface
     && isSelected
     && body.bodyType !== 'star'
     && (body.isSolid ?? true)
@@ -76,7 +76,7 @@ const SystemBodyInfoPanel: React.FC<SystemBodyInfoPanelProps> = ({
           {showSurfaceButton && (
             <button
               type="button"
-              onClick={() => onOpenSurfaceView(surfaceTargetId)}
+              onClick={() => onFocusSurface?.(surfaceTargetId)}
               className="rounded border border-emerald-700 bg-emerald-800 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-50 transition hover:border-emerald-500 hover:bg-emerald-700"
             >
               {t('systemView.bodyInfo.viewSurface')}

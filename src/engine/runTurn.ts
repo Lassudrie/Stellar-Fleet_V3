@@ -10,7 +10,6 @@ import {
   FleetState,
   GameMessage,
   GameState,
-  HexCoord,
   LogEntry,
   PlanetBody,
   PlanetSurfaceMap,
@@ -24,7 +23,13 @@ import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } f
 import { applyCommand } from './commands';
 import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement';
-import { generateSurfaceMapForState, isPassable, normalizeSurfacePositions } from './planetSurface';
+import {
+  generateSurfaceMapForState,
+  getSurfaceTileCoordFromId,
+  isPassable,
+  normalizeSurfacePositions,
+  resolveSurfaceTileId
+} from './planetSurface';
 import { checkVictoryConditions } from './objectives';
 import { ORBIT_PROXIMITY_RANGE_SQ, COLORS, CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
@@ -55,12 +60,12 @@ import {
   deriveRoutedAfterMorale,
   executeMoveOrder,
   hasLineOfSight,
-  hexDistance,
-  hexKey,
   isInEnemyZoc,
   isRouted,
   isSupplied,
   resolveEngagement,
+  tileDistance,
+  tileKey,
   type EngagementParticipant
 } from './ground';
 import { sanitizeArmies } from './army';
@@ -593,16 +598,16 @@ export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): Gam
   if (!hasUncontestedOrbitalDominance(state)) {
     return {
       ...state,
-      bombardedHexesByBodyId: {}
+      bombardedTilesByBodyId: {}
     };
   }
 
   const result = resolveOrbitalBombardment(state);
-  const hasChanges = result.updates.size > 0 || result.logs.length > 0 || Object.keys(result.bombardedHexesByBodyId).length > 0;
+  const hasChanges = result.updates.size > 0 || result.logs.length > 0 || Object.keys(result.bombardedTileIdsByBodyId).length > 0;
   if (!hasChanges) {
     return {
       ...state,
-      bombardedHexesByBodyId: {}
+      bombardedTilesByBodyId: {}
     };
   }
 
@@ -627,7 +632,7 @@ export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): Gam
     ...state,
     armies: nextArmies,
     logs: nextLogs,
-    bombardedHexesByBodyId: result.bombardedHexesByBodyId
+    bombardedTilesByBodyId: result.bombardedTileIdsByBodyId
   };
 }
 
@@ -696,14 +701,15 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     preLandingArmiesByBodyId.set(army.containerId, list);
   });
 
-  const bombardedHexesByBodyId = state.bombardedHexesByBodyId ?? {};
-  const bombardedHexKeysByBodyId = new Map<string, Set<string>>();
-  Object.entries(bombardedHexesByBodyId).forEach(([bodyId, coords]) => {
-    const set = new Set<string>();
-    coords.forEach(coord => {
-      set.add(hexKey(coord));
+  const bombardedTilesByBodyId = state.bombardedTilesByBodyId ?? {};
+  const bombardedTileIdsByBodyId = new Map<string, Set<number>>();
+  Object.entries(bombardedTilesByBodyId).forEach(([bodyId, tiles]) => {
+    const set = new Set<number>();
+    tiles.forEach(tileId => {
+      if (!Number.isFinite(tileId)) return;
+      set.add(Math.floor(tileId));
     });
-    bombardedHexKeysByBodyId.set(bodyId, set);
+    bombardedTileIdsByBodyId.set(bodyId, set);
   });
 
   const normalizeOrders = (orders: Army['groundOrders'] | undefined): Army['groundOrders'] | undefined => {
@@ -714,14 +720,35 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     return { ...(move ? { move } : {}), ...(attack ? { attack } : {}) };
   };
 
+  const resolveTileId = (
+    map: PlanetSurfaceMap,
+    pos: { bodyId: string; tileId?: number; q?: number; r?: number } | null | undefined
+  ): number | null => {
+    if (!pos) return null;
+    return resolveSurfaceTileId(map.descriptor, pos);
+  };
+
+  const toSurfacePos = (map: PlanetSurfaceMap, tileId: number) => {
+    const coord = getSurfaceTileCoordFromId(map.descriptor, tileId);
+    return coord ? { bodyId: map.bodyId, tileId, q: coord.q, r: coord.r } : { bodyId: map.bodyId, tileId };
+  };
+
   const occupancyByBody = new Map<string, Map<string, string[]>>();
   const factionCountByBody = new Map<string, Map<FactionId, number>>();
   preLandingArmiesByBodyId.forEach((armies, bodyId) => {
     const occupancy = new Map<string, string[]>();
     const factionCounts = new Map<FactionId, number>();
+    const map = getSurfaceMap(bodyId);
+    if (!map) {
+      occupancyByBody.set(bodyId, occupancy);
+      factionCountByBody.set(bodyId, factionCounts);
+      return;
+    }
     armies.forEach(army => {
       if (!army.surfacePos) return;
-      const key = hexKey({ q: army.surfacePos.q, r: army.surfacePos.r });
+      const tileId = resolveTileId(map, army.surfacePos);
+      if (tileId === null) return;
+      const key = tileKey(tileId);
       const ids = occupancy.get(key) ?? [];
       ids.push(army.id);
       occupancy.set(key, ids);
@@ -737,8 +764,11 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       const ta = a.landingOrder!.to;
       const tb = b.landingOrder!.to;
       if (ta.bodyId !== tb.bodyId) return ta.bodyId.localeCompare(tb.bodyId);
-      if (ta.r !== tb.r) return ta.r - tb.r;
-      if (ta.q !== tb.q) return ta.q - tb.q;
+      const descA = state.planetSurfaceDescriptorsByBodyId?.[ta.bodyId];
+      const descB = state.planetSurfaceDescriptorsByBodyId?.[tb.bodyId];
+      const tileA = descA ? resolveSurfaceTileId(descA, ta) ?? -1 : -1;
+      const tileB = descB ? resolveSurfaceTileId(descB, tb) ?? -1 : -1;
+      if (tileA !== tileB) return tileA - tileB;
       return a.id.localeCompare(b.id);
     }
   );
@@ -765,14 +795,12 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       invalidLandingIds.add(army.id);
       return;
     }
-    const { w, h } = map.descriptor.config;
-    const q = Math.floor(order.to.q);
-    const r = Math.floor(order.to.r);
-    if (q < 0 || q >= w || r < 0 || r >= h) {
+    const targetTileId = resolveSurfaceTileId(map.descriptor, order.to);
+    if (targetTileId === null || targetTileId < 0 || targetTileId >= map.tiles.length) {
       invalidLandingIds.add(army.id);
       return;
     }
-    const tile = map.tiles[r * w + q];
+    const tile = map.tiles[targetTileId];
     if (!tile) {
       invalidLandingIds.add(army.id);
       return;
@@ -784,7 +812,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     }
 
     const occupancy = occupancyByBody.get(bodyId) ?? new Map<string, string[]>();
-    const key = hexKey({ q, r });
+    const key = tileKey(targetTileId);
     const occupants = occupancy.get(key) ?? [];
     const enemyOnHex = occupants.some(id => (armiesById.get(id)?.factionId ?? army.factionId) !== army.factionId);
     if (enemyOnHex) {
@@ -876,15 +904,15 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     const system = bodyEntry?.system ?? null;
     const buildings = state.groundBuildings ?? [];
     const orbitContested = system ? isOrbitContested(system, state.fleets) : false;
-    const bombardedKeys = bombardedHexKeysByBodyId.get(bodyId) ?? new Set<string>();
+    const bombardedTileIds = bombardedTileIdsByBodyId.get(bodyId) ?? new Set<number>();
     const preLandingArmies = preLandingArmiesByBodyId.get(bodyId) ?? [];
-    const { w, wrapX } = map.descriptor.config;
 
     byHex.forEach((armiesOnHex, key) => {
       if (armiesOnHex.length === 0) return;
-      const [qStr, rStr] = key.split('|');
-      const coord = { q: Number(qStr), r: Number(rStr) };
+      const tileId = Number(key);
+      if (!Number.isFinite(tileId)) return;
       const landingFactionId = armiesOnHex[0].factionId;
+      const coord = getSurfaceTileCoordFromId(map.descriptor, tileId);
 
       const landingForce = armiesOnHex.reduce((sum, army) => {
         const resistance = GROUND_UNIT_STATS[army.unitType].landingResistance ?? 1;
@@ -897,17 +925,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         if (!defender.surfacePos) return;
         if (defender.members <= 0) return;
         if (isRouted(defender)) return;
-        const dist = hexDistance(
-          { q: defender.surfacePos.q, r: defender.surfacePos.r },
-          coord,
-          w,
-          wrapX
-        );
+        const defenderTileId = resolveTileId(map, defender.surfacePos);
+        if (defenderTileId === null) return;
+        const dist = tileDistance(map, defenderTileId, tileId);
         if (dist > defender.projectionRange) return;
         defenseProjection += defender.members * defender.defense * Math.max(0, Math.min(1, defender.condition));
       });
 
-      const fortifFactor = computeFortifFactorAtCoord(buildings, bodyId, coord);
+      const fortifFactor = computeFortifFactorAtCoord(map, buildings, tileId);
       defenseProjection *= fortifFactor;
 
       let antiOrbitalProjection = 0;
@@ -917,12 +942,9 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         if (defender.members <= 0) return;
         const rating = GROUND_UNIT_STATS[defender.unitType].antiOrbital ?? 0;
         if (rating <= 0) return;
-        const dist = hexDistance(
-          { q: defender.surfacePos.q, r: defender.surfacePos.r },
-          coord,
-          w,
-          wrapX
-        );
+        const defenderTileId = resolveTileId(map, defender.surfacePos);
+        if (defenderTileId === null) return;
+        const dist = tileDistance(map, defenderTileId, tileId);
         if (dist > defender.projectionRange) return;
         const ratio = defender.maxMembers > 0 ? defender.members / defender.maxMembers : 0;
         antiOrbitalProjection += rating * ratio;
@@ -931,7 +953,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       buildings.forEach(building => {
         if (building.factionId === landingFactionId) return;
         if (building.surfacePos.bodyId !== bodyId) return;
-        if (building.surfacePos.q !== coord.q || building.surfacePos.r !== coord.r) return;
+        const buildingTileId = resolveTileId(map, building.surfacePos);
+        if (buildingTileId === null || buildingTileId !== tileId) return;
         const rating = Number.isFinite(building.antiOrbital)
           ? Math.max(0, building.antiOrbital ?? 0)
           : (building.tags?.includes('anti_orbital') || building.type === 'bunker' ? 1 : 0);
@@ -940,7 +963,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
       const variableLoss = landingForce > 0 ? LANDING_VAR * (defenseProjection / (defenseProjection + landingForce)) : 0;
       const orbitPenalty = orbitContested ? ORBIT_CONTESTED_LANDING_PENALTY : 0;
-      const bombardPenalty = bombardedKeys.has(key) ? BOMBARD_LANDING_PENALTY : 0;
+      const bombardPenalty = bombardedTileIds.has(tileId) ? BOMBARD_LANDING_PENALTY : 0;
       const antiOrbitalPenalty = Math.min(AO_LANDING_MAX, AO_LANDING_COEFF * antiOrbitalProjection);
 
       const totalLossRate = Math.max(
@@ -954,11 +977,12 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       armiesOnHex.forEach(army => {
         const loss = lossesById[army.id] ?? 0;
         const membersAfter = Math.max(0, army.members - loss);
+        const targetPos = toSurfacePos(map, tileId);
         const updated: Army = {
           ...army,
           state: ArmyState.DEPLOYED,
           containerId: bodyId,
-          surfacePos: { bodyId, q: coord.q, r: coord.r },
+          surfacePos: targetPos,
           members: membersAfter,
           landingOrder: undefined,
           lastDeployedTurn: ctx.turn
@@ -972,7 +996,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           id: ctx.rng.id('log'),
           day: ctx.turn,
           type: 'combat',
-          text: `Landing on ${bodyId} (${coord.q},${coord.r}): ${army.id} lost ${loss} members.`
+          text: `Landing on ${bodyId} (${coord ? `${coord.q},${coord.r}` : `tile ${tileId}`}): ${army.id} lost ${loss} members.`
         });
       });
     });
@@ -1013,27 +1037,28 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     const map = getSurfaceMap(bodyId);
     if (!map) return;
     const buildings = state.groundBuildings ?? [];
-    const bombardedKeys = bombardedHexKeysByBodyId.get(bodyId) ?? new Set<string>();
+    const bombardedTileIds = bombardedTileIdsByBodyId.get(bodyId) ?? new Set<number>();
     const bodyArmies = sorted(deployedArmiesByBodyId.get(bodyId) ?? [], (a, b) => a.id.localeCompare(b.id));
     if (bodyArmies.length === 0) return;
-    const { w, h, wrapX } = map.descriptor.config;
 
     const occupancy = new Map<string, string[]>();
     bodyArmies.forEach(army => {
       if (!army.surfacePos) return;
-      const key = hexKey({ q: army.surfacePos.q, r: army.surfacePos.r });
+      const tileId = resolveTileId(map, army.surfacePos);
+      if (tileId === null) return;
+      const key = tileKey(tileId);
       const ids = occupancy.get(key) ?? [];
       ids.push(army.id);
       occupancy.set(key, ids);
     });
 
-    const getOccupants = (coord: HexCoord): Army[] => {
-      const ids = occupancy.get(hexKey(coord)) ?? [];
+    const getOccupants = (tileId: number): Army[] => {
+      const ids = occupancy.get(tileKey(tileId)) ?? [];
       return ids.map(id => armiesById.get(id)).filter((a): a is Army => Boolean(a));
     };
 
-    const removeFromOccupancy = (coord: HexCoord, armyId: string) => {
-      const key = hexKey(coord);
+    const removeFromOccupancy = (tileId: number, armyId: string) => {
+      const key = tileKey(tileId);
       const ids = occupancy.get(key);
       if (!ids) return;
       const next = ids.filter(id => id !== armyId);
@@ -1044,8 +1069,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       }
     };
 
-    const addToOccupancy = (coord: HexCoord, armyId: string) => {
-      const key = hexKey(coord);
+    const addToOccupancy = (tileId: number, armyId: string) => {
+      const key = tileKey(tileId);
       const ids = occupancy.get(key) ?? [];
       occupancy.set(key, [...ids, armyId]);
     };
@@ -1061,12 +1086,13 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     });
 
     const isArmySupplied = (army: Army): boolean => {
-      if (!army.surfacePos) return false;
+      const tileId = army.surfacePos ? resolveTileId(map, army.surfacePos) : null;
+      if (tileId === null) return false;
       const dist = supplyByFaction.get(army.factionId) ?? null;
-      return isSupplied(dist, { q: army.surfacePos.q, r: army.surfacePos.r }, map);
+      return isSupplied(dist, tileId, map);
     };
 
-    const zocPre = computeZocSnapshotFromArmies({ bodyId, w, h, wrapX, armies: bodyArmies });
+    const zocPre = computeZocSnapshotFromArmies({ bodyId, map, armies: bodyArmies });
     const enteredEnemyZoc = new Map<string, boolean>();
 
     bodyArmies.forEach(armyBase => {
@@ -1082,14 +1108,21 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         return;
       }
 
-      const target: HexCoord = { q: moveOrder.to.q, r: moveOrder.to.r };
+      const targetTileId = resolveTileId(map, moveOrder.to);
+      if (targetTileId === null) {
+        const nextOrders = normalizeOrders({ ...current.groundOrders, move: undefined });
+        armiesById.set(current.id, { ...current, groundOrders: nextOrders });
+        return;
+      }
       const supplied = isArmySupplied(current);
-      removeFromOccupancy({ q: current.surfacePos.q, r: current.surfacePos.r }, current.id);
+      const currentTileId = resolveTileId(map, current.surfacePos);
+      if (currentTileId === null) return;
+      removeFromOccupancy(currentTileId, current.id);
 
       const result = executeMoveOrder({
         state,
         army: current,
-        to: target,
+        toTileId: targetTileId,
         supplied,
         zocSnapshot: zocPre,
         getOccupants,
@@ -1099,7 +1132,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       let updatedArmy = result.updatedArmy;
       let updatedOrders = updatedArmy.groundOrders;
       if (updatedArmy.surfacePos && updatedOrders?.move) {
-        const reached = updatedArmy.surfacePos.q === target.q && updatedArmy.surfacePos.r === target.r;
+        const updatedTileId = resolveTileId(map, updatedArmy.surfacePos);
+        const reached = updatedTileId !== null && updatedTileId === targetTileId;
         if (reached) {
           updatedOrders = normalizeOrders({ ...updatedOrders, move: undefined });
           updatedArmy = { ...updatedArmy, groundOrders: updatedOrders };
@@ -1109,7 +1143,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       armiesById.set(updatedArmy.id, updatedArmy);
 
       const finalPos = updatedArmy.surfacePos ?? current.surfacePos;
-      addToOccupancy({ q: finalPos.q, r: finalPos.r }, updatedArmy.id);
+      const finalTileId = resolveTileId(map, finalPos);
+      if (finalTileId !== null) {
+        addToOccupancy(finalTileId, updatedArmy.id);
+      }
 
       if (result.enteredEnemyZoc) {
         enteredEnemyZoc.set(updatedArmy.id, true);
@@ -1120,7 +1157,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           id: ctx.rng.id('log'),
           day: ctx.turn,
           type: 'move',
-          text: `Ground unit ${current.id} moved ${result.steps} hexes on ${bodyId}.`
+          text: `Ground unit ${current.id} moved ${result.steps} tiles on ${bodyId}.`
         });
       }
     });
@@ -1162,15 +1199,13 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       }
 
       if (!attacker.surfacePos) return;
+      const attackerTileId = resolveTileId(map, attacker.surfacePos);
+      const defenderTileId = resolveTileId(map, defender.surfacePos);
+      if (attackerTileId === null || defenderTileId === null) return;
 
-      const dist = hexDistance(
-        { q: attacker.surfacePos.q, r: attacker.surfacePos.r },
-        { q: defender.surfacePos.q, r: defender.surfacePos.r },
-        w,
-        wrapX
-      );
+      const dist = tileDistance(map, attackerTileId, defenderTileId);
       if (dist < attacker.rangeMin || dist > attacker.rangeMax) return;
-      if (!hasLineOfSight({ map, buildings, from: attacker.surfacePos, to: defender.surfacePos })) return;
+      if (!hasLineOfSight({ map, buildings, fromTileId: attackerTileId, toTileId: defenderTileId })) return;
       if (isRouted(attacker)) return;
 
       validAttackOrders.set(attacker.id, defender.id);
@@ -1180,6 +1215,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
     const computeDefensePotential = (defender: Army): number => {
       if (!defender.surfacePos) return 0;
+      const defenderTileId = resolveTileId(map, defender.surfacePos);
+      if (defenderTileId === null) return 0;
       const stackingFactor = stackingFactors.get(defender.id) ?? 1;
       const moraleFactor = Math.max(0, Math.min(1, defender.morale));
       const fatigueFactor = Math.max(FATIGUE_FACTOR_MIN, 1 - defender.fatigue);
@@ -1190,8 +1227,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         moraleFactor *
         fatigueFactor *
         stackingFactor;
-      const coverFactor = computeCoverFactorAtCoord(map, buildings, defender.surfacePos);
-      const fortifFactor = computeFortifFactorAtCoord(buildings, bodyId, defender.surfacePos);
+      const coverFactor = computeCoverFactorAtCoord(map, buildings, defenderTileId);
+      const fortifFactor = computeFortifFactorAtCoord(map, buildings, defenderTileId);
       return base * coverFactor * fortifFactor;
     };
 
@@ -1206,15 +1243,13 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         if (!defender.surfacePos) return false;
         if (defender.members <= 0) return false;
         if (isRouted(defender)) return false;
-        const distToDefender = hexDistance(
-          { q: defender.surfacePos.q, r: defender.surfacePos.r },
-          { q: attacker.surfacePos!.q, r: attacker.surfacePos!.r },
-          w,
-          wrapX
-        );
+        const attackerTileId = resolveTileId(map, attacker.surfacePos);
+        const defenderTileId = resolveTileId(map, defender.surfacePos);
+        if (attackerTileId === null || defenderTileId === null) return false;
+        const distToDefender = tileDistance(map, defenderTileId, attackerTileId);
         if (distToDefender > defender.projectionRange) return false;
         if (distToDefender < attacker.rangeMin || distToDefender > attacker.rangeMax) return false;
-        if (!hasLineOfSight({ map, buildings, from: attacker.surfacePos!, to: defender.surfacePos })) return false;
+        if (!hasLineOfSight({ map, buildings, fromTileId: attackerTileId, toTileId: defenderTileId })) return false;
         return true;
       });
 
@@ -1251,15 +1286,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     const defenderEntries = sorted(
       Array.from(attackersByDefender.keys()).map(defenderId => {
         const defender = armiesById.get(defenderId);
-        const coord = defender?.surfacePos ? { q: defender.surfacePos.q, r: defender.surfacePos.r } : { q: 0, r: 0 };
-        return { defenderId, coord };
+        const tileId = defender?.surfacePos ? resolveTileId(map, defender.surfacePos) ?? -1 : -1;
+        return { defenderId, tileId };
       }),
-      (a, b) =>
-        a.coord.r !== b.coord.r
-          ? a.coord.r - b.coord.r
-          : a.coord.q !== b.coord.q
-            ? a.coord.q - b.coord.q
-            : a.defenderId.localeCompare(b.defenderId)
+      (a, b) => (a.tileId !== b.tileId ? a.tileId - b.tileId : a.defenderId.localeCompare(b.defenderId))
     );
 
     defenderEntries.forEach(entry => {
@@ -1290,7 +1320,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         turn: ctx.turn,
         map,
         buildings,
-        bombardedKeys,
+        bombardedTileIds,
         attackers,
         defender: {
           army: defender,
@@ -1309,7 +1339,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         if (attackerAfter.members <= 0) {
           removeArmyIds.add(attackerAfter.id);
           if (attackerAfter.surfacePos) {
-            removeFromOccupancy({ q: attackerAfter.surfacePos.q, r: attackerAfter.surfacePos.r }, attackerAfter.id);
+            const attackerTileId = resolveTileId(map, attackerAfter.surfacePos);
+            if (attackerTileId !== null) {
+              removeFromOccupancy(attackerTileId, attackerAfter.id);
+            }
           }
         }
       });
@@ -1319,10 +1352,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       if (engagement.defenderAfter.members <= 0) {
         removeArmyIds.add(engagement.defenderAfter.id);
         if (engagement.defenderAfter.surfacePos) {
-          removeFromOccupancy(
-            { q: engagement.defenderAfter.surfacePos.q, r: engagement.defenderAfter.surfacePos.r },
-            engagement.defenderAfter.id
-          );
+          const defenderTileId = resolveTileId(map, engagement.defenderAfter.surfacePos);
+          if (defenderTileId !== null) {
+            removeFromOccupancy(defenderTileId, engagement.defenderAfter.id);
+          }
         }
       }
 
@@ -1362,11 +1395,12 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           !removeArmyIds.has(army.id)
       );
 
-    const zocCapture = computeZocSnapshotFromArmies({ bodyId, w, h, wrapX, armies: postCombatArmies });
+    const zocCapture = computeZocSnapshotFromArmies({ bodyId, map, armies: postCombatArmies });
     const settlements = map.settlements;
     settlements.forEach(settlement => {
-      const coord = settlement.coord;
-      const key = hexKey(coord);
+      const tileId = settlement.tileId;
+      if (!Number.isFinite(tileId)) return;
+      const key = tileKey(tileId);
       const occupantIds = occupancy.get(key) ?? [];
       const occupantFactions = new Set<FactionId>();
       occupantIds.forEach(id => {
@@ -1377,7 +1411,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
       if (occupantFactions.size === 1) {
         const [factionId] = Array.from(occupantFactions.values());
-        const enemyZoc = isInEnemyZoc(zocCapture, coord, factionId);
+        const enemyZoc = isInEnemyZoc(zocCapture, Math.floor(tileId), factionId);
         if (!enemyZoc) {
           const current = settlementControl[settlement.id];
           if (!current || current.factionId !== factionId) {

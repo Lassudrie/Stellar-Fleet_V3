@@ -8,7 +8,7 @@ import type {
   StarData,
   StarOrbit
 } from '../../../../shared/shared';
-import { hashStringToAngle, hashStringToUnit } from '../systemViewLayout';
+import { hashStringToAngle, hashStringToUnit } from '../../screens';
 import {
   DAYS_PER_YEAR,
   DEFAULT_ORBIT_INNER_KM,

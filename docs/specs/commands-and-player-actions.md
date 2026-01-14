@@ -82,12 +82,12 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 Ces commandes posent des **ordres** exécutés plus tard par `phaseGround` (débarquement, mouvement, combat). Elles ne déplacent ni ne résolvent de combat immédiatement. Les ordres persistent tant qu’ils restent valides et sont supprimés s’ils deviennent invalides ou après exécution.
 
 ### ORDER_GROUND_MOVE
-- **Entrée** : `armyId`, `to` (`{ bodyId, q, r }`).
+- **Entrée** : `armyId`, `to` (`SurfacePos` avec `bodyId`, `tileId` et éventuels `q/r` legacy).
 - **Préconditions/erreurs** :
   - L’armée doit exister.
   - L’armée doit être `ArmyState.DEPLOYED`.
   - `to.bodyId` doit correspondre au `containerId` de l’armée (même body).
-  - Les coordonnées doivent être dans les bornes de la surface map et viser un hex passable.
+  - La tuile ciblée doit être dans les bornes de la surface map et passable.
   - En cas d’échec, la commande retourne une erreur explicite (`Army not found`, `Army is not deployed...`, etc.).
 - **Effets** : assigne `army.groundOrders.move = { type:'move', to }`. L’ordre peut coexister avec un ordre d’attaque.
 
@@ -100,15 +100,15 @@ Ces commandes posent des **ordres** exécutés plus tard par `phaseGround` (déb
 - **Effets** : assigne `attacker.groundOrders.attack = { type:'attack', targetArmyId }`.
 
 ### ORDER_GROUND_LAND
-- **Entrée** : `armyId`, `to` (`{ bodyId, q, r }`).
+- **Entrée** : `armyId`, `to` (`SurfacePos` avec `bodyId`, `tileId` et éventuels `q/r` legacy).
 - **Préconditions/erreurs** :
   - L’armée doit exister.
   - L’armée doit être `ArmyState.EMBARKED`.
   - La flotte porteuse doit être en orbite du système cible.
   - `to.bodyId` doit désigner un corps solide dans le système cible.
-  - Les coordonnées doivent être dans les bornes de la surface map.
-  - L’hex doit être passable (sauf unités `amphibious`).
-  - L’hex ne doit pas être occupé par un ennemi (débarquement interdit sur hex ennemi).
+  - La tuile doit être dans les bornes de la surface map.
+  - La tuile doit être passable (sauf unités `amphibious`).
+  - La tuile ne doit pas être occupée par un ennemi (débarquement interdit sur tuile ennemie).
   - En cas d’échec, la commande retourne une erreur explicite.
 - **Effets** : assigne `army.landingOrder = { type:'land', to }` pour exécution lors de la phase de débarquement.
 

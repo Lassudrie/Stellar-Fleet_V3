@@ -46,10 +46,10 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
 - `stations`: structures orbitales (id, systemId, factionId, type, anchorBodyId?, slotIndex?).
-- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, position surface optionnelle, ordres persistants, `landingOrder`, `lastDeployedTurn`/`lastCombatTurn`, morale/fatigue, ranges, projection).
-- `groundBuildings` : bâtiments persistés en surface (type, position, tags, anti‑orbital).
+- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, `surfacePos` optionnelle avec `tileId` et éventuels `q/r` legacy, ordres persistants, `landingOrder`, `lastDeployedTurn`/`lastCombatTurn`, morale/fatigue, ranges, projection).
+- `groundBuildings` : bâtiments persistés en surface (type, position, tags, anti‑orbital, `surfacePos` avec `tileId` et éventuellement `q/r` pour les surfaces rectangulaires legacy).
 - `settlementControl` : contrôle persisté des settlements (factionId + lastCaptureTurn).
-- `bombardedHexesByBodyId` : hexes bombardés au tour courant, indexés par `bodyId` (liste de coords `{q,r}`).
+- `bombardedTilesByBodyId` : tuiles bombardées au tour courant, indexées par `bodyId` (liste de `tileId`).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
 - `lasers` : tirs (`start`, `end`, couleur, durée de vie) conservés pour l’animation.
 - `logs` : journaux texte.
@@ -80,7 +80,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `idRngState` : hérite de `rngState` si absent.
 - `members/maxMembers/condition/morale/fatigue` : valeurs clampées ou défauts issus des stats d’unité si absentes.
 - `lastDeployedTurn` / `lastCombatTurn` : optionnels, ignorés si absents ou invalides.
-- `bombardedHexesByBodyId` : valeur par défaut `{}` si absente.
+- `bombardedTilesByBodyId` : valeur par défaut `{}` si absente. Le legacy `bombardedHexesByBodyId` est accepté en lecture et converti en `tileId`.
 - `objectives` et `rules` : valeurs par défaut si manquantes (`conditions: []`, règles activées).
 - **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis (ou `idRngState` non fini s’il est fourni) ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.
 

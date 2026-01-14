@@ -12,11 +12,26 @@ interface GameCameraProps {
   ready?: boolean;
   mapRadius?: number;
   mapBounds?: ClampBounds;
+  distanceLimits?: { min: number; max: number };
+  enableRotate?: boolean;
+  minPolarAngle?: number;
+  maxPolarAngle?: number;
 }
 
 const CAMERA_FOV = 35;
 
-const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, initialTarget, focusTarget, ready, mapRadius, mapBounds }) => {
+const GameCamera: React.FC<GameCameraProps> = React.memo(({
+  initialPosition,
+  initialTarget,
+  focusTarget,
+  ready,
+  mapRadius,
+  mapBounds,
+  distanceLimits,
+  enableRotate = false,
+  minPolarAngle,
+  maxPolarAngle
+}) => {
   const controlsRef = useRef<ThreeMapControls>(null);
   const hasInitialized = useRef(false);
   const isClampingRef = useRef(false);
@@ -40,6 +55,11 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   }, [initialPosition]);
 
   const distanceConfig = useMemo(() => {
+    if (distanceLimits) {
+      const minDistance = Math.max(distanceLimits.min, 0.1);
+      const maxDistance = Math.max(distanceLimits.max, minDistance);
+      return { minDistance, maxDistance };
+    }
     const fallbackRadius = 120;
     const radius = Math.max(mapRadius ?? fallbackRadius, 1);
     const halfFovRad = (CAMERA_FOV * Math.PI) / 360;
@@ -52,9 +72,9 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
   }, [mapRadius]);
 
   const polarLimits = useMemo(() => ({
-    min: Math.PI / 8,
-    max: Math.PI / 2,
-  }), []);
+    min: minPolarAngle ?? Math.PI / 8,
+    max: maxPolarAngle ?? Math.PI / 2,
+  }), [maxPolarAngle, minPolarAngle]);
 
   const cameraBounds = useMemo<ClampBounds | null>(() => {
     if (!mapBounds) return null;
@@ -202,7 +222,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({ initialPosition, ini
       <MapControls
         ref={controlsRef}
         target={targetArray}
-        enableRotate={false}
+        enableRotate={enableRotate}
         enablePan={true}
         enableZoom={true}
         minDistance={distanceConfig.minDistance}

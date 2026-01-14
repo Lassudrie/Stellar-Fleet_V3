@@ -5,7 +5,6 @@ import type {
   GameMessage,
   GameState,
   GroundBuilding,
-  HexCoord,
   LaserShot,
   LogEntry,
   SettlementControlState,
@@ -88,7 +87,7 @@ export const canonicalizeState = (state: GameState): GameState => {
     lasers: canonicalizeLasers(state.lasers),
     groundBuildings: canonicalizeGroundBuildings(state.groundBuildings ?? []),
     settlementControl: canonicalizeSettlementControl(state.settlementControl),
-    bombardedHexesByBodyId: canonicalizeBombardedHexesByBodyId(state.bombardedHexesByBodyId),
+    bombardedTilesByBodyId: canonicalizeBombardedTilesByBodyId(state.bombardedTilesByBodyId),
     battles: canonicalizeBattles(state.battles),
     logs: canonicalizeLogs(state.logs),
     messages: canonicalizeMessages(state.messages)
@@ -143,18 +142,18 @@ export const canonicalizeSettlementControl = (
   return next;
 };
 
-export const canonicalizeBombardedHexesByBodyId = (
-  value?: Record<string, HexCoord[]>
-): Record<string, HexCoord[]> | undefined => {
+export const canonicalizeBombardedTilesByBodyId = (
+  value?: Record<string, number[]>
+): Record<string, number[]> | undefined => {
   if (!value) return value;
   const keys = Object.keys(value);
   if (keys.length === 0) return value;
   const orderedKeys = sorted(keys, (a, b) => compareIds(a, b));
-  const next: Record<string, HexCoord[]> = {};
+  const next: Record<string, number[]> = {};
   orderedKeys.forEach(bodyId => {
-    const coords = value[bodyId] ?? [];
-    const orderedCoords = sorted(coords, (a, b) => (a.r !== b.r ? a.r - b.r : a.q - b.q));
-    next[bodyId] = orderedCoords.map(coord => ({ q: coord.q, r: coord.r }));
+    const tiles = value[bodyId] ?? [];
+    const orderedTiles = sorted(tiles, (a, b) => a - b);
+    next[bodyId] = orderedTiles.map(tileId => Math.floor(tileId));
   });
   return next;
 };
@@ -237,22 +236,18 @@ export const isCanonical = (state: GameState): boolean => {
     }
   }
 
-  const bombardedHexesByBodyId = state.bombardedHexesByBodyId;
-  if (bombardedHexesByBodyId) {
-    const keys = Object.keys(bombardedHexesByBodyId);
+  const bombardedTilesByBodyId = state.bombardedTilesByBodyId;
+  if (bombardedTilesByBodyId) {
+    const keys = Object.keys(bombardedTilesByBodyId);
     for (let i = 1; i < keys.length; i++) {
       if (compareIds(keys[i - 1], keys[i]) > 0) {
         return false;
       }
     }
     for (const key of keys) {
-      const coords = bombardedHexesByBodyId[key] ?? [];
-      for (let i = 1; i < coords.length; i++) {
-        const prev = coords[i - 1];
-        const cur = coords[i];
-        if (cur.r < prev.r || (cur.r === prev.r && cur.q < prev.q)) {
-          return false;
-        }
+      const tiles = bombardedTilesByBodyId[key] ?? [];
+      for (let i = 1; i < tiles.length; i++) {
+        if (tiles[i] < tiles[i - 1]) return false;
       }
     }
   }

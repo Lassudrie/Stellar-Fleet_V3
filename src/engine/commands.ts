@@ -1,5 +1,17 @@
 
-import { GameState, FleetState, AIState, FactionId, ArmyState, LogEntry, Fleet, ShipType, GroundBuildingType } from '../shared/shared';
+import {
+    GameState,
+    FleetState,
+    AIState,
+    FactionId,
+    ArmyState,
+    LogEntry,
+    Fleet,
+    ShipType,
+    GroundBuildingType,
+    PlanetSurfaceDescriptor,
+    SurfacePos
+} from '../shared/shared';
 import type { Army } from '../shared/shared';
 import { RNG } from './rng';
 import { getSystemById } from './world';
@@ -12,9 +24,18 @@ import { shortId } from '../shared/shared';
 import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/shared';
-import { generateSurfaceMapForState, getTileAt, isBuildable, isPassable, normalizeSurfacePositions, pickLandingSurfacePosForArmy } from './planetSurface';
+import {
+    generateSurfaceMapForState,
+    getSurfaceTileCoordFromId,
+    getTileAt,
+    isBuildable,
+    isPassable,
+    normalizeSurfacePositions,
+    pickLandingSurfacePosForArmy,
+    resolveSurfaceTileId
+} from './planetSurface';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
-import { STACKING_CAP } from './ground';
+import { STACKING_CAP, tileKey } from './ground';
 
 export type GameCommand =
   | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
@@ -25,13 +46,13 @@ export type GameCommand =
   | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
-  | { type: 'MOVE_ARMY_ON_SURFACE'; armyId: string; to: { bodyId: string; q: number; r: number } }
-  | { type: 'ORDER_GROUND_MOVE'; armyId: string; to: { bodyId: string; q: number; r: number } }
+  | { type: 'MOVE_ARMY_ON_SURFACE'; armyId: string; to: SurfacePos }
+  | { type: 'ORDER_GROUND_MOVE'; armyId: string; to: SurfacePos }
   | { type: 'ORDER_GROUND_ATTACK'; attackerId: string; targetArmyId: string }
-  | { type: 'ORDER_GROUND_LAND'; armyId: string; to: { bodyId: string; q: number; r: number } }
+  | { type: 'ORDER_GROUND_LAND'; armyId: string; to: SurfacePos }
   | { type: 'SET_GROUND_POSTURE'; armyId: string; posture: 'normal' | 'prepared_defense' }
   | { type: 'CANCEL_GROUND_ORDER'; armyId: string }
-  | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: { bodyId: string; q: number; r: number }; name?: string }
+  | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: SurfacePos; name?: string }
   | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
   | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
   | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null; reason?: string; turn?: number }
@@ -77,6 +98,11 @@ const getAvailableTransportsInOrbit = (
 
 const isCombatLocked = (fleet: Fleet | undefined | null): boolean => fleet?.state === FleetState.COMBAT;
 
+const toSurfacePos = (descriptor: PlanetSurfaceDescriptor, bodyId: string, tileId: number): SurfacePos => {
+    const coord = getSurfaceTileCoordFromId(descriptor, tileId);
+    return coord ? { bodyId, tileId, q: coord.q, r: coord.r } : { bodyId, tileId };
+};
+
 export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, executionTurn?: number): CommandResult => {
     // Enforce Immutability in Dev
     deepFreezeDev(state);
@@ -97,18 +123,19 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
             if (!descriptor) return fail('Missing surface descriptor for body.');
 
-            const q = Math.floor(command.to.q);
-            const r = Math.floor(command.to.r);
-            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+            const tileId = resolveSurfaceTileId(descriptor, command.to);
+            if (tileId === null) return fail('Target is outside grid.');
 
-            const tileResult = getTileAt(state, bodyId, q, r);
+            const tileResult = getTileAt(state, bodyId, tileId);
             if (!tileResult) return fail('Unable to resolve target tile.');
             if (!isPassable(tileResult.tile.biome)) return fail('Target tile is not passable.');
+
+            const targetPos = toSurfacePos(tileResult.descriptor, bodyId, tileId);
 
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === army.id
-                    ? ({ ...a, groundOrders: { ...(a.groundOrders ?? {}), move: { type: 'move', to: { bodyId, q, r } } } })
+                    ? ({ ...a, groundOrders: { ...(a.groundOrders ?? {}), move: { type: 'move', to: targetPos } } })
                     : a)
             });
         }
@@ -149,32 +176,33 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
             if (!descriptor) return fail('Missing surface descriptor for body.');
 
-            const q = Math.floor(command.to.q);
-            const r = Math.floor(command.to.r);
-            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+            const tileId = resolveSurfaceTileId(descriptor, command.to);
+            if (tileId === null) return fail('Target is outside grid.');
 
-            const tileResult = getTileAt(state, bodyId, q, r);
+            const tileResult = getTileAt(state, bodyId, tileId);
             if (!tileResult) return fail('Unable to resolve target tile.');
 
             const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
             if (!isPassable(tileResult.tile.biome) && !isAmphibious) return fail('Target tile is not passable.');
 
-            const deployedOnHex = state.armies.filter(a =>
-                a.state === ArmyState.DEPLOYED &&
-                a.containerId === bodyId &&
-                a.surfacePos &&
-                a.surfacePos.q === q &&
-                a.surfacePos.r === r
-            );
-            const enemyOnHex = deployedOnHex.some(a => a.factionId !== army.factionId);
-            if (enemyOnHex) return fail('Landing on enemy-occupied hex is not allowed.');
-            const friendlyCount = deployedOnHex.filter(a => a.factionId === army.factionId).length;
-            if (friendlyCount >= STACKING_CAP) return fail('Landing hex is at stacking capacity.');
+            const deployedOnTile = state.armies.filter(a => {
+                if (a.state !== ArmyState.DEPLOYED) return false;
+                if (a.containerId !== bodyId) return false;
+                if (!a.surfacePos) return false;
+                const posTileId = resolveSurfaceTileId(descriptor, a.surfacePos);
+                return posTileId === tileId;
+            });
+            const enemyOnTile = deployedOnTile.some(a => a.factionId !== army.factionId);
+            if (enemyOnTile) return fail('Landing on enemy-occupied tile is not allowed.');
+            const friendlyCount = deployedOnTile.filter(a => a.factionId === army.factionId).length;
+            if (friendlyCount >= STACKING_CAP) return fail('Landing tile is at stacking capacity.');
+
+            const targetPos = toSurfacePos(tileResult.descriptor, bodyId, tileId);
 
             return ok({
                 ...state,
                 armies: state.armies.map(a => a.id === army.id
-                    ? ({ ...a, landingOrder: { type: 'land', to: { bodyId, q, r } } })
+                    ? ({ ...a, landingOrder: { type: 'land', to: targetPos } })
                     : a)
             });
         }
@@ -221,17 +249,21 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];
             if (!descriptor) return fail('Missing surface descriptor for body.');
 
-            const q = Math.floor(command.to.q);
-            const r = Math.floor(command.to.r);
-            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+            const tileId = resolveSurfaceTileId(descriptor, command.to);
+            if (tileId === null) return fail('Target is outside grid.');
 
-            const tileResult = getTileAt(state, bodyId, q, r);
+            const tileResult = getTileAt(state, bodyId, tileId);
             if (!tileResult) return fail('Unable to resolve target tile.');
             if (!isPassable(tileResult.tile.biome)) return fail('Target tile is not passable.');
 
+            const targetPos = toSurfacePos(tileResult.descriptor, bodyId, tileId);
+
             const nextState: GameState = {
                 ...state,
-                armies: state.armies.map(a => a.id === army.id ? ({ ...a, surfacePos: { bodyId, q, r } }) : a)
+                armies: state.armies.map(a => a.id === army.id ? ({
+                  ...a,
+                  surfacePos: targetPos
+                }) : a)
             };
 
             return ok(nextState);
@@ -244,24 +276,28 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
 
             if (!state.factions.some(f => f.id === command.factionId)) return fail('Unknown faction.');
 
-            const q = Math.floor(command.at.q);
-            const r = Math.floor(command.at.r);
-            if (q < 0 || q >= descriptor.config.w || r < 0 || r >= descriptor.config.h) return fail('Target is outside grid.');
+            const tileId = resolveSurfaceTileId(descriptor, command.at);
+            if (tileId === null) return fail('Target is outside grid.');
 
-            const tileResult = getTileAt(state, bodyId, q, r);
+            const tileResult = getTileAt(state, bodyId, tileId);
             if (!tileResult) return fail('Unable to resolve target tile.');
             if (!isBuildable(tileResult.tile.biome)) return fail('Target tile is not buildable.');
 
             const buildings = state.groundBuildings ?? [];
-            const occupied = buildings.some(b => b.surfacePos.bodyId === bodyId && b.surfacePos.q === q && b.surfacePos.r === r);
+            const occupied = buildings.some(b => {
+                if (b.surfacePos.bodyId !== bodyId) return false;
+                const bTileId = resolveSurfaceTileId(descriptor, b.surfacePos);
+                return bTileId === tileId;
+            });
             if (occupied) return fail('Tile already contains a building.');
 
+            const targetPos = toSurfacePos(tileResult.descriptor, bodyId, tileId);
             const building = {
                 id: rng.id('building'),
                 factionId: command.factionId,
                 type: command.buildingType,
                 name: command.name,
-                surfacePos: { bodyId, q, r }
+                surfacePos: targetPos
             };
 
             return ok({
@@ -509,11 +545,17 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (!map) return fail('Missing surface descriptor for body.');
 
             const occupancy = new Map<string, { enemy: boolean; friendlyCount: number }>();
+            const toOccupancyKey = (pos: SurfacePos | null | undefined): string | null => {
+              if (!pos) return null;
+              const tileId = resolveSurfaceTileId(map.descriptor, pos);
+              return tileId === null ? null : tileKey(tileId);
+            };
             state.armies.forEach(army => {
               if (army.state !== ArmyState.DEPLOYED) return;
               if (army.containerId !== targetPlanet.id) return;
               if (!army.surfacePos) return;
-              const key = `${army.surfacePos.q}|${army.surfacePos.r}`;
+              const key = toOccupancyKey(army.surfacePos);
+              if (!key) return;
               const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
               if (army.factionId === fleet.factionId) {
                 occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -524,7 +566,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             state.armies.forEach(army => {
               if (army.state !== ArmyState.EMBARKED) return;
               if (!army.landingOrder || army.landingOrder.to.bodyId !== targetPlanet.id) return;
-              const key = `${Math.floor(army.landingOrder.to.q)}|${Math.floor(army.landingOrder.to.r)}`;
+              const key = toOccupancyKey(army.landingOrder.to);
+              if (!key) return;
               const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
               if (army.factionId === fleet.factionId) {
                 occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -534,10 +577,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             });
 
             const embarkedIds = new Set(embarkedArmies.map(army => army.id));
-            const landingPosByArmyId = new Map<string, { bodyId: string; q: number; r: number }>();
+            const landingPosByArmyId = new Map<string, SurfacePos>();
 
-            const isOccupied = (q: number, r: number): boolean => {
-              const entry = occupancy.get(`${q}|${r}`);
+            const isOccupied = (tileId: number): boolean => {
+              const entry = occupancy.get(tileKey(tileId));
               if (!entry) return false;
               if (entry.enemy) return true;
               return entry.friendlyCount >= STACKING_CAP;
@@ -548,8 +591,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
                 pickLandingSurfacePosForArmy({ state, map, army });
               if (!chosen) return;
+              const chosenTileId = resolveSurfaceTileId(map.descriptor, chosen);
+              if (chosenTileId === null) return;
               landingPosByArmyId.set(army.id, chosen);
-              const key = `${chosen.q}|${chosen.r}`;
+              const key = tileKey(chosenTileId);
               const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
               occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
             });
@@ -634,11 +679,17 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (!map) return fail('Missing surface descriptor for body.');
 
             const occupancy = new Map<string, { enemy: boolean; friendlyCount: number }>();
+            const toOccupancyKey = (pos: SurfacePos | null | undefined): string | null => {
+              if (!pos) return null;
+              const tileId = resolveSurfaceTileId(map.descriptor, pos);
+              return tileId === null ? null : tileKey(tileId);
+            };
             state.armies.forEach(other => {
               if (other.state !== ArmyState.DEPLOYED) return;
               if (other.containerId !== bodyId) return;
               if (!other.surfacePos) return;
-              const key = `${other.surfacePos.q}|${other.surfacePos.r}`;
+              const key = toOccupancyKey(other.surfacePos);
+              if (!key) return;
               const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
               if (other.factionId === fleet.factionId) {
                 occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -649,7 +700,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             state.armies.forEach(other => {
               if (other.state !== ArmyState.EMBARKED) return;
               if (!other.landingOrder || other.landingOrder.to.bodyId !== bodyId) return;
-              const key = `${Math.floor(other.landingOrder.to.q)}|${Math.floor(other.landingOrder.to.r)}`;
+              const key = toOccupancyKey(other.landingOrder.to);
+              if (!key) return;
               const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
               if (other.factionId === fleet.factionId) {
                 occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
@@ -658,8 +710,8 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
               }
             });
 
-            const isOccupied = (q: number, r: number): boolean => {
-              const entry = occupancy.get(`${q}|${r}`);
+            const isOccupied = (tileId: number): boolean => {
+              const entry = occupancy.get(tileKey(tileId));
               if (!entry) return false;
               if (entry.enemy) return true;
               return entry.friendlyCount >= STACKING_CAP;
@@ -669,7 +721,9 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
               pickLandingSurfacePosForArmy({ state, map, army });
             if (!chosen) return fail('Unable to choose landing position.');
 
-            const key = `${chosen.q}|${chosen.r}`;
+            const chosenTileId = resolveSurfaceTileId(map.descriptor, chosen);
+            if (chosenTileId === null) return fail('Unable to choose landing position.');
+            const key = tileKey(chosenTileId);
             const current = occupancy.get(key) ?? { enemy: false, friendlyCount: 0 };
             occupancy.set(key, { enemy: current.enemy, friendlyCount: current.friendlyCount + 1 });
 

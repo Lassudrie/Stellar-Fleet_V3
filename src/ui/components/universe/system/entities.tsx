@@ -20,7 +20,7 @@ import {
   makeObjectId,
   type SystemObjectId,
   type TacticalRingConfig
-} from '../systemViewLayout';
+} from '../../screens';
 import type { OrbitingPlanet } from './systemModel';
 import { useDisposableMemo } from './renderUtils';
 

@@ -29,7 +29,8 @@ import {
   AIState,
   ShipEntity,
   ShipType,
-  StarSystem
+  StarSystem,
+  SurfacePos
 } from '../../shared/shared';
 import { shortId } from '../../shared/shared';
 import { Vec3 } from '../math/vec3';
@@ -52,7 +53,20 @@ import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../f
 import { SpatialIndex } from '../spatialIndex';
 import { deepFreezeDev } from '../state';
 import { buildPlanetBodies } from '../planets';
-import { createPlanetSurfaceDescriptor, deriveSurfaceParamsFromPlanet, fnv1a32, generateSurfaceMap, generateSurfaceMapForState, neighborsAxial } from '../planetSurface';
+import {
+  axialToIndex,
+  buildGeodesicGrid,
+  createPlanetSurfaceDescriptor,
+  deriveSurfaceParamsFromPlanet,
+  fnv1a32,
+  generateSurfaceMap,
+  generateSurfaceMapForState,
+  getSurfaceTileCoordFromId,
+  getSurfaceTileCount,
+  neighborsAxial,
+  resolveSurfaceTileId,
+  tileCount
+} from '../planetSurface';
 import {
   BOMBARD_COMBAT_CONDITION_LOSS,
   BOMBARD_COMBAT_MULT,
@@ -292,7 +306,9 @@ const createArmiesOnSettlements = (params: {
       condition: 1,
       state: ArmyState.DEPLOYED,
       containerId: params.map.bodyId,
-      surfacePos: { bodyId: params.map.bodyId, q: settlement.coord.q, r: settlement.coord.r }
+      surfacePos: settlement.coord
+        ? { bodyId: params.map.bodyId, tileId: settlement.tileId, q: settlement.coord.q, r: settlement.coord.r }
+        : { bodyId: params.map.bodyId, tileId: settlement.tileId }
     })
   );
 };
@@ -3537,7 +3553,8 @@ tests.push(
       const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
-      assert.ok(map.tiles.length === descriptor.config.w * descriptor.config.h);
+      const expectedTiles = getSurfaceTileCount(descriptor);
+      assert.strictEqual(map.tiles.length, expectedTiles);
     }
   },
   {
@@ -3549,9 +3566,9 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: 'blue' });
 
-      const w = descriptor.config.w;
       for (const s of map.settlements) {
-        const idx = s.coord.r * w + s.coord.q;
+        const idx = s.tileId;
+        assert.ok(idx >= 0 && idx < map.tiles.length, `Settlement tileId ${idx} out of bounds`);
         const biome = map.tiles[idx].biome;
         assert.ok(biome !== 'ocean' && biome !== 'coast' && biome !== 'lake', `Settlement spawned on water biome '${biome}'`);
       }
@@ -4039,10 +4056,36 @@ tests.push(
   }
 );
 
+tests.push({
+  name: 'Geodesic grid is deterministic and has 12 pentagons',
+  run: () => {
+    const frequency = 6;
+    const gridA = buildGeodesicGrid(frequency);
+    const gridB = buildGeodesicGrid(frequency);
+    assert.strictEqual(gridA.vertices.length, tileCount(frequency));
+    assert.deepStrictEqual(gridA.vertices, gridB.vertices);
+    assert.deepStrictEqual(gridA.neighbors, gridB.neighbors);
+
+    const neighborCounts = gridA.neighbors.map(n => n.length);
+    const pentagons = neighborCounts.filter(count => count === 5).length;
+    const hexes = neighborCounts.filter(count => count === 6).length;
+    assert.strictEqual(pentagons, 12);
+    assert.strictEqual(pentagons + hexes, gridA.vertices.length);
+  }
+});
+
 // --- planetSurfacePositions.spec.ts ---
 
 const engine_ps_isWater = (biome: string): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
 const engine_ps_isBuildable = (biome: string): boolean => !engine_ps_isWater(biome) && biome !== 'mountain' && biome !== 'ice';
+
+type EngineTilePick = { tileId: number; coord?: { q: number; r: number } };
+
+const engine_ps_toSurfacePos = (bodyId: string, tile: EngineTilePick): SurfacePos => {
+  return tile.coord
+    ? { bodyId, tileId: tile.tileId, q: tile.coord.q, r: tile.coord.r }
+    : { bodyId, tileId: tile.tileId };
+};
 
 const engine_ps_createArmy = (params: {
   id: string;
@@ -4050,7 +4093,7 @@ const engine_ps_createArmy = (params: {
   members: number;
   state: ArmyState;
   containerId: string;
-  surfacePos?: { bodyId: string; q: number; r: number };
+  surfacePos?: SurfacePos;
 }): Army => {
   const scaledMembers = scaleMembers(params.members);
   return withGroundDefaults({
@@ -4152,14 +4195,14 @@ const engine_ps_findAnyTile = (
   state: GameState,
   bodyId: string,
   predicate: (biome: string) => boolean
-): { q: number; r: number } | null => {
+): EngineTilePick | null => {
   const map = generateSurfaceMapForState(state, bodyId);
   assert.ok(map, 'Expected surface map');
-  const { w } = map.descriptor.config;
   for (let i = 0; i < map.tiles.length; i += 1) {
     const t = map.tiles[i];
     if (!predicate(t.biome)) continue;
-    return { q: i % w, r: Math.floor(i / w) };
+    const coord = getSurfaceTileCoordFromId(map.descriptor, i);
+    return { tileId: i, coord: coord ?? undefined };
   }
   return null;
 };
@@ -4168,7 +4211,7 @@ const engine_ps_pickAnyTile = (
   state: GameState,
   bodyId: string,
   predicate: (biome: string) => boolean
-): { q: number; r: number } => {
+): EngineTilePick => {
   const match = engine_ps_findAnyTile(state, bodyId, predicate);
   if (!match) throw new Error('No matching tile found');
   return match;
@@ -4192,7 +4235,7 @@ tests.push(
             members: 10000,
             state: ArmyState.DEPLOYED,
             containerId: body.id,
-            surfacePos: { bodyId: body.id, q: land.q, r: land.r }
+            surfacePos: engine_ps_toSurfacePos(body.id, land)
           })
         ],
         groundBuildings: [
@@ -4200,7 +4243,7 @@ tests.push(
             id: 'bld-1',
             factionId: 'blue',
             type: 'outpost',
-            surfacePos: { bodyId: body.id, q: buildingSpot.q, r: buildingSpot.r }
+            surfacePos: engine_ps_toSurfacePos(body.id, buildingSpot)
           }
         ]
       };
@@ -4220,7 +4263,7 @@ tests.push(
       if (water) {
         const fail = applyCommand(
           base,
-          { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: water.q, r: water.r } },
+          { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: engine_ps_toSurfacePos(body.id, water) },
           new RNG(1)
         );
         assert.ok(!fail.ok, 'Expected BUILD_AT on water to fail');
@@ -4228,7 +4271,7 @@ tests.push(
 
       const ok1 = applyCommand(
         base,
-        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: { bodyId: body.id, q: land.q, r: land.r } },
+        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'outpost', at: engine_ps_toSurfacePos(body.id, land) },
         new RNG(2)
       );
       assert.ok(ok1.ok, 'Expected BUILD_AT on land to succeed');
@@ -4236,7 +4279,7 @@ tests.push(
 
       const ok2 = applyCommand(
         ok1.state,
-        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'mine', at: { bodyId: body.id, q: land.q, r: land.r } },
+        { type: 'BUILD_AT', factionId: 'blue', buildingType: 'mine', at: engine_ps_toSurfacePos(body.id, land) },
         new RNG(3)
       );
       assert.ok(!ok2.ok, 'Expected second building on same tile to fail');
@@ -4248,15 +4291,13 @@ tests.push(
       const { state: base, body } = engine_ps_createStateWithOneSurface(11, 'sys_move');
       const landA = engine_ps_pickAnyTile(base, body.id, b => !engine_ps_isWater(b));
       const map = generateSurfaceMapForState(base, body.id)!;
-      const { w } = map.descriptor.config;
-      let landB: { q: number; r: number } | null = null;
+      let landB: EngineTilePick | null = null;
       for (let i = 0; i < map.tiles.length; i += 1) {
         const t = map.tiles[i];
         if (engine_ps_isWater(t.biome)) continue;
-        const q = i % w;
-        const r = Math.floor(i / w);
-        if (q === landA.q && r === landA.r) continue;
-        landB = { q, r };
+        if (i === landA.tileId) continue;
+        const coord = getSurfaceTileCoordFromId(map.descriptor, i);
+        landB = { tileId: i, coord: coord ?? undefined };
         break;
       }
       if (!landB) landB = landA;
@@ -4271,7 +4312,7 @@ tests.push(
             members: 10000,
             state: ArmyState.DEPLOYED,
             containerId: body.id,
-            surfacePos: { bodyId: body.id, q: landA.q, r: landA.r }
+            surfacePos: engine_ps_toSurfacePos(body.id, landA)
           })
         ]
       };
@@ -4279,7 +4320,7 @@ tests.push(
       if (water) {
         const fail = applyCommand(
           state,
-          { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: water.q, r: water.r } },
+          { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: engine_ps_toSurfacePos(body.id, water) },
           new RNG(5)
         );
         assert.ok(!fail.ok, 'Expected move onto water to fail');
@@ -4287,11 +4328,11 @@ tests.push(
 
       const ok = applyCommand(
         state,
-        { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: { bodyId: body.id, q: landB.q, r: landB.r } },
+        { type: 'MOVE_ARMY_ON_SURFACE', armyId: 'army-1', to: engine_ps_toSurfacePos(body.id, landB) },
         new RNG(6)
       );
       assert.ok(ok.ok, 'Expected move onto land to succeed');
-      assert.deepStrictEqual(ok.state.armies[0].surfacePos, { bodyId: body.id, q: landB.q, r: landB.r });
+      assert.deepStrictEqual(ok.state.armies[0].surfacePos, engine_ps_toSurfacePos(body.id, landB));
     }
   },
   {
@@ -4308,7 +4349,7 @@ tests.push(
               members: 10000,
               state: ArmyState.DEPLOYED,
               containerId: body.id,
-              surfacePos: { bodyId: body.id, q: 9999, r: 9999 }
+              surfacePos: { bodyId: body.id, tileId: 999999 }
             })
           ]
         })
@@ -4319,10 +4360,10 @@ tests.push(
       assert.deepStrictEqual(restoredA.armies[0].surfacePos, restoredB.armies[0].surfacePos, 'Relocation should be deterministic');
 
       const map = generateSurfaceMapForState(restoredA, body.id)!;
-      const { w, h } = map.descriptor.config;
       const pos = restoredA.armies[0].surfacePos!;
-      assert.ok(pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h);
-      const biome = map.tiles[pos.r * w + pos.q].biome;
+      assert.ok(Number.isFinite(pos.tileId), 'Relocated position must include tileId');
+      assert.ok(pos.tileId >= 0 && pos.tileId < map.tiles.length);
+      const biome = map.tiles[pos.tileId].biome;
       assert.ok(!engine_ps_isWater(biome), `Relocated biome must be passable, got ${biome}`);
     }
   },
@@ -4345,7 +4386,7 @@ tests.push(
         members: 9000,
         state: ArmyState.DEPLOYED,
         containerId: body.id,
-        surfacePos: { bodyId: body.id, q: defenderLand.q, r: defenderLand.r }
+        surfacePos: engine_ps_toSurfacePos(body.id, defenderLand)
       });
 
       const attackerArmyId = 'army-atk';
@@ -4399,10 +4440,10 @@ tests.push(
       assert.strictEqual(queued.landingOrder?.to.bodyId, body.id, 'Expected landingOrder to target the invasion body');
 
       const map = generateSurfaceMapForState(next, body.id)!;
-      const { w, h } = map.descriptor.config;
       const planned = queued.landingOrder!.to;
-      assert.ok(planned.q >= 0 && planned.q < w && planned.r >= 0 && planned.r < h, 'landingOrder should target a valid grid coordinate');
-      const plannedBiome = map.tiles[planned.r * w + planned.q].biome;
+      const plannedTileId = resolveSurfaceTileId(map.descriptor, planned);
+      assert.ok(plannedTileId !== null, 'landingOrder should target a valid tile');
+      const plannedBiome = map.tiles[plannedTileId].biome;
       assert.ok(!engine_ps_isWater(plannedBiome), `landingOrder should target passable terrain, got biome '${plannedBiome}'`);
 
       const afterGround = phaseGround(next, { turn: state.day, rng: new RNG(3) });
@@ -4411,8 +4452,8 @@ tests.push(
       assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected landingOrder to be resolved during phaseGround');
       assert.strictEqual(landed.containerId, body.id, 'Expected attacker army to be deployed onto the target body');
       assert.ok(landed.surfacePos, 'Expected deployed army to have a surfacePos');
-      assert.strictEqual(landed.surfacePos?.q, planned.q);
-      assert.strictEqual(landed.surfacePos?.r, planned.r);
+      const landedTileId = landed.surfacePos ? resolveSurfaceTileId(map.descriptor, landed.surfacePos) : null;
+      assert.strictEqual(landedTileId, plannedTileId);
     }
   },
   {
@@ -5307,16 +5348,15 @@ tests.push({
     };
 
     const map = generateSurfaceMapForState(base, body.id)!;
-    const { w } = map.descriptor.config;
     const idx = map.tiles.findIndex(t => t.biome !== 'ocean');
     assert.ok(idx >= 0);
-    const q = idx % w;
-    const r = Math.floor(idx / w);
+    const coord = getSurfaceTileCoordFromId(map.descriptor, idx);
+    const surfacePos = coord ? { bodyId: body.id, tileId: idx, q: coord.q, r: coord.r } : { bodyId: body.id, tileId: idx };
     const state: GameState = {
       ...base,
-      groundBuildings: [{ id: 'b', factionId: 'blue', type: 'outpost', surfacePos: { bodyId: body.id, q, r } }]
+      groundBuildings: [{ id: 'b', factionId: 'blue', type: 'outpost', surfacePos }]
     };
-    const terrain = deriveTerrainType(state, body.id, { q, r });
+    const terrain = deriveTerrainType(state, body.id, idx);
     assert.strictEqual(terrain, 'Urban');
   }
 });
@@ -5342,6 +5382,26 @@ const groundCombatMap: PlanetSurfaceMap = {
   settlements: []
 };
 
+const groundCombatConfig = groundCombatMap.descriptor.config;
+if (!('w' in groundCombatConfig)) {
+  throw new Error('Expected rect surface config for groundCombatMap');
+}
+const groundCombatW = groundCombatConfig.w;
+const groundCombatTileId = (q: number, r: number): number => axialToIndex({ q, r }, groundCombatW);
+const groundCombatPos = (q: number, r: number): SurfacePos => ({
+  bodyId: groundCombatMap.bodyId,
+  q,
+  r,
+  tileId: groundCombatTileId(q, r)
+});
+const normalizeGroundCombatSurfacePos = (pos?: SurfacePos): SurfacePos | undefined => {
+  if (!pos) return pos;
+  if (pos.tileId !== undefined) return pos;
+  if (pos.bodyId !== groundCombatMap.bodyId) return pos;
+  if (pos.q === undefined || pos.r === undefined) return pos;
+  return { ...pos, tileId: groundCombatTileId(pos.q, pos.r) };
+};
+
 const wrapLosMap: PlanetSurfaceMap = {
   systemId: 'sys-los-wrap',
   bodyId: 'body-los-wrap',
@@ -5361,13 +5421,20 @@ const wrapLosMap: PlanetSurfaceMap = {
   settlements: []
 };
 
+const wrapLosConfig = wrapLosMap.descriptor.config;
+if (!('w' in wrapLosConfig)) {
+  throw new Error('Expected rect surface config for wrapLosMap');
+}
+const wrapLosW = wrapLosConfig.w;
+const wrapLosTileId = (q: number, r: number): number => axialToIndex({ q, r }, wrapLosW);
+
 const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factionId'>): Army => {
   const base: Army = {
     id: overrides.id,
     factionId: overrides.factionId,
     state: ArmyState.DEPLOYED,
     containerId: groundCombatMap.bodyId,
-    surfacePos: { bodyId: groundCombatMap.bodyId, q: 0, r: 0 },
+    surfacePos: groundCombatPos(0, 0),
     unitType: 'mechanized_infantry',
     posture: 'normal',
     maxMembers: scaleMembers(10000),
@@ -5381,7 +5448,9 @@ const groundCombatMkArmy = (overrides: Partial<Army> & Pick<Army, 'id' | 'factio
     rangeMax: 1,
     projectionRange: 1
   };
-  return withGroundDefaults({ ...base, ...overrides });
+  const merged = { ...base, ...overrides };
+  const surfacePos = normalizeGroundCombatSurfacePos(merged.surfacePos);
+  return withGroundDefaults({ ...merged, ...(surfacePos ? { surfacePos } : {}) });
 };
 
 tests.push(
@@ -5390,9 +5459,9 @@ tests.push(
     run: () => {
       const hasLos = lineOfSight({
         map: wrapLosMap,
-        from: { q: 0, r: 1 },
-        to: { q: 8, r: 1 },
-        isBlocked: coord => coord.q === 9 && coord.r === 1
+        fromTileId: wrapLosTileId(0, 1),
+        toTileId: wrapLosTileId(8, 1),
+        isBlocked: tileId => tileId === wrapLosTileId(9, 1)
       });
       assert.strictEqual(hasLos, false);
     }
@@ -5402,9 +5471,9 @@ tests.push(
     run: () => {
       const hasLos = lineOfSight({
         map: wrapLosMap,
-        from: { q: 0, r: 1 },
-        to: { q: 8, r: 1 },
-        isBlocked: coord => coord.q === 4 && coord.r === 1
+        fromTileId: wrapLosTileId(0, 1),
+        toTileId: wrapLosTileId(8, 1),
+        isBlocked: tileId => tileId === wrapLosTileId(4, 1)
       });
       assert.strictEqual(hasLos, true);
     }
@@ -5581,7 +5650,7 @@ tests.push(
     }
   },
   {
-    name: 'bombardedKeys applies combat multiplier + condition loss (defender)',
+    name: 'bombarded tiles apply combat multiplier + condition loss (defender)',
     run: () => {
       const attacker = groundCombatMkArmy({
         id: 'a',
@@ -5610,7 +5679,7 @@ tests.push(
         turn: 7,
         map: groundCombatMap,
         buildings: [],
-        bombardedKeys: new Set(['1|0']),
+        bombardedTileIds: new Set([groundCombatTileId(1, 0)]),
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
         defender: { army: defender, supplied: true, stackingFactor: 1 }
       });
@@ -5623,7 +5692,7 @@ tests.push(
     }
   },
   {
-    name: 'bombardedKeys applies combat multiplier + condition loss (attacker)',
+    name: 'bombarded tiles apply combat multiplier + condition loss (attacker)',
     run: () => {
       const attacker = groundCombatMkArmy({
         id: 'a',
@@ -5652,7 +5721,7 @@ tests.push(
         turn: 7,
         map: groundCombatMap,
         buildings: [],
-        bombardedKeys: new Set(['0|0']),
+        bombardedTileIds: new Set([groundCombatTileId(0, 0)]),
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
         defender: { army: defender, supplied: true, stackingFactor: 1 }
       });
@@ -5894,6 +5963,27 @@ tests.push(
       }
 
       assert.strictEqual(seen.size, count);
+    }
+  },
+  {
+    name: 'Geodesic grid builds stable vertices and adjacency',
+    run: () => {
+      const frequency = 4;
+      const gridA = buildGeodesicGrid(frequency);
+      const gridB = buildGeodesicGrid(frequency);
+
+      assert.strictEqual(gridA.vertices.length, tileCount(frequency));
+      assert.strictEqual(gridA.facesByVertex.length, gridA.vertices.length);
+      assert.strictEqual(gridA.neighbors.length, gridA.vertices.length);
+      assert.strictEqual(gridA.vertices.length, gridB.vertices.length);
+      assert.deepStrictEqual(gridA.vertices, gridB.vertices);
+      assert.deepStrictEqual(gridA.neighbors, gridB.neighbors);
+
+      const neighborCounts = gridA.neighbors.map(list => list.length);
+      const pentCount = neighborCounts.filter(count => count === 5).length;
+      const hexCount = neighborCounts.filter(count => count === 6).length;
+      assert.strictEqual(pentCount, 12);
+      assert.strictEqual(pentCount + hexCount, neighborCounts.length);
     }
   },
   {

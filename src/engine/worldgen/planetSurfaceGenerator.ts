@@ -5,6 +5,7 @@ import type {
   GameState,
   GroundBuilding,
   HexCoord,
+  GeodesicSurfaceConfig,
   MoonData,
   PlanetBody,
   PlanetData,
@@ -21,6 +22,7 @@ import { ArmyState, FeatureBits, sorted } from '../../shared/shared';
 import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
 import { RNG } from '../rng';
 import { getPlanetById } from '../planets';
+import { buildGeodesicGrid, tileCount, type GeodesicGrid } from './geodesicGrid';
 
 // ============================================================
 // Stable 32-bit hashing helpers (was: planetSurface/hash32.ts)
@@ -89,6 +91,33 @@ export const normalizedLatitude = (r: number, h: number): number => {
   return (r / (h - 1)) * 2 - 1;
 };
 
+const isGeodesicConfig = (config: PlanetSurfaceConfig): config is GeodesicSurfaceConfig =>
+  config.gridKind === 'geodesic';
+
+const geodesicGridCache = new Map<number, GeodesicGrid>();
+
+const getGeodesicGrid = (frequency: number): GeodesicGrid => {
+  const freq = Math.max(1, Math.floor(frequency));
+  const cached = geodesicGridCache.get(freq);
+  if (cached) return cached;
+  const grid = buildGeodesicGrid(freq);
+  geodesicGridCache.set(freq, grid);
+  return grid;
+};
+
+const getRectConfig = (config: PlanetSurfaceConfig): { w: number; h: number; wrapX: boolean } | null => {
+  if (isGeodesicConfig(config)) return null;
+  return { w: config.w, h: config.h, wrapX: config.wrapX };
+};
+
+const requireRectConfig = (config: PlanetSurfaceConfig): { w: number; h: number; wrapX: boolean } => {
+  const rect = getRectConfig(config);
+  if (!rect) {
+    throw new Error('Rect surface config required for this operation.');
+  }
+  return rect;
+};
+
 const LATITUDE_EXPONENT = 1.45;
 
 const computeLatTermOffset = (h: number, latGradientK: number): number => {
@@ -136,6 +165,92 @@ export const surfaceDirFromTile = (
   const u = (q + offsetQ) / w;
   const v = (r + offsetR) / h;
   return surfaceDirFromUv(u, v);
+};
+
+export const getSurfaceTileCount = (descriptor: PlanetSurfaceDescriptor): number => {
+  const config = descriptor.config;
+  if (isGeodesicConfig(config)) return tileCount(config.frequency);
+  return config.w * config.h;
+};
+
+export const getSurfaceTileCoordFromId = (
+  descriptor: PlanetSurfaceDescriptor,
+  tileId: number
+): HexCoord | null => {
+  const config = descriptor.config;
+  if (isGeodesicConfig(config)) return null;
+  if (!Number.isFinite(tileId)) return null;
+  const idx = Math.floor(tileId);
+  if (idx < 0 || idx >= config.w * config.h) return null;
+  return indexToAxial(idx, config.w);
+};
+
+export const getSurfaceTileIdFromCoord = (
+  descriptor: PlanetSurfaceDescriptor,
+  coord: HexCoord
+): number | null => {
+  const rect = getRectConfig(descriptor.config);
+  if (!rect) return null;
+  if (!isInBounds(coord, rect.w, rect.h)) return null;
+  return axialToIndex(coord, rect.w);
+};
+
+export const getSurfaceTileNeighbors = (
+  descriptor: PlanetSurfaceDescriptor,
+  tileId: number
+): number[] => {
+  if (!Number.isFinite(tileId)) return [];
+  const idx = Math.floor(tileId);
+  const config = descriptor.config;
+  if (isGeodesicConfig(config)) {
+    const grid = getGeodesicGrid(config.frequency);
+    if (idx < 0 || idx >= grid.neighbors.length) return [];
+    return grid.neighbors[idx];
+  }
+  const { w, h, wrapX } = config;
+  if (idx < 0 || idx >= w * h) return [];
+  const coord = indexToAxial(idx, w);
+  return neighborsAxial(coord, w, h, wrapX).map(c => axialToIndex(c, w));
+};
+
+export const getSurfaceTileDir = (
+  descriptor: PlanetSurfaceDescriptor,
+  tileId: number
+): SurfaceDir | null => {
+  if (!Number.isFinite(tileId)) return null;
+  const idx = Math.floor(tileId);
+  const config = descriptor.config;
+  if (isGeodesicConfig(config)) {
+    const grid = getGeodesicGrid(config.frequency);
+    if (idx < 0 || idx >= grid.vertices.length) return null;
+    return grid.vertices[idx];
+  }
+  const { w, h } = config;
+  if (idx < 0 || idx >= w * h) return null;
+  const coord = indexToAxial(idx, w);
+  return surfaceDirFromTile(coord.q, coord.r, w, h);
+};
+
+export const resolveSurfaceTileId = (
+  descriptor: PlanetSurfaceDescriptor,
+  pos: SurfacePos
+): number | null => {
+  const config = descriptor.config;
+  if (isGeodesicConfig(config)) {
+    if (!Number.isFinite(pos.tileId)) return null;
+    const idx = Math.floor(pos.tileId);
+    return idx >= 0 && idx < tileCount(config.frequency) ? idx : null;
+  }
+  if (Number.isFinite(pos.tileId)) {
+    const idx = Math.floor(pos.tileId);
+    return idx >= 0 && idx < config.w * config.h ? idx : null;
+  }
+  if (Number.isFinite(pos.q) && Number.isFinite(pos.r)) {
+    const coord = { q: Math.floor(pos.q), r: Math.floor(pos.r) };
+    if (!isInBounds(coord, config.w, config.h)) return null;
+    return axialToIndex(coord, config.w);
+  }
+  return null;
 };
 
 // ==========================================
@@ -1682,7 +1797,7 @@ const classifyLandBiome = (params: {
 // Descriptor (was: planetSurface/descriptor.ts)
 // ==========================================
 
-export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 6;
+export const DEFAULT_PLANET_SURFACE_GENERATOR_VERSION = 7;
 
 const clampInt = (x: number, min: number, max: number): number => Math.max(min, Math.min(max, Math.round(x)));
 
@@ -1706,6 +1821,15 @@ export const computeDefaultSurfaceConfig = (
   const size = typeof body.size === 'number' && Number.isFinite(body.size) ? Math.max(0.1, body.size) : 1;
   const w = clampInt(60 * Math.sqrt(size), 64, 128);
   const h = clampInt(w / 2, 32, 64);
+  const frequency = clampInt(10 + size * 4, 8, 18);
+
+  if (generatorVersion >= 7) {
+    return {
+      gridKind: 'geodesic',
+      frequency,
+      generatorVersion
+    };
+  }
 
   return {
     w,
@@ -1871,6 +1995,16 @@ const computeSlope = (idx: number, elev: Float32Array, w: number, h: number, wra
   for (const n of ns) {
     const ni = axialToIndex(n, w);
     const diff = Math.abs(elev[idx] - elev[ni]);
+    if (diff > maxDiff) maxDiff = diff;
+  }
+  return maxDiff;
+};
+
+const computeSlopeGeodesic = (idx: number, elev: Float32Array, grid: GeodesicGrid): number => {
+  const ns = grid.neighbors[idx] ?? [];
+  let maxDiff = 0;
+  for (const n of ns) {
+    const diff = Math.abs(elev[idx] - elev[n]);
     if (diff > maxDiff) maxDiff = diff;
   }
   return maxDiff;
@@ -2113,18 +2247,21 @@ const toTitleCase = (value: string): string => {
 const generateSettlementName = (params: {
   descriptorSeed: number;
   factionId: string;
-  coord: HexCoord;
+  coord?: HexCoord;
+  tileId?: number;
   type: SettlementType;
   isCapital: boolean;
   used: Set<string>;
 }): string => {
-  const { descriptorSeed, factionId, coord, type, isCapital, used } = params;
+  const { descriptorSeed, factionId, coord, tileId, type, isCapital, used } = params;
 
   const styleIndex = (hashJoin32(factionId, 'style') >>> 0) % NAME_STYLES.length;
   const style = NAME_STYLES[styleIndex] ?? NAME_STYLES[0];
 
   // Per-settlement RNG keeps naming stable even if placement RNG usage changes.
-  const rng = new RNG(hashJoin32(descriptorSeed, factionId, coord.q, coord.r, type, 'name'));
+  const seedA = coord ? coord.q : (tileId ?? 0);
+  const seedB = coord ? coord.r : (tileId ?? 0) * 97;
+  const rng = new RNG(hashJoin32(descriptorSeed, factionId, seedA, seedB, type, 'name'));
 
   const start = rng.pick([...style.starts]) ?? 'Nova';
   const mid = rng.next() < 0.75 ? (rng.pick([...style.mids]) ?? '') : '';
@@ -2249,6 +2386,7 @@ const placeSettlementsV1 = (params: {
     settlements.push({
       id: rng.id('settlement'),
       name: isRuins ? 'Ruins' : 'Outpost',
+      tileId: idx,
       coord,
       factionId: undefined,
       type: 'outpost',
@@ -2268,6 +2406,7 @@ const placeSettlementsV1 = (params: {
     settlements.push({
       id: rng.id('settlement'),
       name: 'Capital',
+      tileId: capitalIdx,
       coord,
       factionId: ownerFactionId,
       type: 'city',
@@ -2286,6 +2425,7 @@ const placeSettlementsV1 = (params: {
     settlements.push({
       id: rng.id('settlement'),
       name: `City ${i + 1}`,
+      tileId: idx,
       coord,
       factionId: ownerFactionId,
       type: 'city',
@@ -2445,6 +2585,7 @@ const placeSettlementsV2 = (params: {
       {
         id: rng.id('settlement'),
         name: isRuins ? 'Ruins' : 'Outpost',
+        tileId: idx,
         coord,
         factionId: undefined,
         type: 'outpost',
@@ -2574,6 +2715,7 @@ const placeSettlementsV2 = (params: {
       descriptorSeed: descriptor.seed,
       factionId: ownerFactionId,
       coord,
+      tileId: idx,
       type,
       isCapital,
       used: usedNames
@@ -2582,6 +2724,7 @@ const placeSettlementsV2 = (params: {
     settlements.push({
       id: rng.id('settlement'),
       name,
+      tileId: idx,
       coord,
       factionId: ownerFactionId,
       type,
@@ -2598,22 +2741,354 @@ const placeSettlementsV2 = (params: {
   return settlements;
 };
 
-const placeSettlements = (params: {
+const placeSettlementsGeodesic = (params: {
   descriptor: PlanetSurfaceDescriptor;
   tiles: PlanetSurfaceTile[];
-  w: number;
-  h: number;
-  wrapX: boolean;
+  grid: GeodesicGrid;
   ownerFactionId?: string | null;
   env: SurfaceParams;
 }): Settlement[] => {
-  const generatorVersion = params.descriptor.config?.generatorVersion ?? 1;
+  const { descriptor, tiles, grid, ownerFactionId, env } = params;
+  const settlementConfig = resolveSettlementConfig(descriptor);
+  const n = tiles.length;
+  const rng = new RNG(descriptor.seed ^ 0x9e3779b9);
 
-  // v1 kept for save compatibility (old descriptors).
-  if (generatorVersion <= 1) {
-    return placeSettlementsV1(params);
+  const elev = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) elev[i] = tiles[i].elev / 1000;
+
+  const isLandIndex = (i: number): boolean => !isWaterBiome(tiles[i].biome);
+
+  const pickCandidates = (k: number): number[] => {
+    const out: number[] = [];
+    const seen = new Set<number>();
+    let safety = 0;
+    while (out.length < k && safety < k * 40) {
+      safety += 1;
+      const idx = rng.int(0, n - 1);
+      if (!isLandIndex(idx)) continue;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      out.push(idx);
+    }
+    return out;
+  };
+
+  const tempC = (tC2: number): number => tC2 / 2;
+
+  const distanceBetween = (from: number, to: number, maxDist: number): number => {
+    if (from === to) return 0;
+    const dist = new Int16Array(n);
+    dist.fill(-1);
+    const queue = new Int32Array(n);
+    let head = 0;
+    let tail = 0;
+    dist[from] = 0;
+    queue[tail++] = from;
+
+    while (head < tail) {
+      const cur = queue[head++];
+      const d = dist[cur];
+      if (d >= maxDist) continue;
+      const ns = grid.neighbors[cur] ?? [];
+      for (const next of ns) {
+        if (dist[next] !== -1) continue;
+        const nd = d + 1;
+        if (next === to) return nd;
+        dist[next] = nd;
+        queue[tail++] = next;
+      }
+    }
+    return Number.POSITIVE_INFINITY;
+  };
+
+  const placed: Array<{ idx: number; type: SettlementType }> = [];
+
+  const canPlaceAt = (idx: number, type: SettlementType, spacingMultiplier: number) => {
+    if (placed.length === 0) return { ok: true, minDist: Infinity, nearestRequired: 0 };
+
+    let minDist = Infinity;
+    let nearestRequired = 0;
+
+    for (const p of placed) {
+      const required = Math.max(SETTLEMENT_MIN_SPACING[type], SETTLEMENT_MIN_SPACING[p.type]) * spacingMultiplier;
+      const d = distanceBetween(idx, p.idx, Math.ceil(required));
+      if (d < required) return { ok: false, minDist: d, nearestRequired: required };
+      if (d < minDist) {
+        minDist = d;
+        nearestRequired = required;
+      }
+    }
+
+    return { ok: true, minDist, nearestRequired };
+  };
+
+  const scoreSite = (idx: number, type: SettlementType, spacingMultiplier: number): number => {
+    const tile = tiles[idx];
+    const slope = computeSlopeGeodesic(idx, elev, grid);
+    const ns = grid.neighbors[idx] ?? [];
+    const nearWater = ns.some(nc => isWaterBiome(tiles[nc].biome)) ? 1 : 0;
+    const t = tempC(tile.tempC2);
+    const tempComfort = 1 - clamp(Math.abs(t - 18) / 45, 0, 1);
+
+    const placement = canPlaceAt(idx, type, spacingMultiplier);
+    if (!placement.ok) return -Infinity;
+
+    const spacingScore =
+      placed.length === 0
+        ? 1
+        : clamp(
+            (Math.min(placement.minDist, placement.nearestRequired * 4) - placement.nearestRequired)
+              / Math.max(1, placement.nearestRequired * 2),
+            0,
+            1
+          );
+
+    const moistScore = 1 - Math.abs(tile.moist / 255 - 0.55);
+    const slopePenalty = clamp(slope / 1.2, 0, 1);
+
+    let tempW = 0.35;
+    let moistW = 0.25;
+    let waterW = 0.2;
+    let spacingW = 0.2;
+    let slopeFactor = 0.55;
+
+    if (type === 'frontierTown') {
+      waterW = 0.21;
+      spacingW = 0.21;
+      moistW = 0.24;
+      tempW = 0.34;
+    } else if (type === 'city') {
+      waterW = 0.23;
+      spacingW = 0.22;
+      moistW = 0.23;
+      tempW = 0.32;
+      slopeFactor = 0.6;
+    } else if (type === 'metropolis') {
+      waterW = 0.26;
+      spacingW = 0.24;
+      moistW = 0.2;
+      tempW = 0.3;
+      slopeFactor = 0.65;
+    } else if (type === 'megalopolis') {
+      waterW = 0.28;
+      spacingW = 0.27;
+      moistW = 0.18;
+      tempW = 0.27;
+      slopeFactor = 0.75;
+    }
+
+    const base = tempW * tempComfort + moistW * moistScore + waterW * nearWater + spacingW * spacingScore;
+    return base * (1 - slopeFactor * slopePenalty);
+  };
+
+  const placeOne = (type: SettlementType): number | null => {
+    const samples = SETTLEMENT_CANDIDATE_SAMPLES[type];
+    const relaxations = [1.0, 0.85, 0.7];
+
+    for (const spacingMultiplier of relaxations) {
+      const candidates = pickCandidates(samples);
+      let best: { idx: number; score: number } | null = null;
+
+      for (const idx of candidates) {
+        if (!isLandIndex(idx)) continue;
+        const s = scoreSite(idx, type, spacingMultiplier);
+        if (!Number.isFinite(s)) continue;
+        if (!best || s > best.score) best = { idx, score: s };
+      }
+
+      if (best) return best.idx;
+    }
+
+    return null;
+  };
+
+  if (!ownerFactionId) {
+    if (rng.next() > settlementConfig.neutralOutpostChance) return [];
+    const idx = placeOne('outpost');
+    if (idx === null) return [];
+
+    const isRuins = rng.next() < settlementConfig.neutralOutpostRuinsChance;
+    const settlements: Settlement[] = [
+      {
+        id: rng.id('settlement'),
+        name: isRuins ? 'Ruins' : 'Outpost',
+        tileId: idx,
+        factionId: undefined,
+        type: 'outpost',
+        population: isRuins ? 0 : SETTLEMENT_BASE_POPULATION.outpost,
+        status: isRuins ? 'ruins' : 'active'
+      }
+    ];
+
+    if (!isRuins) tiles[idx].featureBits |= FeatureBits.City;
+    return settlements;
   }
-  return placeSettlementsV2(params);
+
+  let landCount = 0;
+  for (let i = 0; i < n; i += 1) if (isLandIndex(i)) landCount += 1;
+
+  const surfaceClassScore = (() => {
+    switch (env.surfaceClass) {
+      case 'temperate':
+        return 0.9;
+      case 'icy':
+        return 0.45;
+      case 'hot':
+        return 0.4;
+      case 'dense':
+        return 0.35;
+      case 'airless':
+        return 0.18;
+      default:
+        return 0.45;
+    }
+  })();
+
+  const sizeScore = clamp((landCount - 500) / 2600, 0, 1);
+  const waterScore = clamp((env.waterFraction - 0.05) / 0.35, 0, 1);
+
+  const developmentBias = settlementConfig.developmentBias ?? 0;
+  const development = clamp(
+    0.12 + 0.55 * surfaceClassScore + 0.18 * sizeScore + 0.12 * waterScore + 0.25 * rng.next() + developmentBias,
+    0,
+    1
+  );
+
+  let stage = 0;
+  if (development >= 0.25) stage = 1;
+  if (development >= 0.45) stage = 2;
+  if (development >= 0.7) stage = 3;
+  if (development >= 0.88) stage = 4;
+
+  if (env.surfaceClass === 'airless') stage = Math.min(stage, 2);
+  if (landCount < 320) stage = Math.min(stage, 1);
+  if (stage >= 4 && (landCount < 1400 || env.surfaceClass === 'airless')) stage = 3;
+
+  const scale = clamp(landCount / 2000, 0.35, 1.45);
+
+  let megalopolisCount = stage >= 4 ? 1 : 0;
+  let metropolisCount = stage >= 3 ? 1 : 0;
+  if (stage >= 3 && development > 0.92 && rng.next() < 0.35 * scale) metropolisCount += 1;
+
+  let cityCount = stage >= 2 ? clamp(1 + rng.int(0, Math.floor(2 * scale)), 1, 5) : 0;
+  if (stage >= 3 && rng.next() < 0.35) cityCount += 1;
+
+  let frontierCount = stage >= 1 ? rng.int(1, Math.max(1, Math.floor(2 * scale) + 2)) : 0;
+  let colonyCount = 1 + rng.int(0, Math.max(1, Math.floor(3 * scale)));
+
+  const maxSettlements = clamp(Math.floor(landCount / 70), 1, 36);
+
+  const reduceOne = (): void => {
+    if (colonyCount > 1) {
+      colonyCount -= 1;
+      return;
+    }
+    if (frontierCount > 0) {
+      frontierCount -= 1;
+      return;
+    }
+    if (cityCount > 1) {
+      cityCount -= 1;
+      return;
+    }
+    if (metropolisCount > 1) {
+      metropolisCount -= 1;
+      return;
+    }
+    if (cityCount > 0) {
+      cityCount -= 1;
+      return;
+    }
+    if (frontierCount > 0) {
+      frontierCount -= 1;
+    }
+  };
+
+  while (megalopolisCount + metropolisCount + cityCount + frontierCount + colonyCount > maxSettlements) {
+    reduceOne();
+    if (megalopolisCount + metropolisCount + cityCount + frontierCount + colonyCount <= 1) break;
+  }
+
+  const schedule: SettlementType[] = [];
+  for (let i = 0; i < megalopolisCount; i += 1) schedule.push('megalopolis');
+  for (let i = 0; i < metropolisCount; i += 1) schedule.push('metropolis');
+  for (let i = 0; i < cityCount; i += 1) schedule.push('city');
+  for (let i = 0; i < frontierCount; i += 1) schedule.push('frontierTown');
+  for (let i = 0; i < colonyCount; i += 1) schedule.push('colony');
+
+  const settlements: Settlement[] = [];
+  const usedNames = new Set<string>();
+  let capitalAssigned = false;
+
+  for (const type of schedule) {
+    const idx = placeOne(type);
+    if (idx === null) continue;
+
+    const isCapital = !capitalAssigned;
+    if (isCapital) capitalAssigned = true;
+
+    const name = generateSettlementName({
+      descriptorSeed: descriptor.seed,
+      factionId: ownerFactionId,
+      tileId: idx,
+      type,
+      isCapital,
+      used: usedNames
+    });
+
+    settlements.push({
+      id: rng.id('settlement'),
+      name,
+      tileId: idx,
+      factionId: ownerFactionId,
+      type,
+      population: SETTLEMENT_BASE_POPULATION[type],
+      ...(isCapital ? { isCapital: true } : {})
+    });
+
+    placed.push({ idx, type });
+
+    tiles[idx].featureBits |= FeatureBits.City;
+    if (isCapital) tiles[idx].featureBits |= FeatureBits.Capital;
+  }
+
+  return settlements;
+};
+
+const placeSettlements = (params: {
+  descriptor: PlanetSurfaceDescriptor;
+  tiles: PlanetSurfaceTile[];
+  ownerFactionId?: string | null;
+  env: SurfaceParams;
+  grid?: GeodesicGrid;
+}): Settlement[] => {
+  const config = params.descriptor.config;
+  if (isGeodesicConfig(config)) {
+    const grid = params.grid ?? getGeodesicGrid(config.frequency);
+    return placeSettlementsGeodesic({
+      descriptor: params.descriptor,
+      tiles: params.tiles,
+      grid,
+      ownerFactionId: params.ownerFactionId,
+      env: params.env
+    });
+  }
+
+  const generatorVersion = config?.generatorVersion ?? 1;
+  const rectParams = {
+    descriptor: params.descriptor,
+    tiles: params.tiles,
+    w: config.w,
+    h: config.h,
+    wrapX: config.wrapX,
+    ownerFactionId: params.ownerFactionId,
+    env: params.env
+  };
+
+  if (generatorVersion <= 1) {
+    return placeSettlementsV1(rectParams);
+  }
+  return placeSettlementsV2(rectParams);
 };
 
 const addRivers = (params: {
@@ -2669,6 +3144,70 @@ const addRivers = (params: {
   }
 };
 
+const addRiversGeodesic = (params: {
+  tiles: PlanetSurfaceTile[];
+  elev: Float32Array;
+  seaLevelElev: number;
+  grid: GeodesicGrid;
+  seed: number;
+}): void => {
+  const { tiles, elev, seaLevelElev, grid, seed } = params;
+  const n = tiles.length;
+  const candidates: number[] = [];
+
+  for (let i = 0; i < n; i += 1) {
+    if (elev[i] <= seaLevelElev) continue;
+    if (isWaterBiome(tiles[i].biome)) continue;
+    if (tiles[i].tempC2 <= 0) continue;
+    candidates.push(i);
+  }
+
+  if (candidates.length === 0) return;
+
+  const maxRivers = clamp(Math.floor(candidates.length / 280), 0, 14);
+  if (maxRivers <= 0) return;
+
+  const rng = new RNG(seed ^ 0x5bd1e995);
+  const used = new Set<number>();
+  const sources: number[] = [];
+
+  let safety = 0;
+  while (sources.length < maxRivers && safety < candidates.length * 3) {
+    safety += 1;
+    const idx = candidates[rng.int(0, candidates.length - 1)];
+    if (used.has(idx)) continue;
+    used.add(idx);
+    sources.push(idx);
+  }
+
+  for (const source of sources) {
+    const visited = new Set<number>();
+    let current = source;
+    let steps = 0;
+
+    while (steps < 120) {
+      tiles[current].featureBits |= FeatureBits.River;
+      visited.add(current);
+      if (elev[current] <= seaLevelElev || isWaterBiome(tiles[current].biome)) break;
+
+      const ns = grid.neighbors[current] ?? [];
+      let best = -1;
+      let bestElev = elev[current];
+      for (const next of ns) {
+        if (visited.has(next)) continue;
+        const e = elev[next];
+        if (e < bestElev - 1e-5) {
+          bestElev = e;
+          best = next;
+        }
+      }
+      if (best < 0) break;
+      current = best;
+      steps += 1;
+    }
+  }
+};
+
 const generateSurfaceMapV2 = (params: {
   systemId: string;
   bodyId: string;
@@ -2678,7 +3217,7 @@ const generateSurfaceMapV2 = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const { descriptor } = params;
-  const { w, h, wrapX } = descriptor.config;
+  const { w, h, wrapX } = requireRectConfig(descriptor.config);
   const n = w * h;
 
   const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
@@ -2819,9 +3358,6 @@ const generateSurfaceMapV2 = (params: {
   const settlements = placeSettlements({
     descriptor,
     tiles,
-    w,
-    h,
-    wrapX,
     ownerFactionId: params.ownerFactionId,
     env: envHydrology
   });
@@ -2849,7 +3385,7 @@ const generateSurfaceMapV3 = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const { descriptor } = params;
-  const { w, h, wrapX } = descriptor.config;
+  const { w, h, wrapX } = requireRectConfig(descriptor.config);
   const n = w * h;
 
   const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
@@ -3021,9 +3557,6 @@ const generateSurfaceMapV3 = (params: {
   const settlements = placeSettlements({
     descriptor,
     tiles,
-    w,
-    h,
-    wrapX,
     ownerFactionId: params.ownerFactionId,
     env: envHydrology
   });
@@ -3051,7 +3584,7 @@ const generateSurfaceMapV4 = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const { descriptor } = params;
-  const { w, h, wrapX } = descriptor.config;
+  const { w, h, wrapX } = requireRectConfig(descriptor.config);
   const n = w * h;
 
   const { env, baseT0K, albedo, atmosphere, pressureBar, maxLiquidWaterK } = resolveSurfaceInputs(params);
@@ -3386,7 +3919,7 @@ const generateSurfaceMapV6 = (params: {
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
   const { descriptor } = params;
-  const { w, h, wrapX } = descriptor.config;
+  const { w, h, wrapX } = requireRectConfig(descriptor.config);
   const n = w * h;
 
   const field = createTerrainField(params);
@@ -3487,9 +4020,6 @@ const generateSurfaceMapV6 = (params: {
   const settlements = placeSettlements({
     descriptor,
     tiles,
-    w,
-    h,
-    wrapX,
     ownerFactionId: params.ownerFactionId,
     env
   });
@@ -3508,6 +4038,85 @@ const generateSurfaceMapV6 = (params: {
   };
 };
 
+const generateSurfaceMapGeodesic = (params: {
+  systemId: string;
+  bodyId: string;
+  descriptor: PlanetSurfaceDescriptor;
+  planetData?: PlanetData;
+  moonData?: MoonData;
+  ownerFactionId?: string | null;
+}): PlanetSurfaceMap => {
+  const { descriptor } = params;
+  const config = descriptor.config;
+  if (!isGeodesicConfig(config)) {
+    return generateSurfaceMapV6(params);
+  }
+
+  const grid = getGeodesicGrid(config.frequency);
+  const n = grid.vertices.length;
+  const field = createTerrainField(params);
+  const { env, hydrologyMode } = field;
+  const allowRivers = hydrologyMode === 'liquid' && env.riversEnabled;
+
+  const elev = new Float32Array(n);
+  const tiles: PlanetSurfaceTile[] = new Array(n);
+
+  for (let i = 0; i < n; i += 1) {
+    const dir = grid.vertices[i];
+    const sample = field.sample(dir);
+    elev[i] = sample.height;
+    const tempC2 = Math.round(sample.tempC * 2);
+    const moistU8 = Math.round(clamp01(sample.moist) * 255);
+    tiles[i] = {
+      elev: Math.round(sample.height * 1000),
+      tempC2,
+      moist: moistU8,
+      biome: sample.biome,
+      featureBits: 0
+    };
+  }
+
+  if (hydrologyMode !== 'frozen') {
+    for (let i = 0; i < n; i += 1) {
+      if (!isWaterBiome(tiles[i].biome)) continue;
+      const ns = grid.neighbors[i] ?? [];
+      const adjacentLand = ns.some(nc => !isWaterBiome(tiles[nc].biome));
+      if (adjacentLand) tiles[i].biome = 'coast';
+    }
+  }
+
+  if (allowRivers) {
+    addRiversGeodesic({
+      tiles,
+      elev,
+      seaLevelElev: field.seaLevelElev,
+      grid,
+      seed: descriptor.seed
+    });
+  }
+
+  const settlements = placeSettlements({
+    descriptor,
+    tiles,
+    ownerFactionId: params.ownerFactionId,
+    env,
+    grid
+  });
+
+  if (hydrologyMode === 'frozen') {
+    freezeWaterBiomes(tiles);
+  }
+
+  return {
+    systemId: params.systemId,
+    bodyId: params.bodyId,
+    descriptor,
+    seaLevelElev: Math.round(field.seaLevelElev * 1000),
+    tiles,
+    settlements
+  };
+};
+
 export const generateSurfaceMap = (params: {
   systemId: string;
   bodyId: string;
@@ -3516,6 +4125,10 @@ export const generateSurfaceMap = (params: {
   moonData?: MoonData;
   ownerFactionId?: string | null;
 }): PlanetSurfaceMap => {
+  if (isGeodesicConfig(params.descriptor.config)) {
+    return generateSurfaceMapGeodesic(params);
+  }
+
   const generatorVersion = params.descriptor.config?.generatorVersion ?? 1;
   if (generatorVersion >= 6) {
     return generateSurfaceMapV6(params);
@@ -3548,11 +4161,12 @@ export interface SurfaceMapSummary {
     byType: Record<SettlementType, number>;
     byStatus: Record<string, number>;
     byFactionId: Record<string, number>;
-    capitals: Array<{ id: string; name: string; coord: HexCoord; factionId?: string }>;
+    capitals: Array<{ id: string; name: string; tileId: number; coord?: HexCoord; factionId?: string }>;
   };
   tileSample: Array<{
     index: number;
-    coord: HexCoord;
+    tileId: number;
+    coord?: HexCoord;
     elev: number;
     tempC2: number;
     moist: number;
@@ -3614,11 +4228,37 @@ const toSortedRecord = (entries: Array<[string, number]>): Record<string, number
   return out;
 };
 
-const buildTileSample = (tiles: PlanetSurfaceTile[], w: number, h: number): SurfaceMapSummary['tileSample'] => {
-  if (tiles.length === 0 || w <= 0 || h <= 0) return [];
+const buildTileSample = (
+  tiles: PlanetSurfaceTile[],
+  descriptor: PlanetSurfaceDescriptor
+): SurfaceMapSummary['tileSample'] => {
+  if (tiles.length === 0) return [];
+  const sample: SurfaceMapSummary['tileSample'] = [];
+
+  if (isGeodesicConfig(descriptor.config)) {
+    const count = Math.min(24, tiles.length);
+    for (let i = 0; i < count; i += 1) {
+      const index = Math.floor(((i + 0.5) * tiles.length) / count);
+      const tile = tiles[index];
+      if (!tile) continue;
+      sample.push({
+        index,
+        tileId: index,
+        elev: tile.elev,
+        tempC2: tile.tempC2,
+        moist: tile.moist,
+        biome: tile.biome,
+        featureBits: tile.featureBits
+      });
+    }
+    return sample;
+  }
+
+  const { w, h } = requireRectConfig(descriptor.config);
+  if (w <= 0 || h <= 0) return [];
   const rows = Math.min(4, h);
   const cols = Math.min(8, w);
-  const sample: SurfaceMapSummary['tileSample'] = [];
+
   for (let rIndex = 0; rIndex < rows; rIndex += 1) {
     const r = Math.floor(((rIndex + 0.5) * h) / rows);
     for (let qIndex = 0; qIndex < cols; qIndex += 1) {
@@ -3628,6 +4268,7 @@ const buildTileSample = (tiles: PlanetSurfaceTile[], w: number, h: number): Surf
       if (!tile) continue;
       sample.push({
         index,
+        tileId: index,
         coord: { q, r },
         elev: tile.elev,
         tempC2: tile.tempC2,
@@ -3637,6 +4278,7 @@ const buildTileSample = (tiles: PlanetSurfaceTile[], w: number, h: number): Surf
       });
     }
   }
+
   return sample;
 };
 
@@ -3702,7 +4344,7 @@ export const summarizeSurfaceMap = (map: PlanetSurfaceMap): SurfaceMapSummary =>
   const byType = createCountRecord(SETTLEMENT_TYPE_ORDER);
   const byStatus: Record<string, number> = { active: 0, ruins: 0 };
   const factionCounts = new Map<string, number>();
-  const capitals: Array<{ id: string; name: string; coord: HexCoord; factionId?: string }> = [];
+  const capitals: Array<{ id: string; name: string; tileId: number; coord?: HexCoord; factionId?: string }> = [];
 
   orderedSettlements.forEach(settlement => {
     byType[settlement.type] += 1;
@@ -3714,16 +4356,19 @@ export const summarizeSurfaceMap = (map: PlanetSurfaceMap): SurfaceMapSummary =>
       capitals.push({
         id: settlement.id,
         name: settlement.name,
-        coord: settlement.coord,
+        tileId: settlement.tileId,
+        ...(settlement.coord ? { coord: settlement.coord } : {}),
         factionId: settlement.factionId
       });
     }
+    const coordQ = settlement.coord ? settlement.coord.q : settlement.tileId;
+    const coordR = settlement.coord ? settlement.coord.r : settlement.tileId * 97;
     tilesHash = hashJoin32(
       tilesHash,
       settlement.id,
       settlement.name,
-      settlement.coord.q,
-      settlement.coord.r,
+      coordQ,
+      coordR,
       settlement.type,
       settlement.population,
       settlement.status ?? '',
@@ -3761,7 +4406,7 @@ export const summarizeSurfaceMap = (map: PlanetSurfaceMap): SurfaceMapSummary =>
       byFactionId: toSortedRecord(Array.from(factionCounts.entries())),
       capitals
     },
-    tileSample: buildTileSample(tiles, map.descriptor.config.w, map.descriptor.config.h)
+    tileSample: buildTileSample(tiles, map.descriptor)
   };
 };
 
@@ -3778,7 +4423,7 @@ const freezeSurfaceMap = (map: PlanetSurfaceMap): PlanetSurfaceMap => {
   Object.freeze(map.tiles);
 
   map.settlements.forEach(settlement => {
-    Object.freeze(settlement.coord);
+    if (settlement.coord) Object.freeze(settlement.coord);
     Object.freeze(settlement);
   });
   Object.freeze(map.settlements);
@@ -3848,20 +4493,17 @@ export const generateSurfaceMapForState = (state: GameState, bodyId: string): Pl
 export const getTileAt = (
   state: GameState,
   bodyId: string,
-  q: number,
-  r: number
+  tileId: number
 ): { descriptor: PlanetSurfaceDescriptor; tile: PlanetSurfaceTile } | null => {
   const descriptor = getSurfaceDescriptor(state, bodyId);
   if (!descriptor) return null;
-  const { w, h } = descriptor.config;
-  if (!Number.isFinite(q) || !Number.isFinite(r)) return null;
-  const qq = Math.floor(q);
-  const rr = Math.floor(r);
-  if (qq < 0 || qq >= w || rr < 0 || rr >= h) return null;
+  if (!Number.isFinite(tileId)) return null;
+  const idx = Math.floor(tileId);
+  const count = getSurfaceTileCount(descriptor);
+  if (idx < 0 || idx >= count) return null;
 
   const map = generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
-  const idx = rr * w + qq;
   return { descriptor, tile: map.tiles[idx] };
 };
 
@@ -3870,39 +4512,12 @@ export const getTileAt = (
 // ==========================================
 
 export const isInsideGrid = (pos: SurfacePos, descriptor: PlanetSurfaceDescriptor): boolean => {
-  const { w, h } = descriptor.config;
-  return pos.q >= 0 && pos.q < w && pos.r >= 0 && pos.r < h;
+  return resolveSurfaceTileId(descriptor, pos) !== null;
 };
 
 export const isPassable = (biome: Biome): boolean => !isWaterBiome(biome);
 
 export const isBuildable = (biome: Biome): boolean => !isWaterBiome(biome) && biome !== 'mountain' && biome !== 'ice';
-
-const axialDirs = [
-  { q: 1, r: 0 },
-  { q: 1, r: -1 },
-  { q: 0, r: -1 },
-  { q: -1, r: 0 },
-  { q: -1, r: 1 },
-  { q: 0, r: 1 }
-] as const;
-
-const axialRing = (center: { q: number; r: number }, radius: number): Array<{ q: number; r: number }> => {
-  if (radius <= 0) return [center];
-  const results: Array<{ q: number; r: number }> = [];
-  // Start at direction 4 * radius (south-west)
-  let q = center.q + axialDirs[4].q * radius;
-  let r = center.r + axialDirs[4].r * radius;
-  for (let side = 0; side < 6; side += 1) {
-    const d = axialDirs[side];
-    for (let step = 0; step < radius; step += 1) {
-      results.push({ q, r });
-      q += d.q;
-      r += d.r;
-    }
-  }
-  return results;
-};
 
 export const relocateSurfacePosDeterministic = (params: {
   state: GameState;
@@ -3910,53 +4525,92 @@ export const relocateSurfacePosDeterministic = (params: {
   kind: 'army' | 'building';
   bodyId: string;
   map?: PlanetSurfaceMap;
-  origin: { q: number; r: number };
-  predicate: (biome: Biome, q: number, r: number) => boolean;
-  isOccupied?: (q: number, r: number) => boolean;
+  originTileId: number | null;
+  predicate: (biome: Biome, tileId: number) => boolean;
+  isOccupied?: (tileId: number) => boolean;
 }): SurfacePos | null => {
   const { state, entityId, bodyId } = params;
   const map = params.map ?? generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
   if (map.bodyId !== bodyId) return null;
 
-  const { w, h, wrapX } = map.descriptor.config;
-  const inBounds = (q: number, r: number) => q >= 0 && q < w && r >= 0 && r < h;
+  const descriptor = map.descriptor;
+  const tileCount = map.tiles.length;
   const occupied = params.isOccupied ?? (() => false);
 
-  const maxRadius = w + h;
-  const originFinite = Number.isFinite(params.origin.q) && Number.isFinite(params.origin.r);
-  if (originFinite) {
-    for (let radius = 0; radius <= maxRadius; radius += 1) {
-      const ring = axialRing(params.origin, radius);
-      const candidates: Array<{ q: number; r: number; score: number }> = [];
-      for (const c of ring) {
-        const q = wrapQ(c.q, w, wrapX);
-        const r = c.r;
-        if (!inBounds(q, r)) continue;
-        if (occupied(q, r)) continue;
-        const biome = map.tiles[r * w + q].biome;
-        if (!params.predicate(biome, q, r)) continue;
-        const score = fnv1a32(`${entityId}|${bodyId}|${q}|${r}`) >>> 0;
-        candidates.push({ q, r, score });
+  const toSurfacePos = (tileId: number): SurfacePos => {
+    const coord = getSurfaceTileCoordFromId(descriptor, tileId);
+    return coord ? { bodyId, tileId, q: coord.q, r: coord.r } : { bodyId, tileId };
+  };
+
+  const pickBest = (candidates: number[]): SurfacePos | null => {
+    if (candidates.length === 0) return null;
+    let bestTile = candidates[0];
+    let bestScore = fnv1a32(`${entityId}|${bodyId}|${bestTile}`) >>> 0;
+    for (let i = 1; i < candidates.length; i += 1) {
+      const tileId = candidates[i];
+      const score = fnv1a32(`${entityId}|${bodyId}|${tileId}`) >>> 0;
+      if (score < bestScore) {
+        bestScore = score;
+        bestTile = tileId;
       }
-      if (candidates.length === 0) continue;
-      const rankedCandidates = sorted(candidates, (a, b) => a.score - b.score);
-      return { bodyId, q: rankedCandidates[0].q, r: rankedCandidates[0].r };
     }
+    return toSurfacePos(bestTile);
+  };
+
+  const originTileId = Number.isFinite(params.originTileId) ? Math.floor(params.originTileId as number) : null;
+
+  if (originTileId !== null && originTileId >= 0 && originTileId < tileCount) {
+    const visited = new Uint8Array(tileCount);
+    const dist = new Int16Array(tileCount);
+    dist.fill(-1);
+    const queue = new Int32Array(tileCount);
+    let head = 0;
+    let tail = 0;
+
+    visited[originTileId] = 1;
+    dist[originTileId] = 0;
+    queue[tail++] = originTileId;
+
+    let currentRadius = 0;
+    let candidates: number[] = [];
+
+    while (head < tail) {
+      const tileId = queue[head++];
+      const d = dist[tileId];
+      if (d > currentRadius) {
+        const picked = pickBest(candidates);
+        if (picked) return picked;
+        candidates = [];
+        currentRadius = d;
+      }
+
+      if (!occupied(tileId) && params.predicate(map.tiles[tileId].biome, tileId)) {
+        candidates.push(tileId);
+      }
+
+      const ns = getSurfaceTileNeighbors(descriptor, tileId);
+      for (const next of ns) {
+        if (next < 0 || next >= tileCount) continue;
+        if (visited[next]) continue;
+        visited[next] = 1;
+        dist[next] = d + 1;
+        queue[tail++] = next;
+      }
+    }
+
+    const picked = pickBest(candidates);
+    if (picked) return picked;
   }
 
-  // Fallback: scan whole map
-  let best: { q: number; r: number; score: number } | null = null;
-  for (let r = 0; r < h; r += 1) {
-    for (let q = 0; q < w; q += 1) {
-      if (occupied(q, r)) continue;
-      const biome = map.tiles[r * w + q].biome;
-      if (!params.predicate(biome, q, r)) continue;
-      const score = fnv1a32(`${entityId}|${bodyId}|${q}|${r}`) >>> 0;
-      if (!best || score < best.score) best = { q, r, score };
-    }
+  const fallback: number[] = [];
+  for (let i = 0; i < tileCount; i += 1) {
+    if (occupied(i)) continue;
+    const biome = map.tiles[i].biome;
+    if (!params.predicate(biome, i)) continue;
+    fallback.push(i);
   }
-  return best ? { bodyId, q: best.q, r: best.r } : null;
+  return pickBest(fallback);
 };
 
 // ==========================================
@@ -3971,16 +4625,22 @@ const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): S
   const map = generateSurfaceMapForState(state, bodyId);
   if (!map) return null;
 
-  const { w, h } = descriptor.config;
-
-  const explicitCapital = map.settlements.find(s => s.isCapital)?.coord;
+  const explicitCapital = map.settlements.find(s => s.isCapital)?.tileId;
   // Fallback: pick the largest settlement by population if no explicit capital is flagged.
   let largest: (typeof map.settlements)[number] | null = null;
   for (const s of map.settlements) {
     if (!largest || s.population > largest.population) largest = s;
   }
-  const capital = explicitCapital ?? largest?.coord;
-  const origin = capital ? { q: capital.q, r: capital.r } : { q: Math.floor(w / 2), r: Math.floor(h / 2) };
+  const capital = explicitCapital ?? largest?.tileId;
+  const fallbackTileId = (() => {
+    if (!isGeodesicConfig(descriptor.config)) {
+      const { w, h } = requireRectConfig(descriptor.config);
+      return axialToIndex({ q: Math.floor(w / 2), r: Math.floor(h / 2) }, w);
+    }
+    const count = getSurfaceTileCount(descriptor);
+    return count > 0 ? (fnv1a32(`${bodyId}|origin`) % count) : 0;
+  })();
+  const originTileId = capital ?? fallbackTileId;
 
   // Prefer passable tiles near capital/center. Deterministic tie-break by hash.
   const pos = relocateSurfacePosDeterministic({
@@ -3988,7 +4648,7 @@ const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): S
     entityId: armyId,
     kind: 'army',
     bodyId,
-    origin,
+    originTileId,
     predicate: biome => isPassable(biome)
   });
   return pos;
@@ -3998,19 +4658,25 @@ export const pickLandingSurfacePosForArmy = (params: {
   state: GameState;
   map: PlanetSurfaceMap;
   army: Army;
-  isOccupied?: (q: number, r: number) => boolean;
+  isOccupied?: (tileId: number) => boolean;
 }): SurfacePos | null => {
   const { state, map, army } = params;
-  const { w, h } = map.descriptor.config;
-
-  const explicitCapital = map.settlements.find(s => s.isCapital)?.coord;
+  const explicitCapital = map.settlements.find(s => s.isCapital)?.tileId;
   // Fallback: pick the largest settlement by population if no explicit capital is flagged.
   let largest: (typeof map.settlements)[number] | null = null;
   for (const s of map.settlements) {
     if (!largest || s.population > largest.population) largest = s;
   }
-  const capital = explicitCapital ?? largest?.coord;
-  const origin = capital ? { q: capital.q, r: capital.r } : { q: Math.floor(w / 2), r: Math.floor(h / 2) };
+  const capital = explicitCapital ?? largest?.tileId;
+  const fallbackTileId = (() => {
+    if (!isGeodesicConfig(map.descriptor.config)) {
+      const { w, h } = requireRectConfig(map.descriptor.config);
+      return axialToIndex({ q: Math.floor(w / 2), r: Math.floor(h / 2) }, w);
+    }
+    const count = map.tiles.length;
+    return count > 0 ? (fnv1a32(`${map.bodyId}|landing`) % count) : 0;
+  })();
+  const originTileId = capital ?? fallbackTileId;
 
   const isAmphibious = GROUND_UNIT_STATS[army.unitType].tags?.includes('amphibious') ?? false;
 
@@ -4020,7 +4686,7 @@ export const pickLandingSurfacePosForArmy = (params: {
     entityId: army.id,
     kind: 'army',
     bodyId: map.bodyId,
-    origin,
+    originTileId,
     predicate: biome => isPassable(biome) || (isAmphibious && isWaterBiome(biome)),
     isOccupied: params.isOccupied
   });
@@ -4045,96 +4711,105 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
   let armiesChanged = false;
   let buildingsChanged = false;
 
-  // 1) Normalize buildings (valid tile + uniqueness per tile)
+  const resolveFallbackTileId = (descriptor: PlanetSurfaceDescriptor, bodyId: string, map: PlanetSurfaceMap): number => {
+    if (!isGeodesicConfig(descriptor.config)) {
+      const { w, h } = requireRectConfig(descriptor.config);
+      return axialToIndex({ q: Math.floor(w / 2), r: Math.floor(h / 2) }, w);
+    }
+    const count = map.tiles.length;
+    return count > 0 ? (fnv1a32(`${bodyId}|fallback`) % count) : 0;
+  };
+
+  const toSurfacePos = (
+    descriptor: PlanetSurfaceDescriptor,
+    bodyId: string,
+    tileId: number
+  ): SurfacePos => {
+    const coord = getSurfaceTileCoordFromId(descriptor, tileId);
+    return coord ? { bodyId, tileId, q: coord.q, r: coord.r } : { bodyId, tileId };
+  };
+
   const buildingsSorted = sorted(groundBuildings, (a, b) => a.id.localeCompare(b.id));
   const finalPosById = new Map<string, SurfacePos>();
-  const occupied = new Set<string>(); // `${bodyId}:${q}:${r}`
+  const occupied = new Set<string>(); // `${bodyId}:${tileId}`
 
   for (const b of buildingsSorted) {
     const bodyId = b.surfacePos.bodyId;
     const descriptor = descriptors[bodyId];
-    const q = clampInt2(b.surfacePos.q);
-    const r = clampInt2(b.surfacePos.r);
-    let finalPos: SurfacePos = { bodyId, q, r };
-
     if (!descriptor) {
-      const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
-      occupied.add(key);
-      finalPosById.set(b.id, finalPos);
-      buildingsChanged = true;
+      finalPosById.set(b.id, b.surfacePos);
       continue;
     }
 
     const map = generateSurfaceMapForState(state, bodyId);
     if (!map) {
-      const key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
-      occupied.add(key);
-      finalPosById.set(b.id, finalPos);
-      buildingsChanged = true;
+      const tileId = resolveSurfaceTileId(descriptor, b.surfacePos);
+      if (tileId !== null) {
+        const pos = toSurfacePos(descriptor, bodyId, tileId);
+        finalPosById.set(b.id, pos);
+        occupied.add(`${bodyId}:${tileId}`);
+        if (
+          b.surfacePos.tileId !== pos.tileId
+          || b.surfacePos.q !== pos.q
+          || b.surfacePos.r !== pos.r
+        ) {
+          buildingsChanged = true;
+        }
+      } else {
+        finalPosById.set(b.id, b.surfacePos);
+      }
       continue;
     }
 
-    if (!isInsideGrid(finalPos, descriptor)) {
-      const relocated = relocateSurfacePosDeterministic({
-        state,
-        entityId: b.id,
-        kind: 'building',
-        bodyId,
-        origin: { q, r },
-        predicate: biome => isBuildable(biome),
-        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
-      });
-      if (!relocated) continue;
-      finalPos = relocated;
-      buildingsChanged = true;
+    const occupiedCheck = (tileId: number) => occupied.has(`${bodyId}:${tileId}`);
+    const fallbackTileId = resolveFallbackTileId(descriptor, bodyId, map);
+    const originTileId = resolveSurfaceTileId(descriptor, b.surfacePos) ?? fallbackTileId;
+
+    const relocate = (): SurfacePos | null => relocateSurfacePosDeterministic({
+      state,
+      entityId: b.id,
+      kind: 'building',
+      bodyId,
+      map,
+      originTileId,
+      predicate: biome => isBuildable(biome),
+      isOccupied: occupiedCheck
+    });
+
+    let nextPos: SurfacePos | null = null;
+    const currentTileId = resolveSurfaceTileId(descriptor, b.surfacePos);
+    if (currentTileId === null || currentTileId < 0 || currentTileId >= map.tiles.length) {
+      nextPos = relocate();
+    } else {
+      const biome = map.tiles[currentTileId].biome;
+      if (!isBuildable(biome) || occupiedCheck(currentTileId)) {
+        nextPos = relocate();
+      } else {
+        nextPos = toSurfacePos(descriptor, bodyId, currentTileId);
+      }
     }
 
-    const biome = map.tiles[finalPos.r * descriptor.config.w + finalPos.q].biome;
-    if (!isBuildable(biome)) {
-      const relocated = relocateSurfacePosDeterministic({
-        state,
-        entityId: b.id,
-        kind: 'building',
-        bodyId,
-        origin: { q: finalPos.q, r: finalPos.r },
-        predicate: bb => isBuildable(bb),
-        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
-      });
-      if (!relocated) continue;
-      finalPos = relocated;
+    if (!nextPos || nextPos.tileId === undefined) continue;
+    occupied.add(`${bodyId}:${nextPos.tileId}`);
+    finalPosById.set(b.id, nextPos);
+
+    if (
+      b.surfacePos.bodyId !== nextPos.bodyId
+      || b.surfacePos.tileId !== nextPos.tileId
+      || b.surfacePos.q !== nextPos.q
+      || b.surfacePos.r !== nextPos.r
+    ) {
       buildingsChanged = true;
     }
-
-    let key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
-    if (occupied.has(key)) {
-      const relocated = relocateSurfacePosDeterministic({
-        state,
-        entityId: b.id,
-        kind: 'building',
-        bodyId,
-        origin: { q: finalPos.q, r: finalPos.r },
-        predicate: biome2 => isBuildable(biome2),
-        isOccupied: (qq, rr) => occupied.has(`${bodyId}:${qq}:${rr}`)
-      });
-      if (!relocated) continue;
-      finalPos = relocated;
-      key = `${bodyId}:${finalPos.q}:${finalPos.r}`;
-      buildingsChanged = true;
-    }
-
-    occupied.add(key);
-    finalPosById.set(b.id, finalPos);
   }
 
   const nextBuildings: GroundBuilding[] = [];
   for (const b of groundBuildings) {
     const pos = finalPosById.get(b.id);
     if (!pos) continue;
-    if (pos.bodyId !== b.surfacePos.bodyId || pos.q !== b.surfacePos.q || pos.r !== b.surfacePos.r) buildingsChanged = true;
     nextBuildings.push({ ...b, surfacePos: pos });
   }
 
-  // 2) Normalize armies (ensure surfacePos exists, in-grid, passable; stacking allowed)
   const nextArmies = state.armies.map(a => {
     if (a.state !== ArmyState.DEPLOYED) return a;
 
@@ -4145,39 +4820,41 @@ export const normalizeSurfacePositions = (state: GameState): GameState => {
     if (!map) return a;
 
     const isAmphibious = GROUND_UNIT_STATS[a.unitType].tags?.includes('amphibious') ?? false;
-    const isWaterBiome = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
-    const isPassableForArmy = (biome: Biome): boolean => isPassable(biome) || (isAmphibious && isWaterBiome(biome));
+    const isWaterBiomeLocal = (biome: Biome): boolean => biome === 'ocean' || biome === 'coast' || biome === 'lake';
+    const isPassableForArmy = (biome: Biome): boolean => isPassable(biome) || (isAmphibious && isWaterBiomeLocal(biome));
 
-    const existing = a.surfacePos;
-    const q0 = existing ? clampInt2(existing.q) : NaN;
-    const r0 = existing ? clampInt2(existing.r) : NaN;
-
+    const existingTileId = a.surfacePos ? resolveSurfaceTileId(descriptor, a.surfacePos) : null;
     let nextPos: SurfacePos | null = null;
-    if (!existing) {
+
+    if (existingTileId === null) {
+      nextPos = pickInitialArmyPos(state, a.id, bodyId);
+    } else if (existingTileId < 0 || existingTileId >= map.tiles.length) {
       nextPos = pickInitialArmyPos(state, a.id, bodyId);
     } else {
-      const normalized: SurfacePos = { bodyId, q: q0, r: r0 };
-      if (!isInsideGrid(normalized, descriptor)) {
-        nextPos = pickInitialArmyPos(state, a.id, bodyId);
+      const biome = map.tiles[existingTileId].biome;
+      if (!isPassableForArmy(biome)) {
+        nextPos = relocateSurfacePosDeterministic({
+          state,
+          entityId: a.id,
+          kind: 'army',
+          bodyId,
+          map,
+          originTileId: existingTileId,
+          predicate: b2 => isPassableForArmy(b2)
+        });
       } else {
-        const biome = map.tiles[normalized.r * descriptor.config.w + normalized.q].biome;
-        if (!isPassableForArmy(biome)) {
-          nextPos = relocateSurfacePosDeterministic({
-            state,
-            entityId: a.id,
-            kind: 'army',
-            bodyId,
-            origin: { q: normalized.q, r: normalized.r },
-            predicate: b2 => isPassableForArmy(b2)
-          });
-        } else {
-          nextPos = normalized;
-        }
+        nextPos = toSurfacePos(descriptor, bodyId, existingTileId);
       }
     }
 
     if (!nextPos) return a;
-    if (!a.surfacePos || a.surfacePos.q !== nextPos.q || a.surfacePos.r !== nextPos.r || a.surfacePos.bodyId !== nextPos.bodyId) {
+    if (
+      !a.surfacePos
+      || a.surfacePos.bodyId !== nextPos.bodyId
+      || a.surfacePos.tileId !== nextPos.tileId
+      || a.surfacePos.q !== nextPos.q
+      || a.surfacePos.r !== nextPos.r
+    ) {
       armiesChanged = true;
       return { ...a, surfacePos: nextPos };
     }

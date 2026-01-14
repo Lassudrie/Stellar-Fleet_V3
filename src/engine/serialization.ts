@@ -65,7 +65,7 @@ import {
 } from './worldgen/stellarSystem';
 import { normalizePlanetBodies } from './planets';
 import { quantizeFuel } from './logistics/fuel';
-import { createPlanetSurfaceDescriptor, normalizeSurfacePositions } from './planetSurface';
+import { createPlanetSurfaceDescriptor, getSurfaceTileCount, normalizeSurfacePositions, resolveSurfaceTileId } from './planetSurface';
 import { BREAK_THRESHOLD, RALLY_THRESHOLD } from './ground';
 
 // ============================================================
@@ -295,6 +295,7 @@ export interface GameStateDTO {
   planetSurfaceDescriptorsByBodyId?: Record<string, PlanetSurfaceDescriptor>;
   groundBuildings?: GroundBuildingDTO[];
   settlementControl?: Record<string, SettlementControlState>;
+  bombardedTilesByBodyId?: Record<string, number[]>;
   bombardedHexesByBodyId?: Record<string, HexCoord[]>;
 }
 
@@ -872,12 +873,74 @@ const sanitizeBombardedHexesByBodyId = (
   return Object.keys(out).length > 0 ? out : undefined;
 };
 
+const sanitizeBombardedTilesByBodyId = (
+  value: unknown,
+  validBodyIds: Set<string>,
+  descriptors?: Record<string, PlanetSurfaceDescriptor>
+): Record<string, number[]> | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') {
+    throw new Error("Field 'bombardedTilesByBodyId' must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const out: Record<string, number[]> = {};
+  Object.entries(record).forEach(([bodyId, entry]) => {
+    if (!validBodyIds.has(bodyId)) return;
+    if (!Array.isArray(entry)) return;
+    const descriptor = descriptors?.[bodyId];
+    const maxCount = descriptor ? getSurfaceTileCount(descriptor) : null;
+    const tiles: number[] = [];
+    entry.forEach(raw => {
+      if (!isFiniteNumber(raw)) return;
+      const tileId = Math.floor(raw);
+      if (tileId < 0) return;
+      if (typeof maxCount === 'number' && tileId >= maxCount) return;
+      tiles.push(tileId);
+    });
+    if (tiles.length > 0) {
+      out[bodyId] = tiles;
+    }
+  });
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
+const convertBombardedHexesToTiles = (
+  legacy: Record<string, HexCoord[]> | undefined,
+  descriptors?: Record<string, PlanetSurfaceDescriptor>
+): Record<string, number[]> | undefined => {
+  if (!legacy || !descriptors) return undefined;
+  const out: Record<string, number[]> = {};
+  Object.entries(legacy).forEach(([bodyId, coords]) => {
+    const descriptor = descriptors[bodyId];
+    if (!descriptor) return;
+    const tiles: number[] = [];
+    coords.forEach(coord => {
+      const tileId = resolveSurfaceTileId(descriptor, { bodyId, q: coord.q, r: coord.r });
+      if (tileId === null) return;
+      tiles.push(tileId);
+    });
+    if (tiles.length > 0) {
+      out[bodyId] = tiles;
+    }
+  });
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 const sanitizeSurfacePos = (value: unknown, validBodyIds: Set<string>): SurfacePos | null => {
   if (!value || typeof value !== 'object') return null;
   const p: any = value;
   if (typeof p.bodyId !== 'string' || !validBodyIds.has(p.bodyId)) return null;
-  if (!isFiniteNumber(p.q) || !isFiniteNumber(p.r)) return null;
-  return { bodyId: p.bodyId, q: Math.floor(p.q), r: Math.floor(p.r) };
+  const tileId = isFiniteNumber(p.tileId) ? Math.floor(p.tileId) : undefined;
+  const q = isFiniteNumber(p.q) ? Math.floor(p.q) : undefined;
+  const r = isFiniteNumber(p.r) ? Math.floor(p.r) : undefined;
+  const hasQr = q !== undefined && r !== undefined;
+  if (tileId === undefined && !hasQr) return null;
+  if ((q !== undefined) !== (r !== undefined)) return null;
+  return {
+    bodyId: p.bodyId,
+    ...(tileId !== undefined ? { tileId } : {}),
+    ...(hasQr ? { q, r } : {})
+  };
 };
 
 const GROUND_UNIT_TYPES = new Set<GroundUnitType>([
@@ -1016,14 +1079,20 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
   const config = d.config;
   if (!config || typeof config !== 'object') return null;
 
+  const gridKind = (config as any).gridKind;
+  const frequency = (config as any).frequency;
   const w = (config as any).w;
   const h = (config as any).h;
   const wrapX = (config as any).wrapX;
   const generatorVersion = (config as any).generatorVersion;
-  if (!isFiniteNumber(w) || w <= 0) return null;
-  if (!isFiniteNumber(h) || h <= 0) return null;
-  if (typeof wrapX !== 'boolean') return null;
   if (!isFiniteNumber(generatorVersion) || generatorVersion <= 0) return null;
+  if (gridKind === 'geodesic') {
+    if (!isFiniteNumber(frequency) || frequency <= 0) return null;
+  } else {
+    if (!isFiniteNumber(w) || w <= 0) return null;
+    if (!isFiniteNumber(h) || h <= 0) return null;
+    if (typeof wrapX !== 'boolean') return null;
+  }
 
   const astroRef = d.astroRef;
   if (!astroRef || typeof astroRef !== 'object') return null;
@@ -1037,9 +1106,9 @@ const sanitizePlanetSurfaceDescriptor = (value: unknown): PlanetSurfaceDescripto
   return {
     seed: (d.seed >>> 0),
     config: {
-      w: Math.floor(w),
-      h: Math.floor(h),
-      wrapX,
+      ...(gridKind === 'geodesic'
+        ? { gridKind: 'geodesic', frequency: Math.floor(frequency) }
+        : { w: Math.floor(w), h: Math.floor(h), wrapX }),
       generatorVersion: Math.floor(generatorVersion)
     },
     astroRef: {
@@ -1325,7 +1394,7 @@ export const serializeGameState = (state: GameState): string => {
     planetSurfaceDescriptorsByBodyId: state.planetSurfaceDescriptorsByBodyId,
     groundBuildings: state.groundBuildings,
     settlementControl: state.settlementControl,
-    bombardedHexesByBodyId: state.bombardedHexesByBodyId,
+    bombardedTilesByBodyId: state.bombardedTilesByBodyId,
     objectives: state.objectives,
     rules: state.rules
   };
@@ -1590,7 +1659,17 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     );
     const groundBuildings = sanitizeGroundBuildings(dto.groundBuildings, planetIds, validFactionIds);
     const settlementControl = sanitizeSettlementControl(dto.settlementControl, validFactionIds);
-    const bombardedHexesByBodyId = sanitizeBombardedHexesByBodyId(dto.bombardedHexesByBodyId, planetIds);
+    const bombardedTilesByBodyId = sanitizeBombardedTilesByBodyId(
+      dto.bombardedTilesByBodyId,
+      planetIds,
+      planetSurfaceDescriptorsByBodyIdFromSave
+    );
+    const legacyBombardedHexes = sanitizeBombardedHexesByBodyId(dto.bombardedHexesByBodyId, planetIds);
+    const bombardedTilesFromLegacy = convertBombardedHexesToTiles(
+      legacyBombardedHexes,
+      planetSurfaceDescriptorsByBodyIdFromSave
+    );
+    const resolvedBombardedTiles = bombardedTilesByBodyId ?? bombardedTilesFromLegacy;
 
     const stationsDto: unknown[] = Array.isArray(dto.stations) ? dto.stations : [];
     if (dto.stations !== undefined && !Array.isArray(dto.stations)) {
@@ -1984,7 +2063,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       planetSurfaceDescriptorsByBodyId,
       groundBuildings,
       settlementControl,
-      bombardedHexesByBodyId,
+      bombardedTilesByBodyId: resolvedBombardedTiles,
       objectives: dto.objectives || { conditions: [], maxTurns: undefined },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };

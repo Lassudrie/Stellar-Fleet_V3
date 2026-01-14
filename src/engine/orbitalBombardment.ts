@@ -1,4 +1,4 @@
-import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, GroundBuilding, HexCoord, ShipType, StarSystem } from '../shared/shared';
+import { Army, ArmyState, FactionId, Fleet, FleetState, GameState, GroundBuilding, ShipType, StarSystem } from '../shared/shared';
 import {
   ORBITAL_BOMBARDMENT_POWER_PER_SHIP,
   ORBITAL_BOMBARDMENT_STRENGTH_LOSS_PER_POWER,
@@ -12,6 +12,7 @@ import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { sorted } from '../shared/shared';
 import { AO_COEFF } from './ground';
+import { resolveSurfaceTileId } from './planetSurface';
 
 export interface OrbitalBombardmentTarget {
   systemId: string;
@@ -27,7 +28,7 @@ export interface OrbitalBombardmentResult {
   updates: Map<string, { members: number; morale: number }>;
   logs: string[];
   bombardedPlanetIds: Set<string>;
-  bombardedHexesByBodyId: Record<string, HexCoord[]>;
+  bombardedTileIdsByBodyId: Record<string, number[]>;
 }
 
 const getFactionLabel = (state: GameState, factionId: FactionId): string => {
@@ -196,16 +197,13 @@ export const resolveOrbitalBombardment = (state: GameState): OrbitalBombardmentR
   const updates = new Map<string, { members: number; morale: number }>();
   const logs: string[] = [];
   const bombardedPlanetIds = new Set<string>();
-  const bombardedHexesByBodyId = new Map<string, Map<string, HexCoord>>();
+  const bombardedTileIdsByBodyId = new Map<string, Set<number>>();
   const buildings = state.groundBuildings ?? [];
 
-  const markBombardedHex = (bodyId: string, coord: HexCoord) => {
-    const byBody = bombardedHexesByBodyId.get(bodyId) ?? new Map<string, HexCoord>();
-    const key = `${coord.q}|${coord.r}`;
-    if (!byBody.has(key)) {
-      byBody.set(key, coord);
-      bombardedHexesByBodyId.set(bodyId, byBody);
-    }
+  const markBombardedTile = (bodyId: string, tileId: number) => {
+    const byBody = bombardedTileIdsByBodyId.get(bodyId) ?? new Set<number>();
+    byBody.add(tileId);
+    bombardedTileIdsByBodyId.set(bodyId, byBody);
   };
 
   state.systems.forEach(system => {
@@ -230,16 +228,20 @@ export const resolveOrbitalBombardment = (state: GameState): OrbitalBombardmentR
 
       target.targetArmies.forEach(army => {
         if (!army.surfacePos) return;
-        markBombardedHex(target.planetId, { q: army.surfacePos.q, r: army.surfacePos.r });
+        const descriptor = state.planetSurfaceDescriptorsByBodyId?.[target.planetId];
+        if (!descriptor) return;
+        const tileId = resolveSurfaceTileId(descriptor, army.surfacePos);
+        if (tileId === null) return;
+        markBombardedTile(target.planetId, tileId);
       });
     });
   });
 
-  const bombardedHexes: Record<string, HexCoord[]> = {};
-  bombardedHexesByBodyId.forEach((coords, bodyId) => {
-    const list = sorted(Array.from(coords.values()), (a, b) => (a.r !== b.r ? a.r - b.r : a.q - b.q));
-    bombardedHexes[bodyId] = list;
+  const bombardedTileIds: Record<string, number[]> = {};
+  bombardedTileIdsByBodyId.forEach((tiles, bodyId) => {
+    const list = sorted(Array.from(tiles.values()), (a, b) => a - b);
+    bombardedTileIds[bodyId] = list;
   });
 
-  return { updates, logs, bombardedPlanetIds, bombardedHexesByBodyId: bombardedHexes };
+  return { updates, logs, bombardedPlanetIds, bombardedTileIdsByBodyId: bombardedTileIds };
 };
