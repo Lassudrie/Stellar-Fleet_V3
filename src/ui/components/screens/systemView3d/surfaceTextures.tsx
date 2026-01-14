@@ -9,6 +9,7 @@ import {
   MathUtils,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Quaternion,
   RepeatWrapping,
   SRGBColorSpace,
   Vector3
@@ -55,6 +56,13 @@ const SURFACE_TEXTURE_MAX_CACHE_ENTRIES = 24;
 const SURFACE_TEXTURE_MAX_INFLIGHT = 4;
 const SURFACE_TEXTURE_WORKER_POOL_SIZE = 3;
 const MAX_BODY_UPDATES_PER_FRAME = 3;
+const SURFACE_TEXTURE_IDLE_DELAY_MS = 250;
+const SURFACE_TEXTURE_WARMUP_WINDOW_MS = 1200;
+const SURFACE_TEXTURE_BASELINE_RESOLUTION = { width: 512, height: 256 };
+const SURFACE_TEXTURE_MIN_RESOLUTION = { width: 256, height: 128 };
+const CAMERA_MOTION_POS_EPS = 1e-4;
+const CAMERA_MOTION_ROT_EPS = 1e-4;
+const CAMERA_MOTION_FOV_EPS = 1e-3;
 const SURFACE_MIPMAP_ANISOTROPY_DESKTOP = 8;
 
 type SurfaceTextureResolution = { width: number; height: number };
@@ -320,6 +328,15 @@ export const SystemSurfaceTextureManager: React.FC<{
   const requestStateRef = useRef<GameState | null>(null);
   const requestEpochRef = useRef(0);
   const planetsRef = useRef(planets);
+  const selectedBodyIdRef = useRef<string | null>(selectedBodyId);
+  const warmupTargetsRef = useRef<Map<string, number>>(new Map());
+  const cameraMotionRef = useRef({
+    position: new Vector3(),
+    quaternion: new Quaternion(),
+    fov: 0,
+    hasSample: false,
+    lastMotionTime: 0
+  });
   const maxCacheEntries = SURFACE_TEXTURE_MAX_CACHE_ENTRIES;
   const maxInflight = SURFACE_TEXTURE_MAX_INFLIGHT;
   const scratch = useMemo(() => ({
@@ -430,6 +447,10 @@ export const SystemSurfaceTextureManager: React.FC<{
   useEffect(() => {
     planetsRef.current = planets;
   }, [planets]);
+
+  useEffect(() => {
+    selectedBodyIdRef.current = selectedBodyId;
+  }, [selectedBodyId]);
 
   const disposeTextureBundle = useCallback((bundle: SurfaceTextureBundle) => {
     bundle.color.dispose();
@@ -693,6 +714,11 @@ export const SystemSurfaceTextureManager: React.FC<{
     lastResolutionByBodyIdRef.current.clear();
     closeUpBodyIdRef.current = null;
     onCloseUpBodyIdChange?.(null);
+    warmupTargetsRef.current.clear();
+    const warmupBodyId = selectedBodyIdRef.current;
+    if (warmupBodyId) {
+      warmupTargetsRef.current.set(warmupBodyId, performance.now() + SURFACE_TEXTURE_WARMUP_WINDOW_MS);
+    }
 
     planetsRef.current.forEach((planet) => {
       const material = resolveMaterial(planet.id);
@@ -718,6 +744,28 @@ export const SystemSurfaceTextureManager: React.FC<{
     camera.updateMatrixWorld();
 
     const now = performance.now();
+    const cameraMotion = cameraMotionRef.current;
+    if (!cameraMotion.hasSample) {
+      cameraMotion.position.copy(camera.position);
+      cameraMotion.quaternion.copy(camera.quaternion);
+      cameraMotion.fov = camera.fov;
+      cameraMotion.hasSample = true;
+      cameraMotion.lastMotionTime = now;
+    } else {
+      const posDeltaSq = camera.position.distanceToSquared(cameraMotion.position);
+      const quatDot = Math.abs(camera.quaternion.dot(cameraMotion.quaternion));
+      const rotDelta = 1 - quatDot;
+      const fovDelta = Math.abs(camera.fov - cameraMotion.fov);
+      if (posDeltaSq > CAMERA_MOTION_POS_EPS * CAMERA_MOTION_POS_EPS
+        || rotDelta > CAMERA_MOTION_ROT_EPS
+        || fovDelta > CAMERA_MOTION_FOV_EPS) {
+        cameraMotion.lastMotionTime = now;
+      }
+      cameraMotion.position.copy(camera.position);
+      cameraMotion.quaternion.copy(camera.quaternion);
+      cameraMotion.fov = camera.fov;
+    }
+    const isIdle = now - cameraMotion.lastMotionTime > SURFACE_TEXTURE_IDLE_DELAY_MS;
     const activeKeys = activeKeysRef.current;
     const bodyMetricsById = bodyMetricsByIdRef.current;
     const bodyInfoById = bodyInfoByIdRef.current;
@@ -763,7 +811,7 @@ export const SystemSurfaceTextureManager: React.FC<{
         && Math.abs(scratch.ndc.x) <= 1 + screenMargin + ndcRadiusX
         && Math.abs(scratch.ndc.y) <= 1 + screenMargin + ndcRadiusY;
 
-      const diameterPx = isOnScreen ? pixelRadius * 2 : 0;
+      const diameterPx = pixelRadius * 2;
       bodyMetricsById.set(bodyId, { diameterPx, isOnScreen });
 
       if (isOnScreen && diameterPx >= SURFACE_TEXTURE_ULTRA_DIAMETER_PX && diameterPx > ultraDiameter) {
@@ -850,6 +898,9 @@ export const SystemSurfaceTextureManager: React.FC<{
       const metrics = bodyMetricsById.get(bodyId);
       if (!metrics) return;
       const { diameterPx, isOnScreen } = metrics;
+      const warmupUntil = warmupTargetsRef.current.get(bodyId);
+      const isWarmup = typeof warmupUntil === 'number' && warmupUntil > now;
+      const shouldRender = isOnScreen || isWarmup;
       if (diameterPx < 10) {
         desiredKeyByBodyIdRef.current.set(bodyId, null);
         const material = resolveMaterial(bodyId);
@@ -863,14 +914,21 @@ export const SystemSurfaceTextureManager: React.FC<{
       const upshift = SURFACE_TEXTURE_UPSHIFT_DESKTOP;
       const downshift = SURFACE_TEXTURE_DOWNSHIFT_DESKTOP;
       const isFocusBody = bodyId === closeUpBodyIdRef.current;
-      let resolution = isOnScreen
+      let resolution = shouldRender
         ? pickSurfaceTextureResolution(diameterPx, shouldPreferUltra(bodyId), lastResolution, upshift, downshift)
         : null;
-      if (!resolution && isFocusBody) {
-        resolution = lastResolution ?? SURFACE_TEXTURE_RESOLUTIONS[0];
+      if (!resolution && isFocusBody && shouldRender) {
+        resolution = lastResolution ?? SURFACE_TEXTURE_MIN_RESOLUTION;
       }
-      if (resolution && !isFocusBody && resolution.width > 256) {
-        resolution = { width: 256, height: 128 };
+      if (resolution && isFocusBody && resolution.width > SURFACE_TEXTURE_BASELINE_RESOLUTION.width && (!isIdle || isWarmup)) {
+        if (lastResolution && lastResolution.width > SURFACE_TEXTURE_BASELINE_RESOLUTION.width) {
+          resolution = lastResolution;
+        } else {
+          resolution = SURFACE_TEXTURE_BASELINE_RESOLUTION;
+        }
+      }
+      if (resolution && !isFocusBody && resolution.width > SURFACE_TEXTURE_MIN_RESOLUTION.width) {
+        resolution = SURFACE_TEXTURE_MIN_RESOLUTION;
       }
       if (resolution) {
         lastResolutionByBodyIdRef.current.set(bodyId, resolution);
@@ -880,7 +938,7 @@ export const SystemSurfaceTextureManager: React.FC<{
       if (!resolution) {
         desiredKeyByBodyIdRef.current.set(bodyId, null);
         const material = resolveMaterial(bodyId);
-        if (!isOnScreen && material && material.userData.surfaceTextureKey) {
+        if (!isOnScreen && !isWarmup && material && material.userData.surfaceTextureKey) {
           clearTextureFromMaterial(material);
         }
         return;
@@ -930,13 +988,23 @@ export const SystemSurfaceTextureManager: React.FC<{
             cloudShadow.seed2.toString(10)
           ].join(':')
         : 'shadow:none';
+      const hasHeavyMaps = Boolean(
+        material?.normalMap || material?.aoMap || material?.displacementMap || material?.emissiveMap
+      );
+      const allowHeavyMaps = isFocusBody
+        && !isWarmup
+        && (isIdle || (hasHeavyMaps && lastResolution?.width === resolution.width));
       const wantsHeightMap = !isGasGiant
         && isOnScreen
         && resolution.width >= 512
-        && isFocusBody;
-      const wantsEmissiveMap = !isGasGiant && isOnScreen && resolution.width >= 256 && emissiveIntensity > 0;
+        && allowHeavyMaps;
+      const wantsEmissiveMap = !isGasGiant
+        && isOnScreen
+        && resolution.width >= SURFACE_TEXTURE_MIN_RESOLUTION.width
+        && emissiveIntensity > 0
+        && allowHeavyMaps;
       const textureSource = isGasGiant ? 'field' : (isFocusBody ? 'field' : 'tiles');
-      const includeHeavyMaps = isFocusBody;
+      const includeHeavyMaps = allowHeavyMaps;
       const textureOptionsForBody: SurfaceTextureOptions = {
         source: textureSource,
         includeNormalMap: includeHeavyMaps && resolution.width >= 512,
@@ -1071,9 +1139,27 @@ export const SystemSurfaceTextureManager: React.FC<{
       queued.add(bodyId);
       updateQueue.push(bodyId);
     };
+    const pushWarmup = (bodyId: string) => {
+      if (queued.has(bodyId)) return;
+      if (!bodyMetricsById.has(bodyId)) return;
+      queued.add(bodyId);
+      updateQueue.push(bodyId);
+    };
 
     pushVisible(resolvedCloseUpBodyId);
     pushVisible(selectedBodyId);
+
+    if (warmupTargetsRef.current.size) {
+      const expired: string[] = [];
+      warmupTargetsRef.current.forEach((expiresAt, bodyId) => {
+        if (expiresAt <= now) {
+          expired.push(bodyId);
+          return;
+        }
+        pushWarmup(bodyId);
+      });
+      expired.forEach(bodyId => warmupTargetsRef.current.delete(bodyId));
+    }
 
     const rotationStart = visibleBodies.length ? (updateCursorRef.current % visibleBodies.length) : 0;
     const rotatedBodies = visibleBodies.length
