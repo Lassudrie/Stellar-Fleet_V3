@@ -3881,9 +3881,6 @@ const generateSurfaceMapV4 = (params: {
   const settlements = placeSettlements({
     descriptor,
     tiles,
-    w,
-    h,
-    wrapX,
     ownerFactionId: params.ownerFactionId,
     env: envHydrology
   });

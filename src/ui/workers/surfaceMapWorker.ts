@@ -995,6 +995,7 @@ const renderSurfaceTexture = (
   emissiveRgba: Uint8Array | null;
 } => {
   const config = map.descriptor.config;
+  const rectConfig = config.gridKind === 'geodesic' ? null : config;
   if (textureOptions?.source === 'tiles' && config.gridKind !== 'geodesic') {
     return renderSurfaceTextureFromTiles(map, resolution, cloudShadow, textureOptions);
   }
@@ -1010,7 +1011,9 @@ const renderSurfaceTexture = (
   const heightRgba = includeHeightMap ? new Uint8Array(width * height * 4) : null;
   const emissiveRgba = includeEmissiveMap ? new Uint8Array(width * height * 4) : null;
   const heightField = (includeNormalMap || includeAoMap || includeHeightMap) ? new Float32Array(width * height) : null;
-  const useWrap = config.gridKind === 'geodesic' ? false : Boolean(config.wrapX);
+  const useWrap = rectConfig ? Boolean(rectConfig.wrapX) : false;
+  const rectW = rectConfig?.w ?? 0;
+  const rectH = rectConfig?.h ?? 0;
   const env = terrain.env;
   const baseSeed = map.descriptor.seed >>> 0;
   const iceAgeScaleX = 3;
@@ -1221,46 +1224,48 @@ const renderSurfaceTexture = (
 
       if (emissiveRgba) {
         let cityWeight = 0;
-        const rFloat = v * (h - 1);
-        const r0 = Math.max(0, Math.min(h - 1, Math.floor(rFloat)));
-        const r1 = Math.min(r0 + 1, h - 1);
-        const rFrac = rFloat - r0;
-        const wR0 = 1 - rFrac;
-        const wR1 = rFrac;
+        if (rectConfig && rectW > 0 && rectH > 0) {
+          const rFloat = v * (rectH - 1);
+          const r0 = Math.max(0, Math.min(rectH - 1, Math.floor(rFloat)));
+          const r1 = Math.min(r0 + 1, rectH - 1);
+          const rFrac = rFloat - r0;
+          const wR0 = 1 - rFrac;
+          const wR1 = rFrac;
 
-        let qFloat: number;
-        let q0: number;
-        let q1: number;
-        let qFrac: number;
-        if (useWrap) {
-          qFloat = u * w;
-          const qFloor = Math.floor(qFloat);
-          q0 = wrapIndex(qFloor, w);
-          q1 = wrapIndex(qFloor + 1, w);
-          qFrac = qFloat - qFloor;
-        } else {
-          qFloat = u * (w - 1);
-          q0 = Math.max(0, Math.min(w - 1, Math.floor(qFloat)));
-          q1 = Math.min(q0 + 1, w - 1);
-          qFrac = qFloat - q0;
+          let qFloat: number;
+          let q0: number;
+          let q1: number;
+          let qFrac: number;
+          if (useWrap) {
+            qFloat = u * rectW;
+            const qFloor = Math.floor(qFloat);
+            q0 = wrapIndex(qFloor, rectW);
+            q1 = wrapIndex(qFloor + 1, rectW);
+            qFrac = qFloat - qFloor;
+          } else {
+            qFloat = u * (rectW - 1);
+            q0 = Math.max(0, Math.min(rectW - 1, Math.floor(qFloat)));
+            q1 = Math.min(q0 + 1, rectW - 1);
+            qFrac = qFloat - q0;
+          }
+
+          const wQ0 = 1 - qFrac;
+          const wQ1 = qFrac;
+
+          const t00 = getTile(map.tiles, rectW, q0, r0);
+          const t10 = getTile(map.tiles, rectW, q1, r0);
+          const t01 = getTile(map.tiles, rectW, q0, r1);
+          const t11 = getTile(map.tiles, rectW, q1, r1);
+          const w00 = wQ0 * wR0;
+          const w10 = wQ1 * wR0;
+          const w01 = wQ0 * wR1;
+          const w11 = wQ1 * wR1;
+
+          cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
+            + ((t10.featureBits & cityMask) !== 0 ? w10 : 0)
+            + ((t01.featureBits & cityMask) !== 0 ? w01 : 0)
+            + ((t11.featureBits & cityMask) !== 0 ? w11 : 0);
         }
-
-        const wQ0 = 1 - qFrac;
-        const wQ1 = qFrac;
-
-        const t00 = getTile(map.tiles, w, q0, r0);
-        const t10 = getTile(map.tiles, w, q1, r0);
-        const t01 = getTile(map.tiles, w, q0, r1);
-        const t11 = getTile(map.tiles, w, q1, r1);
-        const w00 = wQ0 * wR0;
-        const w10 = wQ1 * wR0;
-        const w01 = wQ0 * wR1;
-        const w11 = wQ1 * wR1;
-
-        cityWeight = ((t00.featureBits & cityMask) !== 0 ? w00 : 0)
-          + ((t10.featureBits & cityMask) !== 0 ? w10 : 0)
-          + ((t01.featureBits & cityMask) !== 0 ? w01 : 0)
-          + ((t11.featureBits & cityMask) !== 0 ? w11 : 0);
 
         const settlementGlow = settlementField ? settlementField[pixelIndex] : 0;
         const featureGlow = cityWeight * 0.4;

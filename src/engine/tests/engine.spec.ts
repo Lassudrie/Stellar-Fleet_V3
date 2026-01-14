@@ -25,6 +25,7 @@ import {
   FeatureBits,
   PlanetBody,
   PlanetData,
+  PlanetSurfaceConfig,
   PlanetSurfaceMap,
   AIState,
   ShipEntity,
@@ -3512,6 +3513,20 @@ const engine_labelComponents = (mask: Uint8Array, w: number, h: number, wrapX: b
   return { labels, sizes };
 };
 
+const engine_requireRectConfig = (
+  config: PlanetSurfaceConfig
+): { w: number; h: number; wrapX: boolean; generatorVersion: number } => {
+  if (!('w' in config)) {
+    throw new Error('Expected rect surface config');
+  }
+  return {
+    w: config.w,
+    h: config.h,
+    wrapX: config.wrapX,
+    generatorVersion: config.generatorVersion
+  };
+};
+
 const engine_getFirstSolidPlanet = (
   worldSeed: number,
   systemId: string
@@ -3778,7 +3793,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       const waterMask = new Uint8Array(map.tiles.length);
       let oceanTiles = 0;
       for (let i = 0; i < map.tiles.length; i += 1) {
@@ -3812,7 +3827,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 3 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       if (!wrapX || w < 2) return;
 
       const seamDiffs: number[] = [];
@@ -3865,7 +3880,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 4 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       const waterMask = new Uint8Array(map.tiles.length);
       let oceanTiles = 0;
       for (let i = 0; i < map.tiles.length; i += 1) {
@@ -3899,7 +3914,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 4 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       if (!wrapX || w < 2) return;
 
       const seamDiffs: number[] = [];
@@ -3952,7 +3967,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       const waterMask = new Uint8Array(map.tiles.length);
       let oceanTiles = 0;
       for (let i = 0; i < map.tiles.length; i += 1) {
@@ -3986,7 +4001,7 @@ tests.push(
       const descriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
       const map = generateSurfaceMap({ systemId, bodyId: body.id, descriptor, planetData, ownerFactionId: null });
 
-      const { w, h, wrapX } = map.descriptor.config;
+      const { w, h, wrapX } = engine_requireRectConfig(map.descriptor.config);
       if (!wrapX || w < 2) return;
 
       const seamDiffs: number[] = [];
@@ -4017,13 +4032,14 @@ tests.push(
       const systemId = 'sys_surface_scale_v6';
       const { body, planetData } = engine_getFirstSolidPlanet(worldSeed, systemId);
       const baseDescriptor = createPlanetSurfaceDescriptor({ gameSeed: worldSeed, systemId, body, generatorVersion: 6 });
+      const rectConfig = engine_requireRectConfig(baseDescriptor.config);
       const smallDescriptor = {
         ...baseDescriptor,
-        config: { ...baseDescriptor.config, w: 64, h: 32 }
+        config: { ...rectConfig, w: 64, h: 32 }
       };
       const largeDescriptor = {
         ...baseDescriptor,
-        config: { ...baseDescriptor.config, w: 128, h: 64 }
+        config: { ...rectConfig, w: 128, h: 64 }
       };
 
       const mapSmall = generateSurfaceMap({ systemId, bodyId: body.id, descriptor: smallDescriptor, planetData, ownerFactionId: null });
