@@ -141,27 +141,96 @@ const createGasGiantTextureData = (
   baseColor: string,
   width: number,
   height: number,
-  isIceGiant: boolean
+  planetType: PlanetType | null
 ): { color: Uint8Array; roughness: Uint8Array; heightField: Float32Array } => {
   const seed = Math.floor(hashStringToUnit(seedKey) * 0xffffffff);
   const rand = createSeededRandom(seed);
+  const isGasGiant = planetType === 'GasGiant';
+  const isIceGiant = planetType === 'IceGiant';
+  const isSubNeptune = planetType === 'SubNeptune';
+  const iceProfile = isIceGiant || isSubNeptune;
   const base = new Color(baseColor);
-  const light = base.clone().lerp(new Color('#ffffff'), 0.18 + rand() * 0.2);
-  const dark = base.clone().lerp(new Color('#0b1020'), 0.22 + rand() * 0.22);
-  const accent = base.clone().lerp(new Color(isIceGiant ? '#e0f2fe' : '#fcd34d'), 0.2 + rand() * 0.3);
+  const baseShift = iceProfile ? new Color('#8bd6ff') : new Color('#fde68a');
+  const baseShiftStrength = (iceProfile ? 0.08 : 0.06) + rand() * (iceProfile ? 0.12 : 0.1);
+  base.lerp(baseShift, baseShiftStrength);
+  const light = base.clone().lerp(new Color('#ffffff'), (iceProfile ? 0.14 : 0.22) + rand() * 0.18);
+  const dark = base.clone().lerp(new Color('#0b1020'), (iceProfile ? 0.22 : 0.28) + rand() * 0.18);
+  const accentTarget = isGasGiant ? '#fcd34d' : (isSubNeptune ? '#b6f3ff' : '#e0f2fe');
+  const accent = base.clone().lerp(new Color(accentTarget), 0.18 + rand() * 0.3);
+  const hazeTarget = iceProfile ? '#e0f2fe' : '#fff7ed';
+  const hazeColor = base.clone().lerp(new Color(hazeTarget), 0.45 + rand() * 0.2);
 
-  const bandFreq = 5 + Math.floor(rand() * 7);
-  const bandJitter = 0.2 + rand() * 0.35;
-  const bandContrast = 0.12 + rand() * 0.18;
-  const lonFreq = 1.6 + rand() * 2.8;
-  const lonStrength = 0.05 + rand() * 0.09;
-  const vortexU = rand();
-  const vortexV = 0.25 + rand() * 0.5;
-  const vortexRadius = 0.08 + rand() * 0.12;
-  const vortexStrength = 0.18 + rand() * 0.2;
-  const vortexTwist = 4.5 + rand() * 3.5;
-  const roughBase = isIceGiant ? 0.52 : 0.38;
-  const roughVar = isIceGiant ? 0.16 : 0.12;
+  const baseR = base.r;
+  const baseG = base.g;
+  const baseB = base.b;
+  const lightR = light.r;
+  const lightG = light.g;
+  const lightB = light.b;
+  const darkR = dark.r;
+  const darkG = dark.g;
+  const darkB = dark.b;
+  const accentR = accent.r;
+  const accentG = accent.g;
+  const accentB = accent.b;
+  const hazeR = hazeColor.r;
+  const hazeG = hazeColor.g;
+  const hazeB = hazeColor.b;
+
+  const bandFreq = (iceProfile ? 3 : 5) + Math.floor(rand() * (iceProfile ? 4 : 7));
+  const bandJitter = (iceProfile ? 0.16 : 0.22) + rand() * (iceProfile ? 0.25 : 0.35);
+  const bandContrast = (iceProfile ? 0.07 : 0.12) + rand() * (iceProfile ? 0.12 : 0.18);
+  const lonFreq = (iceProfile ? 1.2 : 1.6) + rand() * (iceProfile ? 2.0 : 3.0);
+  const lonStrength = (iceProfile ? 0.04 : 0.06) + rand() * (iceProfile ? 0.06 : 0.1);
+  const turbulenceFreq = (iceProfile ? 3.5 : 5.5) + rand() * 3.5;
+  const turbulenceStrength = (iceProfile ? 0.03 : 0.06) + rand() * (iceProfile ? 0.04 : 0.08);
+  const turbulenceLat = 1.3 + rand() * 1.6;
+  const jetFreq = (iceProfile ? 2.0 : 2.6) + rand() * (iceProfile ? 2.0 : 3.0);
+  const jetStrength = (iceProfile ? 0.04 : 0.07) + rand() * (iceProfile ? 0.05 : 0.08);
+  const jetPhase = rand() * Math.PI * 2;
+  const hazeStrength = (iceProfile ? (isSubNeptune ? 0.28 : 0.22) : 0.14) + rand() * (iceProfile ? 0.12 : 0.08);
+  const heightContrast = iceProfile ? (isSubNeptune ? 0.45 : 0.6) : 0.8;
+
+  const roughBase = isSubNeptune ? 0.58 : (isIceGiant ? 0.52 : 0.38);
+  const roughVar = isSubNeptune ? 0.08 : (isIceGiant ? 0.12 : 0.12);
+  const roughPhase = rand() * Math.PI * 2;
+  const hazeNoiseFreq = (iceProfile ? 2.4 : 3.4) + rand() * 3.2;
+  const hazeLatFreq = 0.9 + rand() * 1.4;
+  const hazePhase = rand() * Math.PI * 2;
+  const bandOffsetPhase = rand() * Math.PI * 2;
+  const twoPi = Math.PI * 2;
+
+  type GasStorm = {
+    u: number;
+    v: number;
+    radius: number;
+    strength: number;
+    swirl: number;
+    tint: [number, number, number];
+    height: number;
+  };
+  const stormCount = isGasGiant ? 2 + Math.floor(rand() * 2) : 1 + Math.floor(rand() * (isSubNeptune ? 1 : 2));
+  const storms: GasStorm[] = [];
+  for (let i = 0; i < stormCount; i += 1) {
+    const u = rand();
+    const v = 0.18 + rand() * 0.64;
+    const radius = (iceProfile ? 0.05 : 0.07) + rand() * (iceProfile ? 0.08 : 0.12);
+    const strength = (iceProfile ? 0.14 : 0.2) + rand() * (iceProfile ? 0.12 : 0.2);
+    const swirl = 2.5 + rand() * 3.5;
+    const tintLerp = 0.25 + rand() * 0.4;
+    const tintR = MathUtils.lerp(baseR, accentR, tintLerp);
+    const tintG = MathUtils.lerp(baseG, accentG, tintLerp);
+    const tintB = MathUtils.lerp(baseB, accentB, tintLerp);
+    const height = (iceProfile ? 0.08 : 0.12) + rand() * (iceProfile ? 0.08 : 0.16);
+    storms.push({
+      u,
+      v,
+      radius,
+      strength,
+      swirl,
+      tint: [tintR, tintG, tintB],
+      height
+    });
+  }
 
   const rowOffsets = new Float32Array(height);
   for (let y = 0; y < height; y += 1) {
@@ -174,11 +243,18 @@ const createGasGiantTextureData = (
       rowOffsets[y] = (rowOffsets[y] + prev + next) / 3;
     }
   }
+  const shearOffsets = new Float32Array(height);
+  for (let y = 0; y < height; y += 1) {
+    const v = (y + 0.5) / height;
+    const lat = (v - 0.5) * Math.PI;
+    const jet = Math.sin(lat * jetFreq + jetPhase);
+    const jetMix = 0.6 + 0.4 * Math.sin(lat * 1.3 + bandOffsetPhase);
+    shearOffsets[y] = rowOffsets[y] + jet * jetStrength * jetMix;
+  }
 
   const color = new Uint8Array(width * height * 4);
   const roughness = new Uint8Array(width * height * 4);
   const heightField = new Float32Array(width * height);
-  const twoPi = Math.PI * 2;
 
   for (let y = 0; y < height; y += 1) {
     const v = (y + 0.5) / height;
@@ -189,39 +265,86 @@ const createGasGiantTextureData = (
     const detailFactor = MathUtils.lerp(0.4, 1, poleBlend);
     const bandBase = Math.sin(latSin * bandFreq + rowOffsets[y]);
     const bandValue = 0.5 + 0.5 * bandBase;
+    const shear = shearOffsets[y];
 
     for (let x = 0; x < width; x += 1) {
       const u = (x + 0.5) / width;
-      const uAngle = u * twoPi;
+      const uShear = u + shear;
+      const uWrapped = uShear - Math.floor(uShear);
+      const uAngle = uWrapped * twoPi;
       const lonNoise = Math.sin(uAngle * lonFreq + lat * 2.1) * lonStrength;
-      let band = bandValue + lonNoise * detailFactor;
+      const turbulence = Math.sin(uAngle * turbulenceFreq + lat * turbulenceLat + bandOffsetPhase) * turbulenceStrength;
+      let band = bandValue + (lonNoise + turbulence) * detailFactor;
 
-      const dx = Math.min(Math.abs(u - vortexU), 1 - Math.abs(u - vortexU));
-      const dy = Math.abs(v - vortexV);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < vortexRadius) {
-        const t = 1 - dist / vortexRadius;
-        band += Math.sin((dist * vortexTwist + uAngle) * 2.5) * vortexStrength * t;
+      let stormTintR = 0;
+      let stormTintG = 0;
+      let stormTintB = 0;
+      let stormWeight = 0;
+      let stormHeight = 0;
+      if (storms.length) {
+        for (const storm of storms) {
+          const du = Math.min(Math.abs(uWrapped - storm.u), 1 - Math.abs(uWrapped - storm.u));
+          const dv = Math.abs(v - storm.v);
+          const dist = Math.sqrt(du * du + dv * dv * (iceProfile ? 1.4 : 1.0));
+          if (dist < storm.radius) {
+            const t = 1 - dist / storm.radius;
+            const swirl = Math.sin((dist * storm.swirl + uAngle) * 2.5) * 0.5 + 0.5;
+            const weight = t * t * storm.strength;
+            stormWeight += weight;
+            stormTintR += storm.tint[0] * weight;
+            stormTintG += storm.tint[1] * weight;
+            stormTintB += storm.tint[2] * weight;
+            stormHeight += (t * 0.6 + swirl * 0.4) * storm.height;
+          }
+        }
+        if (stormWeight > 0) {
+          band += stormHeight * detailFactor;
+        }
       }
 
       const bandWeight = smoothstep(0.35 - bandContrast, 0.65 + bandContrast, band);
-      const tint = bandWeight < 0.5
-        ? dark.clone().lerp(base, bandWeight * 2)
-        : base.clone().lerp(light, (bandWeight - 0.5) * 2);
+      const blendT = bandWeight < 0.5 ? bandWeight * 2 : (bandWeight - 0.5) * 2;
+      const tintR = bandWeight < 0.5 ? MathUtils.lerp(darkR, baseR, blendT) : MathUtils.lerp(baseR, lightR, blendT);
+      const tintG = bandWeight < 0.5 ? MathUtils.lerp(darkG, baseG, blendT) : MathUtils.lerp(baseG, lightG, blendT);
+      const tintB = bandWeight < 0.5 ? MathUtils.lerp(darkB, baseB, blendT) : MathUtils.lerp(baseB, lightB, blendT);
       const accentWeight = Math.max(0, 0.25 - Math.abs(bandWeight - 0.55)) * 3.2;
-      const r = MathUtils.lerp(tint.r, accent.r, accentWeight);
-      const g = MathUtils.lerp(tint.g, accent.g, accentWeight);
-      const b = MathUtils.lerp(tint.b, accent.b, accentWeight);
+      let r = MathUtils.lerp(tintR, accentR, accentWeight);
+      let g = MathUtils.lerp(tintG, accentG, accentWeight);
+      let b = MathUtils.lerp(tintB, accentB, accentWeight);
+      if (stormWeight > 0) {
+        const stormMix = MathUtils.clamp(stormWeight, 0, 1);
+        const invStorm = 1 / stormWeight;
+        r = MathUtils.lerp(r, stormTintR * invStorm, stormMix);
+        g = MathUtils.lerp(g, stormTintG * invStorm, stormMix);
+        b = MathUtils.lerp(b, stormTintB * invStorm, stormMix);
+      }
+      const hazeNoise = 0.5 + 0.5 * Math.sin(uAngle * hazeNoiseFreq + lat * hazeLatFreq + hazePhase);
+      const polarHaze = smoothstep(0.45, 0.92, latNorm);
+      const hazeMix = hazeStrength * (0.35 + 0.65 * hazeNoise) * (0.35 + 0.65 * polarHaze);
+      r = MathUtils.lerp(r, hazeR, hazeMix);
+      g = MathUtils.lerp(g, hazeG, hazeMix);
+      b = MathUtils.lerp(b, hazeB, hazeMix);
 
       const idx = (y * width + x) * 4;
       color[idx] = linearToSrgbByte(r);
       color[idx + 1] = linearToSrgbByte(g);
       color[idx + 2] = linearToSrgbByte(b);
       color[idx + 3] = 255;
-      heightField[y * width + x] = MathUtils.clamp(bandWeight, 0, 1);
+      const heightNoise = (lonNoise + turbulence) * 0.12;
+      const heightValue = MathUtils.clamp(
+        0.5 + (bandWeight - 0.5) * heightContrast + stormHeight * 0.5 + heightNoise,
+        0,
+        1
+      );
+      heightField[y * width + x] = heightValue;
 
-      const roughNoise = Math.sin(uAngle * (lonFreq * 0.7) + lat * 1.7) * 0.05;
-      const rough = MathUtils.clamp(roughBase + (0.5 - band) * roughVar + roughNoise, 0.2, 0.95);
+      const roughNoise = Math.sin(uAngle * (lonFreq * 0.7) + lat * 1.7 + roughPhase) * 0.05;
+      const stormRough = stormWeight > 0 ? -stormWeight * (iceProfile ? 0.04 : 0.06) : 0;
+      const rough = MathUtils.clamp(
+        roughBase + (0.5 - band) * roughVar + roughNoise + stormRough + hazeMix * (iceProfile ? 0.08 : 0.05),
+        0.2,
+        0.95
+      );
       const roughByte = Math.round(rough * 255);
       roughness[idx] = roughByte;
       roughness[idx + 1] = roughByte;
@@ -520,9 +643,8 @@ export const SystemSurfaceTextureManager: React.FC<{
     options: SurfaceTextureOptions | null
   ): SurfaceTextureBundle => {
     const baseColor = planetType ? PLANET_TYPE_COLORS[planetType] : '#cbd5e1';
-    const isIceGiant = planetType === 'IceGiant';
     const seedKey = `${bodyId}|${astroKey}|${resolution.width}x${resolution.height}`;
-    const data = createGasGiantTextureData(seedKey, baseColor, resolution.width, resolution.height, isIceGiant);
+    const data = createGasGiantTextureData(seedKey, baseColor, resolution.width, resolution.height, planetType);
     const colorTexture = createDataTexture(data.color, resolution.width, resolution.height, true);
     const includeRoughness = options?.includeRoughnessMap ?? true;
     const roughnessTexture = includeRoughness
