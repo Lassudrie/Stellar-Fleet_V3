@@ -8,9 +8,6 @@
     "npm": ">=10 <11"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
@@ -19,30 +16,15 @@
     "smoke": "npm run check:runtime && node --import ./tools/registerTsLoader.mjs src/engine/aiSmoke.ts",
     "battle:sim": "npm run check:runtime && tsx tools/battleSim.ts",
     "worldgen:audit": "npm run check:runtime && node --import ./tools/registerTsLoader.mjs ./tools/worldgenAudit.mjs",
-    "test": "npm run check:runtime && tsx src/engine/tests/engine.spec.ts && tsx src/ui/ui.spec.ts"
-  },
-  "dependencies": {
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.4.2",
-    "@react-three/postprocessing": "^3.0.4",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1",
-    "three": "^0.181.2"
+    "test": "npm run check:runtime && tsx src/engine/tests/engine.spec.ts"
   },
   "devDependencies": {
     "@eslint/js": "^8.57.0",
     "@types/node": "^22.14.0",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "autoprefixer": "^10.4.23",
     "eslint": "^8.57.0",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.19",
     "tsx": "^4.19.3",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~5.8.2"
   }
 }

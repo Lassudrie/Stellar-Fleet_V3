@@ -5,7 +5,6 @@ const compilerOptions = {
   module: ts.ModuleKind.ES2022,
   moduleResolution: ts.ModuleResolutionKind.Bundler,
   target: ts.ScriptTarget.ES2022,
-  jsx: ts.JsxEmit.ReactJSX,
   esModuleInterop: true
 };
 
@@ -40,7 +39,7 @@ export async function resolve(specifier, context, defaultResolve) {
     return await defaultResolve(specifier, context, defaultResolve);
   } catch (error) {
     if (specifier.startsWith('./') || specifier.startsWith('../')) {
-      const resolved = await tryResolveWithExtensions(specifier, context.parentURL, ['.ts', '.tsx']);
+      const resolved = await tryResolveWithExtensions(specifier, context.parentURL, ['.ts']);
       if (resolved) return resolved;
     }
 
@@ -49,7 +48,7 @@ export async function resolve(specifier, context, defaultResolve) {
 }
 
 export async function load(url, context, defaultLoad) {
-  if (url.endsWith('.ts') || url.endsWith('.tsx')) {
+  if (url.endsWith('.ts')) {
     const source = await readFile(new URL(url), 'utf8');
     const { outputText } = ts.transpileModule(source, { compilerOptions, fileName: url });
     return { format: 'module', source: outputText, shortCircuit: true };

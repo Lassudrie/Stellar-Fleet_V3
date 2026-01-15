@@ -42,8 +42,8 @@ Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de
    - **Auto load** d'armées amies si `loadTargetSystemId` correspond au système d'arrivée.
    - **Auto invasion** si `invasionTargetSystemId` correspond au système d'arrivée :
      - **Factions IA (non joueur)** : déploiement automatique identique à la v1.
-     - **Faction joueur** : aucun débarquement automatique ; un `GameMessage` `INVASION_DECISION` est créé pour proposer « Siège (bombardement orbital) » ou « Attaque (débarquement) » côté UI.
+     - **Faction joueur** : aucun débarquement automatique ; un `GameMessage` `INVASION_DECISION` est créé pour proposer « Siège (bombardement orbital) » ou « Attaque (débarquement) ».
      - Si la flotte est détruite ou n'est plus en orbite après la résolution des batailles du tour, le message est automatiquement invalidé (dismissed).
-     - Si aucune planète solide n'est disponible, la décision est limitée (débarquement impossible) et l'UI doit afficher l'information.
+     - Si aucune planète solide n'est disponible, la décision est limitée (débarquement impossible) et le message doit le signaler aux consommateurs.
 
 Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `src/engine/movement.ts`.

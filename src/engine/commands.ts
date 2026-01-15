@@ -21,7 +21,6 @@ import { computeLoadOps } from './armyOps';
 import { areFleetsSharingOrbit, isFleetOrbitingSystem } from './orbit';
 import { getDefaultSolidPlanet, getPlanetById } from './planets';
 import { shortId } from '../shared/shared';
-import { withUpdatedFleetDerived } from './fleetDerived';
 import { FuelShortageError, validateAndDebitJumpOrFail } from './logistics/fuel';
 import { sorted } from '../shared/shared';
 import {
@@ -797,7 +796,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
 
             const remainingShips = fleet.ships.filter(ship => !shipIdSet.has(ship.id));
 
-            const newFleet = withUpdatedFleetDerived({
+            const newFleet = {
                 ...fleet,
                 id: rng.id('fleet'),
                 ships: splitShips,
@@ -807,12 +806,12 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 invasionTargetPlanetId: fleet.invasionTargetPlanetId ?? null,
                 loadTargetSystemId: fleet.loadTargetSystemId ?? null,
                 unloadTargetSystemId: fleet.unloadTargetSystemId ?? null
-            });
+            };
 
-            const updatedOriginalFleet = withUpdatedFleetDerived({
+            const updatedOriginalFleet = {
                 ...fleet,
                 ships: remainingShips
-            });
+            };
 
             const updatedArmies = state.armies.map(army => {
                 if (army.containerId !== fleet.id) return army;
@@ -834,8 +833,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     .map(f => (f.id === fleet.id ? updatedOriginalFleet : f))
                     .concat(newFleet),
                 armies: updatedArmies,
-                logs: [...state.logs, splitLog],
-                selectedFleetId: newFleet.id
+                logs: [...state.logs, splitLog]
             });
         }
 
@@ -851,10 +849,10 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             if (sourceFleet.state !== FleetState.ORBIT || targetFleet.state !== FleetState.ORBIT) return fail('Fleets must be in orbit to merge.');
             if (!areFleetsSharingOrbit(sourceFleet, targetFleet)) return fail('Fleets are too far apart to merge.');
 
-            const mergedTarget = withUpdatedFleetDerived({
+            const mergedTarget = {
                 ...targetFleet,
                 ships: [...targetFleet.ships, ...sourceFleet.ships]
-            });
+            };
 
             const updatedArmies = state.armies.map(army => {
                 if (army.containerId !== sourceFleet.id) return army;
@@ -874,8 +872,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     .filter(f => f.id !== sourceFleet.id)
                     .map(f => (f.id === targetFleet.id ? mergedTarget : f)),
                 armies: updatedArmies,
-                logs: [...state.logs, mergeLog],
-                selectedFleetId: mergedTarget.id
+                logs: [...state.logs, mergeLog]
             });
         }
 

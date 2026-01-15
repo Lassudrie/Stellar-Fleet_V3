@@ -366,22 +366,7 @@ TotalLossRate = clamp(BaseLoss + VariableLoss + OrbitPenalty + BombardedPenalty 
 - Pas de multi-selection / planification.
 - Actions non annulables (a la selection, ordre fixe jusqu'a execution/invalid).
 
-## 17) UI et synchro multi-vues
-
-Galaxy view:
-- Presence combat sol par systeme.
-- % settlements controles par body.
-
-System view 3D:
-- Ratio settlements controles, statut contested.
-- Indicateur des debarquements planifies sur le tour.
-
-Surface view:
-- Overlays: ZOC, supply, stacking, controle settlements, bombardedTilesByBodyId (tour courant).
-- Details unite: morale, fatigue, condition, supply, ordre courant, portee.
-- Ordre de rendu sur une tuile: tri par id (determinisme).
-
-## 18) IA
+## 17) IA
 
 - Tactiques multiples (attaque/defense) par profil.
 - Eviter le stacking penalise.
@@ -389,19 +374,19 @@ Surface view:
 - Retrait / annulation de debarquement possible.
 - Choix de zone de debarquement base sur terrain + defense ennemie.
 
-## 19) Logs et messages
+## 18) Logs et messages
 
 - Logs par engagement + logs specifiques de debarquement.
 - Tres detaille; affichage pertes, supply, stacking.
-- Localisation i18n requise.
+- Formatage et localisation delegues aux consommateurs.
 
-## 20) Save format
+## 19) Save format
 
 - Serialiser tous les nouveaux champs (settlementControl, morale, fatigue, landingOrder, etc.).
 - Pas de retro-compatibilite requise.
 - Bump `SAVE_VERSION` obligatoire, load refuse si mismatch.
 
-## 21) Determinisme et performance
+## 20) Determinisme et performance
 
 - RNG par engagement.
 - Taille cible: 200 unites fluide.
@@ -416,7 +401,7 @@ Surface view:
 - Pathfinding limite a MPeff (Dijkstra tronque).
 - Pas de mutation in-place.
 
-## 22) Tests et validation
+## 21) Tests et validation
 
 - Priorite: debarquement, capture, stacking.
 - Tests perf requis (200 unites, cap stacking).

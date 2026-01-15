@@ -5,7 +5,7 @@ import { Vec3, distSq } from './math/vec3';
 /**
  * Returns whether the provided positions fall within the orbit interaction threshold.
  *
- * This wrapper avoids manual squared-distance comparisons, keeping gameplay and UI
+ * This wrapper avoids manual squared-distance comparisons, keeping gameplay and consumers
  * aligned on the same proximity constant.
  */
 export const isWithinOrbitProximity = (a: Vec3, b: Vec3): boolean =>

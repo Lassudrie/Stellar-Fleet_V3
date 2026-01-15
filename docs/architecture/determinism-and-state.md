@@ -20,7 +20,7 @@ Stellar Fleet est conçu pour être strictement déterministe.
 ### Règle #2 : Pas de temps système dans la logique
 *   Interdiction d'utiliser `Date.now()` ou `performance.now()` pour influencer la logique de jeu.
 *   Le temps est discret (`state.day`).
-*   Seul le rendu visuel (`useFrame`) peut utiliser le temps système pour les animations.
+*   Seules des métadonnées hors-état (ex. horodatage d'export) peuvent utiliser le temps système.
 
 ### Règle #3 : Ordre des opérations stable
 *   Lorsqu'on itère sur des collections (Flottes, Systèmes) pour appliquer des règles (ex: Combat), il faut garantir un ordre stable.
@@ -46,5 +46,5 @@ Le système de sauvegarde repose sur la sérialisation complète du `GameState`.
 *   **Persistance RNG** : Les états internes du générateur RNG (`rngState` et `idRngState`) sont sauvegardés. Au chargement, la classe `RNG` est restaurée dans ces états précis.
 
 ### Structure DTO (Data Transfer Object)
-Nous distinguons les types Runtime (`Vector3` de Three.js) des types DTO (`{x,y,z}`).
+Nous distinguons les types Runtime (ex. `Vec3`) des types DTO (`{x,y,z}`).
 Le fichier `serialization.ts` contient les mappers `serializeGameState` et `deserializeGameState` qui font la conversion et la validation.

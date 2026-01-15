@@ -105,10 +105,10 @@ export interface Fleet {
   state: FleetState;
   targetSystemId: string | null;
   targetPosition: Vec3 | null;
-  radius: number;
   stateStartTurn: number;
   retreating?: boolean;
   invasionTargetSystemId?: string | null;
+  invasionTargetPlanetId?: string | null;
   loadTargetSystemId?: string | null;
   unloadTargetSystemId?: string | null;
 }
@@ -292,11 +292,9 @@ export interface GameState {
   systems: StarSystem[];
   fleets: Fleet[];
   armies: Army[];
-  lasers: LaserShot[];
   battles: Battle[];
   logs: LogEntry[];
   messages: GameMessage[];
-  selectedFleetId: string | null;
   winnerFactionId: FactionId | 'draw' | null;
   aiStates?: Record<FactionId, AIState>;
   aiState?: AIState;

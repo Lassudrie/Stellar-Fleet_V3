@@ -20,7 +20,7 @@ Le moteur consomme ces données, instancie l'état initial et ne dépend d'aucun
 ### 1.2 Principes
 * **Data-driven :** aucune fonction, uniquement des valeurs sérialisables.
 * **Immutabilité :** la définition sert à ensemencer le GameState mutable, mais ne change pas en cours de partie.
-* **Découplage :** le scénario ne connaît pas l'UI ni les implémentations IA, seulement des identifiants (IDs).
+* **Découplage :** le scénario ne connaît pas la couche de présentation ni les implémentations IA, seulement des identifiants (IDs).
 
 ---
 
@@ -67,7 +67,7 @@ Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup
 | `title` | string | Oui | Nom affiché. |
 | `description` | string | Oui | Texte court ou briefing. |
 | `author` | string | Non | Crédit ou source du mod. |
-| `difficulty` | number | Oui | 1 (facile) à 5 (très difficile). Indicateur UI. |
+| `difficulty` | number | Oui | 1 (facile) à 5 (très difficile). Indicateur de difficulté. |
 | `tags` | string[] | Non | Filtres (ex. `["Spiral", "Sandbox"]`). |
 
 ---

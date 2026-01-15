@@ -3,7 +3,6 @@ import {
   GameState,
   Fleet,
   StarSystem,
-  LaserShot,
   Battle,
   AIState,
   EnemySighting,
@@ -48,7 +47,6 @@ import {
 } from '../shared/shared';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
-import { withUpdatedFleetDerived } from './fleetDerived';
 import { COLORS, SHIP_STATS } from '../content/data/static';
 import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { RNG } from './rng';
@@ -119,7 +117,6 @@ export interface FleetDTO {
   state: FleetState;
   targetSystemId: string | null;
   targetPosition: Vector3DTO | null;
-  radius: number;
   stateStartTurn: number;
   retreating?: boolean;
   invasionTargetSystemId?: string | null;
@@ -184,14 +181,6 @@ export interface StarSystemDTO {
   isHomeworld?: boolean;
   planets?: PlanetBody[];
   astro?: StarSystemAstro;
-}
-
-export interface LaserShotDTO {
-  id: string;
-  start: Vector3DTO;
-  end: Vector3DTO;
-  color: string;
-  life: number;
 }
 
 export interface BattleShipSnapshotDTO {
@@ -281,11 +270,9 @@ export interface GameStateDTO {
   fleets: FleetDTO[];
   stations?: StationDTO[];
   armies?: ArmyDTO[];
-  lasers?: LaserShotDTO[];
   battles?: BattleDTO[];
   logs?: LogEntry[];
   messages?: GameMessageDTO[];
-  selectedFleetId: string | null;
   winnerFactionId: string | 'draw' | null; // Renamed
 
   objectives?: GameObjectivesDTO;
@@ -1149,7 +1136,7 @@ const sanitizePlanetSurfaceDescriptorRecord = (
  * Why this exists:
  * - Older save files (or debug fixtures) may predate the introduction of
  *   `planetSurfaceDescriptorsByBodyId`.
- * - The surface view (and ground ops validations) require descriptors to exist.
+ * - Surface operations and validations require descriptors to exist.
  *
  * We can reconstruct missing descriptors deterministically from (seed, systemId, bodyId)
  * without consuming RNG.
@@ -1370,11 +1357,6 @@ export const serializeGameState = (state: GameState): string => {
       containerId: a.containerId,
       surfacePos: a.surfacePos
     })),
-    lasers: state.lasers.map(l => ({
-      ...l,
-      start: serializeVector3(l.start),
-      end: serializeVector3(l.end)
-    })),
     battles: state.battles.map(b => ({
       ...b,
       winnerFactionId: b.winnerFactionId,
@@ -1387,7 +1369,6 @@ export const serializeGameState = (state: GameState): string => {
       payload: sanitizeMessagePayload(message.payload),
       lines: sanitizeMessageLines(message.lines)
     })),
-    selectedFleetId: state.selectedFleetId,
     winnerFactionId: state.winnerFactionId,
     aiState: aiStateDto,
     aiStates: aiStatesDto,
@@ -1478,7 +1459,6 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     const fleetsTotal = Array.isArray(dto.fleets) ? dto.fleets.length : 0;
     const stationsTotal = Array.isArray(dto.stations) ? dto.stations.length : 0;
     const armiesTotal = Array.isArray(dto.armies) ? Math.min(dto.armies.length, MAX_ARMY_ENTRIES) : 0;
-    const lasersTotal = Array.isArray(dto.lasers) ? dto.lasers.length : 0;
     const battlesTotal = Array.isArray(dto.battles) ? Math.min(dto.battles.length, MAX_BATTLE_ENTRIES) : 0;
     const logsTotal = Array.isArray(dto.logs) ? Math.min(dto.logs.length, MAX_LOG_ENTRIES) : 0;
     const messagesTotal = Array.isArray(dto.messages) ? Math.min(dto.messages.length, MAX_MESSAGE_ENTRIES) : 0;
@@ -1488,7 +1468,6 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         fleetsTotal +
         stationsTotal +
         armiesTotal +
-        lasersTotal +
         battlesTotal +
         logsTotal +
         messagesTotal
@@ -1551,9 +1530,6 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     }
     if (dto.armies !== undefined && !Array.isArray(dto.armies)) {
       throw new Error("Field 'armies' must be an array.");
-    }
-    if (dto.lasers !== undefined && !Array.isArray(dto.lasers)) {
-      throw new Error("Field 'lasers' must be an array.");
     }
     if (dto.battles !== undefined && !Array.isArray(dto.battles)) {
       throw new Error("Field 'battles' must be an array.");
@@ -1637,7 +1613,6 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         state: fleetState,
         targetSystemId,
         targetPosition,
-        radius: 1,
         stateStartTurn: Number.isFinite(f.stateStartTurn) ? f.stateStartTurn : 0,
         retreating: f.retreating ?? false,
         invasionTargetSystemId: f.invasionTargetSystemId ?? null,
@@ -1647,7 +1622,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         ships: sanitizedShips
       };
 
-      return withUpdatedFleetDerived(baseFleet);
+      return baseFleet;
     });
 
     const fleetIds = new Set(fleets.map(fleet => fleet.id));
@@ -1697,7 +1672,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         }
         const anchorBodyId = typeof entry.anchorBodyId === 'string' ? entry.anchorBodyId : null;
         if (anchorBodyId && !planetIds.has(anchorBodyId)) {
-          console.warn(`[Serialization] Station '${entry.id}' references unknown anchor body; keeping id for UI.`);
+          console.warn(`[Serialization] Station '${entry.id}' references unknown anchor body; keeping id for consumers.`);
         }
         const slotIndex = isFiniteNumber(entry.slotIndex) ? entry.slotIndex : undefined;
 
@@ -1821,25 +1796,6 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       })
       .filter((army): army is Army => Boolean(army));
     processed += armiesTotal;
-
-    const lasersDto = Array.isArray(dto.lasers) ? dto.lasers : [];
-    const lasers: LaserShot[] = lasersDto.map((l: any, index: number) => {
-      reportLoopProgress(index, lasersTotal);
-      if (typeof l?.id !== 'string') {
-        throw new Error(`Laser entry at index ${index} is missing a valid id.`);
-      }
-      if (!isFiniteNumber(l.life)) {
-        throw new Error(`Laser '${l.id}' has invalid life value.`);
-      }
-      return {
-        id: l.id,
-        color: typeof l.color === 'string' ? l.color : '#ffffff',
-        life: l.life,
-        start: deserializeVector3(l.start, `laser '${l.id ?? 'unknown'}' start`),
-        end: deserializeVector3(l.end, `laser '${l.id ?? 'unknown'}' end`)
-      };
-    });
-    processed += lasersTotal;
 
     // Battles
     const battlesDto = Array.isArray(dto.battles) ? dto.battles : [];
@@ -2052,11 +2008,9 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       fleets,
       stations,
       armies,
-      lasers,
       battles,
       logs: sanitizedLogs,
       messages,
-      selectedFleetId: dto.selectedFleetId ?? null,
       winnerFactionId: dto.winnerFactionId !== undefined ? dto.winnerFactionId : (dto.winner || null),
       aiStates: migratedAiStates,
       aiState: primaryAiState,

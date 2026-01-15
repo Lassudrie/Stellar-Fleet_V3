@@ -10,7 +10,7 @@
 
 ## Définitions
 - Énumérer les termes et acronymes clés.
-- S'aligner sur les types et constantes existants dans les sources TypeScript (ex. `src/shared/types.ts`, `src/engine/**`, `src/content/**`, `src/ui/**`).
+- S'aligner sur les types et constantes existants dans les sources TypeScript (ex. `src/shared/types.ts`, `src/engine/**`, `src/content/**`).
 
 ## Données
 - Lister les structures de données impliquées avec leurs champs obligatoires/facultatifs.
@@ -32,8 +32,8 @@
 - Lister les cas limites et comportements attendus.
 - Documenter les stratégies de garde-fous et validations.
 
-## Logs/UI
-- Décrire les événements à tracer (logs) et les impacts UI éventuels.
+## Logs
+- Décrire les événements à tracer (logs).
 - Spécifier le format attendu des messages et le niveau de sévérité.
 
 ## Tests/Acceptation

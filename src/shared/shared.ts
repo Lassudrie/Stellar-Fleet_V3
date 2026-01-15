@@ -502,8 +502,7 @@ export interface Fleet {
   state: FleetState;
   targetSystemId: string | null;
   targetPosition: Vec3 | null;
-  radius: number; // Visual size based on ship count (Derived field)
-  stateStartTurn: number; // Turn when the current state began (Used for VFX)
+  stateStartTurn: number; // Turn when the current state began
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
   invasionTargetPlanetId?: string | null; // Preferred planet target for invasion orders
@@ -519,14 +518,6 @@ export interface Station {
   name?: string;
   anchorBodyId?: string | null;
   slotIndex?: number;
-}
-
-export interface LaserShot {
-  id: string;
-  start: Vec3;
-  end: Vec3;
-  color: string;
-  life: number;
 }
 
 export interface LogEntry {
@@ -649,11 +640,9 @@ export interface GameState {
   fleets: Fleet[];
   stations?: Station[];
   armies: Army[];
-  lasers: LaserShot[];
   battles: Battle[];
   logs: LogEntry[];
   messages: GameMessage[];
-  selectedFleetId: string | null;
   winnerFactionId: FactionId | 'draw' | null; // Renamed from winner
   aiStates?: Record<FactionId, AIState>;
   aiState?: AIState; // Legacy single-AI state kept for transition

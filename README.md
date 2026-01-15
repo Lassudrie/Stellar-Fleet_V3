@@ -1,28 +1,22 @@
 # Stellar Fleet
 
-A minimalist 3D space battle simulator for mobile.
+A deterministic space battle simulation engine.
 
 ## Architecture
 
-- **UI (`src/ui/`)** : React + React Three Fiber, écrans, hooks, i18n et orchestration de l'app.
 - **Engine (`src/engine/`)** : Simulation déterministe (boucle de tour, IA, combat, déplacement, génération).
-- **Content (`src/content/`)** : Données statiques, templates de scénarios et assets audio utilisés par l'UI.
+- **Content (`src/content/`)** : Données statiques et templates de scénarios.
 - **Shared (`src/shared/`)** : Types métier et utilitaires runtime partagés.
-- **Styles** : Tailwind est compilé localement via PostCSS/Tailwind (config `postcss.config.cjs` et `tailwind.config.cjs`) et importé depuis `src/ui/index.css`.
 - **State** : Immutable updates.
-- **Determinism** : The simulation (world generation, combat, movement logs) is strictly deterministic based on the `seed` in `GameState`. `Math.random` and `Date.now` are prohibited in state-modifying logic. Visual animations (FleetRenderer) may use system time for smooth interpolation but do not affect logic.
-- **Audio assets (UI only)** : stockés sous `src/content/audio/` avec des sous-dossiers `sounds/` (effets) et `musics/` (ambiances). La couche moteur n'en dépend jamais.
-- **Règles de dépendance** : `src/shared` n'importe rien ; `src/content` ne dépend que de `src/shared` ; `src/engine` dépend de `src/shared` et `src/content` mais jamais de `src/ui` ; `src/ui` peut orchestrer l'ensemble.
+- **Determinism** : The simulation (world generation, combat, movement logs) is strictly deterministic based on the `seed` in `GameState`. `Math.random` and `Date.now` are prohibited in state-modifying logic.
+- **Règles de dépendance** : `src/shared` n'importe rien ; `src/content` ne dépend que de `src/shared` ; `src/engine` dépend de `src/shared` et `src/content`.
 
 ## Tech Stack
 
-- React 19 / Vite
-- React Three Fiber / Three.js
-- TailwindCSS
+- TypeScript (ESM) / Node 20
+- tsx for test execution
 
 ## Installation fiable
 
 - Version Node recommandée : **20.x** (voir `.nvmrc` pour la version exacte). npm 10.x est attendu (champ `engines`).
-- Commande standard : `npm ci` (identique à la CI).  
-  - Pré-requis réseau : l'étape `postinstall` télécharge les binaires `esbuild` (hébergés par l'équipe esbuild).
-- Pour accélérer la CI, activer le cache npm (ex. `cache: 'npm'` dans GitHub Actions) et, si vos jobs compilent des binaires, augmenter légèrement le timeout afin d'éviter les faux positifs de flakiness.
+- Commande standard : `npm ci` (identique à la CI).

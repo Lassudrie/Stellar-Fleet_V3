@@ -2,18 +2,17 @@
 
 Version: **1.1** (legacy rect + note géodésique)
 
-> Ce document décrit le modèle **rectangulaire legacy** (wrap X). Depuis `generatorVersion >= 7`, la surface par défaut est **géodésique** (icosphère, `tileId`), la grille `w×h` restant supportée pour compatibilité. Voir `docs/specs/surface-view.md` et `src/shared/shared.ts` pour les types actuels.
+> Ce document décrit le modèle **rectangulaire legacy** (wrap X). Depuis `generatorVersion >= 7`, la surface par défaut est **géodésique** (icosphère, `tileId`), la grille `w×h` restant supportée pour compatibilité. Voir `src/shared/shared.ts` pour les types actuels.
 
 ## 1. Objectif et périmètre
 
-La “Planet Map” est une vue 2D hexagonale (top-down) représentant la surface d’une planète (ou lune) pour visualiser et, à terme, supporter les opérations au sol (invasion, défense, présence d’armées, villes/points d’intérêt, rivières, biomes).
+La “Planet Map” est une représentation hexagonale 2D (top-down) de la surface d’une planète (ou lune) pour supporter les opérations au sol (invasion, défense, présence d’armées, villes/points d’intérêt, rivières, biomes).
 
 La carte doit être :
 
 - cohérente avec l’environnement de la planète (température, atmosphère/pression, gravité, albédo, distance à l’étoile, éventuel échauffement de marée),
 - déterministe (même seed + mêmes identifiants + même version d’algo => même carte),
 - légère en sauvegarde (on ne stocke pas obligatoirement toutes les tuiles),
-- performante au rendu (InstancedMesh, caméra orthographique, picking math).
 
 ### Contraintes de génération au début du jeu
 
@@ -192,7 +191,7 @@ Principe : aucune lecture de hasard non seedée. Toute décision provient de (ga
 - Fichier moteur : `src/engine/worldgen/planetSurfaceGenerator.ts` (versions 1/2 legacy, v7 par défaut).
 - Entrée pipeline : `generateSurfaceMap` choisit l’implémentation selon `descriptor.config.generatorVersion`.
 - Spécificités v4/v5 (P0 qualité) : macro-masse continentale séparée du relief, rotation/warp anti-anisotropie, jitter côtier, bruit périodique wrapX, classification océan = plus grande composante d’eau, nettoyage micro-îles/micro-lacs post-seuil, bords de côtes recalculés après labeling.
-- Spécificités v6 (terrain-first) : champ de terrain continu échantillonné sur la sphère (dir unitaire), bruit 3D sans couture, carte 2D dérivée par sampling multi-points, textures 3D dérivées du même champ (source de vérité unique).
+- Spécificités v6 (terrain-first) : champ de terrain continu échantillonné sur la sphère (dir unitaire), bruit 3D sans couture, carte 2D dérivée par sampling multi-points, données dérivées issues du même champ (source de vérité unique).
 - Spécificités v7 : grille géodésique (icosphère), `tileId` comme index stable, 12 pentagones implicites.
 
 ## 5. Pipeline de génération (cohérence environnementale)
@@ -246,46 +245,31 @@ Puis : classification biomes + rivières + features (villes).
   - Mode Lazy : régénération + cache LRU.
   - Mode Precompute : calcul au lancement, sans sérialiser forcément.
 
-## 7. Intégration application (3 niveaux de vues)
-
-Navigation contractuelle :
-
-- GALAXY (carte systèmes)
-- SYSTEM (vue 3D tactique)
-- PLANET (nouvelle vue 2D hex)
-
-## 8. Rendu et interactions (Three.js / R3F)
-
-- OrthographicCamera (pan/zoom)
-- InstancedMesh pour les hex, couleurs par instance selon biome
-- Picking math écran->monde->axial
-
-## 9. Unités au sol et combats (compat v1)
+## 7. Unités au sol et combats (compat v1)
 
 Phase 1 :
 
 - Army “sur la planète” via containerId=planetId
-- Position visuelle déterministe (hash(army.id) -> coord)
+- Position déterministe (hash(army.id) -> coord)
 
 Phase 2 :
 
 - armyPositionsById: Record<armyId, HexCoord>
 - commandes MOVE_ARMY, etc.
 
-## 10. Exigences de performance et qualité
+## 8. Exigences de performance et qualité
 
 - Taille max recommandée : <= ~15k hex (ex: 128×64 = 8192)
 - Génération < 100–300 ms pour ~5k–10k hex (sinon Lazy + cache)
-- Instancing obligatoire, éviter un mesh par tuile
 
-## 11. Tests (obligatoires pour fiabiliser le déterminisme)
+## 9. Tests (obligatoires pour fiabiliser le déterminisme)
 
 - Determinism : même descriptor => hash stable tiles + settlements
 - Dimension bounds : tiles.length == w*h
 - Validité : settlements sur tuiles non ocean
 - Eau : % tuiles eau conforme waterFraction (tolérance faible)
 
-## 12. Plan d’implémentation (tâches atomiques)
+## 10. Plan d’implémentation (tâches atomiques)
 
 1) Types partagés (Biome, PlanetSurfaceDescriptor, PlanetSurfaceMap, etc.)
 2) hash32 stable (FNV-1a) + deriveSeed(surface)
@@ -293,9 +277,5 @@ Phase 2 :
 4) deriveSurfaceParams(PlanetData/MoonData)
 5) generateSurfaceMap(descriptor, planetData?)
 6) Stocker PlanetSurfaceDescriptor au NewGame
-7) Écran PLANET_VIEW + navigation
-8) Rendu InstancedMesh + orthographic camera
-9) Picking math + tooltip
-10) Markers villes + unités (phase 1)
-11) Cache LRU (Lazy)
-12) Tests determinism + invariants
+7) Cache LRU (Lazy)
+8) Tests determinism + invariants

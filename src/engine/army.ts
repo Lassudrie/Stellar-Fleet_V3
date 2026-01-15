@@ -245,7 +245,7 @@ export const sanitizeArmies = (state: GameState): { state: GameState, logs: stri
 
 /**
  * Checks if a fleet contains at least one Troop Transport with an embarked army.
- * Used for UI logic (Can I invade?).
+ * Used for invasion eligibility checks.
  */
 export const hasInvadingForce = (fleet: Fleet): boolean => {
     return fleet.ships.some(s => 

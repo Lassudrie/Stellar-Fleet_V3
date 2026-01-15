@@ -19,7 +19,6 @@ import { RNG } from '../rng';
 import { GameScenario } from '../../content/scenarios';
 import { createArmy } from '../army';
 import { createShip } from '../world';
-import { computeFleetRadius } from '../fleetDerived';
 import { vec3, clone, Vec3, distSq } from '../math/vec3';
 import { SHIP_STATS } from '../../content/data/static';
 import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
@@ -30,7 +29,7 @@ import { createPlanetSurfaceDescriptor, normalizeSurfacePositions, DEFAULT_PLANE
 const CLUSTER_NEIGHBOR_COUNT = 4; // Number of extra systems for 'cluster' starting distribution
 
 // --- World Gen Constraints ---
-// Default requirement: ensure systems are not closer than 5 ly to avoid visual overlaps.
+// Default requirement: ensure systems are not closer than 5 ly to avoid extreme crowding.
 // Can be overridden / disabled per scenario via generation.minimumSystemSpacingLy (0 = disabled).
 const DEFAULT_MINIMUM_SYSTEM_SPACING_LY = 5;
 
@@ -1106,7 +1105,6 @@ export const generateWorld = (
           state: state,
           targetSystemId: targetSystemId,
           targetPosition: targetPosition,
-          radius: computeFleetRadius(ships.length),
           stateStartTurn: 0
       };
 
@@ -1207,11 +1205,9 @@ export const generateWorld = (
       fleets,
       stations: [],
       armies,
-      lasers: [],
       battles: [],
       logs: [initLog],
       messages: [],
-      selectedFleetId: null,
       winnerFactionId: null,
       planetSurfaceDescriptorsByBodyId,
       groundBuildings: [],

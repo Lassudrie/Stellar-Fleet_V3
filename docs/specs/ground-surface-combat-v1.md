@@ -239,7 +239,7 @@ Construire `K` dans cet ordre :
 4. `kStatus = Π Ki_status`, puis clamp `[0.4..1.0]`
 5. `K = clamp(kTerrainBase * kAffinity * kSituation * kStatus, 0.5, 1.8)`
 
-Le moteur doit pouvoir exposer un breakdown complet (debug + UI).
+Le moteur doit pouvoir exposer un breakdown complet (debug + consommateurs).
 
 **Ki_situation (normatif)** :
 - `prepared_defense` : 1.20 (si `posture = prepared_defense`).

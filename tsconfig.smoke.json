@@ -10,15 +10,6 @@
   "include": [
     "src/engine/**/*.ts",
     "src/content/**/*.ts",
-    "src/shared/**/*.ts",
-    "src/ui/commands/**/*.ts",
-    "src/ui/format/**/*.ts"
-  ],
-  "exclude": [
-    "src/ui/components/**/*",
-    "src/ui/audio/**/*",
-    "src/ui/i18n/**/*",
-    "src/ui/App.tsx",
-    "src/ui/main.tsx"
+    "src/shared/**/*.ts"
   ]
 }

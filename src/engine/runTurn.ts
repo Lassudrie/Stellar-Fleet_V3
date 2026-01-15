@@ -675,7 +675,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
   });
 
   // NOTE: `settlementControl` is intentionally sparse.
-  // Generating all surface maps every turn (to pre-seed entries) is extremely expensive and can freeze the UI.
+  // Generating all surface maps every turn (to pre-seed entries) is extremely expensive and can stall processing.
   // Missing entries fall back to the settlement's generated `factionId` when needed.
   let settlementControl = state.settlementControl ? { ...state.settlementControl } : {};
 

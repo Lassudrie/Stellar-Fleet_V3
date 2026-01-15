@@ -1,6 +1,6 @@
 # Stellar Fleet — Guide pour agents
 
-Ce dépôt contient **Stellar Fleet**, un simulateur de batailles spatiales 3D (Vite/React + React Three Fiber) avec un **moteur strictement déterministe**.
+Ce dépôt contient **Stellar Fleet**, un simulateur de batailles spatiales déterministe avec un **moteur strictement déterministe**.
 
 Ce fichier est destiné aux assistants de code (agents) et sert de “contrat” projet : commandes utiles, frontières d’architecture, invariants à ne pas casser, et conventions de contribution.
 
@@ -15,12 +15,6 @@ Installation (recommandé, identique à la CI) :
 npm ci
 ```
 
-Développement :
-
-```bash
-npm run dev
-```
-
 Vérifications (avant PR) :
 
 ```bash
@@ -33,8 +27,6 @@ Vérifications utiles (selon le scope du changement) :
 ```bash
 npm run typecheck:strict   # strict sur src/engine
 npm run lint
-npm run build
-npm run preview
 ```
 
 Outils de debug/simulation :
@@ -54,11 +46,9 @@ node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs
 ## Plan du repo (où modifier quoi)
 
 - `src/shared/` : types métier et utilitaires runtime partagés. Ne dépend de rien.
-- `src/content/` : données statiques, scénarios, assets audio (UI seulement). Dépend uniquement de `src/shared/`.
-- `src/engine/` : moteur de simulation déterministe (tour, IA, mouvement, combat, génération, sérialisation). Dépend de `src/shared/` et `src/content/`, mais **jamais** de `src/ui/`.
-- `src/ui/` : React + React Three Fiber. Orchestration, écrans, rendu 3D, i18n, audio.
+- `src/content/` : données statiques et scénarios. Dépend uniquement de `src/shared/`.
+- `src/engine/` : moteur de simulation déterministe (tour, IA, mouvement, combat, génération, sérialisation). Dépend de `src/shared/` et `src/content/`.
 - `docs/` : specs et architecture. Garder la doc alignée avec le code lorsqu’on modifie des règles.
-- `docs/agent-notes/` : plans, TODOs et certaines reponses d'agents conservees dans le repo.
 
 Entrées importantes :
 - Boucle de tour : `src/engine/runTurn.ts` et `src/engine/turn/phases/*`.
@@ -77,7 +67,7 @@ Règles (voir `docs/architecture/determinism-and-state.md`) :
 
 - Interdiction d’utiliser `Math.random()`, `crypto.randomUUID()`, ou toute source non déterministe dans `src/engine`, `src/shared`, `src/content`.
 - Interdiction d’utiliser `Date.now()` / `performance.now()` pour influencer la logique moteur. Le temps logique est discret (`state.day`).
-  - Exception : rendu/animation UI (ex. interpolation visuelle) et métadonnées hors-état (ex. horodatage d’export) peuvent utiliser le temps système.
+  - Exception : métadonnées hors-état (ex. horodatage d’export) peuvent utiliser le temps système.
 - RNG unique : utiliser la classe `RNG` (`src/engine/rng.ts`). Le curseur RNG (`rngState`) est persisté dans le `GameState`.
 - Ordre d’itération stable : tout ce qui consomme la RNG doit itérer dans un ordre déterministe.
   - Toujours trier par `id` (ou appliquer `canonicalizeState`) avant une boucle qui consomme la RNG.
@@ -116,7 +106,7 @@ alors vous devez très probablement :
 
 ### 4) Format de sauvegarde / sérialisation
 
-Tout ce qui est dans `GameState` doit rester JSON-sérialisable (types simples / objets / tableaux). Pas d’instances Three.js dans l’état : utiliser `Vec3` (`src/engine/math/vec3.ts`).
+Tout ce qui est dans `GameState` doit rester JSON-sérialisable (types simples / objets / tableaux). Pas d’instances runtime non sérialisables dans l’état : utiliser `Vec3` (`src/engine/math/vec3.ts`).
 
 Si vous modifiez un type sérialisé (ajout/changement de champ), mettre à jour de manière cohérente :
 - `src/shared/types.ts` (types runtime),
@@ -133,10 +123,7 @@ Règle : lecture tolérante, écriture stricte. Éviter de casser la compatibili
 Respecter strictement :
 - `src/shared` n’importe rien.
 - `src/content` dépend uniquement de `src/shared`.
-- `src/engine` dépend de `src/shared` et `src/content`, mais jamais de `src/ui` (ni DOM).
-- `src/ui` peut orchestrer l’ensemble.
-
-Les assets audio (`src/content/audio/*`) sont **UI-only** : le moteur ne doit pas y référencer.
+- `src/engine` dépend de `src/shared` et `src/content`.
 
 
 ### 6) Imports et exécution Node
@@ -144,7 +131,7 @@ Les assets audio (`src/content/audio/*`) sont **UI-only** : le moteur ne doit pa
 Le projet est en ESM (`"type": "module"`). Les tests et scripts Node utilisent un loader TypeScript (`tools/tsSmokeLoader.mjs`).
 
 Contraintes :
-- Préférer des imports relatifs (comme le code existant). Éviter d’introduire l’alias `@/` : il est configuré côté TS/Vite, mais **n’est pas résolu** par le runner Node actuel.
+- Préférer des imports relatifs (comme le code existant). Éviter d’introduire l’alias `@/` : il est configuré côté TS, mais **n’est pas résolu** par le runner Node actuel.
 - Les spec files sont exécutés directement avec Node (pas de Jest/Vitest). Écrire des tests “script” avec `node:assert`.
 
 
@@ -159,16 +146,12 @@ IDs :
 - Pour afficher des IDs à l’écran/log : utiliser `shortId()` (`src/engine/idUtils.ts`).
 
 Logs :
-- Éviter le bruit en console. Préférer `src/shared/devLogger.ts` (niveau configurable via `VITE_LOG_LEVEL`) et garder les logs lourds derrière un flag dev.
-
-UI / i18n :
-- Ne pas hardcoder du texte UI : utiliser `useI18n().t(key, params)`.
-- Si vous ajoutez une clé, la définir dans `src/ui/i18n/locales/en.ts` ET `src/ui/i18n/locales/fr.ts`.
+- Éviter le bruit en console. Préférer `logger` dans `src/shared/shared.ts` (niveau configurable via `VITE_LOG_LEVEL`) et garder les logs lourds derrière un flag dev.
 
 
 ## Patterns de contribution (ce qui marche bien ici)
 
-1) Identifier la couche : `engine` (règles), `ui` (présentation/UX), `content` (données/scénarios).
+1) Identifier la couche : `engine` (règles), `content` (données/scénarios), `shared` (types/outils).
 2) Lire les docs associées (`docs/architecture/*`, `docs/specs/*`) avant de modifier une règle.
 3) Faire des changements minimaux, sans refactor gratuit.
 4) Ajouter/adapter un test script si la logique change.
@@ -198,7 +181,6 @@ UI / i18n :
 - `npm run typecheck`
 - `npm run typecheck:strict`
 - `npm test`
-- Si changement UI/build : `npm run build` (et éventuellement `npm run preview`)
 
 Dans la description/summary, mentionner explicitement :
 - l’impact (ou non) sur le déterminisme,

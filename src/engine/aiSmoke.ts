@@ -64,7 +64,6 @@ const assertStateIsFinite = (state: GameState) => {
       assertVectorFinite(fleet.targetPosition, `fleet:${fleet.id}.targetPosition`);
     }
 
-    assertFiniteNumber(fleet.radius, `fleet:${fleet.id}.radius`);
     assertFiniteNumber(fleet.stateStartTurn, `fleet:${fleet.id}.stateStartTurn`);
 
     fleet.ships.forEach(ship => {

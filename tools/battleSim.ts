@@ -19,7 +19,6 @@ import { resolveBattle } from '../src/engine/battle';
 import { SHIP_STATS, COLORS } from '../src/content/data/static';
 import { Vec3 } from '../src/engine/math/vec3';
 import { sorted } from '../src/shared/shared';
-import { computeFleetRadius } from '../src/engine/fleetDerived';
 
 type FleetComposition = Partial<Record<ShipType, number>>;
 
@@ -489,7 +488,6 @@ const createFleet = (
     state: FleetState.ORBIT,
     targetSystemId: systemId,
     targetPosition: cloneVec(position),
-    radius: computeFleetRadius(ships.length),
     stateStartTurn: turn
   };
 };
@@ -531,11 +529,9 @@ const createBaseState = (
     systems: [system],
     fleets: [fleetA, fleetB],
     armies: [],
-    lasers: [],
     battles: [],
     logs: [],
     messages: [],
-    selectedFleetId: null,
     winnerFactionId: null,
     objectives,
     rules

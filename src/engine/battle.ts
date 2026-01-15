@@ -19,7 +19,6 @@ import { shortId } from '../shared/shared';
 import { distSq } from './math/vec3';
 import { hashJoin32 } from './planetSurface';
 import { RNG } from './rng';
-import { withUpdatedFleetDerived } from './fleetDerived';
 
 // ---------------------------------------
 // Balance profile (was: battle/balance.ts)
@@ -1038,13 +1037,13 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
 
     if (newShips.length > 0) {
       // Update fleet with new ships AND new derived stats (radius)
-      const updatedFleet = withUpdatedFleetDerived({
+      const updatedFleet = {
         ...oldFleet,
         ships: newShips,
         position: { ...orbitPosition },
         state: FleetState.ORBIT,
         stateStartTurn: turn
-      });
+      };
       survivingFleets.push(updatedFleet);
     }
   });
@@ -1076,7 +1075,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
     });
 
     if (penalizedShips.length > 0) {
-      attritionAdjustedFleets.push(withUpdatedFleetDerived({ ...fleet, ships: penalizedShips, stateStartTurn: turn }));
+      attritionAdjustedFleets.push({ ...fleet, ships: penalizedShips, stateStartTurn: turn });
     }
   });
 

@@ -5,7 +5,6 @@ import type {
   GameMessage,
   GameState,
   GroundBuilding,
-  LaserShot,
   LogEntry,
   SettlementControlState,
   StarSystem,
@@ -84,7 +83,6 @@ export const canonicalizeState = (state: GameState): GameState => {
     fleets: canonicalizeFleets(state.fleets),
     stations: canonicalizeStations(state.stations ?? []),
     armies: canonicalizeArmies(state.armies),
-    lasers: canonicalizeLasers(state.lasers),
     groundBuildings: canonicalizeGroundBuildings(state.groundBuildings ?? []),
     settlementControl: canonicalizeSettlementControl(state.settlementControl),
     bombardedTilesByBodyId: canonicalizeBombardedTilesByBodyId(state.bombardedTilesByBodyId),
@@ -118,10 +116,6 @@ export const canonicalizeStations = (stations: Station[]): Station[] => {
 
 export const canonicalizeArmies = (armies: Army[]): Army[] => {
   return sorted(armies, (a, b) => compareIds(a.id, b.id));
-};
-
-export const canonicalizeLasers = (lasers: LaserShot[]): LaserShot[] => {
-  return sorted(lasers, (a, b) => compareIds(a.id, b.id));
 };
 
 export const canonicalizeGroundBuildings = (buildings: GroundBuilding[]): GroundBuilding[] => {
@@ -208,13 +202,6 @@ export const isCanonical = (state: GameState): boolean => {
   // Check armies order
   for (let i = 1; i < state.armies.length; i++) {
     if (compareIds(state.armies[i].id, state.armies[i - 1].id) < 0) {
-      return false;
-    }
-  }
-
-  // Check lasers order
-  for (let i = 1; i < state.lasers.length; i++) {
-    if (compareIds(state.lasers[i].id, state.lasers[i - 1].id) < 0) {
       return false;
     }
   }

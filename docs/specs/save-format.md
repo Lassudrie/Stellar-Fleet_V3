@@ -51,7 +51,6 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `settlementControl` : contrôle persisté des settlements (factionId + lastCaptureTurn).
 - `bombardedTilesByBodyId` : tuiles bombardées au tour courant, indexées par `bodyId` (liste de `tileId`).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
-- `lasers` : tirs (`start`, `end`, couleur, durée de vie) conservés pour l’animation.
 - `logs` : journaux texte.
 - `messages` : notifications joueur (payloads arbitraires sérialisables JSON).
 
@@ -59,11 +58,10 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `aiState` (hérité) ou `aiStates` (par faction) avec observations et priorités.
 - `objectives` : conditions de victoire (`type`, `value?`) et éventuel `maxTurns`.
 - `winnerFactionId` : gagnant (`<factionId>`, `'draw'` ou `null`).
-- `selectedFleetId` : focus UI facultatif.
 
 ## 3. Champs sensibles et validations
 - **Références croisées** : `playerFactionId`, `ownerFactionId`, `factionId` (flottes/armées) et `winnerFactionId` doivent appartenir au registre `factions`. Une faction inconnue déclenche une erreur à la désérialisation.
-- **Vecteurs** : `position`, `targetPosition`, `start`/`end` des lasers doivent porter des composantes numériques finies (`x`, `y`, `z`). Toute valeur non numérique lève une erreur contextuelle.
+- **Vecteurs** : `position` et `targetPosition` doivent porter des composantes numériques finies (`x`, `y`, `z`). Toute valeur non numérique lève une erreur contextuelle.
 - **Seeds et RNG** : `seed` et `rngState` doivent être des nombres finis. `idRngState` doit être fini lorsqu’il est présent (sinon il hérite de `rngState`).
 - **Points de vie et consommables** : `hp` est clampé à `[0, maxHp]`; les munitions (`offensiveMissiles`, `torpedoes`, `interceptors`) sont remises à leur stock du vaisseau quand la valeur est manquante ou invalide.
 - **Kill history & messages** : les entrées sont assainies (`id` par défaut, dates numériques, chaînes forcées) pour éviter les charges arbitraires.
@@ -75,7 +73,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 
 ## 5. Gestion des champs manquants
 - `factions` ou `playerFactionId` absents : injection de factions par défaut (Blue/Red) et sélection du joueur sur la première faction disponible.
-- `systems`, `fleets`, `armies`, `lasers`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
+- `systems`, `fleets`, `armies`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
 - `stateStartTurn`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
 - `idRngState` : hérite de `rngState` si absent.
 - `members/maxMembers/condition/morale/fatigue` : valeurs clampées ou défauts issus des stats d’unité si absentes.

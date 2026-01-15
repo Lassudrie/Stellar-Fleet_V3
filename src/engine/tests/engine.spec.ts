@@ -144,7 +144,6 @@ const createFleet = (id: string, factionId: string, position: Vec3, ships: TestS
   state: FleetState.ORBIT,
   targetSystemId: null,
   targetPosition: null,
-  radius: 1,
   stateStartTurn: 0
 });
 
@@ -218,11 +217,9 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     systems: [],
     fleets: [],
     armies: [],
-    lasers: [],
     battles: [],
     logs: [],
     messages: [],
-    selectedFleetId: null,
     winnerFactionId: null,
     objectives,
     rules,
@@ -3139,7 +3136,6 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        radius: 1,
         stateStartTurn: 0
       });
 
@@ -3154,11 +3150,9 @@ tests.push(
         systems: [system],
         fleets: [mkFleet('fleet-blue', 'blue', inRange), mkFleet('fleet-red', 'red', -inRange)],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         aiStates: {},
         objectives: { conditions: [] },
@@ -3210,7 +3204,6 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        radius: 1,
         stateStartTurn: 0
       });
 
@@ -3225,11 +3218,9 @@ tests.push(
         systems: [system],
         fleets: [mkFleet('fleet-blue', 'blue', outOfRange), mkFleet('fleet-red', 'red', -outOfRange)],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         aiStates: {},
         objectives: { conditions: [] },
@@ -3292,7 +3283,6 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        radius: 1,
         stateStartTurn: 0
       });
 
@@ -3307,11 +3297,9 @@ tests.push(
         systems: [systemBeta, systemAlpha],
         fleets: [mkFleet('fleet-blue', 'blue'), mkFleet('fleet-red', 'red')],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         aiStates: {},
         objectives: { conditions: [] },
@@ -4192,11 +4180,9 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
     fleets: [],
     stations: [],
     armies: [],
-    lasers: [],
     battles: [],
     logs: [],
     messages: [],
-    selectedFleetId: null,
     winnerFactionId: null,
     planetSurfaceDescriptorsByBodyId: {
       [body.id]: descriptor
@@ -4435,7 +4421,6 @@ tests.push(
         state: FleetState.MOVING,
         targetSystemId: enemySystem.id,
         targetPosition: enemySystem.position,
-        radius: 1,
         stateStartTurn: base.day,
         invasionTargetSystemId: enemySystem.id,
         invasionTargetPlanetId: body.id
@@ -4514,7 +4499,6 @@ tests.push(
         state: FleetState.MOVING,
         targetSystemId: enemySystem.id,
         targetPosition: enemySystem.position,
-        radius: 1,
         stateStartTurn: base.day,
         invasionTargetSystemId: enemySystem.id,
         invasionTargetPlanetId: body.id
@@ -4573,7 +4557,6 @@ tests.push(
         state: FleetState.COMBAT,
         targetSystemId: null,
         targetPosition: null,
-        radius: 1,
         stateStartTurn: 1
       };
 
@@ -4594,7 +4577,6 @@ tests.push(
         state: FleetState.COMBAT,
         targetSystemId: null,
         targetPosition: null,
-        radius: 1,
         stateStartTurn: 1
       };
 
@@ -4636,11 +4618,9 @@ tests.push(
         systems: [system],
         fleets: [playerFleet, enemyFleet],
         armies: [],
-        lasers: [],
         battles: [battle],
         logs: [],
         messages: [decisionMessage],
-        selectedFleetId: null,
         winnerFactionId: null,
         aiStates: {},
         objectives: { conditions: [] },
@@ -4708,7 +4688,6 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           },
           {
@@ -4719,16 +4698,13 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           }
         ],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         objectives: { conditions: [] },
         rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
@@ -4738,7 +4714,7 @@ tests.push(
       const beta = view.systems.find(system => system.id === 'beta');
       assert.ok(beta, 'Beta system should exist in the view state');
       assert.strictEqual(beta?.ownerFactionId, 'red', 'Enemy ownership should remain visible even when the system is unobserved');
-      assert.strictEqual(beta?.color, fogFactions[1].color, 'Enemy territorial color should remain visible for border rendering');
+      assert.strictEqual(beta?.color, fogFactions[1].color, 'Enemy territorial color should remain visible for territory continuity');
 
       const fleetIds = new Set(view.fleets.map(fleet => fleet.id));
       assert.ok(fleetIds.has('blue-1'), 'Player fleets stay visible');
@@ -4794,7 +4770,6 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           },
           {
@@ -4805,16 +4780,13 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           }
         ],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         objectives: { conditions: [] },
         rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
@@ -4889,7 +4861,6 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           },
           {
@@ -4900,16 +4871,13 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            radius: 1,
             stateStartTurn: 0
           }
         ],
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         objectives: { conditions: [] },
         rules: { fogOfWar: true, useAdvancedCombat: true, aiEnabled: true, totalWar: true, unlimitedFuel: false }
@@ -5002,7 +4970,6 @@ tests.push({
       state: FleetState.ORBIT,
       targetSystemId: null,
       targetPosition: null,
-      radius: 1,
       stateStartTurn: 0
     });
 
@@ -5019,11 +4986,9 @@ tests.push({
         systems: [],
         fleets,
         armies: [],
-        lasers: [],
         battles: [],
         logs: [],
         messages: [],
-        selectedFleetId: null,
         winnerFactionId: null,
         objectives: { conditions: [] },
         rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
@@ -5165,7 +5130,6 @@ const engine_sr_createFleet = (id: string, system: StarSystem): Fleet => {
     state: FleetState.ORBIT,
     targetSystemId: null,
     targetPosition: null,
-    radius: 1,
     stateStartTurn: 0
   };
 };
@@ -5185,11 +5149,9 @@ const engine_sr_createBaseState = (): GameState => {
     systems: [system],
     fleets: [fleet],
     armies: [],
-    lasers: [],
     battles: [],
     logs: [],
     messages: [],
-    selectedFleetId: null,
     winnerFactionId: null,
     objectives: { conditions: [] },
     rules: { fogOfWar: false, aiEnabled: true, useAdvancedCombat: true, totalWar: false, unlimitedFuel: false }
@@ -5353,11 +5315,9 @@ tests.push({
       fleets: [],
       stations: [],
       armies: [],
-      lasers: [],
       battles: [],
       logs: [],
       messages: [],
-      selectedFleetId: null,
       winnerFactionId: null,
       planetSurfaceDescriptorsByBodyId: { [body.id]: descriptor },
       groundBuildings: [],
