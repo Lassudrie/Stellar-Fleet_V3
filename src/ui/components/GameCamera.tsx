@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, MapControls } from '@react-three/drei';
+import { useThree } from '@react-three/fiber';
 import { MapControls as ThreeMapControls } from 'three-stdlib';
 import { TOUCH, Vector3 } from 'three';
 import { Vec3 } from '../../engine/math/vec3';
@@ -37,6 +38,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
   maxPolarAngle
 }) => {
   const controlsRef = useRef<ThreeMapControls>(null);
+  const gl = useThree(state => state.gl);
   const hasInitialized = useRef(false);
   const isClampingRef = useRef(false);
   const clampScratchRef = useRef<ClampScratch>(createClampScratch());
@@ -275,6 +277,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
       */}
       <MapControls
         ref={controlsRef}
+        domElement={gl.domElement}
         target={targetArray}
         enableRotate={enableRotate}
         enablePan={true}
