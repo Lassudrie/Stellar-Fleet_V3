@@ -984,7 +984,7 @@ const App: React.FC = () => {
 
   const handleViewZoomChange = useCallback((nextZoom: number) => {
       const clamped = Math.max(0, Math.min(1, nextZoom));
-      setViewZoom(prev => (Math.abs(prev - clamped) < 0.002 ? prev : clamped));
+      setViewZoom(prev => (prev === clamped ? prev : clamped));
   }, []);
 
   const handleOpenSystemDetails = () => {
