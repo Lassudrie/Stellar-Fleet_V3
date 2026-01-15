@@ -16,6 +16,8 @@ interface GameCameraProps {
   distanceLimits?: { min: number; max: number };
   zoomTargetDistance?: number;
   onDistanceChange?: (distance: number) => void;
+  onWorldOriginShift?: (shift: Vector3) => void;
+  worldOriginShiftThreshold?: number;
   enableRotate?: boolean;
   minPolarAngle?: number;
   maxPolarAngle?: number;
@@ -25,6 +27,7 @@ const CAMERA_FOV = 35;
 const PAN_SPEED_RANGE = { min: 0.35, max: 2.4 };
 const ZOOM_SPEED_RANGE = { min: 0.4, max: 2.1 };
 const SPEED_EPSILON = 0.01;
+const ORIGIN_SHIFT_THRESHOLD = 5000;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -45,6 +48,8 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
   distanceLimits,
   zoomTargetDistance,
   onDistanceChange,
+  onWorldOriginShift,
+  worldOriginShiftThreshold,
   enableRotate = false,
   minPolarAngle,
   maxPolarAngle
@@ -60,6 +65,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
   const speedRef = useRef<{ pan: number; zoom: number }>({ pan: -1, zoom: -1 });
   const clampControlsRef = useRef<(options?: { skipUpdate?: boolean }) => void>(() => {});
   const mapBoundsRef = useRef<ClampBounds | null | undefined>(mapBounds);
+  const originShiftScratchRef = useRef<Vector3>(new Vector3());
 
   const targetArray = useMemo<[number, number, number]>(() => {
     if (!initialTarget) return [0, 0, 0];
@@ -191,6 +197,18 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
       controls.zoomSpeed = zoomSpeed;
       speedRef.current.zoom = zoomSpeed;
     }
+
+    if (!onWorldOriginShift) return;
+    const threshold = worldOriginShiftThreshold ?? ORIGIN_SHIFT_THRESHOLD;
+    if (threshold <= 0) return;
+    const targetDistance = controls.target.length();
+    if (targetDistance <= threshold) return;
+
+    originShiftScratchRef.current.copy(controls.target);
+    onWorldOriginShift(originShiftScratchRef.current);
+    controls.target.sub(originShiftScratchRef.current);
+    controls.object.position.sub(originShiftScratchRef.current);
+    controls.update();
   });
 
   useEffect(() => {
