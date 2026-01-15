@@ -168,6 +168,8 @@ interface MapMetrics {
   bounds: MapBounds;
 }
 
+const WORLD_ORIGIN_SHIFT_THRESHOLD = 5000;
+
 function useMapMetrics(systems: StarSystem[], galaxyRadius?: number): MapMetrics {
   return useMemo(() => {
     const requestedRadius = Math.max(galaxyRadius ?? 0, 0);
@@ -239,6 +241,36 @@ function useMapMetrics(systems: StarSystem[], galaxyRadius?: number): MapMetrics
     };
   }, [galaxyRadius, systems]);
 }
+
+const offsetVec3 = (value: Vec3, origin: Vec3): Vec3 => ({
+  x: value.x - origin.x,
+  y: value.y - origin.y,
+  z: value.z - origin.z
+});
+
+const offsetBounds = (bounds: MapBounds, origin: Vec3): MapBounds => ({
+  minX: bounds.minX - origin.x,
+  maxX: bounds.maxX - origin.x,
+  minZ: bounds.minZ - origin.z,
+  maxZ: bounds.maxZ - origin.z
+});
+
+const useWorldOrigin = () => {
+  const worldOriginRef = useRef<Vector3>(new Vector3());
+  const [worldOrigin, setWorldOrigin] = useState<Vec3>({ x: 0, y: 0, z: 0 });
+
+  const shiftWorldOrigin = useCallback((shift: Vector3) => {
+    if (shift.lengthSq() === 0) return;
+    worldOriginRef.current.add(shift);
+    setWorldOrigin({
+      x: worldOriginRef.current.x,
+      y: worldOriginRef.current.y,
+      z: worldOriginRef.current.z
+    });
+  }, []);
+
+  return { worldOriginRef, worldOrigin, shiftWorldOrigin };
+};
 
 const SimpleLine: React.FC<{ start: Vec3; end: Vec3; color: string; dashed?: boolean }> = ({ start, end, color, dashed }) => {
   const lineRef = useRef<any>(null);
@@ -1801,6 +1833,7 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
   isInteractive = true,
   onReady
 }) => {
+  const { worldOrigin, shiftWorldOrigin } = useWorldOrigin();
 
   const playerHomeworld = useMemo(() => {
     const ownedHomeworld = gameState.systems.find(
@@ -1838,18 +1871,32 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
   }, [focusTarget]);
 
   const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
+  const renderHomeworld = useMemo(
+    () => offsetVec3(homeworldForCamera, worldOrigin),
+    [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z, worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
 
   const cameraTarget = useMemo(
-    () => [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z] as [number, number, number],
-    [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
+    () => [renderHomeworld.x, renderHomeworld.y, renderHomeworld.z] as [number, number, number],
+    [renderHomeworld.x, renderHomeworld.y, renderHomeworld.z]
   );
 
   const cameraPosition = useMemo(
-    () => [homeworldForCamera.x, homeworldForCamera.y + 80, homeworldForCamera.z + 50] as [number, number, number],
-    [homeworldForCamera.x, homeworldForCamera.y, homeworldForCamera.z]
+    () => [renderHomeworld.x, renderHomeworld.y + 80, renderHomeworld.z + 50] as [number, number, number],
+    [renderHomeworld.x, renderHomeworld.y, renderHomeworld.z]
   );
 
-  const cameraFocusTarget = lastFocusedTarget;
+  const cameraFocusTarget = useMemo(
+    () => (lastFocusedTarget ? offsetVec3(lastFocusedTarget, worldOrigin) : null),
+    [
+      lastFocusedTarget?.x,
+      lastFocusedTarget?.y,
+      lastFocusedTarget?.z,
+      worldOrigin.x,
+      worldOrigin.y,
+      worldOrigin.z
+    ]
+  );
 
   const scenarioRadius = useMemo(() => {
     const template = SCENARIO_TEMPLATES.find(scenario => scenario.id === gameState.scenarioId);
@@ -1857,6 +1904,10 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
   }, [gameState.scenarioId]);
 
   const mapMetrics = useMapMetrics(gameState.systems, scenarioRadius);
+  const mapBounds = useMemo(
+    () => offsetBounds(mapMetrics.bounds, worldOrigin),
+    [mapMetrics.bounds, worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
   const ownershipSignature = useMemo(() => {
       const owners = gameState.systems.map((system) => `${system.id}:${system.ownerFactionId ?? 'none'}`);
       return sorted(owners).join('|');
@@ -1902,6 +1953,15 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
 
   // Color Helper
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
+  const worldOriginVector = useMemo(
+    () => new Vector3(worldOrigin.x, worldOrigin.y, worldOrigin.z),
+    [worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
+  const handleGalaxySystemClick = useCallback((sys: StarSystem, event: ThreeEvent<MouseEvent>) => {
+    if (!isInteractive) return;
+    event.point.add(worldOriginVector);
+    onSystemClick(sys, event);
+  }, [isInteractive, onSystemClick, worldOriginVector]);
 
   return (
     <div className={`absolute inset-0 z-0 bg-black ${isInteractive ? '' : 'pointer-events-none'}`}>
@@ -1920,58 +1980,62 @@ const LegacyGameScene: React.FC<GameSceneProps> = ({
               focusTarget={cameraFocusTarget}
               ready={isScenarioReady}
               mapRadius={mapMetrics.radius}
-              mapBounds={mapMetrics.bounds}
+              mapBounds={mapBounds}
+              onWorldOriginShift={shiftWorldOrigin}
+              worldOriginShiftThreshold={WORLD_ORIGIN_SHIFT_THRESHOLD}
             />
-            <ambientLight intensity={0.4} color="#aaccff" />
-            <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
-            <ParallaxStars />
-            
-            <group>
-                <TerritoryBorders 
+            <group position={[-worldOrigin.x, -worldOrigin.y, -worldOrigin.z]}>
+              <ambientLight intensity={0.4} color="#aaccff" />
+              <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
+              <ParallaxStars />
+              
+              <group>
+                  <TerritoryBorders 
+                      systems={gameState.systems} 
+                      signature={ownershipSignature}
+                      factions={gameState.factions} // Pass factions for coloring
+                  />
+
+                  <Galaxy 
                     systems={gameState.systems} 
-                    signature={ownershipSignature}
-                    factions={gameState.factions} // Pass factions for coloring
-                />
+                    fleets={gameState.fleets}
+                    factions={gameState.factions}
+                    armies={gameState.armies}
+                    battlingSystemIds={battlingSystemIds}
+                    onSystemClick={handleGalaxySystemClick} 
+                    playerFactionId={gameState.playerFactionId}
+                  />
+                  
+                  <TrajectoryRenderer
+                    fleets={gameState.fleets}
+                    factions={gameState.factions}
+                    playerFactionId={gameState.playerFactionId}
+                  />
 
-                <Galaxy 
-                  systems={gameState.systems} 
-                  fleets={gameState.fleets}
-                  factions={gameState.factions}
-                  armies={gameState.armies}
-                  battlingSystemIds={battlingSystemIds}
-                  onSystemClick={onSystemClick} 
-                  playerFactionId={gameState.playerFactionId}
-                />
-                
-                <TrajectoryRenderer
-                  fleets={gameState.fleets}
-                  factions={gameState.factions}
-                  playerFactionId={gameState.playerFactionId}
-                />
+                  <IntelGhosts
+                      sightings={enemySightings}
+                      currentDay={gameState.day}
+                      visibleFleetIds={visibleFleetIds}
+                      getFactionColor={getFactionColor}
+                  />
 
-                <IntelGhosts
-                    sightings={enemySightings}
-                    currentDay={gameState.day}
-                    visibleFleetIds={visibleFleetIds}
-                    getFactionColor={getFactionColor}
-                />
+                  {gameState.fleets.map(fleet => (
+                      <FleetMesh
+                          key={fleet.id}
+                          fleet={fleet}
+                          day={gameState.day}
+                          isSelected={selectedFleetId === fleet.id}
+                          onSelect={(e, isDouble, pointerType) => {
+                              e.stopPropagation();
+                              handleFleetInteraction(fleet.id, { isDouble, pointerType });
+                          }}
+                          playerFactionId={gameState.playerFactionId}
+                          color={getFactionColor(fleet.factionId)}
+                      />
+                  ))}
 
-                {gameState.fleets.map(fleet => (
-                    <FleetMesh
-                        key={fleet.id}
-                        fleet={fleet}
-                        day={gameState.day}
-                        isSelected={selectedFleetId === fleet.id}
-                        onSelect={(e, isDouble, pointerType) => {
-                            e.stopPropagation();
-                            handleFleetInteraction(fleet.id, { isDouble, pointerType });
-                        }}
-                        playerFactionId={gameState.playerFactionId}
-                        color={getFactionColor(fleet.factionId)}
-                    />
-                ))}
-
-                <LaserRenderer lasers={gameState.lasers} />
+                  <LaserRenderer lasers={gameState.lasers} />
+              </group>
             </group>
 
             <SceneReadyReporter onReady={onReady} />
@@ -2004,6 +2068,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   onFocusSurface,
   onSurfaceTileSelect
 }) => {
+  const { worldOrigin, shiftWorldOrigin } = useWorldOrigin();
   const resolvedView = viewContext ?? { tier: 'galaxy', focus: {} };
   const fallbackZoom = ZOOM_PRESETS[resolvedView.tier] ?? ZOOM_PRESETS.galaxy;
   const zoomValue = clamp01(viewZoom ?? fallbackZoom);
@@ -2082,6 +2147,10 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   const focusBase = zoomTier === 'galaxy' || !resolvedSystem
     ? homeworldForCamera
     : resolvedSystem.position;
+  const renderFocusBase = useMemo(
+    () => offsetVec3(focusBase, worldOrigin),
+    [focusBase.x, focusBase.y, focusBase.z, worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
 
   const cameraOffset = useMemo(() => {
     switch (zoomTier) {
@@ -2097,13 +2166,13 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   }, [zoomTier]);
 
   const cameraTarget = useMemo(
-    () => [focusBase.x, focusBase.y, focusBase.z] as [number, number, number],
-    [focusBase.x, focusBase.y, focusBase.z]
+    () => [renderFocusBase.x, renderFocusBase.y, renderFocusBase.z] as [number, number, number],
+    [renderFocusBase.x, renderFocusBase.y, renderFocusBase.z]
   );
 
   const cameraPosition = useMemo(
-    () => [focusBase.x, focusBase.y + cameraOffset.y, focusBase.z + cameraOffset.z] as [number, number, number],
-    [cameraOffset.y, cameraOffset.z, focusBase.x, focusBase.y, focusBase.z]
+    () => [renderFocusBase.x, renderFocusBase.y + cameraOffset.y, renderFocusBase.z + cameraOffset.z] as [number, number, number],
+    [cameraOffset.y, cameraOffset.z, renderFocusBase.x, renderFocusBase.y, renderFocusBase.z]
   );
 
   useEffect(() => {
@@ -2127,7 +2196,17 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     resolvedSystem?.position.z
   ]);
 
-  const cameraFocusTarget = lastFocusedTarget;
+  const cameraFocusTarget = useMemo(
+    () => (lastFocusedTarget ? offsetVec3(lastFocusedTarget, worldOrigin) : null),
+    [
+      lastFocusedTarget?.x,
+      lastFocusedTarget?.y,
+      lastFocusedTarget?.z,
+      worldOrigin.x,
+      worldOrigin.y,
+      worldOrigin.z
+    ]
+  );
 
   const scenarioRadius = useMemo(() => {
     const template = SCENARIO_TEMPLATES.find(scenario => scenario.id === gameState.scenarioId);
@@ -2169,8 +2248,13 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     return new Set(gameState.fleets.map(f => f.id));
   }, [gameState.fleets]);
 
+  const worldOriginVector = useMemo(
+    () => new Vector3(worldOrigin.x, worldOrigin.y, worldOrigin.z),
+    [worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
   const handleGalaxySystemClick = (sys: StarSystem, event: ThreeEvent<MouseEvent>) => {
     if (!isInteractive) return;
+    event.point.add(worldOriginVector);
     onFocusSystem?.(sys.id);
     onSystemClick(sys, event);
   };
@@ -2245,9 +2329,13 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     return undefined;
   }, [resolvedView.tier, viewZoom, zoomDistanceLimits, zoomStops, zoomTier]);
 
-  const mapBounds = viewZoom === undefined
+  const virtualMapBounds = viewZoom === undefined
     ? (resolvedView.tier === 'galaxy' ? mapMetrics.bounds : null)
     : (!hasSystemFocus || zoomValue < ZOOM_THRESHOLDS.system ? mapMetrics.bounds : null);
+  const mapBounds = useMemo(
+    () => (virtualMapBounds ? offsetBounds(virtualMapBounds, worldOrigin) : null),
+    [virtualMapBounds, worldOrigin.x, worldOrigin.y, worldOrigin.z]
+  );
   const allowRotate = viewZoom === undefined
     ? isTierAtLeast(resolvedView.tier, 'planet')
     : (hasPlanetFocus && zoomValue >= ZOOM_THRESHOLDS.planet);
@@ -2299,103 +2387,107 @@ const UniverseScene: React.FC<GameSceneProps> = ({
             enableRotate={allowRotate}
             zoomTargetDistance={zoomTargetDistance ?? undefined}
             onDistanceChange={viewZoom === undefined ? undefined : handleDistanceChange}
+            onWorldOriginShift={shiftWorldOrigin}
+            worldOriginShiftThreshold={WORLD_ORIGIN_SHIFT_THRESHOLD}
           />
-          <ambientLight intensity={0.4} color="#aaccff" />
-          <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
-          {!showSystemLayer && <ParallaxStars />}
+          <group position={[-worldOrigin.x, -worldOrigin.y, -worldOrigin.z]}>
+            <ambientLight intensity={0.4} color="#aaccff" />
+            <pointLight position={[0, 50, 0]} intensity={1.5} color="#ffffff" />
+            {!showSystemLayer && <ParallaxStars />}
 
-          {showGalaxyLayer && (
-            <group>
-              <TerritoryBorders
-                systems={gameState.systems}
-                signature={ownershipSignature}
-                factions={gameState.factions}
-              />
+            {showGalaxyLayer && (
+              <group>
+                <TerritoryBorders
+                  systems={gameState.systems}
+                  signature={ownershipSignature}
+                  factions={gameState.factions}
+                />
 
-              <Galaxy
-                systems={gameState.systems}
-                fleets={gameState.fleets}
-                factions={gameState.factions}
-                armies={gameState.armies}
-                battlingSystemIds={battlingSystemIds}
-                onSystemClick={handleGalaxySystemClick}
-                playerFactionId={gameState.playerFactionId}
-              />
-
-              <TrajectoryRenderer
-                fleets={gameState.fleets}
-                factions={gameState.factions}
-                playerFactionId={gameState.playerFactionId}
-              />
-
-              <IntelGhosts
-                sightings={enemySightings}
-                currentDay={gameState.day}
-                visibleFleetIds={visibleFleetIds}
-                getFactionColor={getFactionColor}
-              />
-
-              {gameState.fleets.map(fleet => (
-                <FleetMesh
-                  key={fleet.id}
-                  fleet={fleet}
-                  day={gameState.day}
-                  isSelected={selectedFleetId === fleet.id}
-                  onSelect={(e, isDouble, pointerType) => {
-                    e.stopPropagation();
-                    handleFleetInteraction(fleet.id, { isDouble, pointerType });
-                  }}
+                <Galaxy
+                  systems={gameState.systems}
+                  fleets={gameState.fleets}
+                  factions={gameState.factions}
+                  armies={gameState.armies}
+                  battlingSystemIds={battlingSystemIds}
+                  onSystemClick={handleGalaxySystemClick}
                   playerFactionId={gameState.playerFactionId}
-                  color={getFactionColor(fleet.factionId)}
                 />
-              ))}
 
-              <LaserRenderer lasers={gameState.lasers} />
-            </group>
-          )}
+                <TrajectoryRenderer
+                  fleets={gameState.fleets}
+                  factions={gameState.factions}
+                  playerFactionId={gameState.playerFactionId}
+                />
 
-          {resolvedSystem && (
-            <AnimatedScaleGroup
-              targetScale={systemScaleTarget}
-              position={resolvedSystem.position}
-              visible={showSystemLayer}
-            >
-              <SystemLayer
-                system={resolvedSystem}
-                day={gameState.day}
-                fleets={gameState.fleets}
-                stations={gameState.stations ?? []}
-                factions={gameState.factions}
-                planetSurfaceDescriptorsByBodyId={gameState.planetSurfaceDescriptorsByBodyId}
-                selectedFleetId={selectedFleetId}
-                focusBodyId={resolvedView.focus.bodyId ?? null}
-                onPlanetClick={(planetId) => (onFocusPlanet ?? onFocusSurface)?.(planetId)}
-                onFleetSelect={(fleetId) => handleFleetInteraction(fleetId)}
-              />
-            </AnimatedScaleGroup>
-          )}
-
-          {resolvedSystem && resolvedPlanet && (
-            <AnimatedScaleGroup
-              targetScale={planetScaleTarget}
-              position={resolvedSystem.position}
-              visible={showPlanetLayer}
-            >
-              <PlanetLayer planet={resolvedPlanet} radius={planetRadius} />
-              {showSurfaceLayer && (
-                <SurfaceLayer
-                  planetRadius={planetRadius}
-                  center={resolvedSystem.position}
-                  bodyId={resolvedPlanet.id}
-                  descriptor={surfaceDescriptor}
-                  armies={surfaceArmies}
-                  buildings={surfaceBuildings}
+                <IntelGhosts
+                  sightings={enemySightings}
+                  currentDay={gameState.day}
+                  visibleFleetIds={visibleFleetIds}
                   getFactionColor={getFactionColor}
-                  onSelectTile={onSurfaceTileSelect}
                 />
-              )}
-            </AnimatedScaleGroup>
-          )}
+
+                {gameState.fleets.map(fleet => (
+                  <FleetMesh
+                    key={fleet.id}
+                    fleet={fleet}
+                    day={gameState.day}
+                    isSelected={selectedFleetId === fleet.id}
+                    onSelect={(e, isDouble, pointerType) => {
+                      e.stopPropagation();
+                      handleFleetInteraction(fleet.id, { isDouble, pointerType });
+                    }}
+                    playerFactionId={gameState.playerFactionId}
+                    color={getFactionColor(fleet.factionId)}
+                  />
+                ))}
+
+                <LaserRenderer lasers={gameState.lasers} />
+              </group>
+            )}
+
+            {resolvedSystem && (
+              <AnimatedScaleGroup
+                targetScale={systemScaleTarget}
+                position={resolvedSystem.position}
+                visible={showSystemLayer}
+              >
+                <SystemLayer
+                  system={resolvedSystem}
+                  day={gameState.day}
+                  fleets={gameState.fleets}
+                  stations={gameState.stations ?? []}
+                  factions={gameState.factions}
+                  planetSurfaceDescriptorsByBodyId={gameState.planetSurfaceDescriptorsByBodyId}
+                  selectedFleetId={selectedFleetId}
+                  focusBodyId={resolvedView.focus.bodyId ?? null}
+                  onPlanetClick={(planetId) => (onFocusPlanet ?? onFocusSurface)?.(planetId)}
+                  onFleetSelect={(fleetId) => handleFleetInteraction(fleetId)}
+                />
+              </AnimatedScaleGroup>
+            )}
+
+            {resolvedSystem && resolvedPlanet && (
+              <AnimatedScaleGroup
+                targetScale={planetScaleTarget}
+                position={resolvedSystem.position}
+                visible={showPlanetLayer}
+              >
+                <PlanetLayer planet={resolvedPlanet} radius={planetRadius} />
+                {showSurfaceLayer && (
+                  <SurfaceLayer
+                    planetRadius={planetRadius}
+                    center={offsetVec3(resolvedSystem.position, worldOrigin)}
+                    bodyId={resolvedPlanet.id}
+                    descriptor={surfaceDescriptor}
+                    armies={surfaceArmies}
+                    buildings={surfaceBuildings}
+                    getFactionColor={getFactionColor}
+                    onSelectTile={onSurfaceTileSelect}
+                  />
+                )}
+              </AnimatedScaleGroup>
+            )}
+          </group>
 
           <SceneReadyReporter onReady={onReady} />
 
@@ -2412,7 +2504,7 @@ const GameScene: React.FC<GameSceneProps> = (props) => {
   if (props.viewContext) {
     return <UniverseScene {...props} />;
   }
-  return <LegacyGameScene {...props} />;
+  return <UniverseScene {...props} />;
 };
 
 export default GameScene;
