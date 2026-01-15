@@ -182,6 +182,7 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
     )
     : null;
   const spinGroupRef = useRef<Group>(null);
+  const isPressingRef = useRef(false);
 
   useFrame((_, delta) => {
     if (spinGroupRef.current) {
@@ -207,23 +208,32 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
             castShadow={false}
             receiveShadow={false}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              isPressingRef.current = true;
               onPressStart(moon.id, event);
             }}
             onPointerUp={() => {
+              isPressingRef.current = false;
               onPressEnd();
             }}
             onPointerMove={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onPressMove(event);
             }}
             onPointerOver={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onHover(moon.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onPressMove(event);
               if (event.pointerType !== 'touch') {
+                isPressingRef.current = false;
                 onPressCancel();
               }
               onBlur(moon.id);
@@ -241,11 +251,15 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
             castShadow
             receiveShadow
             onPointerOver={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onHover(moon.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onBlur(moon.id);
             }}
             onClick={(event) => {
@@ -389,6 +403,7 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
       />
     )
     : null;
+  const isPressingRef = useRef(false);
 
   useFrame((_, delta) => {
     if (spinGroupRef.current) {
@@ -414,23 +429,32 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             castShadow={false}
             receiveShadow={false}
             onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+              isPressingRef.current = true;
               onPressStart(planet.id, event);
             }}
             onPointerUp={() => {
+              isPressingRef.current = false;
               onPressEnd();
             }}
             onPointerMove={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onPressMove(event);
             }}
             onPointerOver={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onHover(planet.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onPressMove(event);
               if (event.pointerType !== 'touch') {
+                isPressingRef.current = false;
                 onPressCancel();
               }
               onBlur(planet.id);
@@ -448,11 +472,15 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             castShadow
             receiveShadow
             onPointerOver={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onHover(planet.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
+              if (isPressingRef.current) {
+                event.stopPropagation();
+              }
               onBlur(planet.id);
             }}
             onClick={(event) => {
