@@ -14,7 +14,7 @@ import { buildScenario } from '../content/scenarios';
 import { useI18n } from './i18n';
 import LoadingScreen from './components/ui/LoadingScreen';
 import { applyFogOfWar } from '../engine/fogOfWar';
-import { calculateFleetPower } from '../engine/world';
+import { calculateFleetPower, findNearestSystem } from '../engine/world';
 import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState } from '../engine/serialization';
 import { generateSurfaceMapForState, getSurfaceTileCoordFromId, getSurfaceTileCount, getSurfaceTileDir } from '../engine/planetSurface';
@@ -250,6 +250,74 @@ const App: React.FC = () => {
       if (viewZoom >= ZOOM_THRESHOLDS.system) return 'system';
       return 'galaxy';
   }, [viewContext.focus.bodyId, viewContext.focus.systemId, viewZoom]);
+
+  const defaultFocusSystem = useMemo(() => {
+      if (!viewGameState) return null;
+      const ownedHomeworld = viewGameState.systems.find(
+          (system) => system.isHomeworld && system.ownerFactionId === viewGameState.playerFactionId
+      );
+      if (ownedHomeworld) return ownedHomeworld;
+      const ownedSystem = viewGameState.systems.find((system) => system.ownerFactionId === viewGameState.playerFactionId);
+      if (ownedSystem) return ownedSystem;
+      return viewGameState.systems[0] ?? null;
+  }, [viewGameState]);
+
+  const autoFocusSystem = useMemo(() => {
+      if (!viewGameState) return null;
+      if (targetSystem) {
+          const match = viewGameState.systems.find(system => system.id === targetSystem.id);
+          if (match) return match;
+      }
+      if (focusTarget) {
+          const nearest = findNearestSystem(viewGameState.systems, focusTarget);
+          if (nearest) return nearest;
+      }
+      return defaultFocusSystem;
+  }, [defaultFocusSystem, focusTarget, targetSystem, viewGameState]);
+
+  useEffect(() => {
+      if (!viewGameState) return;
+      if (viewContext.focus.systemId) return;
+      if (viewZoom < ZOOM_THRESHOLDS.system) return;
+      const system = autoFocusSystem;
+      if (!system) return;
+
+      setViewContext(prev => {
+          if (prev.focus.systemId) return prev;
+          return {
+              tier: 'system',
+              focus: { systemId: system.id },
+              desiredZoom: null
+          };
+      });
+
+      if (!targetSystem || targetSystem.id !== system.id) {
+          setTargetSystem(system);
+      }
+      if (!focusTarget || !equals(focusTarget, system.position)) {
+          setFocusTarget(system.position);
+      }
+  }, [autoFocusSystem, focusTarget, targetSystem, viewContext.focus.systemId, viewGameState, viewZoom]);
+
+  useEffect(() => {
+      if (!viewGameState) return;
+      if (!viewContext.focus.systemId) return;
+      if (viewContext.focus.bodyId) return;
+      if (viewZoom < ZOOM_THRESHOLDS.planet) return;
+      const system = viewGameState.systems.find(entry => entry.id === viewContext.focus.systemId);
+      if (!system) return;
+      const planet = getDefaultSolidPlanet(system);
+      if (!planet) return;
+
+      setViewContext(prev => {
+          if (prev.focus.bodyId || prev.focus.systemId !== system.id) return prev;
+          return {
+              tier: 'planet',
+              focus: { systemId: system.id, bodyId: planet.id },
+              desiredZoom: null
+          };
+      });
+  }, [viewContext.focus.bodyId, viewContext.focus.systemId, viewGameState, viewZoom]);
   
   // Intel State (Persisted visual history of enemies)
   const [enemySightings, setEnemySightings] = useState<Record<string, EnemySighting>>({});
