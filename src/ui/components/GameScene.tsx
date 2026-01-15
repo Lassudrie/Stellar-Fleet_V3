@@ -359,7 +359,7 @@ const TIER_INDEX: Record<ViewTier, number> = {
 
 const isTierAtLeast = (tier: ViewTier, target: ViewTier): boolean => TIER_INDEX[tier] >= TIER_INDEX[target];
 
-const SYSTEM_LAYER_SCALE = 35;
+const SYSTEM_LAYER_SCALE_FACTOR = 0.08;
 const PLANET_LAYER_SCALE = 120;
 const ZOOM_THRESHOLDS = {
   system: 0.28,
@@ -2269,7 +2269,9 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   const showPlanetLayer = hasPlanetFocus && planetZoomT > 0.01;
   const showSurfaceLayer = hasPlanetFocus && surfaceZoomT > 0.01;
 
-  const systemScaleTarget = showSystemLayer ? SYSTEM_LAYER_SCALE * systemZoomT : 0;
+  const systemScaleTarget = showSystemLayer
+    ? mapMetrics.radius * SYSTEM_LAYER_SCALE_FACTOR * systemZoomT
+    : 0;
   const planetScaleBoost = MathUtils.lerp(1, 1.6, surfaceZoomT);
   const planetScaleTarget = showPlanetLayer
     ? PLANET_LAYER_SCALE * planetZoomT * planetScaleBoost
