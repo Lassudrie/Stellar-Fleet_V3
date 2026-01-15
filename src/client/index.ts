@@ -7,6 +7,9 @@ const DEFAULT_SEED = 42;
 const DEFAULT_TIME_SCALE = 0;
 const TIME_SCALE_MIN = -5;
 const TIME_SCALE_MAX = 5;
+const DOUBLE_TAP_MS = 320;
+const DOUBLE_TAP_DIST = 32;
+const TAP_SLOP = 10;
 
 type DragMode = 'orbit' | 'pan';
 
@@ -233,6 +236,31 @@ const pointerState: PointerState = {
 const touchPoints = new Map<number, { x: number; y: number }>();
 let lastPinchDistance = 0;
 let lastPinchCenter: { x: number; y: number } | null = null;
+const tapState = {
+  activeId: null as number | null,
+  startX: 0,
+  startY: 0,
+  moved: false,
+  lastTapTime: 0,
+  lastTapX: 0,
+  lastTapY: 0
+};
+
+const registerTap = (x: number, y: number) => {
+  const now = performance.now();
+  const delta = now - tapState.lastTapTime;
+  const dist = Math.hypot(x - tapState.lastTapX, y - tapState.lastTapY);
+  if (delta <= DOUBLE_TAP_MS && dist <= DOUBLE_TAP_DIST) {
+    tapState.lastTapTime = 0;
+    if (runtime) {
+      runtime.view.focusAtScreen(x, y);
+    }
+    return;
+  }
+  tapState.lastTapTime = now;
+  tapState.lastTapX = x;
+  tapState.lastTapY = y;
+};
 
 const resetPinch = () => {
   lastPinchDistance = 0;
@@ -278,6 +306,14 @@ canvas.addEventListener('pointerdown', event => {
   canvas.setPointerCapture(event.pointerId);
   if (event.pointerType === 'touch') {
     touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touchPoints.size === 1) {
+      tapState.activeId = event.pointerId;
+      tapState.startX = event.clientX;
+      tapState.startY = event.clientY;
+      tapState.moved = false;
+    } else {
+      tapState.activeId = null;
+    }
     if (touchPoints.size >= 2) {
       updatePinch();
     }
@@ -294,6 +330,13 @@ canvas.addEventListener('pointermove', event => {
     const point = touchPoints.get(event.pointerId);
     if (!point) return;
     touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (tapState.activeId === event.pointerId) {
+      const dx = event.clientX - tapState.startX;
+      const dy = event.clientY - tapState.startY;
+      if (Math.hypot(dx, dy) > TAP_SLOP) {
+        tapState.moved = true;
+      }
+    }
     if (!runtime) return;
     if (touchPoints.size === 1) {
       const deltaX = event.clientX - point.x;
@@ -320,7 +363,18 @@ canvas.addEventListener('pointermove', event => {
 
 const endDrag = (event: PointerEvent) => {
   if (event.pointerType === 'touch') {
+    const wasSingleTouch = touchPoints.size === 1;
     touchPoints.delete(event.pointerId);
+    if (tapState.activeId === event.pointerId) {
+      const dx = event.clientX - tapState.startX;
+      const dy = event.clientY - tapState.startY;
+      const moved = tapState.moved || Math.hypot(dx, dy) > TAP_SLOP;
+      tapState.activeId = null;
+      tapState.moved = false;
+      if (wasSingleTouch && !moved) {
+        registerTap(event.clientX, event.clientY);
+      }
+    }
     if (touchPoints.size < 2) {
       resetPinch();
     }
@@ -348,6 +402,11 @@ canvas.addEventListener(
   },
   { passive: false }
 );
+
+canvas.addEventListener('dblclick', event => {
+  if (!runtime) return;
+  runtime.view.focusAtScreen(event.clientX, event.clientY);
+});
 
 let lastTime = performance.now();
 const frame = (time: number) => {

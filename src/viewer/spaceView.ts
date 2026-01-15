@@ -582,8 +582,9 @@ class ZoomController {
   }
 
   applyZoomDelta(delta: number): void {
+    const distanceFactor = clamp(1 + (this.logDistance - this.minLogDistance) * 0.12, 1, 4);
     this.targetLogDistance = clamp(
-      this.targetLogDistance + delta * this.zoomSpeed,
+      this.targetLogDistance + delta * this.zoomSpeed * distanceFactor,
       this.minLogDistance,
       this.maxLogDistance
     );
@@ -813,6 +814,8 @@ export class SpaceView {
   private sizePx = { width: 1, height: 1 };
   private rafId: number | null = null;
   private lastFrameMs = 0;
+  private lastOriginMeters: Vec3 = vec3();
+  private lastCameraMeters: Vec3 = vec3();
 
   constructor(options: SpaceViewOptions) {
     this.data = options.data;
@@ -944,6 +947,71 @@ export class SpaceView {
     this.cameraRig.applyPan(deltaX, deltaY);
   }
 
+  focusAtScreen(screenX: number, screenY: number): boolean {
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return false;
+    if (this.sizePx.width <= 1 || this.sizePx.height <= 1) return false;
+    const originMeters = this.lastOriginMeters;
+    const cameraMeters = this.lastCameraMeters;
+    if (!Number.isFinite(cameraMeters.x) || !Number.isFinite(cameraMeters.y) || !Number.isFinite(cameraMeters.z)) return false;
+
+    const activeSystem = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
+    const fovRad = this.camera.fov * (Math.PI / 180);
+
+    if (activeSystem && this.planetFade.value > 0.2) {
+      const planetPick = this.pickPlanetAtScreen(activeSystem, screenX, screenY, originMeters, cameraMeters, fovRad);
+      if (planetPick) {
+        this.focusSystemId = activeSystem.id;
+        this.cameraRig.setTargetMeters(planetPick.targetMeters);
+        return true;
+      }
+    }
+
+    if (activeSystem && this.systemFade.value > 0.2) {
+      const planetPick = this.pickPlanetAtScreen(activeSystem, screenX, screenY, originMeters, cameraMeters, fovRad);
+      if (planetPick) {
+        this.focusSystemId = activeSystem.id;
+        this.cameraRig.setTargetMeters(planetPick.targetMeters);
+        return true;
+      }
+
+      const systemPick = this.pickSystemAtScreen(
+        [activeSystem],
+        screenX,
+        screenY,
+        originMeters,
+        cameraMeters,
+        fovRad,
+        this.scales.metersPerSystemUnit,
+        activeSystem.positionMeters,
+        activeSystem.extentMeters
+      );
+      if (systemPick) {
+        this.focusSystemId = systemPick.system.id;
+        this.cameraRig.setTargetMeters(systemPick.system.positionMeters);
+        return true;
+      }
+    }
+
+    const galaxyPick = this.pickSystemAtScreen(
+      this.data.systems,
+      screenX,
+      screenY,
+      originMeters,
+      cameraMeters,
+      fovRad,
+      this.scales.metersPerGalaxyUnit,
+      vec3(),
+      this.galaxyRadiusMeters
+    );
+    if (galaxyPick) {
+      this.focusSystemId = galaxyPick.system.id;
+      this.cameraRig.setTargetMeters(galaxyPick.system.positionMeters);
+      return true;
+    }
+
+    return false;
+  }
+
   resize(width: number, height: number, pixelRatio?: number): void {
     const ratio = pixelRatio ?? Math.min(2, Number(globalThis.devicePixelRatio) || 1);
     this.renderer.setPixelRatio(ratio);
@@ -983,6 +1051,8 @@ export class SpaceView {
 
     const cameraState = this.cameraRig.update(dtSeconds);
     const originMeters = this.floatingOrigin.update(cameraState.positionMeters);
+    copyVec3(this.lastOriginMeters, originMeters);
+    copyVec3(this.lastCameraMeters, cameraState.positionMeters);
     this.updateRootOffsets(originMeters);
 
     const activeSystem = this.resolveActiveSystem(cameraState.positionMeters);
@@ -1251,6 +1321,17 @@ export class SpaceView {
     passExtentMeters: number;
     passCenterMeters: Vec3;
   }): void {
+    this.configureCameraForPass(options);
+    this.renderer.render(options.scene, this.camera);
+  }
+
+  private configureCameraForPass(options: {
+    originMeters: Vec3;
+    cameraMeters: Vec3;
+    metersPerUnit: number;
+    passExtentMeters: number;
+    passCenterMeters: Vec3;
+  }): void {
     const distanceMeters = distVec3(options.cameraMeters, options.passCenterMeters);
     const distanceUnits = distanceMeters / options.metersPerUnit;
     const extentUnits = Math.max(1, options.passExtentMeters / options.metersPerUnit);
@@ -1266,7 +1347,105 @@ export class SpaceView {
       (options.cameraMeters.z - options.originMeters.z) / options.metersPerUnit
     );
     this.camera.updateProjectionMatrix();
-    this.renderer.render(options.scene, this.camera);
+    this.camera.updateMatrixWorld();
+  }
+
+  private projectMetersToScreen(
+    positionMeters: Vec3,
+    originMeters: Vec3,
+    metersPerUnit: number
+  ): { x: number; y: number; z: number } | null {
+    const vector = scratchVec3A.set(
+      (positionMeters.x - originMeters.x) / metersPerUnit,
+      (positionMeters.y - originMeters.y) / metersPerUnit,
+      (positionMeters.z - originMeters.z) / metersPerUnit
+    );
+    vector.project(this.camera);
+    if (vector.z < -1 || vector.z > 1) return null;
+    const x = (vector.x * 0.5 + 0.5) * this.sizePx.width;
+    const y = (-vector.y * 0.5 + 0.5) * this.sizePx.height;
+    return { x, y, z: vector.z };
+  }
+
+  private pickSystemAtScreen(
+    systems: SystemViewData[],
+    screenX: number,
+    screenY: number,
+    originMeters: Vec3,
+    cameraMeters: Vec3,
+    fovRad: number,
+    metersPerUnit: number,
+    passCenterMeters: Vec3,
+    passExtentMeters: number
+  ): { system: SystemViewData; screenDist: number } | null {
+    if (systems.length === 0) return null;
+
+    this.configureCameraForPass({
+      originMeters,
+      cameraMeters,
+      metersPerUnit,
+      passCenterMeters,
+      passExtentMeters
+    });
+
+    let best: { system: SystemViewData; screenDist: number } | null = null;
+
+    for (const system of systems) {
+      const screenPos = this.projectMetersToScreen(system.positionMeters, originMeters, metersPerUnit);
+      if (!screenPos) continue;
+      const distance = distVec3(cameraMeters, system.positionMeters);
+      const screenRadius = screenSpaceRadiusPx(system.extentMeters, distance, fovRad, this.sizePx.height);
+      const threshold = clamp(screenRadius * 1.2 + 6, 12, 120);
+      const dx = screenPos.x - screenX;
+      const dy = screenPos.y - screenY;
+      const distPx = Math.hypot(dx, dy);
+      if (distPx > threshold) continue;
+      if (!best || distPx < best.screenDist) {
+        best = { system, screenDist: distPx };
+      }
+    }
+
+    return best;
+  }
+
+  private pickPlanetAtScreen(
+    system: SystemViewData,
+    screenX: number,
+    screenY: number,
+    originMeters: Vec3,
+    cameraMeters: Vec3,
+    fovRad: number
+  ): { planet: PlanetViewData; targetMeters: Vec3 } | null {
+    if (system.planets.length === 0) return null;
+
+    this.configureCameraForPass({
+      originMeters,
+      cameraMeters,
+      metersPerUnit: this.scales.metersPerSystemUnit,
+      passCenterMeters: system.positionMeters,
+      passExtentMeters: system.extentMeters
+    });
+
+    let best: { planet: PlanetViewData; targetMeters: Vec3; screenDist: number } | null = null;
+
+    for (const planet of system.planets) {
+      const orbitPosition = computeOrbitPositionMeters(planet, this.timeDays);
+      const planetWorld = addVec3(vec3(), system.positionMeters, orbitPosition);
+      const screenPos = this.projectMetersToScreen(planetWorld, originMeters, this.scales.metersPerSystemUnit);
+      if (!screenPos) continue;
+      const distance = distVec3(cameraMeters, planetWorld);
+      const screenRadius = screenSpaceRadiusPx(planet.radiusMeters, distance, fovRad, this.sizePx.height);
+      const threshold = clamp(screenRadius * 1.4 + 8, 14, 120);
+      const dx = screenPos.x - screenX;
+      const dy = screenPos.y - screenY;
+      const distPx = Math.hypot(dx, dy);
+      if (distPx > threshold) continue;
+      if (!best || distPx < best.screenDist) {
+        best = { planet, targetMeters: planetWorld, screenDist: distPx };
+      }
+    }
+
+    return best ? { planet: best.planet, targetMeters: best.targetMeters } : null;
   }
 
   private updateRootOffsets(originMeters: Vec3): void {
