@@ -30,6 +30,23 @@
         pointer-events: none;
       }
 
+      .menu-screen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 3;
+        background: radial-gradient(circle at 20% 20%, rgba(24, 53, 88, 0.45), transparent 55%),
+          radial-gradient(circle at 80% 10%, rgba(72, 36, 63, 0.28), transparent 45%),
+          linear-gradient(160deg, rgba(5, 7, 12, 0.98), rgba(6, 9, 16, 0.92));
+      }
+
+      .hidden {
+        display: none;
+      }
+
       .panel {
         pointer-events: auto;
         width: min(340px, 92vw);
@@ -39,6 +56,15 @@
         background: linear-gradient(135deg, rgba(11, 15, 24, 0.92), rgba(8, 12, 20, 0.84));
         box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
         color: #e6edf3;
+      }
+
+      .menu-panel {
+        width: min(420px, 92vw);
+      }
+
+      .panel.slim {
+        width: min(300px, 86vw);
+        padding: 12px 14px;
       }
 
       .panel h1 {
@@ -56,6 +82,13 @@
         color: rgba(230, 237, 243, 0.7);
       }
 
+      .menu-eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: rgba(230, 237, 243, 0.55);
+      }
+
       .panel label {
         display: block;
         margin-top: 10px;
@@ -63,6 +96,10 @@
         letter-spacing: 0.18em;
         text-transform: uppercase;
         color: rgba(230, 237, 243, 0.75);
+      }
+
+      .panel .field-group {
+        margin-top: 10px;
       }
 
       .panel select,
@@ -133,6 +170,10 @@
           bottom: 12px;
         }
 
+        .menu-panel {
+          width: min(360px, 92vw);
+        }
+
         .panel {
           width: auto;
         }
@@ -141,23 +182,37 @@
   </head>
   <body>
     <canvas id="galaxy"></canvas>
-    <div class="hud">
-      <div class="panel">
+    <div id="menu-screen" class="menu-screen">
+      <div class="panel menu-panel">
+        <div class="menu-eyebrow">Scenario Gate</div>
         <h1>Stellar Fleet</h1>
         <p id="scenario-description">Loading scenario...</p>
         <label for="scenario-select">Scenario</label>
         <select id="scenario-select"></select>
         <label for="seed-input">Seed</label>
         <input id="seed-input" type="number" step="1" />
-        <label for="time-scale">Time Scale (days/s)</label>
+        <label for="time-scale-menu">Time Scale (days/s)</label>
         <div class="range-row">
-          <input id="time-scale" type="range" min="-5" max="5" step="0.1" />
-          <div class="range-value" id="time-scale-value">0</div>
+          <input id="time-scale-menu" type="range" min="-5" max="5" step="0.1" />
+          <div class="range-value" id="time-scale-value-menu">0</div>
         </div>
         <div class="actions">
-          <button id="apply-button" type="button">Load Scenario</button>
+          <button id="start-button" type="button">Launch Mission</button>
         </div>
-        <div class="hint">Drag to orbit. Shift or right-drag to pan. Scroll to zoom.</div>
+        <div class="hint">Pinch or scroll to zoom. Drag to orbit. Two-finger drag to pan.</div>
+      </div>
+    </div>
+    <div id="hud" class="hud hidden">
+      <div class="panel slim">
+        <label for="time-scale-hud">Time Scale (days/s)</label>
+        <div class="range-row">
+          <input id="time-scale-hud" type="range" min="-5" max="5" step="0.1" />
+          <div class="range-value" id="time-scale-value-hud">0</div>
+        </div>
+        <div class="actions">
+          <button id="menu-button" type="button">Menu</button>
+        </div>
+        <div class="hint">Drag to orbit. Shift or right-drag to pan. Scroll or pinch to zoom.</div>
       </div>
     </div>
     <script type="module" src="/client.js"></script>

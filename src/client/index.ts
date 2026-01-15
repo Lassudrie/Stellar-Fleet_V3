@@ -46,14 +46,21 @@ const getElement = <T extends HTMLElement>(selector: string): T => {
 };
 
 const canvas = getElement<HTMLCanvasElement>('#galaxy');
+const menuScreen = getElement<HTMLDivElement>('#menu-screen');
+const hud = getElement<HTMLDivElement>('#hud');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
-const timeScaleInput = getElement<HTMLInputElement>('#time-scale');
-const timeScaleValue = getElement<HTMLDivElement>('#time-scale-value');
-const applyButton = getElement<HTMLButtonElement>('#apply-button');
+const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
+const hudTimeScaleInput = getElement<HTMLInputElement>('#time-scale-hud');
+const menuTimeScaleValue = getElement<HTMLDivElement>('#time-scale-value-menu');
+const hudTimeScaleValue = getElement<HTMLDivElement>('#time-scale-value-hud');
+const startButton = getElement<HTMLButtonElement>('#start-button');
+const menuButton = getElement<HTMLButtonElement>('#menu-button');
 const scenarioDescription = getElement<HTMLParagraphElement>('#scenario-description');
 
 const scenarioById = new Map(SCENARIO_TEMPLATES.map(template => [template.id, template]));
+const timeScaleInputs = [menuTimeScaleInput, hudTimeScaleInput];
+const timeScaleValues = [menuTimeScaleValue, hudTimeScaleValue];
 
 const resolveScenarioId = (candidate: string | null): string => {
   if (candidate && scenarioById.has(candidate)) return candidate;
@@ -83,8 +90,23 @@ const populateScenarioOptions = () => {
   });
 };
 
+const setMenuVisible = (visible: boolean): void => {
+  menuScreen.classList.toggle('hidden', !visible);
+  hud.classList.toggle('hidden', visible);
+};
+
+const setTimeScaleUI = (value: number): void => {
+  const text = formatTimeScale(value);
+  timeScaleInputs.forEach(input => {
+    input.value = String(value);
+  });
+  timeScaleValues.forEach(label => {
+    label.textContent = text;
+  });
+};
+
 const readSeed = (): number => Math.floor(parseNumberParam(seedInput.value, DEFAULT_SEED));
-const readTimeScale = (): number => clamp(parseNumberParam(timeScaleInput.value, DEFAULT_TIME_SCALE), TIME_SCALE_MIN, TIME_SCALE_MAX);
+const readTimeScale = (value: string): number => clamp(parseNumberParam(value, DEFAULT_TIME_SCALE), TIME_SCALE_MIN, TIME_SCALE_MAX);
 
 const createRuntime = (scenarioId: string, seed: number, timeScale: number): Runtime => {
   const scenario = buildScenario(scenarioId, seed);
@@ -114,7 +136,6 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
   updateDescription(scenarioId);
 
   const next = createRuntime(scenarioId, seed, timeScale);
-  updateUrlParams(next.scenarioId, next.seed, next.timeScale);
   return next;
 };
 
@@ -131,22 +152,49 @@ const initialTimeScale = clamp(parseNumberParam(params.get('timeScale'), DEFAULT
 
 scenarioSelect.value = initialScenarioId;
 seedInput.value = String(initialSeed);
-timeScaleInput.value = String(initialTimeScale);
-timeScaleValue.textContent = formatTimeScale(initialTimeScale);
+setTimeScaleUI(initialTimeScale);
 updateDescription(initialScenarioId);
+setMenuVisible(true);
 
-let runtime = createRuntime(initialScenarioId, initialSeed, initialTimeScale);
+let runtime: Runtime | null = null;
 
-applyButton.addEventListener('click', () => {
+const resize = () => {
+  const width = canvas.clientWidth || window.innerWidth;
+  const height = canvas.clientHeight || window.innerHeight;
+  if (runtime) {
+    runtime.view.resize(width, height);
+  }
+};
+
+const launchScenario = (scenarioId: string, seed: number, timeScale: number): Runtime => {
+  const next = runtime ? applyScenario(runtime, scenarioId, seed, timeScale) : createRuntime(scenarioId, seed, timeScale);
+  updateUrlParams(next.scenarioId, next.seed, next.timeScale);
+  resize();
+  return next;
+};
+
+const openMenu = () => {
+  if (runtime) {
+    scenarioSelect.value = runtime.scenarioId;
+    seedInput.value = String(runtime.seed);
+    setTimeScaleUI(runtime.timeScale);
+    updateDescription(runtime.scenarioId);
+  }
+  setMenuVisible(true);
+};
+
+startButton.addEventListener('click', () => {
   const nextScenarioId = resolveScenarioId(scenarioSelect.value);
   scenarioSelect.value = nextScenarioId;
   const nextSeed = readSeed();
-  const nextTimeScale = readTimeScale();
+  const nextTimeScale = readTimeScale(menuTimeScaleInput.value);
   seedInput.value = String(nextSeed);
-  timeScaleInput.value = String(nextTimeScale);
-  timeScaleValue.textContent = formatTimeScale(nextTimeScale);
-  runtime = applyScenario(runtime, nextScenarioId, nextSeed, nextTimeScale);
+  setTimeScaleUI(nextTimeScale);
+  runtime = launchScenario(nextScenarioId, nextSeed, nextTimeScale);
+  setMenuVisible(false);
 });
+
+menuButton.addEventListener('click', openMenu);
 
 scenarioSelect.addEventListener('change', () => {
   updateDescription(resolveScenarioId(scenarioSelect.value));
@@ -154,27 +202,23 @@ scenarioSelect.addEventListener('change', () => {
 
 seedInput.addEventListener('keydown', event => {
   if (event.key !== 'Enter') return;
-  applyButton.click();
+  startButton.click();
 });
 
-const onTimeScaleChange = () => {
-  const value = readTimeScale();
-  timeScaleInput.value = String(value);
-  timeScaleValue.textContent = formatTimeScale(value);
+const onTimeScaleChange = (event: Event) => {
+  const target = event.target as HTMLInputElement | null;
+  const value = readTimeScale(target?.value ?? menuTimeScaleInput.value);
+  setTimeScaleUI(value);
+  if (!runtime) return;
   runtime.timeScale = value;
   runtime.view.setTimeScaleDaysPerSecond(value);
   updateUrlParams(runtime.scenarioId, runtime.seed, runtime.timeScale);
 };
 
-timeScaleInput.addEventListener('input', onTimeScaleChange);
-
-timeScaleInput.addEventListener('change', onTimeScaleChange);
-
-const resize = () => {
-  const width = canvas.clientWidth || window.innerWidth;
-  const height = canvas.clientHeight || window.innerHeight;
-  runtime.view.resize(width, height);
-};
+timeScaleInputs.forEach(input => {
+  input.addEventListener('input', onTimeScaleChange);
+  input.addEventListener('change', onTimeScaleChange);
+});
 
 window.addEventListener('resize', resize);
 resize();
@@ -186,10 +230,59 @@ const pointerState: PointerState = {
   mode: 'orbit'
 };
 
+const touchPoints = new Map<number, { x: number; y: number }>();
+let lastPinchDistance = 0;
+let lastPinchCenter: { x: number; y: number } | null = null;
+
+const resetPinch = () => {
+  lastPinchDistance = 0;
+  lastPinchCenter = null;
+};
+
+const updatePinch = () => {
+  if (!runtime || touchPoints.size < 2) {
+    resetPinch();
+    return;
+  }
+  const iterator = touchPoints.values();
+  const first = iterator.next();
+  const second = iterator.next();
+  if (first.done || second.done) {
+    resetPinch();
+    return;
+  }
+  const pointA = first.value;
+  const pointB = second.value;
+  const centerX = (pointA.x + pointB.x) * 0.5;
+  const centerY = (pointA.y + pointB.y) * 0.5;
+  const distance = Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+
+  if (lastPinchCenter) {
+    runtime.view.applyPan(centerX - lastPinchCenter.x, centerY - lastPinchCenter.y);
+  }
+
+  if (lastPinchDistance > 0 && Number.isFinite(distance)) {
+    const scale = distance / lastPinchDistance;
+    if (scale > 0 && Number.isFinite(scale)) {
+      runtime.view.applyZoomDelta(-Math.log2(scale));
+    }
+  }
+
+  lastPinchCenter = { x: centerX, y: centerY };
+  lastPinchDistance = distance;
+};
+
 canvas.addEventListener('contextmenu', event => event.preventDefault());
 
 canvas.addEventListener('pointerdown', event => {
   canvas.setPointerCapture(event.pointerId);
+  if (event.pointerType === 'touch') {
+    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touchPoints.size >= 2) {
+      updatePinch();
+    }
+    return;
+  }
   pointerState.active = true;
   pointerState.lastX = event.clientX;
   pointerState.lastY = event.clientY;
@@ -197,7 +290,22 @@ canvas.addEventListener('pointerdown', event => {
 });
 
 canvas.addEventListener('pointermove', event => {
-  if (!pointerState.active) return;
+  if (event.pointerType === 'touch') {
+    const point = touchPoints.get(event.pointerId);
+    if (!point) return;
+    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!runtime) return;
+    if (touchPoints.size === 1) {
+      const deltaX = event.clientX - point.x;
+      const deltaY = event.clientY - point.y;
+      runtime.view.applyOrbit(-deltaX, -deltaY);
+      return;
+    }
+    updatePinch();
+    return;
+  }
+
+  if (!pointerState.active || !runtime) return;
   const deltaX = event.clientX - pointerState.lastX;
   const deltaY = event.clientY - pointerState.lastY;
   pointerState.lastX = event.clientX;
@@ -211,7 +319,18 @@ canvas.addEventListener('pointermove', event => {
 });
 
 const endDrag = (event: PointerEvent) => {
-  if (!pointerState.active) return;
+  if (event.pointerType === 'touch') {
+    touchPoints.delete(event.pointerId);
+    if (touchPoints.size < 2) {
+      resetPinch();
+    }
+    canvas.releasePointerCapture(event.pointerId);
+    return;
+  }
+  if (!pointerState.active) {
+    canvas.releasePointerCapture(event.pointerId);
+    return;
+  }
   pointerState.active = false;
   canvas.releasePointerCapture(event.pointerId);
 };
@@ -223,6 +342,7 @@ canvas.addEventListener(
   'wheel',
   event => {
     event.preventDefault();
+    if (!runtime) return;
     const delta = clamp(event.deltaY, -240, 240);
     runtime.view.applyZoomDelta(-delta / 240);
   },
@@ -233,8 +353,10 @@ let lastTime = performance.now();
 const frame = (time: number) => {
   const dt = (time - lastTime) / 1000;
   lastTime = time;
-  const dayOverride = Math.abs(runtime.timeScale) < 1e-6 ? runtime.engine.state.day : undefined;
-  runtime.view.update(dt, dayOverride);
+  if (runtime) {
+    const dayOverride = Math.abs(runtime.timeScale) < 1e-6 ? runtime.engine.state.day : undefined;
+    runtime.view.update(dt, dayOverride);
+  }
   window.requestAnimationFrame(frame);
 };
 
