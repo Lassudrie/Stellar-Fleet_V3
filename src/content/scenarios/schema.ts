@@ -19,6 +19,28 @@ export interface ScenarioMeta {
   tags?: string[];
 }
 
+// --- 1b. VIEW (Presentation Defaults) ---
+export type ScenarioViewFocusMode = 'player_homeworld' | 'system_id' | 'first_system';
+export type ScenarioViewStartScale = 'galaxy' | 'system' | 'planet';
+
+export interface ScenarioViewFocus {
+  mode?: ScenarioViewFocusMode;
+  systemId?: string;
+  planetId?: string;
+}
+
+export interface ScenarioViewCamera {
+  startScale?: ScenarioViewStartScale;
+  distanceMeters?: number;
+  yawRad?: number;
+  pitchRad?: number;
+}
+
+export interface ScenarioViewConfig {
+  focus?: ScenarioViewFocus;
+  camera?: ScenarioViewCamera;
+}
+
 // --- 2. GENERATION (World Gen) ---
 export type GalaxyTopology = 'spiral' | 'cluster' | 'ring' | 'scattered';
 
@@ -176,6 +198,7 @@ export interface ScenarioDefinitionV1 {
   setup: ScenarioSetup;
   objectives: VictoryConditions;
   rules: GameplayRules;
+  view?: ScenarioViewConfig;
 }
 
 // The runtime scenario object includes the resolved seed.

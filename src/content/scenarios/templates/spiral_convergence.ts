@@ -117,6 +117,10 @@ export const spiralConvergence: ScenarioTemplate = {
     win: [{ type: 'domination', value: 60 }],
     maxTurns: 200
   },
+  view: {
+    focus: { mode: 'player_homeworld' },
+    camera: { startScale: 'system' }
+  },
   rules: {
     fogOfWar: true,
     useAdvancedCombat: true,

@@ -44,7 +44,8 @@ ScenarioDefinitionV1
 ├── generation    (topologie, seed fixe, placement statique éventuel)
 ├── setup         (factions, répartition initiale, flottes de départ)
 ├── objectives    (conditions de victoire/défaite)
-└── rules         (toggles de gameplay)
+├── rules         (toggles de gameplay)
+└── view          (préférences de cadrage 3D, optionnel)
 ```
 
 ---
@@ -56,7 +57,7 @@ ScenarioDefinitionV1
 | `schemaVersion` | `1` | Oui | Version du contrat. |
 | `id` | string | Oui | Identifiant unique du scénario (snake_case recommandé). |
 
-Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup`, `objectives`, `rules`).
+Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup`, `objectives`, `rules`, `view`).
 
 ---
 
@@ -189,7 +190,35 @@ Structure :
 
 ---
 
-## 10. Contraintes de validation
+## 10. Section `view` (optionnel)
+
+Le champ `view` définit des préférences de cadrage pour le viewer 3D. Ces valeurs **n'affectent pas** la simulation.
+
+```ts
+{
+  focus?: {
+    mode?: "player_homeworld" | "system_id" | "first_system";
+    systemId?: string;
+    planetId?: string;
+  };
+  camera?: {
+    startScale?: "galaxy" | "system" | "planet";
+    distanceMeters?: number;
+    yawRad?: number;
+    pitchRad?: number;
+  };
+}
+```
+
+Règles :
+- `focus.mode = "system_id"` exige `focus.systemId`.
+- `focus.planetId` est utilisé si compatible avec le système ciblé.
+- `camera.startScale` sert de fallback si `distanceMeters` est absent.
+- `camera.distanceMeters` doit être strictement positif.
+
+---
+
+## 11. Contraintes de validation
 
 1. **Intégrité référentielle :** `ownerFactionId` des flottes et des planètes statiques doit correspondre à une faction déclarée (ou `null` pour neutre).  
 2. **Règles de base :** au moins deux factions pour un mode compétitif ; `systemCount` ≥ `factions.length`.  
@@ -198,9 +227,9 @@ Structure :
 
 ---
 
-## 11. Exemples compatibles runtime
+## 12. Exemples compatibles runtime
 
-### 11.1 Template TypeScript minimal (1v1)
+### 12.1 Template TypeScript minimal (1v1)
 
 ```ts
 import { ScenarioDefinitionV1 } from "../schemaV1";
@@ -236,7 +265,7 @@ const skirmishStd1v1: ScenarioDefinitionV1 = {
 export default skirmishStd1v1;
 ```
 
-### 11.2 JSON équivalent (modding)
+### 12.2 JSON équivalent (modding)
 
 ```json
 {
@@ -264,7 +293,7 @@ export default skirmishStd1v1;
 }
 ```
 
-### 11.3 Exemple avancé (statique + domination)
+### 12.3 Exemple avancé (statique + domination)
 
 ```ts
 import { ScenarioDefinitionV1 } from "../schemaV1";

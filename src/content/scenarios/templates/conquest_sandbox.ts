@@ -91,6 +91,10 @@ export const conquestSandbox: ScenarioTemplate = {
   objectives: {
     win: [{ type: 'elimination' }]
   },
+  view: {
+    focus: { mode: 'player_homeworld' },
+    camera: { startScale: 'galaxy' }
+  },
   rules: {
     fogOfWar: true,
     useAdvancedCombat: true,

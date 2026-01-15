@@ -74,6 +74,61 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
     if (!s.rules || typeof s.rules !== 'object') throw new Error("Missing 'rules'");
     if (!s.objectives || !Array.isArray(s.objectives.win)) throw new Error("Missing 'objectives.win'");
 
+    // 5b. Optional View (presentation defaults)
+    if (s.view !== undefined && s.view !== null) {
+      if (typeof s.view !== 'object') throw new Error("Invalid 'view' (expected an object)");
+      const view = s.view as any;
+
+      if (view.focus !== undefined && view.focus !== null) {
+        if (typeof view.focus !== 'object') throw new Error("Invalid 'view.focus' (expected an object)");
+        const focus = view.focus as any;
+        if (focus.mode !== undefined && focus.mode !== null) {
+          const allowedModes = new Set(['player_homeworld', 'system_id', 'first_system']);
+          if (typeof focus.mode !== 'string' || !allowedModes.has(focus.mode)) {
+            throw new Error("Invalid 'view.focus.mode' (expected player_homeworld | system_id | first_system)");
+          }
+        }
+        if (focus.systemId !== undefined && focus.systemId !== null && typeof focus.systemId !== 'string') {
+          throw new Error("Invalid 'view.focus.systemId' (expected string)");
+        }
+        if (focus.planetId !== undefined && focus.planetId !== null && typeof focus.planetId !== 'string') {
+          throw new Error("Invalid 'view.focus.planetId' (expected string)");
+        }
+        if (focus.mode === 'system_id' && (!focus.systemId || typeof focus.systemId !== 'string')) {
+          throw new Error("Invalid 'view.focus.systemId' (required when mode=system_id)");
+        }
+      }
+
+      if (view.camera !== undefined && view.camera !== null) {
+        if (typeof view.camera !== 'object') throw new Error("Invalid 'view.camera' (expected an object)");
+        const camera = view.camera as any;
+        if (camera.startScale !== undefined && camera.startScale !== null) {
+          const allowedScales = new Set(['galaxy', 'system', 'planet']);
+          if (typeof camera.startScale !== 'string' || !allowedScales.has(camera.startScale)) {
+            throw new Error("Invalid 'view.camera.startScale' (expected galaxy | system | planet)");
+          }
+        }
+        if (camera.distanceMeters !== undefined && camera.distanceMeters !== null) {
+          if (typeof camera.distanceMeters !== 'number' || !Number.isFinite(camera.distanceMeters)) {
+            throw new Error("Invalid 'view.camera.distanceMeters' (expected finite number)");
+          }
+          if (camera.distanceMeters <= 0) {
+            throw new Error("Invalid 'view.camera.distanceMeters' (must be > 0)");
+          }
+        }
+        if (camera.yawRad !== undefined && camera.yawRad !== null) {
+          if (typeof camera.yawRad !== 'number' || !Number.isFinite(camera.yawRad)) {
+            throw new Error("Invalid 'view.camera.yawRad' (expected finite number)");
+          }
+        }
+        if (camera.pitchRad !== undefined && camera.pitchRad !== null) {
+          if (typeof camera.pitchRad !== 'number' || !Number.isFinite(camera.pitchRad)) {
+            throw new Error("Invalid 'view.camera.pitchRad' (expected finite number)");
+          }
+        }
+      }
+    }
+
     // 6. Referential Integrity (Faction IDs)
     const factionIds = new Set<string>();
     for (const f of s.setup.factions) {
