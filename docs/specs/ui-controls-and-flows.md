@@ -20,6 +20,7 @@
 
 ### 2.2 Pan et zoom
 - Pan fluide avec inertie (`dampingFactor 0.05`), verrouillé sur le plan XZ (`screenSpacePanning=false`) pour garder l’horizon stable. La rotation est désactivée en tiers galaxie/système et activée en tiers planète/surface pour l’inspection locale.
+- La vitesse de pan/zoom est **dynamique** : plus la caméra est haute (zoom out), plus l’action est rapide ; plus la caméra est proche (zoom in), plus l’action ralentit pour la précision.
 - Zoom par molette/pinch avec bornes dynamiques selon le tier : en galaxie les limites dérivent de `mapRadius`, tandis que les tiers système/planète/surface appliquent des min/max dédiés pour éviter les sur-zooms.
 - En tier planète, un bouton « Zoom in » bascule vers la surface; en tiers planète/surface, « Zoom out » remonte vers le système.
 

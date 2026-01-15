@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, MapControls } from '@react-three/drei';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { MapControls as ThreeMapControls } from 'three-stdlib';
 import { TOUCH, Vector3 } from 'three';
 import { Vec3 } from '../../engine/math/vec3';
@@ -22,6 +22,18 @@ interface GameCameraProps {
 }
 
 const CAMERA_FOV = 35;
+const PAN_SPEED_RANGE = { min: 0.35, max: 2.4 };
+const ZOOM_SPEED_RANGE = { min: 0.4, max: 2.1 };
+const SPEED_EPSILON = 0.01;
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const smoothStep = (t: number) => t * t * (3 - 2 * t);
+const resolveDynamicSpeed = (distance: number, min: number, max: number, range: { min: number; max: number }) => {
+  if (max <= min) return range.min;
+  const t = clamp01((distance - min) / (max - min));
+  return lerp(range.min, range.max, smoothStep(t));
+};
 
 const GameCamera: React.FC<GameCameraProps> = React.memo(({
   initialPosition,
@@ -45,6 +57,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
   const focusVectorRef = useRef<Vector3>(new Vector3());
   const desiredPositionRef = useRef<Vector3>(new Vector3());
   const offsetRef = useRef<Vector3>(new Vector3());
+  const speedRef = useRef<{ pan: number; zoom: number }>({ pan: -1, zoom: -1 });
   const clampControlsRef = useRef<(options?: { skipUpdate?: boolean }) => void>(() => {});
   const mapBoundsRef = useRef<ClampBounds | null | undefined>(mapBounds);
 
@@ -162,6 +175,23 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
 
     hasInitialized.current = true;
   }, [ready, targetArray, positionArray, clampControls]);
+
+  useFrame(() => {
+    if (!ready || !controlsRef.current) return;
+    const controls = controlsRef.current;
+    const distance = controls.object.position.distanceTo(controls.target);
+    const panSpeed = resolveDynamicSpeed(distance, distanceConfig.minDistance, distanceConfig.maxDistance, PAN_SPEED_RANGE);
+    const zoomSpeed = resolveDynamicSpeed(distance, distanceConfig.minDistance, distanceConfig.maxDistance, ZOOM_SPEED_RANGE);
+
+    if (Math.abs(panSpeed - speedRef.current.pan) > SPEED_EPSILON) {
+      controls.panSpeed = panSpeed;
+      speedRef.current.pan = panSpeed;
+    }
+    if (Math.abs(zoomSpeed - speedRef.current.zoom) > SPEED_EPSILON) {
+      controls.zoomSpeed = zoomSpeed;
+      speedRef.current.zoom = zoomSpeed;
+    }
+  });
 
   useEffect(() => {
     clampControls();
