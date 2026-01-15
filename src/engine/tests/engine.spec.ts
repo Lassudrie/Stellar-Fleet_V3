@@ -3441,7 +3441,9 @@ const engine_hashSurface = (map: ReturnType<typeof generateSurfaceMap>): number 
     h = fnv1a32(`${h}|${t.elev}|${t.tempC2}|${t.moist}|${t.biome}|${t.featureBits}`);
   }
   for (const s of map.settlements) {
-    h = fnv1a32(`${h}|${s.id}|${s.type}|${s.factionId ?? ''}|${s.coord.q},${s.coord.r}|${s.population}|${s.isCapital ? 1 : 0}`);
+    const coordQ = s.coord ? s.coord.q : s.tileId;
+    const coordR = s.coord ? s.coord.r : s.tileId * 97;
+    h = fnv1a32(`${h}|${s.id}|${s.type}|${s.factionId ?? ''}|${coordQ},${coordR}|${s.population}|${s.isCapital ? 1 : 0}`);
   }
   return h >>> 0;
 };

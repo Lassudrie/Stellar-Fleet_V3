@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, MapControls } from '@react-three/drei';
 import { MapControls as ThreeMapControls } from 'three-stdlib';
-import { Vector3 } from 'three';
+import { TOUCH, Vector3 } from 'three';
 import { Vec3 } from '../../engine/math/vec3';
 import { clampCameraToBounds, ClampBounds, ClampScratch, createClampScratch } from '../hooks';
 
@@ -79,6 +79,11 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
     min: minPolarAngle ?? Math.PI / 8,
     max: maxPolarAngle ?? Math.PI / 2,
   }), [maxPolarAngle, minPolarAngle]);
+
+  const touchConfig = useMemo(() => ({
+    ONE: TOUCH.PAN,
+    TWO: TOUCH.DOLLY_PAN
+  }), []);
 
   const cameraBounds = useMemo<ClampBounds | null>(() => {
     if (!mapBounds) return null;
@@ -274,6 +279,7 @@ const GameCamera: React.FC<GameCameraProps> = React.memo(({
         enableRotate={enableRotate}
         enablePan={true}
         enableZoom={true}
+        touches={touchConfig}
         minDistance={distanceConfig.minDistance}
         maxDistance={distanceConfig.maxDistance}
         dampingFactor={0.05}

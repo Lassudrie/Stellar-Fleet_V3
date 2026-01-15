@@ -19,7 +19,8 @@ import {
   getSurfaceTileNeighbors,
   hashJoin32,
   isPassable,
-  resolveSurfaceTileId
+  resolveSurfaceTileId,
+  wrapQ
 } from './planetSurface';
 
 // ----------------------------
@@ -113,7 +114,8 @@ export const lineOfSight = (params: {
 
   if (fromCoord && toCoord && 'w' in map.descriptor.config) {
     const { w, wrapX } = map.descriptor.config;
-    const toUnwrapped = adjustTargetForWrap(fromCoord, toCoord, w, wrapX ?? false);
+    const wrap = wrapX ?? false;
+    const toUnwrapped = adjustTargetForWrap(fromCoord, toCoord, w, wrap);
     const a = axialToCube(fromCoord);
     const b = axialToCube(toUnwrapped);
     const dist = hexDistance(fromCoord, toUnwrapped, w, false);
@@ -123,7 +125,8 @@ export const lineOfSight = (params: {
       const t = dist === 0 ? 0 : i / dist;
       const cube = cubeRound(cubeLerp(a, b, t));
       const axial = cubeToAxial(cube);
-      const tileId = resolveSurfaceTileId(map.descriptor, { bodyId: map.bodyId, q: axial.q, r: axial.r });
+      const q = wrap ? wrapQ(axial.q, w, true) : axial.q;
+      const tileId = resolveSurfaceTileId(map.descriptor, { bodyId: map.bodyId, q, r: axial.r });
       if (tileId === null) return false;
       if (isBlocked(tileId)) return false;
     }
