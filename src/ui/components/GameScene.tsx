@@ -2107,16 +2107,25 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   );
 
   useEffect(() => {
-    if (zoomTier === 'galaxy') {
-      if (focusTarget) {
-        setLastFocusedTarget({ x: focusTarget.x, y: 0, z: focusTarget.z });
+    const nextFocus = zoomTier === 'galaxy'
+      ? (focusTarget ? { x: focusTarget.x, y: 0, z: focusTarget.z } : null)
+      : (resolvedSystem ? { x: resolvedSystem.position.x, y: 0, z: resolvedSystem.position.z } : null);
+    if (!nextFocus) return;
+    setLastFocusedTarget(prev => {
+      if (prev && prev.x === nextFocus.x && prev.y === nextFocus.y && prev.z === nextFocus.z) {
+        return prev;
       }
-      return;
-    }
-    if (resolvedSystem) {
-      setLastFocusedTarget({ x: resolvedSystem.position.x, y: 0, z: resolvedSystem.position.z });
-    }
-  }, [focusTarget, resolvedSystem, zoomTier]);
+      return nextFocus;
+    });
+  }, [
+    zoomTier,
+    focusTarget?.x,
+    focusTarget?.y,
+    focusTarget?.z,
+    resolvedSystem?.position.x,
+    resolvedSystem?.position.y,
+    resolvedSystem?.position.z
+  ]);
 
   const cameraFocusTarget = lastFocusedTarget;
 
@@ -2195,16 +2204,32 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   const distanceLimits = useMemo(() => {
     if (viewZoom !== undefined) {
       if (zoomStops.length >= 5) {
+        const overshoot = 1.05;
+        const undershoot = 0.95;
+        const globalMax = zoomStops[0].distance;
+        const globalMin = zoomStops[zoomStops.length - 1].distance;
+        const clampDistance = (value: number) => Math.max(globalMin, Math.min(globalMax, value));
+
+        let min = globalMin;
+        let max = globalMax;
         if (zoomTier === 'galaxy') {
-          return { min: zoomStops[1].distance, max: zoomStops[0].distance };
+          min = zoomStops[1].distance * undershoot;
+          max = zoomStops[0].distance;
+        } else if (zoomTier === 'system') {
+          min = zoomStops[2].distance * undershoot;
+          max = zoomStops[1].distance * overshoot;
+        } else if (zoomTier === 'planet') {
+          min = zoomStops[3].distance * undershoot;
+          max = zoomStops[2].distance * overshoot;
+        } else {
+          min = zoomStops[4].distance;
+          max = zoomStops[3].distance * overshoot;
         }
-        if (zoomTier === 'system') {
-          return { min: zoomStops[2].distance, max: zoomStops[1].distance };
-        }
-        if (zoomTier === 'planet') {
-          return { min: zoomStops[3].distance, max: zoomStops[2].distance };
-        }
-        return { min: zoomStops[4].distance, max: zoomStops[3].distance };
+
+        const clampedMin = clampDistance(min);
+        const clampedMax = clampDistance(max);
+        if (clampedMin > clampedMax) return zoomDistanceLimits;
+        return { min: clampedMin, max: clampedMax };
       }
       return zoomDistanceLimits;
     }
