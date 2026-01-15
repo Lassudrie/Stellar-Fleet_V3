@@ -213,15 +213,12 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
               onPressEnd();
             }}
             onPointerMove={(event) => {
-              event.stopPropagation();
               onPressMove(event);
             }}
             onPointerOver={(event) => {
-              event.stopPropagation();
               onHover(moon.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
               onPressMove(event);
               if (event.pointerType !== 'touch') {
                 onPressCancel();
@@ -241,11 +238,9 @@ const MoonOrbitGroup: React.FC<MoonOrbitGroupProps> = ({
             castShadow
             receiveShadow
             onPointerOver={(event) => {
-              event.stopPropagation();
               onHover(moon.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
               onBlur(moon.id);
             }}
             onClick={(event) => {
@@ -420,15 +415,12 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
               onPressEnd();
             }}
             onPointerMove={(event) => {
-              event.stopPropagation();
               onPressMove(event);
             }}
             onPointerOver={(event) => {
-              event.stopPropagation();
               onHover(planet.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
               onPressMove(event);
               if (event.pointerType !== 'touch') {
                 onPressCancel();
@@ -448,11 +440,9 @@ const PlanetOrbitGroup: React.FC<PlanetOrbitGroupProps> = ({
             castShadow
             receiveShadow
             onPointerOver={(event) => {
-              event.stopPropagation();
               onHover(planet.id);
             }}
             onPointerOut={(event) => {
-              event.stopPropagation();
               onBlur(planet.id);
             }}
             onClick={(event) => {
