@@ -17,12 +17,12 @@ import { applyFogOfWar } from '../engine/fogOfWar';
 import { calculateFleetPower, findNearestSystem } from '../engine/world';
 import { Vec3, clone, equals } from '../engine/math/vec3';
 import { serializeGameState } from '../engine/serialization';
-import { generateSurfaceMapForState, getSurfaceTileCoordFromId, getSurfaceTileCount, getSurfaceTileDir } from '../engine/planetSurface';
+import { generateSurfaceMapForState, getSurfaceTileCoordFromId, getSurfaceTileCount, getSurfaceTileDir, resolveSurfaceTileId } from '../engine/planetSurface';
 import { useButtonClickSound } from './audio/useButtonClickSound';
 import { aiDebugger } from '../engine/aiDebugger';
 import { findOrbitingSystem } from './components/ui/orbiting';
 import { processCommandResult } from './commands/processCommandResult';
-import { sorted } from '../shared/shared';
+import { shortId, sorted } from '../shared/shared';
 import { getDefaultSolidPlanet, getPlanetById } from '../engine/planets';
 import type { GameCommand } from '../engine/commands';
 import { BootstrapWorkerClient, buildSurfaceMapWorkerRequest, SurfaceMapWorkerClient } from './workers';
@@ -1557,23 +1557,58 @@ useEffect(() => {
     }
 }, [activeSurfaceBodyId, surfaceSelection]);
 
-  const surfaceArmies = useMemo(() => {
-      if (!viewGameState) return [];
-      return viewGameState.armies;
+  const factionColorById = useMemo(() => {
+      if (!viewGameState) return new Map<string, string>();
+      const map = new Map<string, string>();
+      viewGameState.factions.forEach(faction => {
+          map.set(faction.id, faction.color);
+      });
+      return map;
   }, [viewGameState]);
+
+  const surfaceArmies = useMemo(() => {
+      if (!viewGameState || !activeSurfaceBodyId) return [];
+      return sorted(
+          viewGameState.armies.filter(
+              army => army.state === ArmyState.DEPLOYED && army.containerId === activeSurfaceBodyId
+          ),
+          (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' })
+      );
+  }, [activeSurfaceBodyId, viewGameState]);
 
   const surfaceBuildings = useMemo(() => {
       if (!viewGameState || !activeSurfaceBodyId) return [];
-      return (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === activeSurfaceBodyId);
+      return sorted(
+          (viewGameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === activeSurfaceBodyId),
+          (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' })
+      );
   }, [activeSurfaceBodyId, viewGameState]);
 
+  const surfaceArmiesOnTile = useMemo(() => {
+      if (!surfaceDescriptor || !surfaceSelection) return [];
+      return surfaceArmies.filter(army => {
+          if (!army.surfacePos) return false;
+          const tileId = resolveSurfaceTileId(surfaceDescriptor, army.surfacePos);
+          return tileId !== null && tileId === surfaceSelection.tileId;
+      });
+  }, [surfaceArmies, surfaceDescriptor, surfaceSelection]);
+
+  const surfaceBuildingsOnTile = useMemo(() => {
+      if (!surfaceDescriptor || !surfaceSelection) return [];
+      return surfaceBuildings.filter(building => {
+          const tileId = resolveSurfaceTileId(surfaceDescriptor, building.surfacePos);
+          return tileId !== null && tileId === surfaceSelection.tileId;
+      });
+  }, [surfaceBuildings, surfaceDescriptor, surfaceSelection]);
+
   const surfaceSelectionInfo = useMemo(() => {
-      if (!surfaceSelection || !surfaceMap) return null;
+      if (!surfaceSelection) return null;
       const tileId = surfaceSelection.tileId;
-      const tile = surfaceMap.tiles[tileId] ?? null;
-      const coord = getSurfaceTileCoordFromId(surfaceMap.descriptor, tileId);
+      const descriptor = surfaceMap?.descriptor ?? surfaceDescriptor;
+      const coord = descriptor ? getSurfaceTileCoordFromId(descriptor, tileId) : null;
+      const tile = surfaceMap?.tiles[tileId] ?? null;
       return { tileId, coord, tile };
-  }, [surfaceMap, surfaceSelection]);
+  }, [surfaceDescriptor, surfaceMap, surfaceSelection]);
 
   const zoomOutLabel = useMemo(() => {
       if (resolvedZoomTier === 'surface' || resolvedZoomTier === 'planet') {
@@ -1634,7 +1669,12 @@ useEffect(() => {
                         if (!descriptor) return;
                         const resolvedTileId = resolveSurfaceTileIdFromDir(descriptor, selection.dir);
                         if (resolvedTileId === null) return;
-                        setSurfaceSelection({ ...selection, tileId: resolvedTileId });
+                        setSurfaceSelection(prev => {
+                            if (prev && prev.bodyId === selection.bodyId && prev.tileId === resolvedTileId) {
+                                return prev;
+                            }
+                            return { ...selection, tileId: resolvedTileId };
+                        });
                     }}
                     onFleetSelect={handleFleetSelect}
                     onFleetInspect={handleFleetInspect}
@@ -1752,6 +1792,11 @@ useEffect(() => {
                                     {t('surfaceView.loadingOverlay')}
                                 </div>
                             )}
+                            {(surfaceMapStatus === 'missing' || surfaceMapStatus === 'error') && (
+                                <div className="mt-2 text-xs text-amber-300">
+                                    {t('surfaceView.noData')}
+                                </div>
+                            )}
                             {surfaceSelectionInfo ? (
                                 <>
                                     <div className="mt-2 text-sm font-semibold text-white">
@@ -1789,6 +1834,52 @@ useEffect(() => {
                                             </div>
                                         </div>
                                     )}
+                                    <div className="mt-3 space-y-2 text-xs text-slate-200">
+                                        <div>
+                                            <div className="text-[10px] uppercase text-slate-400">
+                                                {t('surfaceView.armies')}
+                                            </div>
+                                            {surfaceArmiesOnTile.length > 0 ? (
+                                                <div className="mt-1 space-y-1">
+                                                    {surfaceArmiesOnTile.map(army => (
+                                                        <div key={army.id} className="flex items-center justify-between">
+                                                            <span
+                                                                className="font-semibold"
+                                                                style={{ color: factionColorById.get(army.factionId) ?? '#cbd5f5' }}
+                                                            >
+                                                                {shortId(army.id)}
+                                                            </span>
+                                                            <span className="text-slate-400">{army.members}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-slate-500">{t('surfaceView.noArmies')}</div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] uppercase text-slate-400">
+                                                {t('surfaceView.buildings')}
+                                            </div>
+                                            {surfaceBuildingsOnTile.length > 0 ? (
+                                                <div className="mt-1 space-y-1">
+                                                    {surfaceBuildingsOnTile.map(building => (
+                                                        <div key={building.id} className="flex items-center justify-between">
+                                                            <span
+                                                                className="font-semibold"
+                                                                style={{ color: factionColorById.get(building.factionId) ?? '#cbd5f5' }}
+                                                            >
+                                                                {building.name ?? building.type}
+                                                            </span>
+                                                            <span className="text-slate-500">{shortId(building.id)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-slate-500">{t('surfaceView.noBuildings')}</div>
+                                            )}
+                                        </div>
+                                    </div>
                                 </>
                             ) : (
                                 <div className="mt-2 text-xs text-slate-500">{t('surfaceView.hoverHint')}</div>

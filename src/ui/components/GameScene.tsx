@@ -18,7 +18,7 @@ import {
   Vector2,
   Vector3
 } from 'three';
-import { FleetState, sorted } from '../../shared/shared';
+import { ArmyState, FleetState, sorted } from '../../shared/shared';
 import type {
   AtmosphereType,
   GameState,
@@ -27,6 +27,7 @@ import type {
   LaserShot,
   EnemySighting,
   PlanetSurfaceDescriptor,
+  GroundBuilding,
   Station,
   FactionState,
   PlanetType,
@@ -40,7 +41,7 @@ import TerritoryBorders from './TerritoryBorders';
 import GameCamera from './GameCamera';
 import IntelGhosts from './IntelGhosts';
 import { Vec3 } from '../../engine/math/vec3';
-import { buildGeodesicGrid, type GeodesicGrid } from '../../engine/planetSurface';
+import { buildGeodesicGrid, getSurfaceTileDir, resolveSurfaceTileId, type GeodesicGrid } from '../../engine/planetSurface';
 import {
   applyDayNightTerminator,
   applyMoonOrbitSpacing,
@@ -594,6 +595,8 @@ const findClosestTile = (grid: GeodesicGrid, dir: Vec3): number => {
   }
   return bestIndex;
 };
+
+const ignoreRaycast = () => {};
 
 const AnimatedScaleGroup: React.FC<{
   targetScale: number;
@@ -1580,6 +1583,9 @@ const PlanetLayer: React.FC<{
 
 const SURFACE_CAP_ANGLE_DEG = 60;
 const SURFACE_LINE_OFFSET = 1.01;
+const SURFACE_MARKER_OFFSET = 1.035;
+const SURFACE_ARMY_MARKER_RADIUS = 0.02;
+const SURFACE_BUILDING_MARKER_RADIUS = 0.028;
 const SURFACE_MAX_SEGMENTS = 18000;
 
 const selectSurfaceFrequency = (distance: number, radius: number): number => {
@@ -1594,8 +1600,12 @@ const SurfaceLayer: React.FC<{
   planetRadius: number;
   center: Vec3;
   bodyId: string;
+  descriptor: PlanetSurfaceDescriptor | null;
+  armies: GameState['armies'];
+  buildings: GroundBuilding[];
+  getFactionColor: (id: string) => string;
   onSelectTile?: (selection: { bodyId: string; tileId: number; dir: Vec3 }) => void;
-}> = ({ planetRadius, center, bodyId, onSelectTile }) => {
+}> = ({ planetRadius, center, bodyId, descriptor, armies, buildings, getFactionColor, onSelectTile }) => {
   const { camera } = useThree();
   const geometryRef = useRef<BufferGeometry>(null);
   const gridCacheRef = useRef<Map<number, GridData>>(new Map());
@@ -1603,6 +1613,8 @@ const SurfaceLayer: React.FC<{
   const viewDirRef = useRef<Vector3>(new Vector3());
   const lastFrequencyRef = useRef<number>(0);
   const centerVec = useMemo(() => new Vector3(center.x, center.y, center.z), [center.x, center.y, center.z]);
+  const hoverFrameRef = useRef<number | null>(null);
+  const hoverPointRef = useRef<Vector3>(new Vector3());
 
   const getGridData = (frequency: number): GridData => {
     const cache = gridCacheRef.current;
@@ -1612,6 +1624,78 @@ const SurfaceLayer: React.FC<{
     cache.set(frequency, data);
     return data;
   };
+
+  const markers = useMemo(() => {
+    if (!descriptor) return [];
+    const markerRadius = planetRadius * SURFACE_MARKER_OFFSET;
+    const armySize = planetRadius * SURFACE_ARMY_MARKER_RADIUS;
+    const buildingSize = planetRadius * SURFACE_BUILDING_MARKER_RADIUS;
+    const out: Array<{
+      id: string;
+      kind: 'army' | 'building';
+      position: Vec3;
+      color: string;
+      size: number;
+    }> = [];
+
+    armies.forEach((army) => {
+      if (!army.surfacePos) return;
+      const tileId = resolveSurfaceTileId(descriptor, army.surfacePos);
+      if (tileId === null) return;
+      const dir = getSurfaceTileDir(descriptor, tileId);
+      if (!dir) return;
+      out.push({
+        id: army.id,
+        kind: 'army',
+        position: { x: dir.x * markerRadius, y: dir.y * markerRadius, z: dir.z * markerRadius },
+        color: getFactionColor(army.factionId),
+        size: armySize
+      });
+    });
+
+    buildings.forEach((building) => {
+      const tileId = resolveSurfaceTileId(descriptor, building.surfacePos);
+      if (tileId === null) return;
+      const dir = getSurfaceTileDir(descriptor, tileId);
+      if (!dir) return;
+      out.push({
+        id: building.id,
+        kind: 'building',
+        position: { x: dir.x * markerRadius, y: dir.y * markerRadius, z: dir.z * markerRadius },
+        color: getFactionColor(building.factionId),
+        size: buildingSize
+      });
+    });
+
+    return sorted(out, (a, b) => a.id.localeCompare(b.id, 'en', { sensitivity: 'base' }));
+  }, [armies, buildings, descriptor, getFactionColor, planetRadius]);
+
+  const emitSelection = (point: Vector3) => {
+    if (!onSelectTile) return;
+    const hitDir = point.clone().sub(centerVec).normalize();
+    const distance = camera.position.distanceTo(centerVec);
+    const frequency = lastFrequencyRef.current || selectSurfaceFrequency(distance, planetRadius);
+    const gridData = getGridData(frequency);
+    const tileId = findClosestTile(gridData.grid, { x: hitDir.x, y: hitDir.y, z: hitDir.z });
+    onSelectTile({ bodyId, tileId, dir: { x: hitDir.x, y: hitDir.y, z: hitDir.z } });
+  };
+
+  const scheduleHoverPick = (point: Vector3) => {
+    hoverPointRef.current.copy(point);
+    if (hoverFrameRef.current !== null) return;
+    hoverFrameRef.current = requestAnimationFrame(() => {
+      hoverFrameRef.current = null;
+      emitSelection(hoverPointRef.current);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverFrameRef.current !== null) {
+        cancelAnimationFrame(hoverFrameRef.current);
+      }
+    };
+  }, []);
 
   useFrame(() => {
     const geometry = geometryRef.current;
@@ -1667,20 +1751,35 @@ const SurfaceLayer: React.FC<{
 
   return (
     <group>
-      <lineSegments>
+      <lineSegments raycast={ignoreRaycast}>
         <bufferGeometry ref={geometryRef} />
         <lineBasicMaterial color="#cbd5f5" transparent opacity={0.65} />
       </lineSegments>
+      {markers.map(marker => (
+        <mesh
+          key={marker.id}
+          position={[marker.position.x, marker.position.y, marker.position.z]}
+          raycast={ignoreRaycast}
+        >
+          {marker.kind === 'army' ? (
+            <sphereGeometry args={[marker.size, 10, 10]} />
+          ) : (
+            <boxGeometry args={[marker.size * 1.2, marker.size * 1.2, marker.size * 1.2]} />
+          )}
+          <meshBasicMaterial color={marker.color} transparent opacity={0.9} />
+        </mesh>
+      ))}
       <mesh
         onClick={(event) => {
           if (!onSelectTile) return;
           event.stopPropagation();
-          const hitDir = event.point.clone().sub(centerVec).normalize();
-          const distance = camera.position.distanceTo(centerVec);
-          const frequency = lastFrequencyRef.current || selectSurfaceFrequency(distance, planetRadius);
-          const gridData = getGridData(frequency);
-          const tileId = findClosestTile(gridData.grid, { x: hitDir.x, y: hitDir.y, z: hitDir.z });
-          onSelectTile({ bodyId, tileId, dir: { x: hitDir.x, y: hitDir.y, z: hitDir.z } });
+          emitSelection(event.point);
+        }}
+        onPointerMove={(event) => {
+          if (!onSelectTile) return;
+          if (event.pointerType !== 'mouse') return;
+          if ((event.buttons ?? 0) > 0) return;
+          scheduleHoverPick(event.point);
         }}
       >
         <sphereGeometry args={[planetRadius * SURFACE_LINE_OFFSET, 48, 48]} />
@@ -1964,6 +2063,20 @@ const UniverseScene: React.FC<GameSceneProps> = ({
     () => (resolvedPlanet ? Math.max(4, resolvedPlanet.size * 2.5) : 0),
     [resolvedPlanet]
   );
+  const surfaceDescriptor = useMemo(() => {
+    if (!resolvedPlanet) return null;
+    return gameState.planetSurfaceDescriptorsByBodyId?.[resolvedPlanet.id] ?? null;
+  }, [gameState.planetSurfaceDescriptorsByBodyId, resolvedPlanet]);
+  const surfaceArmies = useMemo(() => {
+    if (!resolvedPlanet) return [];
+    return gameState.armies.filter(
+      army => army.state === ArmyState.DEPLOYED && army.containerId === resolvedPlanet.id
+    );
+  }, [gameState.armies, resolvedPlanet]);
+  const surfaceBuildings = useMemo(() => {
+    if (!resolvedPlanet) return [];
+    return (gameState.groundBuildings ?? []).filter(building => building.surfacePos.bodyId === resolvedPlanet.id);
+  }, [gameState.groundBuildings, resolvedPlanet]);
 
   const homeworldForCamera = initialHomeworldRef.current ?? playerHomeworld;
   const focusBase = zoomTier === 'galaxy' || !resolvedSystem
@@ -2080,7 +2193,21 @@ const UniverseScene: React.FC<GameSceneProps> = ({
   const getFactionColor = useMemo(() => (id: string) => resolveFactionColor(gameState.factions, id), [gameState.factions]);
 
   const distanceLimits = useMemo(() => {
-    if (viewZoom !== undefined) return zoomDistanceLimits;
+    if (viewZoom !== undefined) {
+      if (zoomStops.length >= 5) {
+        if (zoomTier === 'galaxy') {
+          return { min: zoomStops[1].distance, max: zoomStops[0].distance };
+        }
+        if (zoomTier === 'system') {
+          return { min: zoomStops[2].distance, max: zoomStops[1].distance };
+        }
+        if (zoomTier === 'planet') {
+          return { min: zoomStops[3].distance, max: zoomStops[2].distance };
+        }
+        return { min: zoomStops[4].distance, max: zoomStops[3].distance };
+      }
+      return zoomDistanceLimits;
+    }
     if (resolvedView.tier === 'system') {
       return { min: 8, max: 140 };
     }
@@ -2091,7 +2218,7 @@ const UniverseScene: React.FC<GameSceneProps> = ({
       return { min: 1.2, max: 35 };
     }
     return undefined;
-  }, [resolvedView.tier, viewZoom, zoomDistanceLimits]);
+  }, [resolvedView.tier, viewZoom, zoomDistanceLimits, zoomStops, zoomTier]);
 
   const mapBounds = viewZoom === undefined
     ? (resolvedView.tier === 'galaxy' ? mapMetrics.bounds : null)
@@ -2233,6 +2360,10 @@ const UniverseScene: React.FC<GameSceneProps> = ({
                   planetRadius={planetRadius}
                   center={resolvedSystem.position}
                   bodyId={resolvedPlanet.id}
+                  descriptor={surfaceDescriptor}
+                  armies={surfaceArmies}
+                  buildings={surfaceBuildings}
+                  getFactionColor={getFactionColor}
                   onSelectTile={onSurfaceTileSelect}
                 />
               )}

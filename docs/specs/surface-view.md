@@ -13,6 +13,7 @@
 ## Pipeline rendu
 - Planète : sphère low-poly + matériau stylisé.
 - Overlay : segments de lignes pour la grille géodésique; LOD choisi selon distance caméra.
+- Marqueurs : armées et bâtiments posés sur la sphère, teintés par faction.
 - Optimisation : rendu limité à un cap angulaire autour du point sous-caméra, cache par niveau de subdivision.
 
 ## Données et compatibilité
