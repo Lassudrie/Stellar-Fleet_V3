@@ -10,6 +10,7 @@ const TIME_SCALE_MAX = 5;
 const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
+let debugEnabled = false;
 
 type DragMode = 'orbit' | 'pan';
 
@@ -42,6 +43,16 @@ const formatTimeScale = (value: number): string => {
   return text.endsWith('.0') ? text.slice(0, -2) : text;
 };
 
+const formatMeters = (value: number): string => {
+  if (!Number.isFinite(value)) return 'n/a';
+  const abs = Math.abs(value);
+  if (abs >= 1e12) return `${(value / 1e12).toFixed(2)}e12 m`;
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}e9 m`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}e6 m`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}e3 m`;
+  return `${value.toFixed(0)} m`;
+};
+
 const getElement = <T extends HTMLElement>(selector: string): T => {
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing element ${selector}`);
@@ -51,6 +62,7 @@ const getElement = <T extends HTMLElement>(selector: string): T => {
 const canvas = getElement<HTMLCanvasElement>('#galaxy');
 const menuScreen = getElement<HTMLDivElement>('#menu-screen');
 const hud = getElement<HTMLDivElement>('#hud');
+const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
 const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
@@ -80,6 +92,9 @@ const updateUrlParams = (scenarioId: string, seed: number, timeScale: number): v
   params.set('scenario', scenarioId);
   params.set('seed', String(seed));
   params.set('timeScale', formatTimeScale(timeScale));
+  if (debugEnabled) {
+    params.set('debug', '1');
+  }
   window.history.replaceState(null, '', `?${params.toString()}`);
 };
 
@@ -143,6 +158,8 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
 };
 
 const params = new URLSearchParams(window.location.search);
+debugEnabled = params.get('debug') === '1';
+debugOverlay.classList.toggle('hidden', !debugEnabled);
 populateScenarioOptions();
 
 const initialScenarioId = resolveScenarioId(params.get('scenario'));
@@ -160,6 +177,32 @@ updateDescription(initialScenarioId);
 setMenuVisible(true);
 
 let runtime: Runtime | null = null;
+
+const updateDebugOverlay = () => {
+  if (!debugEnabled) return;
+  if (!runtime) {
+    debugOverlay.textContent = 'Stage: menu';
+    return;
+  }
+  const info = runtime.view.getDebugInfo();
+  const lines = [
+    `Stage: ${info.stage}`,
+    `Zoom: ${formatMeters(info.zoomDistanceMeters)}`,
+    `System px: ${info.systemScreenPx.toFixed(1)}`,
+    `Planet px: ${info.planetScreenPx.toFixed(1)}`,
+    `System fade: ${info.systemFade.toFixed(2)}`,
+    `Planet fade: ${info.planetFade.toFixed(2)}`,
+    `Active system: ${info.activeSystemId ?? 'none'}`,
+    `Active planet: ${info.activePlanetId ?? 'none'}`,
+    `Focus system: ${info.focusSystemId ?? 'none'}`,
+    `Focus planet: ${info.focusPlanetId ?? 'none'}`,
+    `Loaded systems: ${info.loadedSystems}`,
+    `Loaded planets: ${info.loadedPlanets}`,
+    `Draw calls: ${info.drawCalls}`,
+    `Triangles: ${info.triangles}`
+  ];
+  debugOverlay.textContent = lines.join('\n');
+};
 
 const resize = () => {
   const width = canvas.clientWidth || window.innerWidth;
@@ -416,6 +459,7 @@ const frame = (time: number) => {
     const dayOverride = Math.abs(runtime.timeScale) < 1e-6 ? runtime.engine.state.day : undefined;
     runtime.view.update(dt, dayOverride);
   }
+  updateDebugOverlay();
   window.requestAnimationFrame(frame);
 };
 

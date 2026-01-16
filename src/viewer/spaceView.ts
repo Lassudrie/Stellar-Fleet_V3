@@ -48,6 +48,9 @@ const subVec3 = (out: Vec3, a: Vec3, b: Vec3): Vec3 => setVec3(out, a.x - b.x, a
 
 const scaleVec3 = (out: Vec3, v: Vec3, s: number): Vec3 => setVec3(out, v.x * s, v.y * s, v.z * s);
 
+const lerpVec3 = (out: Vec3, a: Vec3, b: Vec3, t: number): Vec3 =>
+  setVec3(out, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+
 const lengthVec3 = (v: Vec3): number => Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 
 const distVec3 = (a: Vec3, b: Vec3): number => {
@@ -58,6 +61,11 @@ const distVec3 = (a: Vec3, b: Vec3): number => {
 };
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = clamp((x - edge0) / Math.max(1e-6, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 
 const degToRad = (deg: number): number => (deg * Math.PI) / 180;
 
@@ -671,6 +679,8 @@ export interface SpaceViewThresholds {
   planetEnterPx: number;
   planetExitPx: number;
   planetPreloadPx: number;
+  planetMeshEnterPx: number;
+  planetMeshExitPx: number;
   crossFadeSeconds: number;
 }
 
@@ -703,6 +713,9 @@ type SystemAssets = {
   orbitMaterials: THREE.LineBasicMaterial[];
   planetMeshes: THREE.Mesh[];
   planetMaterials: THREE.MeshStandardMaterial[];
+  planetPoints: THREE.Points;
+  planetPointGeometry: THREE.BufferGeometry;
+  planetPointMaterial: THREE.PointsMaterial;
   planetData: PlanetViewData[];
   maxOrbitMeters: number;
 };
@@ -810,12 +823,16 @@ export class SpaceView {
 
   private galaxyRadiusMeters = 1;
   private focusSystemId: string | null = null;
+  private focusPlanetId: string | null = null;
+  private focusTargetMeters: Vec3 = vec3();
 
   private sizePx = { width: 1, height: 1 };
   private rafId: number | null = null;
   private lastFrameMs = 0;
   private lastOriginMeters: Vec3 = vec3();
   private lastCameraMeters: Vec3 = vec3();
+  private lastSystemScreenPx = 0;
+  private lastPlanetScreenPx = 0;
 
   constructor(options: SpaceViewOptions) {
     this.data = options.data;
@@ -826,6 +843,8 @@ export class SpaceView {
       planetEnterPx: 240,
       planetExitPx: 180,
       planetPreloadPx: 200,
+      planetMeshEnterPx: 18,
+      planetMeshExitPx: 10,
       crossFadeSeconds: 0.6,
       ...options.thresholds
     };
@@ -909,10 +928,11 @@ export class SpaceView {
 
   setFocusSystem(systemId: string | null): void {
     this.focusSystemId = systemId;
+    this.focusPlanetId = null;
     if (!systemId) return;
     const system = this.systemById.get(systemId);
     if (system) {
-      this.cameraRig.setTargetMeters(system.positionMeters);
+      copyVec3(this.focusTargetMeters, system.positionMeters);
     }
   }
 
@@ -961,7 +981,7 @@ export class SpaceView {
       const planetPick = this.pickPlanetAtScreen(activeSystem, screenX, screenY, originMeters, cameraMeters, fovRad);
       if (planetPick) {
         this.focusSystemId = activeSystem.id;
-        this.cameraRig.setTargetMeters(planetPick.targetMeters);
+        this.focusPlanetId = planetPick.planet.id;
         return true;
       }
     }
@@ -970,7 +990,7 @@ export class SpaceView {
       const planetPick = this.pickPlanetAtScreen(activeSystem, screenX, screenY, originMeters, cameraMeters, fovRad);
       if (planetPick) {
         this.focusSystemId = activeSystem.id;
-        this.cameraRig.setTargetMeters(planetPick.targetMeters);
+        this.focusPlanetId = planetPick.planet.id;
         return true;
       }
 
@@ -987,7 +1007,7 @@ export class SpaceView {
       );
       if (systemPick) {
         this.focusSystemId = systemPick.system.id;
-        this.cameraRig.setTargetMeters(systemPick.system.positionMeters);
+        this.focusPlanetId = null;
         return true;
       }
     }
@@ -1005,11 +1025,52 @@ export class SpaceView {
     );
     if (galaxyPick) {
       this.focusSystemId = galaxyPick.system.id;
-      this.cameraRig.setTargetMeters(galaxyPick.system.positionMeters);
+      this.focusPlanetId = null;
       return true;
     }
 
     return false;
+  }
+
+  getDebugInfo(): {
+    stage: 'galaxy' | 'system' | 'planet';
+    zoomDistanceMeters: number;
+    systemScreenPx: number;
+    planetScreenPx: number;
+    systemFade: number;
+    planetFade: number;
+    activeSystemId: string | null;
+    activePlanetId: string | null;
+    focusSystemId: string | null;
+    focusPlanetId: string | null;
+    loadedSystems: number;
+    loadedPlanets: number;
+    drawCalls: number;
+    triangles: number;
+    targetMeters: Vec3;
+    cameraMeters: Vec3;
+  } {
+    const stage: 'galaxy' | 'system' | 'planet' =
+      this.planetFade.value > 0.5 ? 'planet' : this.systemFade.value > 0.1 ? 'system' : 'galaxy';
+
+    return {
+      stage,
+      zoomDistanceMeters: this.zoom.distanceMeters,
+      systemScreenPx: this.lastSystemScreenPx,
+      planetScreenPx: this.lastPlanetScreenPx,
+      systemFade: this.systemFade.value,
+      planetFade: this.planetFade.value,
+      activeSystemId: this.activeSystemId,
+      activePlanetId: this.activePlanetId,
+      focusSystemId: this.focusSystemId,
+      focusPlanetId: this.focusPlanetId,
+      loadedSystems: this.systemAssets.size,
+      loadedPlanets: this.planetAssets.size,
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      targetMeters: this.cameraRig.targetMeters,
+      cameraMeters: this.lastCameraMeters
+    };
   }
 
   resize(width: number, height: number, pixelRatio?: number): void {
@@ -1061,6 +1122,7 @@ export class SpaceView {
 
     this.updateSystemAssets(activeSystem, originMeters);
     this.updatePlanetAssets(activeSystem, originMeters);
+    this.updateFocusTarget(activeSystem, dtSeconds);
 
     this.camera.quaternion.copy(cameraState.quaternion);
     this.render(originMeters, cameraState.positionMeters);
@@ -1110,6 +1172,7 @@ export class SpaceView {
       this.activeSystemId = null;
       this.activeSystemMaterial.opacity = 1;
       this.activeSystemImpostor.visible = false;
+      this.lastSystemScreenPx = 0;
       return;
     }
 
@@ -1134,6 +1197,7 @@ export class SpaceView {
 
     const distance = distVec3(cameraMeters, system.positionMeters);
     const screenPx = screenSpaceRadiusPx(system.extentMeters, distance, this.camera.fov * (Math.PI / 180), this.sizePx.height);
+    this.lastSystemScreenPx = screenPx;
     const detailed = this.systemGate.update(screenPx);
     const fade = this.systemFade.update(dtSeconds, detailed);
 
@@ -1150,6 +1214,7 @@ export class SpaceView {
       this.activePlanetId = null;
       this.activePlanetWorldMeters = null;
       this.planetRoot.visible = false;
+      this.lastPlanetScreenPx = 0;
       return;
     }
 
@@ -1157,16 +1222,41 @@ export class SpaceView {
     let bestPlanetWorld: Vec3 | null = null;
     let bestScore = 0;
 
-    for (const planet of system.planets) {
-      const orbitPosition = computeOrbitPositionMeters(planet, this.timeDays);
+    const focusedPlanet = this.focusPlanetId ? system.planets.find(planet => planet.id === this.focusPlanetId) ?? null : null;
+    if (this.focusPlanetId && !focusedPlanet) {
+      this.focusPlanetId = null;
+    }
+
+    if (focusedPlanet) {
+      const orbitPosition = computeOrbitPositionMeters(focusedPlanet, this.timeDays);
       const planetWorld = addVec3(vec3(), system.positionMeters, orbitPosition);
       const distance = distVec3(cameraMeters, planetWorld);
-      const screenPx = screenSpaceRadiusPx(planet.radiusMeters, distance, this.camera.fov * (Math.PI / 180), this.sizePx.height);
+      const screenPx = screenSpaceRadiusPx(
+        focusedPlanet.radiusMeters,
+        distance,
+        this.camera.fov * (Math.PI / 180),
+        this.sizePx.height
+      );
+      bestPlanet = focusedPlanet;
+      bestPlanetWorld = planetWorld;
+      bestScore = screenPx;
+    } else {
+      for (const planet of system.planets) {
+        const orbitPosition = computeOrbitPositionMeters(planet, this.timeDays);
+        const planetWorld = addVec3(vec3(), system.positionMeters, orbitPosition);
+        const distance = distVec3(cameraMeters, planetWorld);
+        const screenPx = screenSpaceRadiusPx(
+          planet.radiusMeters,
+          distance,
+          this.camera.fov * (Math.PI / 180),
+          this.sizePx.height
+        );
 
-      if (screenPx > bestScore) {
-        bestScore = screenPx;
-        bestPlanet = planet;
-        bestPlanetWorld = planetWorld;
+        if (screenPx > bestScore) {
+          bestScore = screenPx;
+          bestPlanet = planet;
+          bestPlanetWorld = planetWorld;
+        }
       }
     }
 
@@ -1175,9 +1265,11 @@ export class SpaceView {
       this.activePlanetId = null;
       this.activePlanetWorldMeters = null;
       this.planetRoot.visible = false;
+      this.lastPlanetScreenPx = 0;
       return;
     }
 
+    this.lastPlanetScreenPx = bestScore;
     const detailed = this.planetGate.update(bestScore);
     const fade = this.planetFade.update(dtSeconds, detailed);
 
@@ -1195,6 +1287,7 @@ export class SpaceView {
 
     const assets = this.systemAssets.get(system.id);
     const systemOpacity = this.systemFade.value;
+    const clutterFade = clamp(1 - this.planetFade.value * 0.7, 0.2, 1);
     if (assets) {
       if (!this.systemRoot.children.includes(assets.group)) {
         this.systemRoot.clear();
@@ -1210,16 +1303,32 @@ export class SpaceView {
         (system.positionMeters.z - originMeters.z) / this.scales.metersPerSystemUnit
       );
 
+      const fovRad = this.camera.fov * (Math.PI / 180);
+      const meshRange = Math.max(1, this.thresholds.planetMeshEnterPx - this.thresholds.planetMeshExitPx);
+      let maxMeshBlend = 0;
+
       assets.starMaterial.opacity = systemOpacity;
       assets.orbitMaterials.forEach(material => {
-        material.opacity = systemOpacity * 0.6;
+        material.opacity = systemOpacity * clutterFade * 0.6;
       });
 
+      const pointPositions = assets.planetPointGeometry.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < assets.planetMeshes.length; i += 1) {
         const planet = assets.planetData[i];
         const mesh = assets.planetMeshes[i];
         const material = assets.planetMaterials[i];
         const orbitPosition = computeOrbitPositionMeters(planet, this.timeDays);
+        const planetWorldX = system.positionMeters.x + orbitPosition.x;
+        const planetWorldY = system.positionMeters.y + orbitPosition.y;
+        const planetWorldZ = system.positionMeters.z + orbitPosition.z;
+        const dx = this.lastCameraMeters.x - planetWorldX;
+        const dy = this.lastCameraMeters.y - planetWorldY;
+        const dz = this.lastCameraMeters.z - planetWorldZ;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const screenPx = screenSpaceRadiusPx(planet.radiusMeters, distance, fovRad, this.sizePx.height);
+        const meshBlend = clamp((screenPx - this.thresholds.planetMeshExitPx) / meshRange, 0, 1);
+        maxMeshBlend = Math.max(maxMeshBlend, meshBlend);
+
         mesh.position.set(
           orbitPosition.x / this.scales.metersPerSystemUnit,
           orbitPosition.y / this.scales.metersPerSystemUnit,
@@ -1227,9 +1336,22 @@ export class SpaceView {
         );
 
         const isActive = planet.id === this.activePlanetId;
-        const planetOpacity = systemOpacity * (isActive ? 1 - this.planetFade.value : 1);
-        material.opacity = planetOpacity;
+        const baseOpacity = isActive ? systemOpacity * (1 - this.planetFade.value) : systemOpacity * clutterFade;
+        material.opacity = baseOpacity * meshBlend;
+        mesh.visible = material.opacity > 0.01;
+
+        pointPositions.setXYZ(
+          i,
+          orbitPosition.x / this.scales.metersPerSystemUnit,
+          orbitPosition.y / this.scales.metersPerSystemUnit,
+          orbitPosition.z / this.scales.metersPerSystemUnit
+        );
       }
+
+      pointPositions.needsUpdate = true;
+      const pointOpacity = systemOpacity * clutterFade * (1 - maxMeshBlend);
+      assets.planetPointMaterial.opacity = pointOpacity;
+      assets.planetPoints.visible = pointOpacity > 0.01;
     }
 
     if (this.systemFleetPoints) {
@@ -1238,7 +1360,7 @@ export class SpaceView {
         (system.positionMeters.y - originMeters.y) / this.scales.metersPerSystemUnit,
         (system.positionMeters.z - originMeters.z) / this.scales.metersPerSystemUnit
       );
-      (this.systemFleetPoints.material as THREE.PointsMaterial).opacity = systemOpacity;
+      (this.systemFleetPoints.material as THREE.PointsMaterial).opacity = systemOpacity * clutterFade;
     }
 
     const minDistance = Math.max(5_000, (system.planets.find(p => p.id === this.activePlanetId)?.radiusMeters ?? 0) * 1.2);
@@ -1273,6 +1395,24 @@ export class SpaceView {
 
     const minDistance = Math.max(planet.radiusMeters * 1.2, 5_000);
     this.zoom.setBounds(minDistance, this.galaxyRadiusMeters * 2.5);
+  }
+
+  private updateFocusTarget(system: SystemViewData | null, dtSeconds: number): void {
+    if (!system) return;
+
+    const systemBlend = this.focusSystemId ? 1 : smoothstep(0.05, 0.6, this.systemFade.value);
+    const planetBlend = this.activePlanetWorldMeters ? smoothstep(0.2, 0.9, this.planetFade.value) : 0;
+
+    copyVec3(this.focusTargetMeters, this.cameraRig.targetMeters);
+    if (systemBlend > 0) {
+      lerpVec3(this.focusTargetMeters, this.focusTargetMeters, system.positionMeters, systemBlend);
+    }
+    if (this.activePlanetWorldMeters && planetBlend > 0) {
+      lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, planetBlend);
+    }
+
+    const smoothing = clamp(dtSeconds * 6, 0, 1);
+    lerpVec3(this.cameraRig.targetMeters, this.cameraRig.targetMeters, this.focusTargetMeters, smoothing);
   }
 
   private render(originMeters: Vec3, cameraMeters: Vec3): void {
@@ -1618,6 +1758,8 @@ export class SpaceView {
     const orbitMaterials: THREE.LineBasicMaterial[] = [];
     const planetMeshes: THREE.Mesh[] = [];
     const planetMaterials: THREE.MeshStandardMaterial[] = [];
+    const planetPointPositions = new Float32Array(system.planets.length * 3);
+    const planetPointColors = new Float32Array(system.planets.length * 3);
 
     system.planets.forEach(planet => {
       const orbitRadiusUnits = planet.orbitRadiusMeters / this.scales.metersPerSystemUnit;
@@ -1643,7 +1785,30 @@ export class SpaceView {
       planetMeshes.push(planetMesh);
       planetMaterials.push(planetMaterial);
       group.add(planetMesh);
+
+      const pointIndex = planetMeshes.length - 1;
+      const baseIndex = pointIndex * 3;
+      const color = new THREE.Color(planet.color);
+      planetPointPositions[baseIndex] = 0;
+      planetPointPositions[baseIndex + 1] = 0;
+      planetPointPositions[baseIndex + 2] = 0;
+      planetPointColors[baseIndex] = color.r;
+      planetPointColors[baseIndex + 1] = color.g;
+      planetPointColors[baseIndex + 2] = color.b;
     });
+
+    const planetPointGeometry = new THREE.BufferGeometry();
+    planetPointGeometry.setAttribute('position', new THREE.BufferAttribute(planetPointPositions, 3));
+    planetPointGeometry.setAttribute('color', new THREE.BufferAttribute(planetPointColors, 3));
+    const planetPointMaterial = new THREE.PointsMaterial({
+      size: 6,
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85
+    });
+    const planetPoints = new THREE.Points(planetPointGeometry, planetPointMaterial);
+    group.add(planetPoints);
 
     const ambient = new THREE.AmbientLight(0x404040, 0.7);
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
@@ -1658,6 +1823,9 @@ export class SpaceView {
       orbitMaterials,
       planetMeshes,
       planetMaterials,
+      planetPoints,
+      planetPointGeometry,
+      planetPointMaterial,
       planetData: system.planets,
       maxOrbitMeters: system.extentMeters
     };

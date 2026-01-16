@@ -75,6 +75,22 @@
         color: #b7e4ff;
       }
 
+      .debug-overlay {
+        position: fixed;
+        right: 16px;
+        top: 16px;
+        z-index: 4;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(93, 120, 156, 0.35);
+        background: rgba(6, 10, 18, 0.82);
+        color: rgba(216, 231, 246, 0.9);
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: pre;
+        pointer-events: none;
+      }
+
       .panel p {
         margin: 0 0 12px;
         font-size: 13px;
@@ -215,6 +231,7 @@
         <div class="hint">Double tap to focus. Drag to orbit. Shift or right-drag to pan. Scroll or pinch to zoom.</div>
       </div>
     </div>
+    <div id="debug-overlay" class="debug-overlay hidden"></div>
     <script type="module" src="/client.js"></script>
   </body>
 </html>
