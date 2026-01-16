@@ -11,6 +11,7 @@ const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
 let debugEnabled = false;
+let overlayMode: 'voronoi' | 'triangulated' | 'both' = 'voronoi';
 
 type DragMode = 'orbit' | 'pan';
 
@@ -95,6 +96,9 @@ const updateUrlParams = (scenarioId: string, seed: number, timeScale: number): v
   if (debugEnabled) {
     params.set('debug', '1');
   }
+  if (overlayMode !== 'voronoi') {
+    params.set('overlay', overlayMode);
+  }
   window.history.replaceState(null, '', `?${params.toString()}`);
 };
 
@@ -137,7 +141,8 @@ const createRuntime = (scenarioId: string, seed: number, timeScale: number): Run
     state: engine.state,
     scenario,
     viewOptions: {
-      timeScaleDaysPerSecond: timeScale
+      timeScaleDaysPerSecond: timeScale,
+      debugOverlayMode: overlayMode
     }
   });
 
@@ -159,6 +164,12 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
 
 const params = new URLSearchParams(window.location.search);
 debugEnabled = params.get('debug') === '1';
+const overlayParam = params.get('overlay');
+if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam === 'voronoi') {
+  overlayMode = overlayParam;
+} else if (overlayParam === 'tri') {
+  overlayMode = 'triangulated';
+}
 debugOverlay.classList.toggle('hidden', !debugEnabled);
 populateScenarioOptions();
 
@@ -185,6 +196,7 @@ const updateDebugOverlay = () => {
     return;
   }
   const info = runtime.view.getDebugInfo();
+  const bodyInfo = info.activeBodyInfo;
   const lines = [
     `Stage: ${info.stage}`,
     `Zoom: ${formatMeters(info.zoomDistanceMeters)}`,
@@ -196,6 +208,15 @@ const updateDebugOverlay = () => {
     `Active planet: ${info.activePlanetId ?? 'none'}`,
     `Focus system: ${info.focusSystemId ?? 'none'}`,
     `Focus planet: ${info.focusPlanetId ?? 'none'}`,
+    bodyInfo
+      ? `Body: ${bodyInfo.kind} ${bodyInfo.id} parent=${bodyInfo.parentId ?? 'none'}`
+      : 'Body: none',
+    bodyInfo?.orbit
+      ? `Orbit: a=${formatMeters(bodyInfo.orbit.aMeters)} e=${bodyInfo.orbit.e.toFixed(3)} i=${bodyInfo.orbit.iDeg.toFixed(1)}° Ω=${bodyInfo.orbit.omegaDeg.toFixed(1)}° ω=${bodyInfo.orbit.argPeriapsisDeg.toFixed(1)}° M0=${bodyInfo.orbit.meanAnomalyDeg.toFixed(1)}° P=${bodyInfo.orbit.periodDays.toFixed(1)}d`
+      : 'Orbit: n/a',
+    bodyInfo?.astroRef
+      ? `AstroRef: p=${bodyInfo.astroRef.planetIndex ?? '-'} m=${bodyInfo.astroRef.moonIndex ?? '-'} s=${bodyInfo.astroRef.starIndex ?? '-'}`
+      : 'AstroRef: n/a',
     `Loaded systems: ${info.loadedSystems}`,
     `Loaded planets: ${info.loadedPlanets}`,
     `Draw calls: ${info.drawCalls}`,

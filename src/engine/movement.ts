@@ -1,6 +1,6 @@
 import { BASE_FLEET_SPEED, SHIP_STATS } from '../content/data/static';
 import { sorted } from '../shared/shared';
-import type { Army, Fleet, GameState, LogEntry, StarSystem } from '../shared/shared';
+import type { Army, Fleet, GameState, LogEntry, StarSystem, SurfacePos } from '../shared/shared';
 import { ArmyState, FleetState } from '../shared/shared';
 import { computeLoadOps } from './armyOps';
 import { shortId } from '../shared/shared';
@@ -208,7 +208,7 @@ export const executeArrivalOperations = (
           return entry.friendlyCount >= STACKING_CAP;
         };
 
-        const landingPosByArmyId = new Map<string, Army['surfacePos']>();
+        const landingPosByArmyId = new Map<string, SurfacePos>();
         embarkedArmies.forEach(army => {
           const chosen =
             pickLandingSurfacePosForArmy({ state, map, army, isOccupied }) ??
@@ -366,7 +366,7 @@ export const executeArrivalOperations = (
           return occ;
         };
 
-        const landingPosByArmyId = new Map<string, Army['surfacePos']>();
+        const landingPosByArmyId = new Map<string, SurfacePos>();
         carriedEmbarkedArmies.forEach((army, index) => {
           const targetPlanet = targetQueue[index % targetQueue.length];
           const map = getMap(targetPlanet.id);

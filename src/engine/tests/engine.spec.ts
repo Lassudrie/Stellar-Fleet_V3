@@ -54,6 +54,7 @@ import { applyFogOfWar, defaultFleetSensors, isFleetVisibleToViewer } from '../f
 import { SpatialIndex } from '../spatialIndex';
 import { deepFreezeDev } from '../state';
 import { buildPlanetBodies } from '../planets';
+import { parseAstroRefFromBodyId } from '../worldgen/planetSurfaceGenerator';
 import {
   axialToIndex,
   buildGeodesicGrid,
@@ -3368,6 +3369,8 @@ tests.push(
             assert.ok(engine_isFiniteNumber(star.orbit?.phaseDeg));
             assert.ok(engine_isFiniteNumber(star.orbit?.inclinationDeg));
             assert.ok(engine_isFiniteNumber(star.orbit?.ascendingNodeDeg));
+            assert.ok(engine_isFiniteNumber(star.orbit?.argPeriapsisDeg));
+            assert.ok(engine_isFiniteNumber(star.orbit?.meanAnomalyAtEpochDeg));
           }
         }
 
@@ -3383,6 +3386,8 @@ tests.push(
           assert.ok(engine_isFiniteNumber(planet.orbitInclinationDeg));
           assert.ok(planet.orbitInclinationDeg >= 0 && planet.orbitInclinationDeg <= 60);
           assert.ok(engine_isFiniteNumber(planet.orbitAscendingNodeDeg));
+          assert.ok(engine_isFiniteNumber(planet.argPeriapsisDeg));
+          assert.ok(engine_isFiniteNumber(planet.meanAnomalyAtEpochDeg));
 
           assert.ok(engine_isFiniteNumber(planet.massEarth) && planet.massEarth > 0);
           assert.ok(engine_isFiniteNumber(planet.radiusEarth) && planet.radiusEarth > 0);
@@ -3403,6 +3408,11 @@ tests.push(
           for (const moon of planet.moons) {
             assert.ok(engine_isFiniteNumber(moon.orbitDistanceRp));
             assert.ok(moon.orbitDistanceRp >= 6 && moon.orbitDistanceRp <= 400);
+            assert.ok(engine_isFiniteNumber(moon.orbitEccentricity));
+            assert.ok(engine_isFiniteNumber(moon.orbitInclinationDeg));
+            assert.ok(engine_isFiniteNumber(moon.orbitAscendingNodeDeg));
+            assert.ok(engine_isFiniteNumber(moon.argPeriapsisDeg));
+            assert.ok(engine_isFiniteNumber(moon.meanAnomalyAtEpochDeg));
             assert.ok(engine_isFiniteNumber(moon.massEarth) && moon.massEarth >= 0);
             assert.ok(engine_isFiniteNumber(moon.radiusEarth) && moon.radiusEarth > 0);
             assert.ok(engine_isFiniteNumber(moon.gravityG) && moon.gravityG >= 0);
@@ -3657,6 +3667,8 @@ tests.push(
         eccentricity: 0,
         orbitInclinationDeg: 0,
         orbitAscendingNodeDeg: 0,
+        argPeriapsisDeg: 0,
+        meanAnomalyAtEpochDeg: 0,
         axialTiltDeg: 0,
         massEarth: 0.45,
         radiusEarth: 0.72,
@@ -3701,6 +3713,8 @@ tests.push(
         eccentricity: 0,
         orbitInclinationDeg: 0,
         orbitAscendingNodeDeg: 0,
+        argPeriapsisDeg: 0,
+        meanAnomalyAtEpochDeg: 0,
         axialTiltDeg: 0,
         massEarth: 1,
         radiusEarth: 1,
@@ -3749,6 +3763,8 @@ tests.push(
         eccentricity: 0,
         orbitInclinationDeg: 0,
         orbitAscendingNodeDeg: 0,
+        argPeriapsisDeg: 0,
+        meanAnomalyAtEpochDeg: 0,
         axialTiltDeg: 0,
         massEarth: 0.9,
         radiusEarth: 0.95,
@@ -3859,6 +3875,24 @@ tests.push(
           assert.ok(tile.elev >= seaLevel - tolerance, `Land tile below sea level: ${tile.elev} < ${seaLevel}`);
         }
       }
+    }
+  },
+  {
+    name: 'AstroRef mapping is stable for canonical planet and moon ids',
+    run: () => {
+      const systemId = 'sys_map_ref';
+      const planetRef = parseAstroRefFromBodyId(systemId, `planet-${systemId}-1`);
+      assert.deepStrictEqual(planetRef, { planetIndex: 0 });
+      const moonRef = parseAstroRefFromBodyId(systemId, `moon-${systemId}-2-3`);
+      assert.deepStrictEqual(moonRef, { planetIndex: 1, moonIndex: 2 });
+
+      const astroA = generateStellarSystem({ worldSeed: 4242, systemId });
+      const astroB = generateStellarSystem({ worldSeed: 4242, systemId });
+      const bodiesA = buildPlanetBodies({ id: systemId, name: 'Ref', ownerFactionId: null }, astroA, []);
+      const bodiesB = buildPlanetBodies({ id: systemId, name: 'Ref', ownerFactionId: null }, astroB, []);
+      const refsA = bodiesA.map(body => parseAstroRefFromBodyId(systemId, body.id));
+      const refsB = bodiesB.map(body => parseAstroRefFromBodyId(systemId, body.id));
+      assert.deepStrictEqual(refsA, refsB);
     }
   },
   {
@@ -4365,9 +4399,10 @@ tests.push(
 
       const map = generateSurfaceMapForState(restoredA, body.id)!;
       const pos = restoredA.armies[0].surfacePos!;
-      assert.ok(Number.isFinite(pos.tileId), 'Relocated position must include tileId');
-      assert.ok(pos.tileId >= 0 && pos.tileId < map.tiles.length);
-      const biome = map.tiles[pos.tileId].biome;
+      const tileId = pos.tileId ?? resolveSurfaceTileId(map.descriptor, pos);
+      assert.ok(Number.isFinite(tileId), 'Relocated position must include tileId');
+      assert.ok(tileId !== null && tileId >= 0 && tileId < map.tiles.length);
+      const biome = map.tiles[tileId].biome;
       assert.ok(!engine_ps_isWater(biome), `Relocated biome must be passable, got ${biome}`);
     }
   },

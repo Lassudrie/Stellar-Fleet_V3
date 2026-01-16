@@ -1,4 +1,4 @@
-# Spécification du format de sauvegarde `SaveFileV5`
+# Spécification du format de sauvegarde `SaveFileV6`
 
 **Version :** 1.0  
 **Statut :** Brouillon
@@ -6,18 +6,18 @@
 ---
 
 ## 1. Objectif et enveloppe
-`SaveFileV5` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
+`SaveFileV6` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
 
 ### 1.1. Conteneur racine
 ```json
 {
-  "version": 5,
+  "version": 6,
   "createdAt": "<timestamp ISO 8601>",
   "state": { /* GameStateDTO */ }
 }
 ```
 
-- `version` : entier **obligatoire** fixé à `5` lors de l’écriture.
+- `version` : entier **obligatoire** fixé à `6` lors de l’écriture.
 - `createdAt` : horodatage ISO 8601 généré au moment de la sérialisation.
 - `state` : objet `GameStateDTO` complet (voir ci‑dessous).
 
@@ -40,8 +40,8 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
   - `ownerFactionId` : identifiant de propriétaire (migration depuis `owner`).
   - `planets` : données de corps planétaires normalisées.
   - `astro` : bloc astrophysique optionnel (spectral type, étoiles, planètes). Peut être régénéré (voir § 5).
-    - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`.
-    - Les planètes/lunes dans `astro` peuvent inclure des champs orbitaux (`orbitInclinationDeg`, `orbitAscendingNodeDeg`, `axialTiltDeg`, `orbitEccentricity`) et climatiques (`greenhouseK`, `climateK`, `airMassIndex`, `seasonalDeltaK`) recalculés si absents.
+    - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`, `argPeriapsisDeg`, `meanAnomalyAtEpochDeg`.
+    - Les planètes/lunes dans `astro` peuvent inclure des champs orbitaux (`orbitInclinationDeg`, `orbitAscendingNodeDeg`, `argPeriapsisDeg`, `meanAnomalyAtEpochDeg`, `axialTiltDeg`, `orbitEccentricity`) et climatiques (`greenhouseK`, `climateK`, `airMassIndex`, `seasonalDeltaK`) recalculés si absents.
 
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
@@ -66,9 +66,9 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - **Points de vie et consommables** : `hp` est clampé à `[0, maxHp]`; les munitions (`offensiveMissiles`, `torpedoes`, `interceptors`) sont remises à leur stock du vaisseau quand la valeur est manquante ou invalide.
 - **Kill history & messages** : les entrées sont assainies (`id` par défaut, dates numériques, chaînes forcées) pour éviter les charges arbitraires.
 
-## 4. Politique de compatibilité V5
+## 4. Politique de compatibilité V6
 
-- **Aucune rétro‑compatibilité** : toute version différente de `5` est rejetée au chargement.
+- **Aucune rétro‑compatibilité** : toute version différente de `6` est rejetée au chargement.
 - Les champs absents ou invalides sont assainis uniquement pour la version courante.
 
 ## 5. Gestion des champs manquants
