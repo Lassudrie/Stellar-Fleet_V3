@@ -445,16 +445,22 @@ export function drawCompanionOrbits(
     if (index > 0) {
       orbitAu = Math.min(orbitAu * rng.range(spacingMin, spacingMax), params.maxSemiMajorAxisAu * 0.85);
     }
+    const eccentricity = clamp01(rng.range(0, 0.35));
     const inclinationDeg = rng.range(0, 18);
     const ascendingNodeDeg = rng.range(0, 360);
     const phaseDeg = rng.range(0, 360);
+    const argPeriapsisDeg = rng.range(0, 360);
+    const meanAnomalyAtEpochDeg = phaseDeg;
     const periodDays = computeOrbitalPeriodDays(orbitAu, primaryMassSun + massSun);
     return {
       semiMajorAxisAu: orbitAu,
+      eccentricity,
       periodDays,
       phaseDeg,
       inclinationDeg,
-      ascendingNodeDeg
+      ascendingNodeDeg,
+      argPeriapsisDeg,
+      meanAnomalyAtEpochDeg
     };
   });
 }
@@ -873,22 +879,36 @@ const drawPlanetOrbitParamsForContext = (
   config: OrbitResolvedConfig,
   systemTiltDeg: number,
   systemNodeDeg: number
-): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number } => {
+): {
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
+  axialTiltDeg: number;
+} => {
   const deltaInclination = drawMutualInclinationDeg(rng, config);
   const relNodeDeg = rng.range(0, 360);
   const relNormal = orbitNormalFromAngles(deltaInclination, relNodeDeg);
   const tiltedNormal = rotateZ(rotateX(relNormal, toRad(systemTiltDeg)), toRad(systemNodeDeg));
   const { inclinationDeg, ascendingNodeDeg } = orbitAnglesFromNormal(tiltedNormal);
   const orbitInclinationDeg = clamp(inclinationDeg, 0, config.iAbsClampDeg);
+  const argPeriapsisDeg = rng.range(0, 360);
+  const meanAnomalyAtEpochDeg = rng.range(0, 360);
   const axialTiltDeg = drawAxialTiltDeg(rng, planetType, orbitInclinationDeg);
-  return { orbitInclinationDeg, orbitAscendingNodeDeg: ascendingNodeDeg, axialTiltDeg };
+  return { orbitInclinationDeg, orbitAscendingNodeDeg: ascendingNodeDeg, argPeriapsisDeg, meanAnomalyAtEpochDeg, axialTiltDeg };
 };
 
 export const generatePlanetOrbitParams = (
   seed: number,
   planetTypes: PlanetType[],
   params: StellarSystemGenParams = DEFAULT_STELLAR_SYSTEM_GEN_PARAMS
-): { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number }[] => {
+): {
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
+  axialTiltDeg: number;
+}[] => {
   if (planetTypes.length === 0) return [];
   const config = resolveOrbitConfig(params);
   const orbitContextRng = new RNG(deriveSeed32(seed, 'orbit_context'));
@@ -905,7 +925,13 @@ export const drawMoonOrbitParams = (
   rng: RNG,
   moonType: MoonType,
   orbitDistanceRp: number
-): { orbitEccentricity: number; orbitInclinationDeg: number; orbitAscendingNodeDeg: number } => {
+): {
+  orbitEccentricity: number;
+  orbitInclinationDeg: number;
+  orbitAscendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
+} => {
   const distanceScale = clamp01((orbitDistanceRp - 10) / 120);
   const isIrregular = moonType === 'Irregular';
   const eccBase = isIrregular
@@ -919,7 +945,9 @@ export const drawMoonOrbitParams = (
   const incMax = isIrregular ? 60 : 12;
   const orbitInclinationDeg = drawInclinationDeg(rng, incStd, incMin, incMax);
   const orbitAscendingNodeDeg = rng.range(0, 360);
-  return { orbitEccentricity: ecc, orbitInclinationDeg, orbitAscendingNodeDeg };
+  const argPeriapsisDeg = rng.range(0, 360);
+  const meanAnomalyAtEpochDeg = rng.range(0, 360);
+  return { orbitEccentricity: ecc, orbitInclinationDeg, orbitAscendingNodeDeg, argPeriapsisDeg, meanAnomalyAtEpochDeg };
 };
 
 export function samplePlanetMassEarth(rng: RNG, planetType: PlanetType): number {
@@ -1386,6 +1414,8 @@ export function buildPlanet(
   eccentricity: number,
   orbitInclinationDeg: number,
   orbitAscendingNodeDeg: number,
+  argPeriapsisDeg: number,
+  meanAnomalyAtEpochDeg: number,
   axialTiltDeg: number,
   L_total: number,
   hzInnerAu: number,
@@ -1421,6 +1451,8 @@ export function buildPlanet(
     eccentricity,
     orbitInclinationDeg,
     orbitAscendingNodeDeg,
+    argPeriapsisDeg,
+    meanAnomalyAtEpochDeg,
     axialTiltDeg,
     massEarth,
     radiusEarth,
@@ -1761,6 +1793,8 @@ export function refineMoons(
       orbitEccentricity: orbitParams.orbitEccentricity,
       orbitInclinationDeg: orbitParams.orbitInclinationDeg,
       orbitAscendingNodeDeg: orbitParams.orbitAscendingNodeDeg,
+      argPeriapsisDeg: orbitParams.argPeriapsisDeg,
+      meanAnomalyAtEpochDeg: orbitParams.meanAnomalyAtEpochDeg,
       massEarth,
       radiusEarth,
       gravityG,
@@ -1923,6 +1957,8 @@ export function generateStellarSystem(input: GenerateStellarSystemInput): StarSy
       eccentricity,
       orbitParams?.orbitInclinationDeg ?? 0,
       orbitParams?.orbitAscendingNodeDeg ?? 0,
+      orbitParams?.argPeriapsisDeg ?? 0,
+      orbitParams?.meanAnomalyAtEpochDeg ?? 0,
       orbitParams?.axialTiltDeg ?? 0,
       luminosityTotalLSun,
       hzInnerAu,

@@ -70,7 +70,7 @@ import { BREAK_THRESHOLD, RALLY_THRESHOLD } from './ground';
 // Save format + DTOs (was: engine/saveFormat.ts)
 // ============================================================
 
-export const SAVE_VERSION = 5 as const;
+export const SAVE_VERSION = 6 as const;
 
 // --- DTOs (Data Transfer Objects) ---
 
@@ -310,7 +310,13 @@ export interface SaveFileV5 {
   state: GameStateDTO;
 }
 
-export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4 | SaveFileV5;
+export interface SaveFileV6 {
+  version: 6;
+  createdAt: string;
+  state: GameStateDTO;
+}
+
+export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4 | SaveFileV5 | SaveFileV6;
 
 export type DeserializeProgressDetail = { current: number; total: number };
 export type DeserializeProgressUpdate = {
@@ -405,20 +411,30 @@ const clampArray = <T>(
   return sliceFromEnd ? items.slice(-max) : items.slice(0, max);
 };
 
-const isStarOrbit = (orbit: unknown): orbit is StarOrbit => {
+const isStarOrbitCore = (orbit: unknown): orbit is StarOrbit => {
   if (!orbit || typeof orbit !== 'object') return false;
   const o: any = orbit;
   return isFiniteNumber(o.semiMajorAxisAu)
+    && (o.eccentricity === undefined || isFiniteNumber(o.eccentricity))
     && isFiniteNumber(o.periodDays)
     && isFiniteNumber(o.phaseDeg)
     && isFiniteNumber(o.inclinationDeg)
     && isFiniteNumber(o.ascendingNodeDeg);
 };
 
+const needsStarOrbitNormalization = (orbit: StarOrbit | undefined): boolean => (
+  !orbit
+  || !isFiniteNumber(orbit.eccentricity ?? 0)
+  || !isFiniteNumber(orbit.argPeriapsisDeg)
+  || !isFiniteNumber(orbit.meanAnomalyAtEpochDeg)
+);
+
 const needsMoonOrbitNormalization = (moon: MoonData): boolean => (
   !isFiniteNumber(moon.orbitEccentricity)
   || !isFiniteNumber(moon.orbitInclinationDeg)
   || !isFiniteNumber(moon.orbitAscendingNodeDeg)
+  || !isFiniteNumber(moon.argPeriapsisDeg)
+  || !isFiniteNumber(moon.meanAnomalyAtEpochDeg)
 );
 
 const normalizeMoonOrbitParams = (moon: MoonData, rng: RNG): MoonData => {
@@ -429,13 +445,19 @@ const normalizeMoonOrbitParams = (moon: MoonData, rng: RNG): MoonData => {
     ...moon,
     orbitEccentricity: isFiniteNumber(moon.orbitEccentricity) ? moon.orbitEccentricity : defaults.orbitEccentricity,
     orbitInclinationDeg: isFiniteNumber(moon.orbitInclinationDeg) ? moon.orbitInclinationDeg : defaults.orbitInclinationDeg,
-    orbitAscendingNodeDeg: isFiniteNumber(moon.orbitAscendingNodeDeg) ? moon.orbitAscendingNodeDeg : defaults.orbitAscendingNodeDeg
+    orbitAscendingNodeDeg: isFiniteNumber(moon.orbitAscendingNodeDeg) ? moon.orbitAscendingNodeDeg : defaults.orbitAscendingNodeDeg,
+    argPeriapsisDeg: isFiniteNumber(moon.argPeriapsisDeg) ? moon.argPeriapsisDeg : defaults.argPeriapsisDeg,
+    meanAnomalyAtEpochDeg: isFiniteNumber(moon.meanAnomalyAtEpochDeg)
+      ? moon.meanAnomalyAtEpochDeg
+      : defaults.meanAnomalyAtEpochDeg
   };
 };
 
 const needsPlanetOrbitNormalization = (planet: PlanetData): boolean => (
   !isFiniteNumber(planet.orbitInclinationDeg)
   || !isFiniteNumber(planet.orbitAscendingNodeDeg)
+  || !isFiniteNumber(planet.argPeriapsisDeg)
+  || !isFiniteNumber(planet.meanAnomalyAtEpochDeg)
   || !isFiniteNumber(planet.axialTiltDeg)
   || (Array.isArray(planet.moons) && planet.moons.some(needsMoonOrbitNormalization))
 );
@@ -444,7 +466,13 @@ const normalizePlanetOrbitParams = (
   planet: PlanetData,
   planetIndex: number,
   seed: number,
-  defaults: { orbitInclinationDeg: number; orbitAscendingNodeDeg: number; axialTiltDeg: number }
+  defaults: {
+    orbitInclinationDeg: number;
+    orbitAscendingNodeDeg: number;
+    argPeriapsisDeg: number;
+    meanAnomalyAtEpochDeg: number;
+    axialTiltDeg: number;
+  }
 ): PlanetData => {
   if (!needsPlanetOrbitNormalization(planet)) return planet;
   const moonOrbitRng = new RNG(deriveSeed32(seed, 'moon_orbits', planetIndex));
@@ -455,6 +483,10 @@ const normalizePlanetOrbitParams = (
     ...planet,
     orbitInclinationDeg: isFiniteNumber(planet.orbitInclinationDeg) ? planet.orbitInclinationDeg : defaults.orbitInclinationDeg,
     orbitAscendingNodeDeg: isFiniteNumber(planet.orbitAscendingNodeDeg) ? planet.orbitAscendingNodeDeg : defaults.orbitAscendingNodeDeg,
+    argPeriapsisDeg: isFiniteNumber(planet.argPeriapsisDeg) ? planet.argPeriapsisDeg : defaults.argPeriapsisDeg,
+    meanAnomalyAtEpochDeg: isFiniteNumber(planet.meanAnomalyAtEpochDeg)
+      ? planet.meanAnomalyAtEpochDeg
+      : defaults.meanAnomalyAtEpochDeg,
     axialTiltDeg: isFiniteNumber(planet.axialTiltDeg) ? planet.axialTiltDeg : defaults.axialTiltDeg,
     moons
   };
@@ -627,7 +659,7 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
   if (!Array.isArray(astro.stars) || astro.stars.length === 0) return astro;
   const primaryMassSun = isFiniteNumber(astro.stars[0]?.massSun) ? astro.stars[0].massSun : 1;
   const companionStars = astro.stars.slice(1);
-  const needsOrbit = companionStars.some(star => !isStarOrbit(star?.orbit));
+  const needsOrbit = companionStars.some(star => !isStarOrbitCore(star?.orbit) || needsStarOrbitNormalization(star?.orbit));
   const needsPlanetOrbit = astro.planets.some(needsPlanetOrbitNormalization);
   const needsPlanetClimate = astro.planets.some(needsPlanetClimateNormalization);
   const needsPlanetSeasonal = astro.planets.some(needsPlanetSeasonalNormalization);
@@ -638,15 +670,35 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
   const companionOrbits = drawCompanionOrbits(orbitRng, primaryMassSun, companionMasses);
   const normalizedStars = astro.stars.map((star, index) => {
     if (index === 0) return star;
-    if (isStarOrbit(star.orbit)) return star;
-    const orbit = companionOrbits[index - 1];
-    return orbit ? { ...star, orbit } : star;
+    const orbitDefaults = companionOrbits[index - 1];
+    if (!orbitDefaults) return star;
+    if (!isStarOrbitCore(star.orbit)) {
+      return { ...star, orbit: orbitDefaults };
+    }
+    if (!needsStarOrbitNormalization(star.orbit)) return star;
+    return {
+      ...star,
+      orbit: {
+        ...star.orbit,
+        eccentricity: isFiniteNumber(star.orbit.eccentricity) ? star.orbit.eccentricity : orbitDefaults.eccentricity ?? 0,
+        argPeriapsisDeg: isFiniteNumber(star.orbit.argPeriapsisDeg) ? star.orbit.argPeriapsisDeg : orbitDefaults.argPeriapsisDeg,
+        meanAnomalyAtEpochDeg: isFiniteNumber(star.orbit.meanAnomalyAtEpochDeg)
+          ? star.orbit.meanAnomalyAtEpochDeg
+          : orbitDefaults.meanAnomalyAtEpochDeg
+      }
+    };
   });
   const orbitDefaults = needsPlanetOrbit
     ? generatePlanetOrbitParams(astro.seed, astro.planets.map(planet => planet.type))
     : [];
   const normalizedPlanets = astro.planets.map((planet, index) => {
-    const defaults = orbitDefaults[index] ?? { orbitInclinationDeg: 0, orbitAscendingNodeDeg: 0, axialTiltDeg: 0 };
+    const defaults = orbitDefaults[index] ?? {
+      orbitInclinationDeg: 0,
+      orbitAscendingNodeDeg: 0,
+      argPeriapsisDeg: 0,
+      meanAnomalyAtEpochDeg: 0,
+      axialTiltDeg: 0
+    };
     const withOrbits = needsPlanetOrbit ? normalizePlanetOrbitParams(planet, index, astro.seed, defaults) : planet;
     const withClimate = needsPlanetClimateNormalization(withOrbits)
       ? normalizePlanetClimate(withOrbits)

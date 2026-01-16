@@ -144,10 +144,13 @@ export type PlanetTypeProbs = Record<PlanetType, number>;
 
 export interface StarOrbit {
   semiMajorAxisAu: number;
+  eccentricity?: number;
   periodDays: number;
   phaseDeg: number;
   inclinationDeg: number;
   ascendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
 }
 
 export interface StarData {
@@ -166,6 +169,8 @@ export interface MoonData {
   orbitEccentricity: number;
   orbitInclinationDeg: number;
   orbitAscendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
   massEarth: number;
   radiusEarth: number;
   gravityG: number;
@@ -187,6 +192,8 @@ export interface PlanetData {
   eccentricity: number;
   orbitInclinationDeg: number;
   orbitAscendingNodeDeg: number;
+  argPeriapsisDeg: number;
+  meanAnomalyAtEpochDeg: number;
   axialTiltDeg: number;
   massEarth: number;
   radiusEarth: number;

@@ -237,15 +237,15 @@ export const resolveSurfaceTileId = (
 ): number | null => {
   const config = descriptor.config;
   if (isGeodesicConfig(config)) {
-    if (!Number.isFinite(pos.tileId)) return null;
+    if (typeof pos.tileId !== 'number' || !Number.isFinite(pos.tileId)) return null;
     const idx = Math.floor(pos.tileId);
     return idx >= 0 && idx < tileCount(config.frequency) ? idx : null;
   }
-  if (Number.isFinite(pos.tileId)) {
+  if (typeof pos.tileId === 'number' && Number.isFinite(pos.tileId)) {
     const idx = Math.floor(pos.tileId);
     return idx >= 0 && idx < config.w * config.h ? idx : null;
   }
-  if (Number.isFinite(pos.q) && Number.isFinite(pos.r)) {
+  if (typeof pos.q === 'number' && Number.isFinite(pos.q) && typeof pos.r === 'number' && Number.isFinite(pos.r)) {
     const coord = { q: Math.floor(pos.q), r: Math.floor(pos.r) };
     if (!isInBounds(coord, config.w, config.h)) return null;
     return axialToIndex(coord, config.w);
@@ -4613,8 +4613,6 @@ export const relocateSurfacePosDeterministic = (params: {
 // ==========================================
 // Positions (was: planetSurface/positions.ts)
 // ==========================================
-
-const clampInt2 = (x: number): number => (Number.isFinite(x) ? Math.floor(x) : NaN);
 
 const pickInitialArmyPos = (state: GameState, armyId: string, bodyId: string): SurfacePos | null => {
   const descriptor = state.planetSurfaceDescriptorsByBodyId?.[bodyId];

@@ -36,11 +36,11 @@ Empêcher les régressions et rendre visibles les incohérences de mapping (plan
 - `src/ui/*` (overlay debug / panneau sélection)
 
 ### Checklist de validation
-- [ ] Tests unitaires: mapping planète OK sur système sans lune.
-- [ ] Tests unitaires: mapping lunes OK sur système avec lunes (aucun décalage d’index).
-- [ ] Le viewer ne crashe pas si une astroRef est absente: fallback explicite et traçable.
-- [ ] Le debug overlay affiche des valeurs cohérentes (indices + éléments orbitaux).
-- [ ] Un seed fixe reproduit le même système et les mêmes mappings.
+- [x] Tests unitaires: mapping planète OK sur système sans lune.
+- [x] Tests unitaires: mapping lunes OK sur système avec lunes (aucun décalage d’index).
+- [x] Le viewer ne crashe pas si une astroRef est absente: fallback explicite et traçable.
+- [x] Le debug overlay affiche des valeurs cohérentes (indices + éléments orbitaux).
+- [x] Un seed fixe reproduit le même système et les mêmes mappings.
 
 ---
 
@@ -75,11 +75,11 @@ Corriger le bug structurel (indexation) et introduire un modèle hiérarchique d
 - `src/shared/shared.ts` (types partagés si nécessaires)
 
 ### Checklist de validation
-- [ ] Le mapping astro ne dépend plus de l’index d’itération; présence d’un parseur d’ID.
-- [ ] Une lune utilise bien `astro.planets[planetIndex].moons[moonIndex]`.
-- [ ] Le viewer affiche un système avec lunes sans incohérence visible (ex: lune attachée à sa planète).
-- [ ] La couleur de l’étoile n’est plus `system.color` (au minimum: couleur neutre provisoire).
-- [ ] Les objets ont un `parentId` cohérent et une hiérarchie logique (inspection debug OK).
+- [x] Le mapping astro ne dépend plus de l’index d’itération; présence d’un parseur d’ID.
+- [x] Une lune utilise bien `astro.planets[planetIndex].moons[moonIndex]`.
+- [x] Le viewer affiche un système avec lunes sans incohérence visible (ex: lune attachée à sa planète).
+- [x] La couleur de l’étoile n’est plus `system.color` (au minimum: couleur neutre provisoire).
+- [x] Les objets ont un `parentId` cohérent et une hiérarchie logique (inspection debug OK).
 
 ---
 
@@ -134,12 +134,12 @@ Les éléments orbitaux doivent permettre une ellipse orientée:
 - `src/viewer/*` (module utilitaire orbit/kepler recommandé, ex: `src/viewer/orbits.ts`)
 
 ### Checklist de validation
-- [ ] Un système avec orbites inclinées: lignes inclinées (pas dans un plan plat XZ par défaut).
-- [ ] Une planète est exactement sur la ligne de son orbite à tout instant (visuel + debug).
-- [ ] Une orbite excentrique est visiblement elliptique (e > 0) et cohérente.
-- [ ] La période varie correctement avec la masse centrale (tests/inspection debug).
-- [ ] Les lunes orbitent autour de leur planète (repère parent), pas directement autour de l’étoile.
-- [ ] Aucune allocation importante par frame dans l’update orbitale (profiling simple).
+- [x] Un système avec orbites inclinées: lignes inclinées (pas dans un plan plat XZ par défaut).
+- [x] Une planète est exactement sur la ligne de son orbite à tout instant (visuel + debug).
+- [x] Une orbite excentrique est visiblement elliptique (e > 0) et cohérente.
+- [x] La période varie correctement avec la masse centrale (tests/inspection debug).
+- [x] Les lunes orbitent autour de leur planète (repère parent), pas directement autour de l’étoile.
+- [x] Aucune allocation importante par frame dans l’update orbitale (profiling simple).
 
 ---
 
@@ -175,11 +175,11 @@ L’étoile doit refléter l’astro (température/couleur, rayon, luminosité) 
 - `src/engine/worldgen/stellarSystem.ts` (si enrichissement orbit star)
 
 ### Checklist de validation
-- [ ] La couleur de l’étoile dépend de `teffK`, pas de `system.color`.
-- [ ] Le rayon à l’écran varie clairement selon `radiusSun`.
-- [ ] Les planètes montrent un terminator cohérent (même sans shader custom, via lumière).
-- [ ] Un système binaire affiche 2 étoiles (positions distinctes, pas superposées).
-- [ ] Le debug overlay indique starIndex et paramètres cohérents.
+- [x] La couleur de l’étoile dépend de `teffK`, pas de `system.color`.
+- [x] Le rayon à l’écran varie clairement selon `radiusSun`.
+- [x] Les planètes montrent un terminator cohérent (même sans shader custom, via lumière).
+- [x] Un système binaire affiche 2 étoiles (positions distinctes, pas superposées).
+- [x] Le debug overlay indique starIndex et paramètres cohérents.
 
 ---
 
@@ -215,12 +215,12 @@ Rendre la planète “physiquement plausible” et exploiter les données/géné
 - `src/viewer/*` (texture gen module, cache, LOD)
 
 ### Checklist de validation
-- [ ] La rotation de la planète est visible et stable (pas de jitter).
-- [ ] Le terminator est cohérent avec la position de l’étoile (test: déplacer la caméra).
-- [ ] Texture low-res apparaît rapidement puis s’améliore sans flash ni pop agressif.
-- [ ] Retour/aller vue système <-> planète: pas de planète “non texturée” (cache OK).
-- [ ] Atmosphère visible sur Earthlike/épaisse; nuages 100% opaques si requis.
-- [ ] Anneaux visibles uniquement sur types ciblés (pas sur telluriques par défaut).
+- [x] La rotation de la planète est visible et stable (pas de jitter).
+- [x] Le terminator est cohérent avec la position de l’étoile (test: déplacer la caméra).
+- [x] Texture low-res apparaît rapidement puis s’améliore sans flash ni pop agressif.
+- [x] Retour/aller vue système <-> planète: pas de planète “non texturée” (cache OK).
+- [x] Atmosphère visible sur Earthlike/épaisse; nuages 100% opaques si requis.
+- [x] Anneaux visibles uniquement sur types ciblés (pas sur telluriques par défaut).
 
 ---
 
@@ -250,11 +250,11 @@ Afficher la grille géodésique hex+12 pentagones (dual Voronoï sphérique) au 
 - Nouveau module conseillé: `src/viewer/geodesicVoronoi.ts`
 
 ### Checklist de validation
-- [ ] À l’écran, on observe majoritairement des hexagones et exactement 12 pentagones.
-- [ ] Pas de couture visible (grille continue sur toute la sphère).
-- [ ] L’overlay reste lisible au zoom et ne z-fight pas avec la surface.
-- [ ] Changer la fréquence LOD ne provoque pas de freeze perceptible (cache OK).
-- [ ] Le mode debug permet de comparer triangulé vs dual.
+- [x] À l’écran, on observe majoritairement des hexagones et exactement 12 pentagones.
+- [x] Pas de couture visible (grille continue sur toute la sphère).
+- [x] L’overlay reste lisible au zoom et ne z-fight pas avec la surface.
+- [x] Changer la fréquence LOD ne provoque pas de freeze perceptible (cache OK).
+- [x] Le mode debug permet de comparer triangulé vs dual.
 
 ---
 
@@ -287,19 +287,138 @@ Réduire draw calls et charges mémoire, rendre le rendu scalable sur smartphone
 - `src/engine/streaming/StreamingQueue.ts` (si ajustements)
 
 ### Checklist de validation
-- [ ] Vue système: draw calls fortement réduits (instancing effectif).
-- [ ] Zoom/pan: absence de spikes majeurs (profiling visuel).
-- [ ] Textures/overlays se chargent progressivement sans bloquer l’UI.
-- [ ] Pas d’allocations répétées par frame (inspection simple + logs).
-- [ ] La qualité baisse automatiquement en cas de FPS bas et remonte ensuite.
+- [x] Vue système: draw calls fortement réduits (instancing effectif).
+- [x] Zoom/pan: absence de spikes majeurs (profiling visuel).
+- [x] Textures/overlays se chargent progressivement sans bloquer l’UI.
+- [x] Pas d’allocations répétées par frame (inspection simple + logs).
+- [x] La qualité baisse automatiquement en cas de FPS bas et remonte ensuite.
 
 ---
 
 ## Définition globale de “Done”
 
-- [ ] Mapping correct étoiles/planètes/lunes (Lot 1) validé par tests (Lot 0).
-- [ ] Positions orbitales keplériennes et lignes d’orbite cohérentes (Lot 2).
-- [ ] Étoiles: taille/couleur/lumière basées sur l’astro (Lot 3).
-- [ ] Planètes: terminator + rotation + texture progressive + atmosphère (Lot 4).
-- [ ] Grille hexagonale dual Voronoï (Lot 5).
-- [ ] Performance mobile: instancing + streaming + qualité adaptative (Lot 6).
+- [x] Mapping correct étoiles/planètes/lunes (Lot 1) validé par tests (Lot 0).
+- [x] Positions orbitales keplériennes et lignes d’orbite cohérentes (Lot 2).
+- [x] Étoiles: taille/couleur/lumière basées sur l’astro (Lot 3).
+- [x] Planètes: terminator + rotation + texture progressive + atmosphère (Lot 4).
+- [x] Grille hexagonale dual Voronoï (Lot 5).
+- [x] Performance mobile: instancing + streaming + qualité adaptative (Lot 6).
+
+---
+
+# Plan d’action (delta) — Fidélité graphique des systèmes stellaires et planètes
+
+Base: audit de `Stellar-Fleet_V3-Hexagonal (2)`.
+
+Objectif: combler les écarts restants pour atteindre une représentation “fidèle” (structure, orbites, éclairage, surface, grille hex) sans régression performance (mobile) et avec validations reproductibles.
+
+Contexte (déjà en place, à ne pas refaire):
+- Hiérarchie star/planet/moon et mapping ID→astroRef testés.
+- Propagation keplérienne avec orientation complète (Ω, i, ω, M0, e, a).
+- Transitions galaxy/system/planet, streaming queue, cache texture, instancing system-view.
+- Grille géodésique (hex + 12 pentagones) générée et testée côté engine.
+
+Ce plan se concentre uniquement sur les manques/corrections à implémenter.
+
+---
+
+## Lot P0 — Corrections de justesse visibles
+
+### P0.1 Corriger l’obliquité (axial tilt) et la hiérarchie de rotation
+Checklist de validation
+- [x] L’obliquité est visiblement un “penchement” (ex: tilt élevé => axe incliné).
+- [x] La rotation jour/nuit se fait autour de l’axe penché (pas autour d’un axe global arbitraire).
+- [x] Les anneaux sont alignés sur l’obliquité (ils penchent avec la planète).
+- [x] Le terminator (zone jour/nuit) reste cohérent quand la planète tourne.
+
+### P0.2 Corriger le bug: la grille overlay ne tourne pas avec la planète
+Checklist de validation
+- [x] Pendant la rotation, l’overlay reste parfaitement solidaire des motifs de surface.
+- [x] Aucun décalage visible entre overlay et texture (même sur tilt élevé).
+
+### P0.3 Éclairage multi-étoiles (terminator et intensité) — support minimal
+Checklist de validation
+- [x] Dans un système binaire, la seconde étoile influence visiblement le terminator (au moins directionnellement).
+- [x] Intensité globale reste stable (pas d’exposition brûlée à courte distance).
+- [x] Coût perf maîtrisé (pas de chute brutale FPS en planet-view).
+
+---
+
+## Lot P1 — Fidélité “contenu” (surface/biomes, grille alignée gameplay)
+
+### P1.1 Remplacer la texture “placeholder” par une texture dérivée de la surface générée
+Checklist de validation
+- [x] Les biomes sont reconnaissables (océan/terre/ice caps/coasts) et reproductibles (seed stable).
+- [x] La texture apparaît rapidement (low-res) puis s’améliore sans blocage.
+- [x] Retour system-view -> planet-view: pas de planète “non texturée” (cache OK).
+- [x] Le coût CPU est amorti (StreamingQueue), pas de freeze perceptible.
+
+### P1.2 Aligner la fréquence d’overlay avec la grille gameplay (éviter divergence)
+Checklist de validation
+- [x] L’overlay correspond à la même fréquence que la surface descriptor (vérifiable en debug).
+- [x] Changer de LOD ne crée pas de confusion visuelle (transitions acceptables).
+- [x] Aucun mismatch entre une tuile “gameplay” et la cellule affichée (mode debug).
+
+---
+
+## Lot P2 — Fidélité systèmes multiples (barycentre) + corrections physiques complémentaires
+
+### P2.1 Orbites stellaires barycentriques (au lieu de primaire fixe)
+Checklist de validation
+- [x] Dans un système binaire, les deux étoiles se déplacent autour du barycentre (aucune étoile “clouée” à l’origine par convention).
+- [x] La distance relative correspond aux masses (étoile plus massive: orbite plus petite).
+- [x] Les planètes orbitent le référentiel choisi (primaire déplacée barycentriquement).
+
+### P2.2 Conserver l’échelle physique en system-view (éviter scaling artificiel)
+Checklist de validation
+- [x] Le rayon affiché des planètes ne change plus artificiellement avec le zoom.
+- [x] La lisibilité reste correcte via points/labels/crossfade (sans triche d’échelle).
+- [x] Aucun popping agressif au moment du basculement points->mesh.
+
+---
+
+## Lot P3 — Rendu et robustesse (qualité device-independent + mémoire GPU)
+
+### P3.1 Orbites “ultra fines” et nettes (device-independent)
+Checklist de validation
+- [x] Épaisseur constante en pixels, quel que soit le device / DPR.
+- [x] Pas d’aliasing grossier sur orbites longues.
+- [x] Coût perf acceptable (pas de multiplication de draw calls incontrôlée).
+
+### P3.2 dispose() complet des ressources GPU (prévenir fuites)
+Checklist de validation
+- [x] Après plusieurs cycles zoom/transition/scénarios, la mémoire GPU n’augmente pas indéfiniment.
+- [x] Les assets détruits ne restent pas référencés (inspection via renderer.info).
+- [x] Le cache texture respecte ses limites (prune effectif).
+
+---
+
+## Lot P4 — Préparation “orbit-to-ground” (si zoom jusqu’au sol est attendu)
+
+### P4.1 Stratégie précision (floating origin local / échelle locale / depth)
+Checklist de validation
+- [x] Pas de z-fighting excessif à proximité du sol.
+- [x] Stabilité de la caméra (pas de jitter) quand on s’approche fortement.
+- [x] Transitions orbit->ground sans saut de repère visible (ou saut contrôlé/crossfade documenté).
+
+---
+
+## Tests & QA transverses (à maintenir tout au long)
+
+### QA.1 Scénarios reproductibles (seed)
+Checklist
+- [x] Les mêmes seeds produisent le même rendu structurel (positions, tailles relatives, hiérarchie).
+- [x] Les écarts visuels sont traçables via le debug overlay.
+
+Seeds “golden” (à utiliser pour les checks visuels):
+- `1337` : système sans lunes.
+- `4242` : système avec plusieurs lunes.
+- `9001` : système binaire.
+
+### QA.2 Invariants visuels (smoke checks)
+Checklist
+- [x] Une planète est sur son orbite et la ligne correspond (pas de désalignement).
+- [x] Les lunes orbitent la planète (pas l’étoile) et restent attachées hiérarchiquement.
+- [x] Overlay tourne avec la planète, et la fréquence correspond au gameplay.
+- [x] Multi-star: terminator influencé par les étoiles (au minimum 2).
+- [x] Aucune fuite GPU notable après 10 cycles de transitions.
