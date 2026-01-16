@@ -1287,7 +1287,7 @@ export class SpaceView {
 
     const assets = this.systemAssets.get(system.id);
     const systemOpacity = this.systemFade.value;
-    const clutterFade = clamp(1 - this.planetFade.value * 0.7, 0.2, 1);
+    const clutterFade = clamp(1 - this.planetFade.value * 0.85, 0, 1);
     if (assets) {
       if (!this.systemRoot.children.includes(assets.group)) {
         this.systemRoot.clear();
@@ -1710,8 +1710,8 @@ export class SpaceView {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 4,
-      sizeAttenuation: true,
+      size: 6,
+      sizeAttenuation: false,
       vertexColors: true,
       transparent: true,
       opacity: 0.9
