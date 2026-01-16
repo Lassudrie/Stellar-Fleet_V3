@@ -1,3 +1,4 @@
+import { sorted } from '../../shared/shared';
 import { Vec3 } from '../math/vec3';
 
 export type GeodesicGrid = {
@@ -138,7 +139,7 @@ export const buildGeodesicGrid = (frequency: number): GeodesicGrid => {
     neighborSets[c].add(b);
   });
 
-  const neighbors = neighborSets.map((set) => Array.from(set).sort((lhs, rhs) => lhs - rhs));
+  const neighbors = neighborSets.map((set) => sorted(Array.from(set), (lhs, rhs) => lhs - rhs));
 
   return {
     frequency: f,
@@ -161,4 +162,57 @@ export const getTileNeighbors = (grid: GeodesicGrid, tileId: number): number[] =
   const idx = Math.floor(tileId);
   if (idx < 0 || idx >= grid.neighbors.length) return [];
   return grid.neighbors[idx];
+};
+
+const cross = (a: Vec3, b: Vec3): Vec3 => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x
+});
+
+const dot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
+
+const scale = (v: Vec3, s: number): Vec3 => ({ x: v.x * s, y: v.y * s, z: v.z * s });
+
+const add = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
+
+const normalizeSafe = (v: Vec3): Vec3 => {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (len <= 0) return { x: 0, y: 0, z: 1 };
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
+};
+
+const faceCenter = (a: Vec3, b: Vec3, c: Vec3): Vec3 => normalizeSafe(add(add(a, b), c));
+
+export const buildGeodesicVoronoiSegments = (grid: GeodesicGrid): Vec3[] => {
+  const centers = grid.faces.map(([a, b, c]) => faceCenter(grid.vertices[a], grid.vertices[b], grid.vertices[c]));
+  const segments: Vec3[] = [];
+
+  grid.vertices.forEach((vertex, vertexIndex) => {
+    const faces = grid.facesByVertex[vertexIndex] ?? [];
+    if (faces.length < 3) return;
+
+    const normal = normalizeSafe(vertex);
+    const ref = Math.abs(normal.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
+    const tangentX = normalizeSafe(cross(ref, normal));
+    const tangentY = cross(normal, tangentX);
+
+    const ordered = sorted(
+      faces.map(faceIndex => {
+        const center = centers[faceIndex];
+        const projected = add(center, scale(normal, -dot(center, normal)));
+        const angle = Math.atan2(dot(projected, tangentY), dot(projected, tangentX));
+        return { center, angle };
+      }),
+      (a, b) => a.angle - b.angle
+    );
+
+    for (let i = 0; i < ordered.length; i += 1) {
+      const current = ordered[i];
+      const next = ordered[(i + 1) % ordered.length];
+      segments.push(current.center, next.center);
+    }
+  });
+
+  return segments;
 };
