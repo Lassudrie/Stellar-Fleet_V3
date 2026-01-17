@@ -1497,6 +1497,7 @@ export class SpaceView {
   private lastCameraMeters: Vec3 = vec3();
   private lastSystemScreenPx = 0;
   private lastPlanetScreenPx = 0;
+  private lastPlanetScreenPxSmoothed = 0;
   private orbitingPositionScratch: Vec3[] = [];
   private starPositionScratch: Vec3[] = [];
   private planetLightScratch: Vec3 = vec3();
@@ -2004,10 +2005,13 @@ export class SpaceView {
   private updatePlanetTransition(system: SystemViewData | null, cameraMeters: Vec3, dtSeconds: number): void {
     if (!system || this.systemFade.value <= 0) {
       this.planetFade.update(dtSeconds, false);
-      this.activePlanetId = null;
-      this.activePlanetWorldMeters = null;
-      this.planetRoot.visible = false;
+      if (this.planetFade.value <= 0.01) {
+        this.activePlanetId = null;
+        this.activePlanetWorldMeters = null;
+      }
+      this.planetRoot.visible = this.planetFade.value > 0.01;
       this.lastPlanetScreenPx = 0;
+      this.lastPlanetScreenPxSmoothed = 0;
       return;
     }
 
@@ -2081,15 +2085,21 @@ export class SpaceView {
 
     if (!bestPlanet || !hasBest) {
       this.planetFade.update(dtSeconds, false);
-      this.activePlanetId = null;
-      this.activePlanetWorldMeters = null;
-      this.planetRoot.visible = false;
+      if (this.planetFade.value <= 0.01) {
+        this.activePlanetId = null;
+        this.activePlanetWorldMeters = null;
+      }
+      this.planetRoot.visible = this.planetFade.value > 0.01;
       this.lastPlanetScreenPx = 0;
       return;
     }
 
-    this.lastPlanetScreenPx = bestScore;
-    const detailed = this.planetGate.update(bestScore);
+    const smoothing = clamp(dtSeconds * 8, 0, 1);
+    this.lastPlanetScreenPxSmoothed = this.lastPlanetScreenPxSmoothed
+      ? this.lastPlanetScreenPxSmoothed + (bestScore - this.lastPlanetScreenPxSmoothed) * smoothing
+      : bestScore;
+    this.lastPlanetScreenPx = this.lastPlanetScreenPxSmoothed;
+    const detailed = this.planetGate.update(this.lastPlanetScreenPxSmoothed);
     this.planetFade.update(dtSeconds, detailed);
 
     if (bestScore >= this.thresholds.planetPreloadPx) {
@@ -2533,7 +2543,11 @@ export class SpaceView {
         metersPerUnit: this.scales.metersPerPlanetUnit,
         passExtentMeters:
           this.systemById.get(this.activeSystemId ?? '')?.orbitingBodies.find(p => p.id === this.activePlanetId)?.radiusMeters ?? 1,
-        passCenterMeters: this.activePlanetWorldMeters ?? this.systemById.get(this.activeSystemId ?? '')?.positionMeters ?? vec3()
+        passCenterMeters:
+          this.activePlanetWorldMeters ??
+          this.systemById.get(this.activeSystemId ?? '')?.positionMeters ??
+          this.activePlanetWorldMeters ??
+          vec3()
       });
     }
   }
@@ -2561,9 +2575,9 @@ export class SpaceView {
     const distanceUnits = distanceMeters / options.metersPerUnit;
     const extentUnits = Math.max(1, options.passExtentMeters / options.metersPerUnit);
     const isPlanetPass = options.metersPerUnit === this.scales.metersPerPlanetUnit;
-    const nearFactor = isPlanetPass ? 0.008 : 0.02;
+    const nearFactor = isPlanetPass ? 0.004 : 0.02;
     const farFactor = isPlanetPass ? 4 : 6;
-    const near = Math.max(isPlanetPass ? 0.002 : 0.05, distanceUnits * nearFactor);
+    const near = Math.max(isPlanetPass ? 0.001 : 0.05, distanceUnits * nearFactor);
     const far = Math.max(near + 8, distanceUnits + extentUnits * farFactor);
 
     this.camera.near = near;
