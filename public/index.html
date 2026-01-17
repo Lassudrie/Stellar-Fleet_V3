@@ -88,7 +88,35 @@
         font-size: 11px;
         line-height: 1.4;
         white-space: pre;
+        pointer-events: auto;
+      }
+
+      .debug-overlay__toggle {
+        position: absolute;
+        right: 8px;
+        top: 8px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(120, 150, 190, 0.5);
+        background: rgba(10, 18, 28, 0.9);
+        color: rgba(216, 231, 246, 0.9);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .debug-overlay__content {
+        margin-top: 20px;
         pointer-events: none;
+      }
+
+      .debug-overlay.is-collapsed {
+        padding: 8px 10px;
+      }
+
+      .debug-overlay.is-collapsed .debug-overlay__content {
+        display: none;
       }
 
       .panel p {
@@ -231,7 +259,10 @@
         <div class="hint">Double tap to focus. Drag to orbit. Shift or right-drag to pan. Scroll or pinch to zoom.</div>
       </div>
     </div>
-    <div id="debug-overlay" class="debug-overlay hidden"></div>
+    <div id="debug-overlay" class="debug-overlay hidden">
+      <button id="debug-overlay-toggle" class="debug-overlay__toggle" type="button">Hide</button>
+      <pre id="debug-overlay-content" class="debug-overlay__content"></pre>
+    </div>
     <script type="module" src="/client.js"></script>
   </body>
 </html>

@@ -303,6 +303,7 @@ export interface SystemViewData {
   orbitingParentStarIndex: Array<number | null>;
   stars: BodyViewData[];
   primaryStarId: string | null;
+  defaultFocusPlanetId?: string | null;
 }
 
 export interface FleetViewData {
@@ -431,6 +432,15 @@ const resolvePlanetRotationDays = (seed: number, planetType?: PlanetType): numbe
 const resolveMoonRotationDays = (seed: number): number => {
   const rng = new Rng32(seed);
   return rng.range(0.4, 1.8);
+};
+
+const resolveDefaultFocusPlanetId = (system: StarSystem): string | null => {
+  const sortedBodies = sorted(system.planets, (a, b) => a.id.localeCompare(b.id));
+  const solidPlanets = sortedBodies.filter(body => body.bodyType === 'planet' && body.isSolid);
+  const ownedSolid = solidPlanets.find(body => body.ownerFactionId === system.ownerFactionId);
+  if (ownedSolid) return ownedSolid.id;
+  if (solidPlanets[0]) return solidPlanets[0].id;
+  return sortedBodies.find(body => body.bodyType === 'planet')?.id ?? null;
 };
 
 const buildBodyViewData = (params: {
@@ -568,6 +578,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   const planetBodiesByIndex = new Map<number, PlanetBody>();
   const primaryStar = astro?.stars?.[0];
   const starMassSun = primaryStar?.massSun ?? 1;
+  const defaultFocusPlanetId = resolveDefaultFocusPlanetId(system);
 
   let maxOrbitMeters = 0;
   let maxBodyRadius = 0;
@@ -703,7 +714,8 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     orbitingParentIndex,
     orbitingParentStarIndex,
     stars,
-    primaryStarId
+    primaryStarId,
+    defaultFocusPlanetId
   };
 };
 
@@ -950,7 +962,7 @@ class ZoomController {
   targetLogDistance = 0;
   minLogDistance = 0;
   maxLogDistance = 0;
-  zoomSpeed = 0.12;
+  zoomSpeed = 0.06;
   smoothing = 8;
 
   constructor(initialDistanceMeters: number, minDistanceMeters: number, maxDistanceMeters: number) {
@@ -1485,6 +1497,7 @@ export class SpaceView {
   private lastCameraMeters: Vec3 = vec3();
   private lastSystemScreenPx = 0;
   private lastPlanetScreenPx = 0;
+  private lastPlanetScreenPxSmoothed = 0;
   private orbitingPositionScratch: Vec3[] = [];
   private starPositionScratch: Vec3[] = [];
   private planetLightScratch: Vec3 = vec3();
@@ -1493,6 +1506,8 @@ export class SpaceView {
   private textureCacheMax = 24;
   private fpsSmoothed = 60;
   private qualityScale = 1;
+  private lastZoomInputMs = 0;
+  private lastZoomDir = 0;
 
   constructor(options: SpaceViewOptions) {
     this.data = options.data;
@@ -1508,6 +1523,12 @@ export class SpaceView {
       crossFadeSeconds: 0.6,
       ...options.thresholds
     };
+    if (options.thresholds?.planetMeshEnterPx === undefined) {
+      this.thresholds.planetMeshEnterPx = this.thresholds.planetEnterPx;
+    }
+    if (options.thresholds?.planetMeshExitPx === undefined) {
+      this.thresholds.planetMeshExitPx = this.thresholds.planetExitPx;
+    }
     this.scales = {
       metersPerGalaxyUnit: LY_METERS,
       metersPerSystemUnit: 1e7,
@@ -1623,6 +1644,10 @@ export class SpaceView {
   }
 
   applyZoomDelta(delta: number): void {
+    if (delta !== 0) {
+      this.lastZoomInputMs = this.getNowMs();
+      this.lastZoomDir = Math.sign(delta);
+    }
     this.zoom.applyZoomDelta(delta);
   }
 
@@ -1717,6 +1742,7 @@ export class SpaceView {
     drawCalls: number;
     triangles: number;
     targetMeters: Vec3;
+    targetToSystemDistanceMeters: number | null;
     cameraMeters: Vec3;
     activeBodyInfo: {
       id: string;
@@ -1740,6 +1766,9 @@ export class SpaceView {
     const stage: 'galaxy' | 'system' | 'planet' =
       this.planetFade.value > 0.5 ? 'planet' : this.systemFade.value > 0.1 ? 'system' : 'galaxy';
     const activeSystem = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
+    const targetToSystemDistanceMeters = activeSystem
+      ? distVec3(this.cameraRig.targetMeters, activeSystem.positionMeters)
+      : null;
     const activeBody = this.activePlanetId && activeSystem
       ? activeSystem.orbitingBodies.find(body => body.id === this.activePlanetId) ?? null
       : null;
@@ -1787,6 +1816,7 @@ export class SpaceView {
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       targetMeters: this.cameraRig.targetMeters,
+      targetToSystemDistanceMeters,
       cameraMeters: this.lastCameraMeters,
       activeBodyInfo
     };
@@ -1975,11 +2005,22 @@ export class SpaceView {
   private updatePlanetTransition(system: SystemViewData | null, cameraMeters: Vec3, dtSeconds: number): void {
     if (!system || this.systemFade.value <= 0) {
       this.planetFade.update(dtSeconds, false);
-      this.activePlanetId = null;
-      this.activePlanetWorldMeters = null;
-      this.planetRoot.visible = false;
+      if (this.planetFade.value <= 0.01) {
+        this.activePlanetId = null;
+        this.activePlanetWorldMeters = null;
+      }
+      this.planetRoot.visible = this.planetFade.value > 0.01;
       this.lastPlanetScreenPx = 0;
+      this.lastPlanetScreenPxSmoothed = 0;
       return;
+    }
+
+    if (!this.focusPlanetId && system.defaultFocusPlanetId && this.systemFade.value > 0.2 && this.isZoomInActive()) {
+      const targetDistance = distVec3(this.cameraRig.targetMeters, system.positionMeters);
+      const barycenterThreshold = Math.max(1, system.extentMeters * 0.05);
+      if (targetDistance <= barycenterThreshold) {
+        this.focusPlanetId = system.defaultFocusPlanetId;
+      }
     }
 
     let bestPlanet: BodyViewData | null = null;
@@ -2044,15 +2085,21 @@ export class SpaceView {
 
     if (!bestPlanet || !hasBest) {
       this.planetFade.update(dtSeconds, false);
-      this.activePlanetId = null;
-      this.activePlanetWorldMeters = null;
-      this.planetRoot.visible = false;
+      if (this.planetFade.value <= 0.01) {
+        this.activePlanetId = null;
+        this.activePlanetWorldMeters = null;
+      }
+      this.planetRoot.visible = this.planetFade.value > 0.01;
       this.lastPlanetScreenPx = 0;
       return;
     }
 
-    this.lastPlanetScreenPx = bestScore;
-    const detailed = this.planetGate.update(bestScore);
+    const smoothing = clamp(dtSeconds * 8, 0, 1);
+    this.lastPlanetScreenPxSmoothed = this.lastPlanetScreenPxSmoothed
+      ? this.lastPlanetScreenPxSmoothed + (bestScore - this.lastPlanetScreenPxSmoothed) * smoothing
+      : bestScore;
+    this.lastPlanetScreenPx = this.lastPlanetScreenPxSmoothed;
+    const detailed = this.planetGate.update(this.lastPlanetScreenPxSmoothed);
     this.planetFade.update(dtSeconds, detailed);
 
     if (bestScore >= this.thresholds.planetPreloadPx) {
@@ -2295,8 +2342,10 @@ export class SpaceView {
       assets.bodyMesh.instanceMatrix.needsUpdate = true;
       pointPositions.needsUpdate = true;
       const pointOpacity = systemOpacity * clutterFade * (1 - maxMeshBlend);
-      assets.bodyPointMaterial.opacity = pointOpacity;
-      assets.bodyPoints.visible = pointOpacity > 0.01;
+      const minPointOpacity = this.planetFade.value < 0.6 ? systemOpacity * 0.12 : 0;
+      const adjustedPointOpacity = Math.max(pointOpacity, minPointOpacity);
+      assets.bodyPointMaterial.opacity = adjustedPointOpacity;
+      assets.bodyPoints.visible = adjustedPointOpacity > 0.01;
       assets.bodyMaterial.opacity = systemOpacity * clutterFade * maxMeshBlend;
 
       assets.orbitLines.forEach((line, index) => {
@@ -2444,8 +2493,21 @@ export class SpaceView {
       lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, focusPlanetBlend);
     }
 
-    const smoothing = clamp(dtSeconds * 6, 0, 1);
+    const smoothingBase = this.focusPlanetId && this.isZoomInActive() ? 12 : 6;
+    const smoothing = clamp(dtSeconds * smoothingBase, 0, 1);
     lerpVec3(this.cameraRig.targetMeters, this.cameraRig.targetMeters, this.focusTargetMeters, smoothing);
+  }
+
+  private getNowMs(): number {
+    if (typeof globalThis.performance !== 'undefined' && typeof globalThis.performance.now === 'function') {
+      return globalThis.performance.now();
+    }
+    return Date.now();
+  }
+
+  private isZoomInActive(): boolean {
+    if (this.lastZoomDir >= 0) return false;
+    return this.getNowMs() - this.lastZoomInputMs < 260;
   }
 
   private render(originMeters: Vec3, cameraMeters: Vec3): void {
@@ -2481,7 +2543,11 @@ export class SpaceView {
         metersPerUnit: this.scales.metersPerPlanetUnit,
         passExtentMeters:
           this.systemById.get(this.activeSystemId ?? '')?.orbitingBodies.find(p => p.id === this.activePlanetId)?.radiusMeters ?? 1,
-        passCenterMeters: this.activePlanetWorldMeters ?? this.systemById.get(this.activeSystemId ?? '')?.positionMeters ?? vec3()
+        passCenterMeters:
+          this.activePlanetWorldMeters ??
+          this.systemById.get(this.activeSystemId ?? '')?.positionMeters ??
+          this.activePlanetWorldMeters ??
+          vec3()
       });
     }
   }
@@ -2509,9 +2575,9 @@ export class SpaceView {
     const distanceUnits = distanceMeters / options.metersPerUnit;
     const extentUnits = Math.max(1, options.passExtentMeters / options.metersPerUnit);
     const isPlanetPass = options.metersPerUnit === this.scales.metersPerPlanetUnit;
-    const nearFactor = isPlanetPass ? 0.008 : 0.02;
+    const nearFactor = isPlanetPass ? 0.004 : 0.02;
     const farFactor = isPlanetPass ? 4 : 6;
-    const near = Math.max(isPlanetPass ? 0.002 : 0.05, distanceUnits * nearFactor);
+    const near = Math.max(isPlanetPass ? 0.001 : 0.05, distanceUnits * nearFactor);
     const far = Math.max(near + 8, distanceUnits + extentUnits * farFactor);
 
     this.camera.near = near;

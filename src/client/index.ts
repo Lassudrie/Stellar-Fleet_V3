@@ -12,7 +12,7 @@ const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
 const PINCH_ZOOM_BOOST = 40;
 const PINCH_JITTER_THRESHOLD = 0.015;
-let debugEnabled = false;
+let debugEnabled = true;
 let overlayMode: 'voronoi' | 'triangulated' | 'both' = 'voronoi';
 
 type DragMode = 'orbit' | 'pan';
@@ -56,6 +56,11 @@ const formatMeters = (value: number): string => {
   return `${value.toFixed(0)} m`;
 };
 
+const formatVec3 = (value: { x: number; y: number; z: number } | null | undefined): string => {
+  if (!value) return 'n/a';
+  return `(${formatMeters(value.x)}, ${formatMeters(value.y)}, ${formatMeters(value.z)})`;
+};
+
 const getElement = <T extends HTMLElement>(selector: string): T => {
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing element ${selector}`);
@@ -66,6 +71,8 @@ const canvas = getElement<HTMLCanvasElement>('#galaxy');
 const menuScreen = getElement<HTMLDivElement>('#menu-screen');
 const hud = getElement<HTMLDivElement>('#hud');
 const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
+const debugOverlayToggle = getElement<HTMLButtonElement>('#debug-overlay-toggle');
+const debugOverlayContent = getElement<HTMLPreElement>('#debug-overlay-content');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
 const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
@@ -165,7 +172,8 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
 };
 
 const params = new URLSearchParams(window.location.search);
-debugEnabled = params.get('debug') === '1';
+const debugParam = params.get('debug');
+debugEnabled = debugParam === null ? true : debugParam === '1';
 const overlayParam = params.get('overlay');
 if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam === 'voronoi') {
   overlayMode = overlayParam;
@@ -173,6 +181,16 @@ if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam =
   overlayMode = 'triangulated';
 }
 debugOverlay.classList.toggle('hidden', !debugEnabled);
+const debugCollapsedStorageKey = 'stellarFleet:debugOverlayCollapsed';
+const initialDebugCollapsed = localStorage.getItem(debugCollapsedStorageKey) === '1';
+debugOverlay.classList.toggle('is-collapsed', initialDebugCollapsed);
+debugOverlayToggle.textContent = initialDebugCollapsed ? 'Show' : 'Hide';
+debugOverlayToggle.addEventListener('click', () => {
+  const nextCollapsed = !debugOverlay.classList.contains('is-collapsed');
+  debugOverlay.classList.toggle('is-collapsed', nextCollapsed);
+  debugOverlayToggle.textContent = nextCollapsed ? 'Show' : 'Hide';
+  localStorage.setItem(debugCollapsedStorageKey, nextCollapsed ? '1' : '0');
+});
 populateScenarioOptions();
 
 const initialScenarioId = resolveScenarioId(params.get('scenario'));
@@ -194,7 +212,7 @@ let runtime: Runtime | null = null;
 const updateDebugOverlay = () => {
   if (!debugEnabled) return;
   if (!runtime) {
-    debugOverlay.textContent = 'Stage: menu';
+    debugOverlayContent.textContent = 'Stage: menu';
     return;
   }
   const info = runtime.view.getDebugInfo();
@@ -210,6 +228,8 @@ const updateDebugOverlay = () => {
     `Active planet: ${info.activePlanetId ?? 'none'}`,
     `Focus system: ${info.focusSystemId ?? 'none'}`,
     `Focus planet: ${info.focusPlanetId ?? 'none'}`,
+    `Target: ${formatVec3(info.targetMeters)}`,
+    `Target->system: ${info.targetToSystemDistanceMeters !== null ? formatMeters(info.targetToSystemDistanceMeters) : 'n/a'}`,
     bodyInfo
       ? `Body: ${bodyInfo.kind} ${bodyInfo.id} parent=${bodyInfo.parentId ?? 'none'}`
       : 'Body: none',
@@ -224,7 +244,7 @@ const updateDebugOverlay = () => {
     `Draw calls: ${info.drawCalls}`,
     `Triangles: ${info.triangles}`
   ];
-  debugOverlay.textContent = lines.join('\n');
+  debugOverlayContent.textContent = lines.join('\n');
 };
 
 const resize = () => {
