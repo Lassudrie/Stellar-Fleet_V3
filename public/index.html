@@ -30,6 +30,41 @@
         pointer-events: none;
       }
 
+      .label-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        font-family: 'Space Grotesk', 'IBM Plex Sans Condensed', 'Trebuchet MS', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .label {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        color: rgba(230, 237, 243, 0.9);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.12s ease;
+      }
+
+      .label[data-kind='star'] {
+        color: rgba(255, 234, 192, 0.95);
+      }
+
+      .label[data-kind='planet'] {
+        color: rgba(204, 233, 255, 0.92);
+      }
+
+      .label[data-kind='moon'] {
+        color: rgba(190, 198, 214, 0.82);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+      }
+
       .menu-screen {
         position: fixed;
         inset: 0;
@@ -226,6 +261,7 @@
   </head>
   <body>
     <canvas id="galaxy"></canvas>
+    <div id="label-layer" class="label-layer hidden"></div>
     <div id="menu-screen" class="menu-screen">
       <div class="panel menu-panel">
         <div class="menu-eyebrow">Scenario Gate</div>

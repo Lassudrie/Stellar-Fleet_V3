@@ -299,6 +299,7 @@ export interface SystemViewData {
   extentMeters: number;
   bodies: BodyViewData[];
   orbitingBodies: BodyViewData[];
+  orbitingIndexById: Record<string, number>;
   orbitingParentIndex: Array<number | null>;
   orbitingParentStarIndex: Array<number | null>;
   stars: BodyViewData[];
@@ -328,6 +329,15 @@ export interface ScenarioViewSettings {
   yawRad: number;
   pitchRad: number;
 }
+
+export type ScreenLabel = {
+  id: string;
+  name: string;
+  kind: BodyKind;
+  x: number;
+  y: number;
+  opacity: number;
+};
 
 const orbitPeriodDaysFromAuMass = (semiMajorAxisAu: number, massSun: number): number => {
   const clamped = Math.max(0.01, semiMajorAxisAu);
@@ -700,6 +710,10 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   const extentMeters = Math.max(maxBodyRadius * 2, maxOrbitMeters + maxBodyRadius);
   const primaryStarId = bodies.find(body => body.kind === 'star' && body.astroRef?.starIndex === 0)?.id ?? null;
   const orbitingIndexById = new Map(orbitingBodies.map((body, index) => [body.id, index]));
+  const orbitingIndexByIdRecord: Record<string, number> = {};
+  orbitingBodies.forEach((body, index) => {
+    orbitingIndexByIdRecord[body.id] = index;
+  });
   const starIndexById = new Map(stars.map((star, index) => [star.id, index]));
   const orbitingParentIndex = orbitingBodies.map(body => (body.parentId ? orbitingIndexById.get(body.parentId) ?? null : null));
   const orbitingParentStarIndex = orbitingBodies.map(body =>
@@ -714,6 +728,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     extentMeters,
     bodies,
     orbitingBodies,
+    orbitingIndexById: orbitingIndexByIdRecord,
     orbitingParentIndex,
     orbitingParentStarIndex,
     stars,
@@ -1520,6 +1535,7 @@ export class SpaceView {
   private systemById = new Map<string, SystemViewData>();
   private activeSystemId: string | null = null;
   private activePlanetId: string | null = null;
+  private activePlanetIndex: number | null = null;
   private activePlanetWorldMeters: Vec3 | null = null;
 
   private thresholds: SpaceViewThresholds;
@@ -1557,8 +1573,16 @@ export class SpaceView {
   private lastPlanetScreenPxSmoothed = 0;
   private orbitingPositionScratch: Vec3[] = [];
   private starPositionScratch: Vec3[] = [];
+  private frameId = 0;
+  private cachedStarPositionsFrameId = -1;
+  private cachedOrbitingPositionsFrameId = -1;
+  private cachedStarPositionsSystemId: string | null = null;
+  private cachedOrbitingPositionsSystemId: string | null = null;
   private planetLightScratch: Vec3 = vec3();
   private planetLightDirectionScratch: Vec3 = vec3();
+  private labelScratch: ScreenLabel[] = [];
+  private labelCount = 0;
+  private labelWorldScratch: Vec3 = vec3();
   private textureCache = new Map<string, { texture: THREE.Texture; resolution: number; lastUsed: number }>();
   private textureCacheMax = 24;
   private fpsSmoothed = 60;
@@ -1655,6 +1679,7 @@ export class SpaceView {
     this.systemAssets.clear();
     this.planetAssets.forEach(assets => disposeObject3D(assets.group));
     this.planetAssets.clear();
+    this.activePlanetIndex = null;
 
     let maxDistance = 0;
     data.systems.forEach(system => {
@@ -1901,6 +1926,118 @@ export class SpaceView {
     };
   }
 
+  getScreenLabels(): ScreenLabel[] {
+    this.labelCount = 0;
+    if (this.sizePx.width <= 1 || this.sizePx.height <= 1) {
+      this.labelScratch.length = 0;
+      return this.labelScratch;
+    }
+
+    const system = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
+    if (!system || this.systemFade.value <= 0.01) {
+      this.labelScratch.length = 0;
+      return this.labelScratch;
+    }
+
+    const originMeters = this.lastOriginMeters;
+    const cameraMeters = this.lastCameraMeters;
+    if (!Number.isFinite(cameraMeters.x) || !Number.isFinite(cameraMeters.y) || !Number.isFinite(cameraMeters.z)) {
+      this.labelScratch.length = 0;
+      return this.labelScratch;
+    }
+
+    this.configureCameraForPass({
+      originMeters,
+      cameraMeters,
+      metersPerUnit: this.scales.metersPerSystemUnit,
+      passCenterMeters: system.positionMeters,
+      passExtentMeters: system.extentMeters
+    });
+
+    const fovRad = this.camera.fov * (Math.PI / 180);
+    const baseOpacity = clamp(this.systemFade.value, 0, 1);
+    const starThreshold = Math.max(2, this.thresholds.planetImpostorEnterPx * 0.35);
+    const planetThreshold = Math.max(4, this.thresholds.planetImpostorEnterPx * 0.7);
+    const moonThreshold = Math.max(3, this.thresholds.planetImpostorEnterPx * 0.45);
+
+    const labelWorld = this.labelWorldScratch;
+    const starPositions = this.getStarPositions(system);
+    for (let i = 0; i < system.stars.length; i += 1) {
+      const star = system.stars[i];
+      const position = starPositions[i];
+      if (!position) continue;
+
+      const worldX = system.positionMeters.x + position.x;
+      const worldY = system.positionMeters.y + position.y;
+      const worldZ = system.positionMeters.z + position.z;
+      const dx = cameraMeters.x - worldX;
+      const dy = cameraMeters.y - worldY;
+      const dz = cameraMeters.z - worldZ;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const screenPx = screenSpaceRadiusPx(star.radiusMeters, distance, fovRad, this.sizePx.height);
+      if (screenPx < starThreshold) continue;
+
+      const screenPos = this.projectMetersToScreen(
+        setVec3(labelWorld, worldX, worldY, worldZ),
+        originMeters,
+        this.scales.metersPerSystemUnit
+      );
+      if (!screenPos) continue;
+
+      const offset = Math.max(12, screenPx * 0.6);
+      this.pushScreenLabel(star, screenPos.x, screenPos.y - offset, baseOpacity);
+    }
+
+    const orbitingPositions = this.computeOrbitingPositions(system);
+    for (let i = 0; i < system.orbitingBodies.length; i += 1) {
+      const body = system.orbitingBodies[i];
+      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeDays);
+      const worldX = system.positionMeters.x + position.x;
+      const worldY = system.positionMeters.y + position.y;
+      const worldZ = system.positionMeters.z + position.z;
+      const dx = cameraMeters.x - worldX;
+      const dy = cameraMeters.y - worldY;
+      const dz = cameraMeters.z - worldZ;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const screenPx = screenSpaceRadiusPx(body.radiusMeters, distance, fovRad, this.sizePx.height);
+      const threshold = body.kind === 'moon' ? moonThreshold : planetThreshold;
+      if (screenPx < threshold) continue;
+
+      const screenPos = this.projectMetersToScreen(
+        setVec3(labelWorld, worldX, worldY, worldZ),
+        originMeters,
+        this.scales.metersPerSystemUnit
+      );
+      if (!screenPos) continue;
+
+      const offset = Math.max(10, screenPx * 0.55);
+      this.pushScreenLabel(body, screenPos.x, screenPos.y - offset, baseOpacity);
+    }
+
+    this.labelScratch.length = this.labelCount;
+    return this.labelScratch;
+  }
+
+  private pushScreenLabel(body: BodyViewData, x: number, y: number, opacity: number): void {
+    const index = this.labelCount;
+    const label = this.labelScratch[index] ?? {
+      id: '',
+      name: '',
+      kind: 'planet',
+      x: 0,
+      y: 0,
+      opacity: 0
+    };
+    label.id = body.id;
+    label.name = body.name;
+    label.kind = body.kind;
+    label.x = x;
+    label.y = y;
+    label.opacity = clamp(opacity, 0, 1);
+    this.labelScratch[index] = label;
+    this.labelCount += 1;
+  }
+
   resize(width: number, height: number, pixelRatio?: number): void {
     const ratio = pixelRatio ?? Math.min(2, Number(globalThis.devicePixelRatio) || 1);
     this.renderer.setPixelRatio(ratio);
@@ -1942,6 +2079,8 @@ export class SpaceView {
     } else if (this.timeScaleDaysPerSecond !== 0) {
       this.timeDays += dtSeconds * this.timeScaleDaysPerSecond;
     }
+
+    this.frameId += 1;
 
     this.updateQuality(dtSeconds);
     this.streamingQueue.process(this.maxTasksPerFrame);
@@ -2086,6 +2225,7 @@ export class SpaceView {
       this.planetFade.update(dtSeconds, false);
       if (this.planetFade.value <= 0.01) {
         this.activePlanetId = null;
+        this.activePlanetIndex = null;
         this.activePlanetWorldMeters = null;
       }
       this.planetRoot.visible = this.planetFade.value > 0.01;
@@ -2107,17 +2247,23 @@ export class SpaceView {
     let hasBest = false;
     let bestScore = 0;
 
-    const focusedPlanet = this.focusPlanetId
-      ? system.orbitingBodies.find(planet => planet.id === this.focusPlanetId) ?? null
-      : null;
-    if (this.focusPlanetId && !focusedPlanet) {
-      this.focusPlanetId = null;
+    let focusedPlanet: BodyViewData | null = null;
+    let focusedIndex: number | null = null;
+    if (this.focusPlanetId) {
+      const index = system.orbitingIndexById[this.focusPlanetId];
+      if (index !== undefined) {
+        focusedIndex = index;
+        focusedPlanet = system.orbitingBodies[index] ?? null;
+      }
+      if (!focusedPlanet) {
+        this.focusPlanetId = null;
+      }
     }
 
     const positions = this.computeOrbitingPositions(system);
-    if (focusedPlanet) {
-      const focusedIndex = system.orbitingBodies.findIndex(body => body.id === focusedPlanet.id);
-      const orbitPosition = focusedIndex >= 0 ? positions[focusedIndex] : computeOrbitPositionMeters(focusedPlanet, this.timeDays);
+    let bestPlanetIndex = -1;
+    if (focusedPlanet && focusedIndex !== null) {
+      const orbitPosition = positions[focusedIndex] ?? computeOrbitPositionMeters(focusedPlanet, this.timeDays);
       const planetWorldX = system.positionMeters.x + orbitPosition.x;
       const planetWorldY = system.positionMeters.y + orbitPosition.y;
       const planetWorldZ = system.positionMeters.z + orbitPosition.z;
@@ -2135,6 +2281,7 @@ export class SpaceView {
       setVec3(bestPlanetWorld, planetWorldX, planetWorldY, planetWorldZ);
       hasBest = true;
       bestScore = screenPx;
+      bestPlanetIndex = focusedIndex;
     } else {
       for (let i = 0; i < system.orbitingBodies.length; i += 1) {
         const planet = system.orbitingBodies[i];
@@ -2158,6 +2305,7 @@ export class SpaceView {
           bestPlanet = planet;
           setVec3(bestPlanetWorld, planetWorldX, planetWorldY, planetWorldZ);
           hasBest = true;
+          bestPlanetIndex = i;
         }
       }
     }
@@ -2166,6 +2314,7 @@ export class SpaceView {
       this.planetFade.update(dtSeconds, false);
       if (this.planetFade.value <= 0.01) {
         this.activePlanetId = null;
+        this.activePlanetIndex = null;
         this.activePlanetWorldMeters = null;
       }
       this.planetRoot.visible = this.planetFade.value > 0.01;
@@ -2186,11 +2335,21 @@ export class SpaceView {
     }
 
     this.activePlanetId = bestPlanet.id;
+    this.activePlanetIndex = bestPlanetIndex >= 0 ? bestPlanetIndex : null;
     if (!this.activePlanetWorldMeters) {
       this.activePlanetWorldMeters = vec3();
     }
     copyVec3(this.activePlanetWorldMeters, bestPlanetWorld);
     this.planetRoot.visible = true;
+  }
+
+  private getStarPositions(system: SystemViewData): Vec3[] {
+    if (this.cachedStarPositionsFrameId === this.frameId && this.cachedStarPositionsSystemId === system.id) {
+      return this.starPositionScratch;
+    }
+    this.cachedStarPositionsFrameId = this.frameId;
+    this.cachedStarPositionsSystemId = system.id;
+    return this.computeStarPositions(system, this.starPositionScratch);
   }
 
   private computeStarPositions(system: SystemViewData, out: Vec3[]): Vec3[] {
@@ -2226,7 +2385,13 @@ export class SpaceView {
   }
 
   private computeOrbitingPositions(system: SystemViewData): Vec3[] {
-    const starPositions = this.computeStarPositions(system, this.starPositionScratch);
+    if (this.cachedOrbitingPositionsFrameId === this.frameId && this.cachedOrbitingPositionsSystemId === system.id) {
+      return this.orbitingPositionScratch;
+    }
+    this.cachedOrbitingPositionsFrameId = this.frameId;
+    this.cachedOrbitingPositionsSystemId = system.id;
+
+    const starPositions = this.getStarPositions(system);
 
     const positions = this.orbitingPositionScratch;
     for (let i = 0; i < system.orbitingBodies.length; i += 1) {
@@ -2346,7 +2511,8 @@ export class SpaceView {
         material.opacity = systemOpacity;
       });
 
-      const starPositions = this.computeStarPositions(system, assets.starPositions);
+      const starPositions = this.getStarPositions(system);
+      const orbitingPositions = this.computeOrbitingPositions(system);
 
       assets.starData.forEach((star, index) => {
         const starPos = starPositions[index];
@@ -2374,16 +2540,8 @@ export class SpaceView {
       const pointPositions = assets.bodyPointGeometry.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < assets.bodyData.length; i += 1) {
         const body = assets.bodyData[i];
-        const position = assets.bodyPositions[i];
-        computeOrbitPositionMeters(body, this.timeDays, position);
-
-        const parentIndex = assets.bodyParentIndex[i];
-        const parentStarIndex = assets.bodyParentStarIndex[i];
-        if (parentIndex !== null) {
-          addVec3(position, position, assets.bodyPositions[parentIndex]);
-        } else if (parentStarIndex !== null) {
-          addVec3(position, position, assets.starPositions[parentStarIndex]);
-        }
+        const position = orbitingPositions[i];
+        if (!position) continue;
 
         const worldX = system.positionMeters.x + position.x;
         const worldY = system.positionMeters.y + position.y;
@@ -2439,14 +2597,22 @@ export class SpaceView {
         const parentIndex = assets.orbitParents[index];
         const parentStarIndex = assets.orbitParentStars[index];
         if (parentIndex !== null) {
-          const parentPos = assets.bodyPositions[parentIndex];
+          const parentPos = orbitingPositions[parentIndex];
+          if (!parentPos) {
+            line.position.set(0, 0, 0);
+            return;
+          }
           line.position.set(
             parentPos.x / this.scales.metersPerSystemUnit,
             parentPos.y / this.scales.metersPerSystemUnit,
             parentPos.z / this.scales.metersPerSystemUnit
           );
         } else if (parentStarIndex !== null) {
-          const starPos = assets.starPositions[parentStarIndex];
+          const starPos = starPositions[parentStarIndex];
+          if (!starPos) {
+            line.position.set(0, 0, 0);
+            return;
+          }
           line.position.set(
             starPos.x / this.scales.metersPerSystemUnit,
             starPos.y / this.scales.metersPerSystemUnit,
@@ -2467,10 +2633,9 @@ export class SpaceView {
       (this.systemFleetPoints.material as THREE.PointsMaterial).opacity = systemOpacity * clutterFade;
     }
 
-    const minDistance = Math.max(
-      5_000,
-      (system.orbitingBodies.find(p => p.id === this.activePlanetId)?.radiusMeters ?? 0) * 1.2
-    );
+    const activePlanet =
+      this.activePlanetIndex !== null ? system.orbitingBodies[this.activePlanetIndex] ?? null : null;
+    const minDistance = Math.max(5_000, (activePlanet?.radiusMeters ?? 0) * 1.2);
     this.zoom.setBounds(minDistance, this.galaxyRadiusMeters * 2.5);
   }
 
@@ -2478,8 +2643,9 @@ export class SpaceView {
     if (!system || !this.activePlanetId) return;
     if (this.planetFade.value <= 0) return;
 
-    const planet = system.orbitingBodies.find(p => p.id === this.activePlanetId);
-    if (!planet) return;
+    const planetIndex = this.activePlanetIndex;
+    const planet = planetIndex !== null ? system.orbitingBodies[planetIndex] ?? null : null;
+    if (!planet || planet.id !== this.activePlanetId) return;
 
     const assets = this.planetAssets.get(planet.id);
     if (!assets) return;
@@ -2490,8 +2656,7 @@ export class SpaceView {
     }
 
     const positions = this.computeOrbitingPositions(system);
-    const planetIndex = system.orbitingBodies.findIndex(body => body.id === planet.id);
-    const planetSystemPos = planetIndex >= 0 ? positions[planetIndex] : computeOrbitPositionMeters(planet, this.timeDays);
+    const planetSystemPos = positions[planetIndex] ?? computeOrbitPositionMeters(planet, this.timeDays);
     const planetWorld = this.activePlanetWorldMeters ?? addVec3(vec3(), system.positionMeters, planetSystemPos);
 
     assets.group.position.set(
@@ -2532,7 +2697,7 @@ export class SpaceView {
 
     this.requestPlanetTexture(assets, system.id, qualityScreenPx);
 
-    const starPositions = this.computeStarPositions(system, this.starPositionScratch);
+    const starPositions = this.getStarPositions(system);
     const maxLights = Math.min(assets.starLights.length, system.stars.length);
     for (let i = 0; i < assets.starLights.length; i += 1) {
       const light = assets.starLights[i];
@@ -2542,7 +2707,8 @@ export class SpaceView {
         continue;
       }
       const star = system.stars[i];
-      const starPosition = starPositions[i] ?? vec3();
+      const starPosition = starPositions[i];
+      if (!starPosition) continue;
       const relativeStar = subVec3(this.planetLightScratch, starPosition, planetSystemPos);
       const distanceAu = Math.max(0.05, lengthVec3(relativeStar) / AU_METERS);
       const relativeUnit = normalizeVec3(this.planetLightDirectionScratch, relativeStar);
@@ -2599,6 +2765,7 @@ export class SpaceView {
 
   private render(originMeters: Vec3, cameraMeters: Vec3): void {
     this.renderer.clear();
+    const activeSystem = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
 
     this.renderPass({
       scene: this.galaxyScene,
@@ -2616,23 +2783,26 @@ export class SpaceView {
         originMeters,
         cameraMeters,
         metersPerUnit: this.scales.metersPerSystemUnit,
-        passExtentMeters: this.systemById.get(this.activeSystemId ?? '')?.extentMeters ?? 1,
-        passCenterMeters: this.systemById.get(this.activeSystemId ?? '')?.positionMeters ?? vec3()
+        passExtentMeters: activeSystem?.extentMeters ?? 1,
+        passCenterMeters: activeSystem?.positionMeters ?? vec3()
       });
     }
 
     if (this.planetFade.value > 0.01) {
       this.renderer.clearDepth();
+      const activePlanetRadius =
+        activeSystem && this.activePlanetIndex !== null
+          ? activeSystem.orbitingBodies[this.activePlanetIndex]?.radiusMeters ?? 1
+          : 1;
       this.renderPass({
         scene: this.planetScene,
         originMeters,
         cameraMeters,
         metersPerUnit: this.scales.metersPerPlanetUnit,
-        passExtentMeters:
-          this.systemById.get(this.activeSystemId ?? '')?.orbitingBodies.find(p => p.id === this.activePlanetId)?.radiusMeters ?? 1,
+        passExtentMeters: activePlanetRadius,
         passCenterMeters:
           this.activePlanetWorldMeters ??
-          this.systemById.get(this.activeSystemId ?? '')?.positionMeters ??
+          activeSystem?.positionMeters ??
           this.activePlanetWorldMeters ??
           vec3()
       });

@@ -73,6 +73,7 @@ const hud = getElement<HTMLDivElement>('#hud');
 const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
 const debugOverlayToggle = getElement<HTMLButtonElement>('#debug-overlay-toggle');
 const debugOverlayContent = getElement<HTMLPreElement>('#debug-overlay-content');
+const labelLayer = getElement<HTMLDivElement>('#label-layer');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
 const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
@@ -86,6 +87,8 @@ const scenarioDescription = getElement<HTMLParagraphElement>('#scenario-descript
 const scenarioById = new Map(SCENARIO_TEMPLATES.map(template => [template.id, template]));
 const timeScaleInputs = [menuTimeScaleInput, hudTimeScaleInput];
 const timeScaleValues = [menuTimeScaleValue, hudTimeScaleValue];
+const labelNodes = new Map<string, HTMLDivElement>();
+const visibleLabelIds = new Set<string>();
 
 const resolveScenarioId = (candidate: string | null): string => {
   if (candidate && scenarioById.has(candidate)) return candidate;
@@ -124,6 +127,7 @@ const populateScenarioOptions = () => {
 const setMenuVisible = (visible: boolean): void => {
   menuScreen.classList.toggle('hidden', !visible);
   hud.classList.toggle('hidden', visible);
+  labelLayer.classList.toggle('hidden', visible);
 };
 
 const setTimeScaleUI = (value: number): void => {
@@ -133,6 +137,42 @@ const setTimeScaleUI = (value: number): void => {
   });
   timeScaleValues.forEach(label => {
     label.textContent = text;
+  });
+};
+
+const clearLabels = (): void => {
+  labelNodes.clear();
+  labelLayer.textContent = '';
+};
+
+const updateLabels = (): void => {
+  if (!runtime || labelLayer.classList.contains('hidden')) return;
+
+  const labels = runtime.view.getScreenLabels();
+  visibleLabelIds.clear();
+
+  labels.forEach(label => {
+    visibleLabelIds.add(label.id);
+    let node = labelNodes.get(label.id);
+    if (!node) {
+      node = document.createElement('div');
+      node.className = 'label';
+      labelLayer.appendChild(node);
+      labelNodes.set(label.id, node);
+    }
+    if (node.textContent !== label.name) {
+      node.textContent = label.name;
+    }
+    node.dataset.kind = label.kind;
+    node.style.left = `${Math.round(label.x)}px`;
+    node.style.top = `${Math.round(label.y)}px`;
+    node.style.opacity = `${label.opacity}`;
+    node.style.display = label.opacity > 0.01 ? 'block' : 'none';
+  });
+
+  labelNodes.forEach((node, id) => {
+    if (visibleLabelIds.has(id)) return;
+    node.style.display = 'none';
   });
 };
 
@@ -165,6 +205,7 @@ const createRuntime = (scenarioId: string, seed: number, timeScale: number): Run
 const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeScale: number): Runtime => {
   runtime.unsubscribe();
   runtime.view.dispose();
+  clearLabels();
   updateDescription(scenarioId);
 
   const next = createRuntime(scenarioId, seed, timeScale);
@@ -514,6 +555,7 @@ const frame = (time: number) => {
     runtime.view.update(dt, dayOverride);
   }
   updateDebugOverlay();
+  updateLabels();
   window.requestAnimationFrame(frame);
 };
 
