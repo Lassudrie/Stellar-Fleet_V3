@@ -962,7 +962,7 @@ class ZoomController {
   targetLogDistance = 0;
   minLogDistance = 0;
   maxLogDistance = 0;
-  zoomSpeed = 0.12;
+  zoomSpeed = 0.06;
   smoothing = 8;
 
   constructor(initialDistanceMeters: number, minDistanceMeters: number, maxDistanceMeters: number) {
@@ -2475,7 +2475,8 @@ export class SpaceView {
       lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, focusPlanetBlend);
     }
 
-    const smoothing = clamp(dtSeconds * 6, 0, 1);
+    const smoothingBase = this.focusPlanetId && this.isZoomInActive() ? 12 : 6;
+    const smoothing = clamp(dtSeconds * smoothingBase, 0, 1);
     lerpVec3(this.cameraRig.targetMeters, this.cameraRig.targetMeters, this.focusTargetMeters, smoothing);
   }
 
