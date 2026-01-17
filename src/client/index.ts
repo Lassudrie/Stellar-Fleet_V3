@@ -12,7 +12,7 @@ const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
 const PINCH_ZOOM_BOOST = 40;
 const PINCH_JITTER_THRESHOLD = 0.015;
-let debugEnabled = false;
+let debugEnabled = true;
 let overlayMode: 'voronoi' | 'triangulated' | 'both' = 'voronoi';
 
 type DragMode = 'orbit' | 'pan';
@@ -54,6 +54,11 @@ const formatMeters = (value: number): string => {
   if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}e6 m`;
   if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}e3 m`;
   return `${value.toFixed(0)} m`;
+};
+
+const formatVec3 = (value: { x: number; y: number; z: number } | null | undefined): string => {
+  if (!value) return 'n/a';
+  return `(${formatMeters(value.x)}, ${formatMeters(value.y)}, ${formatMeters(value.z)})`;
 };
 
 const getElement = <T extends HTMLElement>(selector: string): T => {
@@ -165,7 +170,8 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
 };
 
 const params = new URLSearchParams(window.location.search);
-debugEnabled = params.get('debug') === '1';
+const debugParam = params.get('debug');
+debugEnabled = debugParam === null ? true : debugParam === '1';
 const overlayParam = params.get('overlay');
 if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam === 'voronoi') {
   overlayMode = overlayParam;
@@ -210,6 +216,8 @@ const updateDebugOverlay = () => {
     `Active planet: ${info.activePlanetId ?? 'none'}`,
     `Focus system: ${info.focusSystemId ?? 'none'}`,
     `Focus planet: ${info.focusPlanetId ?? 'none'}`,
+    `Target: ${formatVec3(info.targetMeters)}`,
+    `Target->system: ${info.targetToSystemDistanceMeters !== null ? formatMeters(info.targetToSystemDistanceMeters) : 'n/a'}`,
     bodyInfo
       ? `Body: ${bodyInfo.kind} ${bodyInfo.id} parent=${bodyInfo.parentId ?? 'none'}`
       : 'Body: none',

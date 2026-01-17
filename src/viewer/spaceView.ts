@@ -303,6 +303,7 @@ export interface SystemViewData {
   orbitingParentStarIndex: Array<number | null>;
   stars: BodyViewData[];
   primaryStarId: string | null;
+  defaultFocusPlanetId?: string | null;
 }
 
 export interface FleetViewData {
@@ -431,6 +432,15 @@ const resolvePlanetRotationDays = (seed: number, planetType?: PlanetType): numbe
 const resolveMoonRotationDays = (seed: number): number => {
   const rng = new Rng32(seed);
   return rng.range(0.4, 1.8);
+};
+
+const resolveDefaultFocusPlanetId = (system: StarSystem): string | null => {
+  const sortedBodies = sorted(system.planets, (a, b) => a.id.localeCompare(b.id));
+  const solidPlanets = sortedBodies.filter(body => body.bodyType === 'planet' && body.isSolid);
+  const ownedSolid = solidPlanets.find(body => body.ownerFactionId === system.ownerFactionId);
+  if (ownedSolid) return ownedSolid.id;
+  if (solidPlanets[0]) return solidPlanets[0].id;
+  return sortedBodies.find(body => body.bodyType === 'planet')?.id ?? null;
 };
 
 const buildBodyViewData = (params: {
@@ -568,6 +578,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   const planetBodiesByIndex = new Map<number, PlanetBody>();
   const primaryStar = astro?.stars?.[0];
   const starMassSun = primaryStar?.massSun ?? 1;
+  const defaultFocusPlanetId = resolveDefaultFocusPlanetId(system);
 
   let maxOrbitMeters = 0;
   let maxBodyRadius = 0;
@@ -703,7 +714,8 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     orbitingParentIndex,
     orbitingParentStarIndex,
     stars,
-    primaryStarId
+    primaryStarId,
+    defaultFocusPlanetId
   };
 };
 
@@ -1493,6 +1505,8 @@ export class SpaceView {
   private textureCacheMax = 24;
   private fpsSmoothed = 60;
   private qualityScale = 1;
+  private lastZoomInputMs = 0;
+  private lastZoomDir = 0;
 
   constructor(options: SpaceViewOptions) {
     this.data = options.data;
@@ -1623,6 +1637,10 @@ export class SpaceView {
   }
 
   applyZoomDelta(delta: number): void {
+    if (delta !== 0) {
+      this.lastZoomInputMs = this.getNowMs();
+      this.lastZoomDir = Math.sign(delta);
+    }
     this.zoom.applyZoomDelta(delta);
   }
 
@@ -1717,6 +1735,7 @@ export class SpaceView {
     drawCalls: number;
     triangles: number;
     targetMeters: Vec3;
+    targetToSystemDistanceMeters: number | null;
     cameraMeters: Vec3;
     activeBodyInfo: {
       id: string;
@@ -1740,6 +1759,9 @@ export class SpaceView {
     const stage: 'galaxy' | 'system' | 'planet' =
       this.planetFade.value > 0.5 ? 'planet' : this.systemFade.value > 0.1 ? 'system' : 'galaxy';
     const activeSystem = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
+    const targetToSystemDistanceMeters = activeSystem
+      ? distVec3(this.cameraRig.targetMeters, activeSystem.positionMeters)
+      : null;
     const activeBody = this.activePlanetId && activeSystem
       ? activeSystem.orbitingBodies.find(body => body.id === this.activePlanetId) ?? null
       : null;
@@ -1787,6 +1809,7 @@ export class SpaceView {
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       targetMeters: this.cameraRig.targetMeters,
+      targetToSystemDistanceMeters,
       cameraMeters: this.lastCameraMeters,
       activeBodyInfo
     };
@@ -1980,6 +2003,14 @@ export class SpaceView {
       this.planetRoot.visible = false;
       this.lastPlanetScreenPx = 0;
       return;
+    }
+
+    if (!this.focusPlanetId && system.defaultFocusPlanetId && this.systemFade.value > 0.2 && this.isZoomInActive()) {
+      const targetDistance = distVec3(this.cameraRig.targetMeters, system.positionMeters);
+      const barycenterThreshold = Math.max(1, system.extentMeters * 0.05);
+      if (targetDistance <= barycenterThreshold) {
+        this.focusPlanetId = system.defaultFocusPlanetId;
+      }
     }
 
     let bestPlanet: BodyViewData | null = null;
@@ -2446,6 +2477,18 @@ export class SpaceView {
 
     const smoothing = clamp(dtSeconds * 6, 0, 1);
     lerpVec3(this.cameraRig.targetMeters, this.cameraRig.targetMeters, this.focusTargetMeters, smoothing);
+  }
+
+  private getNowMs(): number {
+    if (typeof globalThis.performance !== 'undefined' && typeof globalThis.performance.now === 'function') {
+      return globalThis.performance.now();
+    }
+    return Date.now();
+  }
+
+  private isZoomInActive(): boolean {
+    if (this.lastZoomDir >= 0) return false;
+    return this.getNowMs() - this.lastZoomInputMs < 260;
   }
 
   private render(originMeters: Vec3, cameraMeters: Vec3): void {
