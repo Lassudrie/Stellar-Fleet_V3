@@ -630,7 +630,10 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     if (body.bodyType !== 'planet') return;
     const astroRef = parseAstroRefFromBodyId(system.id, body.id);
     if (!astroRef || astroRef.planetIndex === undefined) {
-      logger.warn(`[ViewData] Missing astroRef for planet body '${body.id}' in system '${system.id}'.`);
+      const fallbackPrefix = `planet-${system.id}-fallback`;
+      if (!body.id.startsWith(fallbackPrefix)) {
+        logger.warn(`[ViewData] Missing astroRef for planet body '${body.id}' in system '${system.id}'.`);
+      }
       return;
     }
     planetIdsByIndex.set(astroRef.planetIndex, body.id);
@@ -1076,6 +1079,8 @@ export interface SpaceViewThresholds {
   planetEnterPx: number;
   planetExitPx: number;
   planetPreloadPx: number;
+  planetImpostorEnterPx: number;
+  planetImpostorExitPx: number;
   planetMeshEnterPx: number;
   planetMeshExitPx: number;
   crossFadeSeconds: number;
@@ -1122,6 +1127,7 @@ type SystemAssets = {
   bodyPointGeometry: THREE.BufferGeometry;
   bodyPointMaterial: THREE.PointsMaterial;
   bodyPoints: THREE.Points;
+  bodyImpostors: THREE.Sprite[];
   bodyData: BodyViewData[];
   bodyPositions: Vec3[];
   bodyParentIndex: Array<number | null>;
@@ -1168,6 +1174,55 @@ const getSphereGeometry = (() => {
     geometry.userData.shared = true;
     cache.set(key, geometry);
     return geometry;
+  };
+})();
+
+const getPlanetImpostorTexture = (() => {
+  let cached: THREE.Texture | null = null;
+  return (): THREE.Texture => {
+    if (cached) return cached;
+    const size = 128;
+    const canvas =
+      typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(size, size)
+        : typeof document !== 'undefined'
+          ? document.createElement('canvas')
+          : null;
+    if (!canvas) {
+      cached = new THREE.Texture();
+      return cached;
+    }
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!ctx) {
+      cached = new THREE.Texture();
+      return cached;
+    }
+    const center = size * 0.5;
+    const highlight = size * 0.22;
+    const gradient = ctx.createRadialGradient(
+      center - highlight * 0.6,
+      center - highlight * 0.6,
+      highlight * 0.2,
+      center,
+      center,
+      center
+    );
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.6, 'rgba(255, 255, 255, 0.92)');
+    gradient.addColorStop(0.9, 'rgba(90, 90, 90, 0.55)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas as HTMLCanvasElement);
+    texture.minFilter = THREE.LinearMipMapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    cached = texture;
+    return texture;
   };
 })();
 
@@ -1518,6 +1573,8 @@ export class SpaceView {
       planetEnterPx: 240,
       planetExitPx: 180,
       planetPreloadPx: 200,
+      planetImpostorEnterPx: 6,
+      planetImpostorExitPx: 16,
       planetMeshEnterPx: 18,
       planetMeshExitPx: 10,
       crossFadeSeconds: 0.6,
@@ -2260,7 +2317,8 @@ export class SpaceView {
 
       const fovRad = this.camera.fov * (Math.PI / 180);
       const meshRange = Math.max(1, this.thresholds.planetMeshEnterPx - this.thresholds.planetMeshExitPx);
-      let maxMeshBlend = 0;
+      const impostorRange = Math.max(1, this.thresholds.planetImpostorExitPx - this.thresholds.planetImpostorEnterPx);
+      let maxDetailBlend = 0;
 
       assets.starMaterials.forEach(material => {
         material.opacity = systemOpacity;
@@ -2314,39 +2372,46 @@ export class SpaceView {
         const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         const screenPx = screenSpaceRadiusPx(body.radiusMeters, distance, fovRad, this.sizePx.height);
         const meshBlend = clamp((screenPx - this.thresholds.planetMeshExitPx) / meshRange, 0, 1);
-        maxMeshBlend = Math.max(maxMeshBlend, meshBlend);
+        const impostorBlend = clamp(
+          (screenPx - this.thresholds.planetImpostorEnterPx) / impostorRange,
+          0,
+          1
+        );
+        maxDetailBlend = Math.max(maxDetailBlend, Math.max(meshBlend, impostorBlend));
 
+        const unitX = position.x / this.scales.metersPerSystemUnit;
+        const unitY = position.y / this.scales.metersPerSystemUnit;
+        const unitZ = position.z / this.scales.metersPerSystemUnit;
+        const meshScale = (body.radiusMeters / this.scales.metersPerSystemUnit) * meshBlend;
         scratchMatrixA.compose(
-          scratchVec3A.set(
-            position.x / this.scales.metersPerSystemUnit,
-            position.y / this.scales.metersPerSystemUnit,
-            position.z / this.scales.metersPerSystemUnit
-          ),
+          scratchVec3A.set(unitX, unitY, unitZ),
           scratchQuatA.identity(),
-          scratchVec3B.set(
-            body.radiusMeters / this.scales.metersPerSystemUnit,
-            body.radiusMeters / this.scales.metersPerSystemUnit,
-            body.radiusMeters / this.scales.metersPerSystemUnit
-          )
+          scratchVec3B.set(meshScale, meshScale, meshScale)
         );
         assets.bodyMesh.setMatrixAt(i, scratchMatrixA);
 
-        pointPositions.setXYZ(
-          i,
-          position.x / this.scales.metersPerSystemUnit,
-          position.y / this.scales.metersPerSystemUnit,
-          position.z / this.scales.metersPerSystemUnit
-        );
+        pointPositions.setXYZ(i, unitX, unitY, unitZ);
+
+        const impostor = assets.bodyImpostors[i];
+        if (impostor) {
+          const impostorScale = (body.radiusMeters / this.scales.metersPerSystemUnit) * 2;
+          impostor.position.set(unitX, unitY, unitZ);
+          impostor.scale.setScalar(impostorScale);
+          const impostorOpacity = systemOpacity * clutterFade * impostorBlend * (1 - meshBlend);
+          const impostorMaterial = impostor.material as THREE.SpriteMaterial;
+          impostorMaterial.opacity = impostorOpacity;
+          impostor.visible = impostorOpacity > 0.01;
+        }
       }
 
       assets.bodyMesh.instanceMatrix.needsUpdate = true;
       pointPositions.needsUpdate = true;
-      const pointOpacity = systemOpacity * clutterFade * (1 - maxMeshBlend);
+      const pointOpacity = systemOpacity * clutterFade * (1 - maxDetailBlend);
       const minPointOpacity = this.planetFade.value < 0.6 ? systemOpacity * 0.12 : 0;
       const adjustedPointOpacity = Math.max(pointOpacity, minPointOpacity);
       assets.bodyPointMaterial.opacity = adjustedPointOpacity;
       assets.bodyPoints.visible = adjustedPointOpacity > 0.01;
-      assets.bodyMaterial.opacity = systemOpacity * clutterFade * maxMeshBlend;
+      assets.bodyMaterial.opacity = systemOpacity * clutterFade;
 
       assets.orbitLines.forEach((line, index) => {
         const parentIndex = assets.orbitParents[index];
@@ -2967,6 +3032,22 @@ export class SpaceView {
     }
     group.add(bodyMesh);
 
+    const bodyImpostors: THREE.Sprite[] = [];
+    const impostorTexture = getPlanetImpostorTexture();
+    bodyData.forEach(body => {
+      const material = new THREE.SpriteMaterial({
+        map: impostorTexture,
+        color: new THREE.Color(body.baseColor),
+        transparent: true,
+        opacity: 0,
+        depthWrite: false
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.visible = false;
+      group.add(sprite);
+      bodyImpostors.push(sprite);
+    });
+
     const pointPositions = new Float32Array(Math.max(1, bodyData.length) * 3);
     const pointColors = new Float32Array(Math.max(1, bodyData.length) * 3);
     bodyData.forEach((body, index) => {
@@ -3012,6 +3093,7 @@ export class SpaceView {
       bodyPointGeometry,
       bodyPointMaterial,
       bodyPoints,
+      bodyImpostors,
       bodyData,
       bodyPositions,
       bodyParentIndex,
