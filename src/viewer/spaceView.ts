@@ -2429,15 +2429,19 @@ export class SpaceView {
   private updateFocusTarget(system: SystemViewData | null, dtSeconds: number): void {
     if (!system) return;
 
-    const systemBlend = this.focusSystemId ? 1 : smoothstep(0.05, 0.6, this.systemFade.value);
+    const systemFadeBlend = smoothstep(0.05, 0.6, this.systemFade.value);
+    const systemBlend = this.focusSystemId ? 1 : systemFadeBlend;
     const planetBlend = this.activePlanetWorldMeters ? smoothstep(0.2, 0.9, this.planetFade.value) : 0;
+    const focusPlanetBlend = this.activePlanetWorldMeters
+      ? (this.focusPlanetId ? Math.max(planetBlend, systemFadeBlend) : planetBlend)
+      : 0;
 
     copyVec3(this.focusTargetMeters, this.cameraRig.targetMeters);
     if (systemBlend > 0) {
       lerpVec3(this.focusTargetMeters, this.focusTargetMeters, system.positionMeters, systemBlend);
     }
-    if (this.activePlanetWorldMeters && planetBlend > 0) {
-      lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, planetBlend);
+    if (this.activePlanetWorldMeters && focusPlanetBlend > 0) {
+      lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, focusPlanetBlend);
     }
 
     const smoothing = clamp(dtSeconds * 6, 0, 1);

@@ -10,6 +10,8 @@ const TIME_SCALE_MAX = 5;
 const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
+const PINCH_ZOOM_BOOST = 1.2;
+const PINCH_JITTER_THRESHOLD = 0.015;
 let debugEnabled = false;
 let overlayMode: 'voronoi' | 'triangulated' | 'both' = 'voronoi';
 
@@ -348,6 +350,11 @@ const updatePinch = () => {
   const centerX = (pointA.x + pointB.x) * 0.5;
   const centerY = (pointA.y + pointB.y) * 0.5;
   const distance = Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+  const isNewPinch = lastPinchDistance === 0 || !lastPinchCenter;
+
+  if (isNewPinch) {
+    runtime.view.focusAtScreen(centerX, centerY);
+  }
 
   if (lastPinchCenter) {
     runtime.view.applyPan(centerX - lastPinchCenter.x, centerY - lastPinchCenter.y);
@@ -356,7 +363,10 @@ const updatePinch = () => {
   if (lastPinchDistance > 0 && Number.isFinite(distance)) {
     const scale = distance / lastPinchDistance;
     if (scale > 0 && Number.isFinite(scale)) {
-      runtime.view.applyZoomDelta(-Math.log2(scale));
+      const jitter = Math.abs(scale - 1);
+      if (jitter >= PINCH_JITTER_THRESHOLD) {
+        runtime.view.applyZoomDelta(-Math.log2(scale) * PINCH_ZOOM_BOOST);
+      }
     }
   }
 
