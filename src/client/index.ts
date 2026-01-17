@@ -71,6 +71,8 @@ const canvas = getElement<HTMLCanvasElement>('#galaxy');
 const menuScreen = getElement<HTMLDivElement>('#menu-screen');
 const hud = getElement<HTMLDivElement>('#hud');
 const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
+const debugOverlayToggle = getElement<HTMLButtonElement>('#debug-overlay-toggle');
+const debugOverlayContent = getElement<HTMLPreElement>('#debug-overlay-content');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
 const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
@@ -179,6 +181,16 @@ if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam =
   overlayMode = 'triangulated';
 }
 debugOverlay.classList.toggle('hidden', !debugEnabled);
+const debugCollapsedStorageKey = 'stellarFleet:debugOverlayCollapsed';
+const initialDebugCollapsed = localStorage.getItem(debugCollapsedStorageKey) === '1';
+debugOverlay.classList.toggle('is-collapsed', initialDebugCollapsed);
+debugOverlayToggle.textContent = initialDebugCollapsed ? 'Show' : 'Hide';
+debugOverlayToggle.addEventListener('click', () => {
+  const nextCollapsed = !debugOverlay.classList.contains('is-collapsed');
+  debugOverlay.classList.toggle('is-collapsed', nextCollapsed);
+  debugOverlayToggle.textContent = nextCollapsed ? 'Show' : 'Hide';
+  localStorage.setItem(debugCollapsedStorageKey, nextCollapsed ? '1' : '0');
+});
 populateScenarioOptions();
 
 const initialScenarioId = resolveScenarioId(params.get('scenario'));
@@ -200,7 +212,7 @@ let runtime: Runtime | null = null;
 const updateDebugOverlay = () => {
   if (!debugEnabled) return;
   if (!runtime) {
-    debugOverlay.textContent = 'Stage: menu';
+    debugOverlayContent.textContent = 'Stage: menu';
     return;
   }
   const info = runtime.view.getDebugInfo();
@@ -232,7 +244,7 @@ const updateDebugOverlay = () => {
     `Draw calls: ${info.drawCalls}`,
     `Triangles: ${info.triangles}`
   ];
-  debugOverlay.textContent = lines.join('\n');
+  debugOverlayContent.textContent = lines.join('\n');
 };
 
 const resize = () => {
