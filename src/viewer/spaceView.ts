@@ -1522,6 +1522,12 @@ export class SpaceView {
       crossFadeSeconds: 0.6,
       ...options.thresholds
     };
+    if (options.thresholds?.planetMeshEnterPx === undefined) {
+      this.thresholds.planetMeshEnterPx = this.thresholds.planetEnterPx;
+    }
+    if (options.thresholds?.planetMeshExitPx === undefined) {
+      this.thresholds.planetMeshExitPx = this.thresholds.planetExitPx;
+    }
     this.scales = {
       metersPerGalaxyUnit: LY_METERS,
       metersPerSystemUnit: 1e7,
@@ -2326,8 +2332,10 @@ export class SpaceView {
       assets.bodyMesh.instanceMatrix.needsUpdate = true;
       pointPositions.needsUpdate = true;
       const pointOpacity = systemOpacity * clutterFade * (1 - maxMeshBlend);
-      assets.bodyPointMaterial.opacity = pointOpacity;
-      assets.bodyPoints.visible = pointOpacity > 0.01;
+      const minPointOpacity = this.planetFade.value < 0.6 ? systemOpacity * 0.12 : 0;
+      const adjustedPointOpacity = Math.max(pointOpacity, minPointOpacity);
+      assets.bodyPointMaterial.opacity = adjustedPointOpacity;
+      assets.bodyPoints.visible = adjustedPointOpacity > 0.01;
       assets.bodyMaterial.opacity = systemOpacity * clutterFade * maxMeshBlend;
 
       assets.orbitLines.forEach((line, index) => {
