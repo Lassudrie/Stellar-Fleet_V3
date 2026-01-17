@@ -630,11 +630,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     if (body.bodyType !== 'planet') return;
     const astroRef = parseAstroRefFromBodyId(system.id, body.id);
     if (!astroRef || astroRef.planetIndex === undefined) {
-      const fallbackPrefix = `planet-${system.id}-fallback`;
-      if (!body.id.startsWith(fallbackPrefix)) {
-        logger.warn(`[ViewData] Missing astroRef for planet body '${body.id}' in system '${system.id}'.`);
-      }
-      return;
+      throw new Error(`[ViewData] Missing astroRef for planet body '${body.id}' in system '${system.id}'.`);
     }
     planetIdsByIndex.set(astroRef.planetIndex, body.id);
     planetBodiesByIndex.set(astroRef.planetIndex, body);
@@ -643,7 +639,10 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   system.planets.forEach(body => {
     if (body.bodyType !== 'planet') return;
     const astroRef = parseAstroRefFromBodyId(system.id, body.id);
-    const planetIndex = astroRef?.planetIndex;
+    if (!astroRef || astroRef.planetIndex === undefined) {
+      throw new Error(`[ViewData] Missing astroRef for planet body '${body.id}' in system '${system.id}'.`);
+    }
+    const planetIndex = astroRef.planetIndex;
     const planetAstro = planetIndex !== undefined ? astro?.planets?.[planetIndex] : undefined;
     if (planetIndex !== undefined && !planetAstro) {
       logger.warn(`[ViewData] Missing astro planet data for '${body.id}' (planetIndex=${planetIndex}) in '${system.id}'.`);
@@ -668,15 +667,16 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   system.planets.forEach(body => {
     if (body.bodyType !== 'moon') return;
     const astroRef = parseAstroRefFromBodyId(system.id, body.id);
-    const planetIndex = astroRef?.planetIndex;
-    const moonIndex = astroRef?.moonIndex;
+    if (!astroRef || astroRef.planetIndex === undefined || astroRef.moonIndex === undefined) {
+      throw new Error(`[ViewData] Missing astroRef for moon body '${body.id}' in system '${system.id}'.`);
+    }
+    const planetIndex = astroRef.planetIndex;
+    const moonIndex = astroRef.moonIndex;
     const planetAstro = planetIndex !== undefined ? astro?.planets?.[planetIndex] : undefined;
     const moonAstro = planetIndex !== undefined && moonIndex !== undefined ? planetAstro?.moons?.[moonIndex] : undefined;
     const parentId = planetIndex !== undefined ? planetIdsByIndex.get(planetIndex) ?? null : null;
     const planetBody = planetIndex !== undefined ? planetBodiesByIndex.get(planetIndex) : undefined;
-    if (planetIndex === undefined || moonIndex === undefined) {
-      logger.warn(`[ViewData] Missing astroRef for moon body '${body.id}' in system '${system.id}'.`);
-    } else if (!moonAstro) {
+    if (!moonAstro) {
       logger.warn(`[ViewData] Missing astro moon data for '${body.id}' (planetIndex=${planetIndex}, moonIndex=${moonIndex}) in '${system.id}'.`);
     }
     const bodyData = buildBodyViewData({
@@ -1163,6 +1163,8 @@ type PlanetAssets = {
   starLights: THREE.DirectionalLight[];
   starLightTargets: THREE.Object3D[];
 };
+
+type PlanetAssetState = 'none' | 'missing' | 'idle' | 'loading' | 'ready';
 
 const getSphereGeometry = (() => {
   const cache = new Map<string, THREE.SphereGeometry>();
@@ -1795,17 +1797,21 @@ export class SpaceView {
     seed: number;
     loadedSystems: number;
     loadedPlanets: number;
+    planetAssetsLoaded: boolean;
+    planetAssetState: PlanetAssetState;
     memory: THREE.WebGLInfo['memory'];
     drawCalls: number;
     triangles: number;
     targetMeters: Vec3;
     targetToSystemDistanceMeters: number | null;
     cameraMeters: Vec3;
+    activePlanetWorldMeters: Vec3 | null;
     activeBodyInfo: {
       id: string;
       kind: BodyKind;
       parentId: string | null;
       radiusMeters: number;
+      hasAstroRef: boolean;
       systemId?: string;
       surfaceFrequency?: number | null;
       astroRef?: AstroRef;
@@ -1829,12 +1835,25 @@ export class SpaceView {
     const activeBody = this.activePlanetId && activeSystem
       ? activeSystem.orbitingBodies.find(body => body.id === this.activePlanetId) ?? null
       : null;
+    const activePlanetAssets = this.activePlanetId ? this.planetAssets.get(this.activePlanetId) ?? null : null;
+    const planetAssetsLoaded = Boolean(activePlanetAssets);
+    const planetAssetState: PlanetAssetState = !this.activePlanetId
+      ? 'none'
+      : !activePlanetAssets
+        ? 'missing'
+        : activePlanetAssets.textureState.targetResolution === 0
+          ? 'idle'
+          : activePlanetAssets.textureState.resolution >= activePlanetAssets.textureState.targetResolution
+            ? 'ready'
+            : 'loading';
+    const hasAstroRef = Boolean(activeBody?.astroRef);
     const activeBodyInfo = activeBody
       ? {
           id: activeBody.id,
           kind: activeBody.kind,
           parentId: activeBody.parentId,
           radiusMeters: activeBody.radiusMeters,
+          hasAstroRef,
           astroRef: activeBody.astroRef,
           systemId: activeBody.systemId,
           surfaceFrequency:
@@ -1869,12 +1888,15 @@ export class SpaceView {
       focusPlanetId: this.focusPlanetId,
       loadedSystems: this.systemAssets.size,
       loadedPlanets: this.planetAssets.size,
+      planetAssetsLoaded,
+      planetAssetState,
       memory: this.renderer.info.memory,
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       targetMeters: this.cameraRig.targetMeters,
       targetToSystemDistanceMeters,
       cameraMeters: this.lastCameraMeters,
+      activePlanetWorldMeters: this.activePlanetWorldMeters,
       activeBodyInfo
     };
   }

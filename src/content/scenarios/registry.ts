@@ -33,6 +33,14 @@ function validateScenarioV1(data: unknown, fileName: string): ScenarioTemplate |
     if (typeof s.generation.systemCount !== 'number') throw new Error("Missing 'generation.systemCount'");
     if (typeof s.generation.radius !== 'number') throw new Error("Missing 'generation.radius'");
     if (typeof s.generation.topology !== 'string') throw new Error("Missing 'generation.topology'");
+    if (Array.isArray(s.generation.staticSystems)) {
+      const invalidStatic = s.generation.staticSystems.find(
+        (def: any) => Array.isArray(def?.planets) && def.planets.length > 0
+      );
+      if (invalidStatic) {
+        throw new Error("Invalid 'generation.staticSystems': planet overrides are not allowed for procedural scenarios.");
+      }
+    }
 
     // 3b. Optional Generation Constraints
     if (s.generation.minimumSystemSpacingLy !== undefined && s.generation.minimumSystemSpacingLy !== null) {

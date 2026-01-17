@@ -230,17 +230,20 @@ const updateDebugOverlay = () => {
     `Focus planet: ${info.focusPlanetId ?? 'none'}`,
     `Target: ${formatVec3(info.targetMeters)}`,
     `Target->system: ${info.targetToSystemDistanceMeters !== null ? formatMeters(info.targetToSystemDistanceMeters) : 'n/a'}`,
+    `Active planet world: ${formatVec3(info.activePlanetWorldMeters)}`,
     bodyInfo
       ? `Body: ${bodyInfo.kind} ${bodyInfo.id} parent=${bodyInfo.parentId ?? 'none'}`
       : 'Body: none',
+    bodyInfo ? `Body radius: ${formatMeters(bodyInfo.radiusMeters)}` : 'Body radius: n/a',
     bodyInfo?.orbit
       ? `Orbit: a=${formatMeters(bodyInfo.orbit.aMeters)} e=${bodyInfo.orbit.e.toFixed(3)} i=${bodyInfo.orbit.iDeg.toFixed(1)}° Ω=${bodyInfo.orbit.omegaDeg.toFixed(1)}° ω=${bodyInfo.orbit.argPeriapsisDeg.toFixed(1)}° M0=${bodyInfo.orbit.meanAnomalyDeg.toFixed(1)}° P=${bodyInfo.orbit.periodDays.toFixed(1)}d`
       : 'Orbit: n/a',
-    bodyInfo?.astroRef
-      ? `AstroRef: p=${bodyInfo.astroRef.planetIndex ?? '-'} m=${bodyInfo.astroRef.moonIndex ?? '-'} s=${bodyInfo.astroRef.starIndex ?? '-'}`
+    bodyInfo
+      ? `AstroRef: p=${bodyInfo.astroRef?.planetIndex ?? '-'} m=${bodyInfo.astroRef?.moonIndex ?? '-'} s=${bodyInfo.astroRef?.starIndex ?? '-'} ok=${bodyInfo.hasAstroRef ? 'yes' : 'no'}`
       : 'AstroRef: n/a',
     `Loaded systems: ${info.loadedSystems}`,
     `Loaded planets: ${info.loadedPlanets}`,
+    `Planet assets: ${info.planetAssetsLoaded ? 'loaded' : 'missing'} (${info.planetAssetState})`,
     `Draw calls: ${info.drawCalls}`,
     `Triangles: ${info.triangles}`
   ];

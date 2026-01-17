@@ -1884,12 +1884,14 @@ export const createPlanetSurfaceDescriptor = (params: {
   });
 
   const astroRef = parseAstroRefFromBodyId(params.systemId, params.body.id);
+  if (!astroRef) {
+    throw new Error(`[WorldGen] Missing astroRef for body '${params.body.id}' in system '${params.systemId}'.`);
+  }
 
   return {
     seed,
     config,
-    // Contract requires an astroRef; fall back deterministically for custom bodies.
-    astroRef: astroRef ?? { planetIndex: 0 },
+    astroRef,
     settlementConfig: normalizeSettlementConfig(params.settlementConfig)
   };
 };

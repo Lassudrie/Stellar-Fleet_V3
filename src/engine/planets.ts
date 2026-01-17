@@ -138,20 +138,6 @@ export const buildPlanetBodies = (
     }
   });
 
-  if (!bodies.some(body => body.isSolid)) {
-    const fallbackId = ensureUniqueId(`planet-${system.id}-fallback`, usedIds);
-    bodies.push({
-      id: fallbackId,
-      systemId: system.id,
-      name: `${system.name} Outpost`,
-      bodyType: 'planet',
-      class: 'solid',
-      ownerFactionId: system.ownerFactionId ?? null,
-      size: 1,
-      isSolid: true
-    });
-  }
-
   return bodies;
 };
 
@@ -191,7 +177,7 @@ export const normalizePlanetBodies = (
     });
   });
 
-  if (normalized.length === 0 || !normalized.some(body => body.isSolid)) {
+  if (normalized.length === 0) {
     return buildPlanetBodies(system, astro);
   }
 

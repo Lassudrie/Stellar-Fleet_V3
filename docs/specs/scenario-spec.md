@@ -82,7 +82,7 @@ Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup
 | `radius` | number | Oui | Rayon logique de la galaxie. |
 | `topology` | `"spiral" \| "cluster" \| "ring" \| "scattered"` | Oui | Algorithme de placement. |
 | `minimumSystemSpacingLy` | number | Non | Distance minimale entre systèmes. Défaut : `5`. Mettre `0` pour désactiver. |
-| `staticSystems` | array | Non | Points fixes injectés dans la carte. |
+| `staticSystems` | array | Non | Points fixes injectés dans la carte (corps planétaires toujours procéduraux). |
 | `settlements` | object | Non | Paramètres de colonisation neutre et biais de développement. |
 
 ### 6.1 `staticSystems` (optionnel)
@@ -92,14 +92,7 @@ Tous les autres champs sont regroupés par section (`meta`, `generation`, `setup
   name: string;
   position: { x: number; y: number; z: number };
   resourceType: "gas" | "none";
-  planets?: Array<{
-    id?: string;
-    name?: string;
-    bodyType: "planet" | "moon";
-    class: "solid" | "gas_giant" | "ice_giant";
-    size?: number;
-    ownerFactionId?: string | null;
-  }>;
+  // Planet overrides are not supported; bodies are generated procedurally.
 }
 ```
 

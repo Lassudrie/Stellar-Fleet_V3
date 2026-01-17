@@ -19,9 +19,9 @@ La forme globale de la galaxie est contrôlée par `generation.topology` (`spira
 - Si aucun placement ne respecte la contrainte, un avertissement est loggé et le meilleur effort est utilisé. Les positions statiques ne sont **jamais** auto-ajustées : des warnings apparaissent si elles violent l’espacement.
 
 ## 3. Insertion des `staticSystems`
-`generation.staticSystems` permet d’imposer des systèmes (ID, nom, position, ressource, éventuels corps planétaires).
+`generation.staticSystems` permet d’imposer des systèmes (ID, nom, position, ressource). Les corps planétaires restent procéduraux.
 - Ils sont injectés en premier, conservant leurs ID/coordonnées et héritant d’une taille légèrement supérieure (`size: 1.5`).  
-- Les planètes peuvent être surchargées par `planets` (copiées dans le `buildPlanetBodies`).  
+- Les overrides de planètes ne sont pas supportés ; les corps sont toujours dérivés du payload astro.  
 - Avertissement si deux systèmes statiques sont plus proches que l’espacement minimal lorsque celui-ci est actif.
 
 ### 3.1 Paramètres de colonisation neutre (optionnel)
@@ -42,7 +42,7 @@ Optionnelle, de type `percentages`. Calcule une cible de systèmes par faction �
 - Croissance contiguë : chaque faction s’étend depuis ses systèmes possédés vers les systèmes neutres les plus proches (en ignorant les `staticSystems`) jusqu’à atteindre sa cible. Les couleurs sont appliquées immédiatement.
 
 ## 5. Construction des Planètes
-Après l’affectation des systèmes et des propriétaires, chaque système reçoit son payload astro déterministe (`generateStellarSystem`). Les corps planétaires sont ensuite construits via `buildPlanetBodies`, intégrant les overrides éventuels des systèmes statiques.
+Après l’affectation des systèmes et des propriétaires, chaque système reçoit son payload astro déterministe (`generateStellarSystem`). Les corps planétaires sont ensuite construits via `buildPlanetBodies`, sans overrides statiques.
 
 Notes astro :
 - La métallicité `[Fe/H]` suit un gradient radial (centre → bord) avec dispersion déterministe.

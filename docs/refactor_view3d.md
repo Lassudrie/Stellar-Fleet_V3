@@ -23,7 +23,7 @@ Empêcher les régressions et rendre visibles les incohérences de mapping (plan
    - Vérifier que la lune `moon-{systemId}-{p}-{m}` mappe sur `astro.planets[p-1].moons[m-1]`.
 2. Ajouter des assertions/invariants dans le build du SystemViewData.
    - Sur index (p-1, m-1) et présence des arrays.
-   - Fallback contrôlé si astro manquante (ne pas crasher le viewer).
+   - Erreur bloquante si astro manquante (aucun fallback).
 3. Ajouter un mode debug overlay (UI) pour afficher, sur l’objet sélectionné:
    - `kind` (star/planet/moon), `id`, `parentId`
    - `a,e,i,Ω,ω,M0`, période, rayon (mètres), index astro (planetIndex, moonIndex)
@@ -38,7 +38,7 @@ Empêcher les régressions et rendre visibles les incohérences de mapping (plan
 ### Checklist de validation
 - [x] Tests unitaires: mapping planète OK sur système sans lune.
 - [x] Tests unitaires: mapping lunes OK sur système avec lunes (aucun décalage d’index).
-- [x] Le viewer ne crashe pas si une astroRef est absente: fallback explicite et traçable.
+- [x] Toute astroRef manquante déclenche une erreur explicite (aucun fallback).
 - [x] Le debug overlay affiche des valeurs cohérentes (indices + éléments orbitaux).
 - [x] Un seed fixe reproduit le même système et les mêmes mappings.
 
