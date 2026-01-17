@@ -40,7 +40,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
   - `ownerFactionId` : identifiant de propriétaire (migration depuis `owner`).
   - `planets` : données de corps planétaires normalisées.
   - `astro` : bloc astrophysique optionnel (spectral type, étoiles, planètes). Peut être régénéré (voir § 5).
-    - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`, `argPeriapsisDeg`, `meanAnomalyAtEpochDeg`.
+    - `stars[]` : la primaire en premier, suivie des compagnons. Les compagnons peuvent inclure un `orbit` avec `semiMajorAxisAu`, `periodDays`, `phaseDeg`, `inclinationDeg`, `ascendingNodeDeg`, `eccentricity`, `argPeriapsisDeg`, `meanAnomalyAtEpochDeg`.
     - Les planètes/lunes dans `astro` peuvent inclure des champs orbitaux (`orbitInclinationDeg`, `orbitAscendingNodeDeg`, `argPeriapsisDeg`, `meanAnomalyAtEpochDeg`, `axialTiltDeg`, `orbitEccentricity`) et climatiques (`greenhouseK`, `climateK`, `airMassIndex`, `seasonalDeltaK`) recalculés si absents.
 
 ### 2.3. Forces et conflits

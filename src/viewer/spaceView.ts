@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import {
   logger,
   sorted,
@@ -12,12 +15,14 @@ import {
   type PlanetType,
   type MoonType,
   type Fleet,
+  type PlanetSurfaceDescriptor,
   type Vec3
 } from '../shared/shared';
 import { getOrbitingSystem } from '../engine/orbit';
-import { parseAstroRefFromBodyId } from '../engine/worldgen/planetSurfaceGenerator';
+import { createPlanetSurfaceDescriptor, parseAstroRefFromBodyId } from '../engine/worldgen/planetSurfaceGenerator';
 import { buildGeodesicGrid, buildGeodesicVoronoiSegments } from '../engine/worldgen/geodesicGrid';
 import type { GameScenario, ScenarioViewConfig, ScenarioViewFocusMode, ScenarioViewStartScale } from '../content/scenarios';
+import { createPlanetTextureFromSurface } from './planetTextureFromSurface';
 
 const AU_METERS = 149_597_870_700;
 const LY_METERS = 9_460_730_472_580_800;
@@ -67,6 +72,12 @@ const lerpVec3 = (out: Vec3, a: Vec3, b: Vec3, t: number): Vec3 =>
   setVec3(out, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 
 const lengthVec3 = (v: Vec3): number => Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+
+const normalizeVec3 = (out: Vec3, v: Vec3): Vec3 => {
+  const len = lengthVec3(v);
+  if (len <= 0) return setVec3(out, 0, 0, 1);
+  return setVec3(out, v.x / len, v.y / len, v.z / len);
+};
 
 const distVec3 = (a: Vec3, b: Vec3): number => {
   const dx = a.x - b.x;
@@ -271,6 +282,12 @@ export interface BodyViewData {
   planetClass?: PlanetClass;
   planetType?: PlanetType;
   moonType?: MoonType;
+  surfaceDescriptor?: PlanetSurfaceDescriptor;
+  surfaceData?: {
+    planetData?: PlanetData;
+    moonData?: MoonData;
+  };
+  systemId?: string;
   astroRef?: AstroRef;
 }
 
@@ -375,7 +392,7 @@ const resolveStarOrbit = (orbit: StarData['orbit'], totalMassSun: number, epochD
   if (!orbit) return undefined;
   return {
     semiMajorAxisMeters: orbit.semiMajorAxisAu * AU_METERS,
-    eccentricity: 0,
+    eccentricity: orbit.eccentricity ?? 0,
     inclinationRad: degToRad(orbit.inclinationDeg ?? 0),
     ascendingNodeRad: degToRad(orbit.ascendingNodeDeg ?? 0),
     argPeriapsisRad: degToRad(orbit.argPeriapsisDeg ?? 0),
@@ -418,6 +435,8 @@ const resolveMoonRotationDays = (seed: number): number => {
 
 const buildBodyViewData = (params: {
   body: PlanetBody;
+  gameSeed: number;
+  systemId: string;
   systemSeed: number;
   planetAstro: PlanetData | undefined;
   moonAstro: MoonData | undefined;
@@ -426,10 +445,15 @@ const buildBodyViewData = (params: {
   parentId: string | null;
   astroRef?: AstroRef;
 }): BodyViewData => {
-  const { body, systemSeed, planetAstro, moonAstro, planetBody, starMassSun, parentId, astroRef } = params;
+  const { body, gameSeed, systemId, systemSeed, planetAstro, moonAstro, planetBody, starMassSun, parentId, astroRef } = params;
   const bodySeed = deriveSeed(systemSeed, `body:${body.id}`);
   const kind: BodyKind = body.bodyType === 'moon' ? 'moon' : 'planet';
   const baseColor = colorFromSeed(bodySeed);
+  const surfaceDescriptor = createPlanetSurfaceDescriptor({
+    gameSeed,
+    systemId,
+    body
+  });
 
   if (kind === 'moon') {
     const radiusMeters = resolveMoonRadiusMeters(body, moonAstro);
@@ -472,6 +496,12 @@ const buildBodyViewData = (params: {
       orbit,
       rotationPeriodDays: resolveMoonRotationDays(bodySeed),
       moonType: moonAstro?.type,
+      surfaceDescriptor,
+      surfaceData: {
+        planetData: planetAstro,
+        moonData: moonAstro
+      },
+      systemId,
       astroRef
     };
   }
@@ -518,6 +548,12 @@ const buildBodyViewData = (params: {
     rotationPeriodDays: resolvePlanetRotationDays(bodySeed, planetAstro?.type),
     planetClass: body.class,
     planetType: planetAstro?.type,
+    surfaceDescriptor,
+    surfaceData: {
+      planetData: planetAstro,
+      moonData: moonAstro
+    },
+    systemId,
     astroRef
   };
 };
@@ -600,6 +636,8 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     }
     const bodyData = buildBodyViewData({
       body,
+      gameSeed: galaxySeed,
+      systemId: system.id,
       systemSeed,
       planetAstro,
       moonAstro: undefined,
@@ -629,6 +667,8 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     }
     const bodyData = buildBodyViewData({
       body,
+      gameSeed: galaxySeed,
+      systemId: system.id,
       systemSeed,
       planetAstro,
       moonAstro,
@@ -1049,6 +1089,8 @@ export interface SpaceViewOptions {
   floatingOriginSnapMeters?: number;
   timeScaleDaysPerSecond?: number;
   debugOverlayMode?: 'voronoi' | 'triangulated' | 'both';
+  debugSurfaceMode?: 'albedo' | 'biome';
+  orbitLineMode?: 'line2' | 'basic';
 }
 
 type SystemAssets = {
@@ -1060,8 +1102,9 @@ type SystemAssets = {
   starHalos: THREE.Sprite[];
   starData: BodyViewData[];
   starPositions: Vec3[];
-  orbitLines: THREE.Line[];
-  orbitMaterials: THREE.LineBasicMaterial[];
+  orbitLines: Array<THREE.Line | Line2>;
+  orbitMaterials: Array<THREE.LineBasicMaterial | LineMaterial>;
+  orbitGeometries: Array<THREE.BufferGeometry | LineGeometry>;
   bodyMesh: THREE.InstancedMesh;
   bodyMaterial: THREE.MeshStandardMaterial;
   bodyPointGeometry: THREE.BufferGeometry;
@@ -1078,6 +1121,8 @@ type SystemAssets = {
 
 type PlanetAssets = {
   group: THREE.Group;
+  tiltGroup: THREE.Group;
+  spinGroup: THREE.Group;
   bodyMesh: THREE.Mesh;
   bodyMaterial: THREE.MeshStandardMaterial;
   atmosphereMesh: THREE.Mesh;
@@ -1097,7 +1142,8 @@ type PlanetAssets = {
   };
   rotationSpeedRadPerDay: number;
   axialTiltRad: number;
-  light: THREE.PointLight;
+  starLights: THREE.DirectionalLight[];
+  starLightTargets: THREE.Object3D[];
 };
 
 const getSphereGeometry = (() => {
@@ -1107,6 +1153,7 @@ const getSphereGeometry = (() => {
     const cached = cache.get(key);
     if (cached) return cached;
     const geometry = new THREE.SphereGeometry(1, segments, rings);
+    geometry.userData.shared = true;
     cache.set(key, geometry);
     return geometry;
   };
@@ -1129,10 +1176,37 @@ const getVoronoiOverlayGeometry = (() => {
     });
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.userData.shared = true;
     cache.set(freq, geometry);
     return geometry;
   };
 })();
+
+const isSharedGeometry = (geometry: { userData?: Record<string, unknown> } | null | undefined): boolean =>
+  Boolean(geometry && geometry.userData && geometry.userData.shared);
+
+const disposeMaterial = (material: THREE.Material | THREE.Material[] | null | undefined): void => {
+  if (!material) return;
+  if (Array.isArray(material)) {
+    material.forEach(entry => entry.dispose());
+    return;
+  }
+  material.dispose();
+};
+
+const disposeObject3D = (root: THREE.Object3D): void => {
+  root.traverse(obj => {
+    const mesh = obj as THREE.Mesh;
+    const geometry = (mesh as any).geometry as THREE.BufferGeometry | LineGeometry | undefined;
+    if (geometry && !isSharedGeometry(geometry)) {
+      geometry.dispose();
+    }
+    const material = (mesh as any).material as THREE.Material | THREE.Material[] | undefined;
+    if (material) {
+      disposeMaterial(material);
+    }
+  });
+};
 
 const solveKeplerEccentricAnomaly = (meanAnomalyRad: number, eccentricity: number): number => {
   const e = clamp(eccentricity, 0, 0.999);
@@ -1167,9 +1241,9 @@ const computeOrbitPositionFromMeanAnomaly = (
   return out;
 };
 
-const getOrbitGeometry = (() => {
-  const cache = new Map<string, THREE.BufferGeometry>();
-  return (orbit: OrbitElements, unitsScale: number, segments = 192): THREE.BufferGeometry => {
+const getOrbitPositions = (() => {
+  const cache = new Map<string, Float32Array>();
+  return (orbit: OrbitElements, unitsScale: number, segments = 192): Float32Array => {
     const key = [
       Math.round(orbit.semiMajorAxisMeters / 1000),
       Math.round(orbit.eccentricity * 10000),
@@ -1187,13 +1261,56 @@ const getOrbitGeometry = (() => {
       const meanAnomaly = (i / segments) * TWO_PI;
       const position = computeOrbitPositionFromMeanAnomaly(orbit, meanAnomaly, scratchVec3A);
       const baseIndex = i * 3;
-      positions[baseIndex] = (position.x / unitsScale);
-      positions[baseIndex + 1] = (position.y / unitsScale);
-      positions[baseIndex + 2] = (position.z / unitsScale);
+      positions[baseIndex] = position.x / unitsScale;
+      positions[baseIndex + 1] = position.y / unitsScale;
+      positions[baseIndex + 2] = position.z / unitsScale;
     }
+    cache.set(key, positions);
+    return positions;
+  };
+})();
 
+const getOrbitGeometry = (() => {
+  const cache = new Map<string, THREE.BufferGeometry>();
+  return (orbit: OrbitElements, unitsScale: number, segments = 192): THREE.BufferGeometry => {
+    const key = [
+      Math.round(orbit.semiMajorAxisMeters / 1000),
+      Math.round(orbit.eccentricity * 10000),
+      Math.round(orbit.inclinationRad * 10000),
+      Math.round(orbit.ascendingNodeRad * 10000),
+      Math.round(orbit.argPeriapsisRad * 10000),
+      Math.round(unitsScale * 1000),
+      segments
+    ].join('|');
+    const cached = cache.get(key);
+    if (cached) return cached;
+
+    const positions = getOrbitPositions(orbit, unitsScale, segments);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.userData.shared = true;
+    cache.set(key, geometry);
+    return geometry;
+  };
+})();
+
+const getOrbitLineGeometry = (() => {
+  const cache = new Map<string, LineGeometry>();
+  return (orbit: OrbitElements, unitsScale: number, segments = 192): LineGeometry => {
+    const key = [
+      Math.round(orbit.semiMajorAxisMeters / 1000),
+      Math.round(orbit.eccentricity * 10000),
+      Math.round(orbit.inclinationRad * 10000),
+      Math.round(orbit.ascendingNodeRad * 10000),
+      Math.round(orbit.argPeriapsisRad * 10000),
+      Math.round(unitsScale * 1000),
+      segments
+    ].join('|');
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const geometry = new LineGeometry();
+    geometry.setPositions(getOrbitPositions(orbit, unitsScale, segments));
+    geometry.userData.shared = true;
     cache.set(key, geometry);
     return geometry;
   };
@@ -1214,18 +1331,30 @@ const computeOrbitPositionMeters = (body: BodyViewData, timeDays: number, out?: 
   return setVec3(result, position.x, position.y, position.z);
 };
 
-const resolveOverlayFrequency = (screenPx: number): number => {
-  if (screenPx < 120) return 8;
-  if (screenPx < 220) return 10;
-  if (screenPx < 360) return 12;
-  return 16;
+const computeOrbitPositionFromTime = (orbit: OrbitElements, timeDays: number, out: Vec3): Vec3 => {
+  const meanMotion = TWO_PI / Math.max(1e-6, orbit.periodDays);
+  const meanAnomaly = orbit.meanAnomalyAtEpochRad + meanMotion * (timeDays - orbit.epochDays);
+  const position = computeOrbitPositionFromMeanAnomaly(orbit, meanAnomaly, scratchVec3A);
+  return setVec3(out, position.x, position.y, position.z);
+};
+
+const resolveOverlayFrequency = (surfaceFrequency: number | null, screenPx: number): number => {
+  if (!surfaceFrequency) {
+    if (screenPx < 120) return 8;
+    if (screenPx < 220) return 10;
+    if (screenPx < 360) return 12;
+    return 16;
+  }
+  const lodShift = screenPx < 160 ? -2 : screenPx < 260 ? -1 : screenPx < 420 ? 0 : 1;
+  return clamp(surfaceFrequency + lodShift, 2, 32);
 };
 
 const resolveTextureResolution = (screenPx: number): number => {
   if (screenPx < 140) return 128;
   if (screenPx < 260) return 256;
   if (screenPx < 420) return 384;
-  return 512;
+  if (screenPx < 620) return 512;
+  return 1024;
 };
 
 const createPlanetTexture = (
@@ -1334,6 +1463,8 @@ export class SpaceView {
 
   private streamingQueue = new StreamingQueue();
   private maxTasksPerFrame: number;
+  private debugSurfaceMode: 'albedo' | 'biome';
+  private orbitLineMode: 'line2' | 'basic';
 
   private floatingOrigin: FloatingOriginManager;
   private zoom: ZoomController;
@@ -1357,6 +1488,7 @@ export class SpaceView {
   private orbitingPositionScratch: Vec3[] = [];
   private starPositionScratch: Vec3[] = [];
   private planetLightScratch: Vec3 = vec3();
+  private planetLightDirectionScratch: Vec3 = vec3();
   private textureCache = new Map<string, { texture: THREE.Texture; resolution: number; lastUsed: number }>();
   private textureCacheMax = 24;
   private fpsSmoothed = 60;
@@ -1428,6 +1560,8 @@ export class SpaceView {
 
     this.timeScaleDaysPerSecond = options.timeScaleDaysPerSecond ?? 0;
     this.overlayMode = options.debugOverlayMode ?? 'voronoi';
+    this.debugSurfaceMode = options.debugSurfaceMode ?? 'albedo';
+    this.orbitLineMode = options.orbitLineMode ?? 'line2';
 
     const initialWidth = options.canvas.clientWidth || options.canvas.width || 800;
     const initialHeight = options.canvas.clientHeight || options.canvas.height || 600;
@@ -1437,6 +1571,10 @@ export class SpaceView {
   setData(data: GalaxyViewData): void {
     this.data = data;
     this.systemById.clear();
+    this.systemAssets.forEach(assets => disposeObject3D(assets.group));
+    this.systemAssets.clear();
+    this.planetAssets.forEach(assets => disposeObject3D(assets.group));
+    this.planetAssets.clear();
 
     let maxDistance = 0;
     data.systems.forEach(system => {
@@ -1572,8 +1710,10 @@ export class SpaceView {
     activePlanetId: string | null;
     focusSystemId: string | null;
     focusPlanetId: string | null;
+    seed: number;
     loadedSystems: number;
     loadedPlanets: number;
+    memory: THREE.WebGLInfo['memory'];
     drawCalls: number;
     triangles: number;
     targetMeters: Vec3;
@@ -1583,6 +1723,8 @@ export class SpaceView {
       kind: BodyKind;
       parentId: string | null;
       radiusMeters: number;
+      systemId?: string;
+      surfaceFrequency?: number | null;
       astroRef?: AstroRef;
       orbit?: {
         aMeters: number;
@@ -1608,6 +1750,11 @@ export class SpaceView {
           parentId: activeBody.parentId,
           radiusMeters: activeBody.radiusMeters,
           astroRef: activeBody.astroRef,
+          systemId: activeBody.systemId,
+          surfaceFrequency:
+            activeBody.surfaceDescriptor?.config.gridKind === 'geodesic'
+              ? activeBody.surfaceDescriptor.config.frequency
+              : null,
           orbit: activeBody.orbit
             ? {
                 aMeters: activeBody.orbit.semiMajorAxisMeters,
@@ -1631,10 +1778,12 @@ export class SpaceView {
       planetFade: this.planetFade.value,
       activeSystemId: this.activeSystemId,
       activePlanetId: this.activePlanetId,
+      seed: this.data.seed,
       focusSystemId: this.focusSystemId,
       focusPlanetId: this.focusPlanetId,
       loadedSystems: this.systemAssets.size,
       loadedPlanets: this.planetAssets.size,
+      memory: this.renderer.info.memory,
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       targetMeters: this.cameraRig.targetMeters,
@@ -1650,6 +1799,13 @@ export class SpaceView {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
     this.sizePx = { width, height };
+    this.systemAssets.forEach(assets => {
+      assets.orbitMaterials.forEach(material => {
+        if (material instanceof LineMaterial) {
+          material.resolution.set(width, height);
+        }
+      });
+    });
   }
 
   start(): void {
@@ -1707,6 +1863,22 @@ export class SpaceView {
     this.qualityScale = this.qualityScale * 0.9 + targetScale * 0.1;
   }
 
+  private releaseSystemAssets(systemId: string): void {
+    const assets = this.systemAssets.get(systemId);
+    if (!assets) return;
+    disposeObject3D(assets.group);
+    this.systemAssets.delete(systemId);
+  }
+
+  private releasePlanetAssetsForSystem(system: SystemViewData): void {
+    system.orbitingBodies.forEach(body => {
+      const assets = this.planetAssets.get(body.id);
+      if (!assets) return;
+      disposeObject3D(assets.group);
+      this.planetAssets.delete(body.id);
+    });
+  }
+
   dispose(): void {
     this.stop();
     this.renderer.dispose();
@@ -1726,7 +1898,10 @@ export class SpaceView {
     this.activeSystemMaterial.dispose();
     this.textureCache.forEach(entry => entry.texture.dispose());
     this.textureCache.clear();
-    this.systemAssets.clear();
+    Array.from(this.systemAssets.keys()).forEach(systemId => this.releaseSystemAssets(systemId));
+    this.planetAssets.forEach(assets => {
+      disposeObject3D(assets.group);
+    });
     this.planetAssets.clear();
   }
 
@@ -1759,6 +1934,14 @@ export class SpaceView {
 
     this.activeSystemImpostor.visible = true;
     if (system.id !== this.activeSystemId) {
+      const previousSystemId = this.activeSystemId;
+      if (previousSystemId) {
+        const previousSystem = this.systemById.get(previousSystemId);
+        if (previousSystem) {
+          this.releaseSystemAssets(previousSystemId);
+          this.releasePlanetAssetsForSystem(previousSystem);
+        }
+      }
       this.activeSystemId = system.id;
       this.rebuildGalaxyPoints(system.id);
       this.activeSystemMaterial.color = new THREE.Color(system.markerColor);
@@ -1884,17 +2067,40 @@ export class SpaceView {
     this.planetRoot.visible = true;
   }
 
-  private computeOrbitingPositions(system: SystemViewData): Vec3[] {
-    const starPositions = this.starPositionScratch;
+  private computeStarPositions(system: SystemViewData, out: Vec3[]): Vec3[] {
     for (let i = 0; i < system.stars.length; i += 1) {
-      if (!starPositions[i]) starPositions[i] = vec3();
-      const star = system.stars[i];
-      if (star.orbit) {
-        computeOrbitPositionMeters(star, this.timeDays, starPositions[i]);
-      } else {
-        setVec3(starPositions[i], 0, 0, 0);
+      if (!out[i]) out[i] = vec3();
+      setVec3(out[i], 0, 0, 0);
+    }
+
+    if (system.stars.length === 2) {
+      const primary = system.stars[0];
+      const companion = system.stars[1];
+      if (companion.orbit) {
+        const relative = computeOrbitPositionFromTime(companion.orbit, this.timeDays, scratchVec3C);
+        const totalMass = (primary.massSun ?? 1) + (companion.massSun ?? 1);
+        const primaryOffsetScale = -(companion.massSun ?? 1) / totalMass;
+        const companionOffsetScale = (primary.massSun ?? 1) / totalMass;
+        scaleVec3(out[0], relative, primaryOffsetScale);
+        scaleVec3(out[1], relative, companionOffsetScale);
+        return out;
       }
     }
+
+    for (let i = 0; i < system.stars.length; i += 1) {
+      const star = system.stars[i];
+      if (star.orbit) {
+        computeOrbitPositionMeters(star, this.timeDays, out[i]);
+      } else {
+        setVec3(out[i], 0, 0, 0);
+      }
+    }
+
+    return out;
+  }
+
+  private computeOrbitingPositions(system: SystemViewData): Vec3[] {
+    const starPositions = this.computeStarPositions(system, this.starPositionScratch);
 
     const positions = this.orbitingPositionScratch;
     for (let i = 0; i < system.orbitingBodies.length; i += 1) {
@@ -1914,12 +2120,19 @@ export class SpaceView {
     return positions;
   }
 
-  private requestPlanetTexture(assets: PlanetAssets, screenPx: number): void {
+  private requestPlanetTexture(assets: PlanetAssets, systemId: string, screenPx: number): void {
     const desiredResolution = resolveTextureResolution(screenPx);
     if (assets.textureState.resolution >= desiredResolution) return;
     assets.textureState.targetResolution = desiredResolution;
 
-    const cacheKey = `${assets.planetData.id}:${desiredResolution}`;
+    const planet = assets.planetData;
+    const surfaceDescriptor = planet.surfaceDescriptor;
+    const configKey = surfaceDescriptor
+      ? surfaceDescriptor.config.gridKind === 'geodesic'
+        ? `geo:${surfaceDescriptor.config.frequency}`
+        : `rect:${surfaceDescriptor.config.w}x${surfaceDescriptor.config.h}`
+      : 'surface:none';
+    const cacheKey = `${planet.id}:${configKey}:v${surfaceDescriptor?.config.generatorVersion ?? 0}:r${desiredResolution}:mode:${this.debugSurfaceMode}`;
     const cached = this.textureCache.get(cacheKey);
     if (cached) {
       assets.bodyMaterial.map = cached.texture;
@@ -1939,13 +2152,24 @@ export class SpaceView {
         return;
       }
 
-      const texture = createPlanetTexture(
-        assets.textureState.seed,
-        desiredResolution,
-        assets.planetData.baseColor,
-        assets.planetData.planetType,
-        assets.planetData.planetClass
-      );
+      const useSurfaceTexture = surfaceDescriptor && planet.planetClass !== 'gas_giant' && planet.planetClass !== 'ice_giant';
+      const texture = useSurfaceTexture
+        ? createPlanetTextureFromSurface({
+            systemId,
+            bodyId: planet.id,
+            descriptor: surfaceDescriptor,
+            resolution: desiredResolution,
+            planetData: planet.surfaceData?.planetData,
+            moonData: planet.surfaceData?.moonData,
+            mode: this.debugSurfaceMode
+          })
+        : createPlanetTexture(
+            assets.textureState.seed,
+            desiredResolution,
+            planet.baseColor,
+            planet.planetType,
+            planet.planetClass
+          );
       if (!texture) return;
       this.textureCache.set(cacheKey, { texture, resolution: desiredResolution, lastUsed: performance.now() });
       this.pruneTextureCache();
@@ -1995,13 +2219,10 @@ export class SpaceView {
         material.opacity = systemOpacity;
       });
 
+      const starPositions = this.computeStarPositions(system, assets.starPositions);
+
       assets.starData.forEach((star, index) => {
-        const starPos = assets.starPositions[index];
-        if (star.orbit) {
-          computeOrbitPositionMeters(star, this.timeDays, starPos);
-        } else {
-          setVec3(starPos, 0, 0, 0);
-        }
+        const starPos = starPositions[index];
         const unitX = starPos.x / this.scales.metersPerSystemUnit;
         const unitY = starPos.y / this.scales.metersPerSystemUnit;
         const unitZ = starPos.z / this.scales.metersPerSystemUnit;
@@ -2048,9 +2269,6 @@ export class SpaceView {
         const meshBlend = clamp((screenPx - this.thresholds.planetMeshExitPx) / meshRange, 0, 1);
         maxMeshBlend = Math.max(maxMeshBlend, meshBlend);
 
-        const isActive = body.id === this.activePlanetId;
-        const scaleBlend = isActive ? Math.max(meshBlend, 0.6) : meshBlend;
-
         scratchMatrixA.compose(
           scratchVec3A.set(
             position.x / this.scales.metersPerSystemUnit,
@@ -2059,9 +2277,9 @@ export class SpaceView {
           ),
           scratchQuatA.identity(),
           scratchVec3B.set(
-            (body.radiusMeters / this.scales.metersPerSystemUnit) * scaleBlend,
-            (body.radiusMeters / this.scales.metersPerSystemUnit) * scaleBlend,
-            (body.radiusMeters / this.scales.metersPerSystemUnit) * scaleBlend
+            body.radiusMeters / this.scales.metersPerSystemUnit,
+            body.radiusMeters / this.scales.metersPerSystemUnit,
+            body.radiusMeters / this.scales.metersPerSystemUnit
           )
         );
         assets.bodyMesh.setMatrixAt(i, scratchMatrixA);
@@ -2079,7 +2297,7 @@ export class SpaceView {
       const pointOpacity = systemOpacity * clutterFade * (1 - maxMeshBlend);
       assets.bodyPointMaterial.opacity = pointOpacity;
       assets.bodyPoints.visible = pointOpacity > 0.01;
-      assets.bodyMaterial.opacity = systemOpacity * clutterFade;
+      assets.bodyMaterial.opacity = systemOpacity * clutterFade * maxMeshBlend;
 
       assets.orbitLines.forEach((line, index) => {
         const parentIndex = assets.orbitParents[index];
@@ -2149,6 +2367,7 @@ export class SpaceView {
     assets.bodyMaterial.opacity = this.planetFade.value;
     assets.atmosphereMaterial.opacity = this.planetFade.value * (planet.planetType === 'Terrestrial' ? 0.2 : 0.12);
     assets.cloudMaterial.opacity = this.planetFade.value * (planet.planetType === 'Terrestrial' ? 0.28 : 0.18);
+    assets.tiltGroup.rotation.x = assets.axialTiltRad;
 
     const showVoronoi = this.overlayMode === 'voronoi' || this.overlayMode === 'both';
     const showTriangulated = this.overlayMode === 'triangulated' || this.overlayMode === 'both';
@@ -2160,31 +2379,48 @@ export class SpaceView {
     }
 
     const rotation = this.timeDays * assets.rotationSpeedRadPerDay;
-    assets.bodyMesh.rotation.y = rotation;
-    assets.cloudMesh.rotation.y = rotation * 1.15;
+    assets.spinGroup.rotation.y = rotation;
+    assets.cloudMesh.rotation.y = rotation * 0.15;
     assets.atmosphereMesh.rotation.y = rotation * 0.6;
 
     const qualityScreenPx = this.lastPlanetScreenPx * this.qualityScale;
     if (showVoronoi) {
-      const overlayFrequency = resolveOverlayFrequency(qualityScreenPx);
+      const surfaceFrequency =
+        planet.surfaceDescriptor?.config.gridKind === 'geodesic' ? planet.surfaceDescriptor.config.frequency : null;
+      const overlayFrequency = resolveOverlayFrequency(surfaceFrequency, qualityScreenPx);
       const desiredOverlay = getVoronoiOverlayGeometry(overlayFrequency);
       if (assets.overlayMesh.geometry !== desiredOverlay) {
         assets.overlayMesh.geometry = desiredOverlay;
       }
     }
 
-    this.requestPlanetTexture(assets, qualityScreenPx);
+    this.requestPlanetTexture(assets, system.id, qualityScreenPx);
 
-    const primaryStarIndex = system.primaryStarId ? system.stars.findIndex(star => star.id === system.primaryStarId) : 0;
-    const starIndex = primaryStarIndex >= 0 ? primaryStarIndex : 0;
-    const starPosition = this.starPositionScratch[starIndex] ?? vec3();
-    const relativeStar = subVec3(this.planetLightScratch, starPosition, planetSystemPos);
-    assets.light.position.set(
-      relativeStar.x / this.scales.metersPerPlanetUnit,
-      relativeStar.y / this.scales.metersPerPlanetUnit,
-      relativeStar.z / this.scales.metersPerPlanetUnit
-    );
-    assets.light.intensity = Math.max(0.6, Math.sqrt(system.stars[starIndex]?.luminositySun ?? 1));
+    const starPositions = this.computeStarPositions(system, this.starPositionScratch);
+    const maxLights = Math.min(assets.starLights.length, system.stars.length);
+    for (let i = 0; i < assets.starLights.length; i += 1) {
+      const light = assets.starLights[i];
+      const target = assets.starLightTargets[i];
+      if (i >= maxLights) {
+        light.visible = false;
+        continue;
+      }
+      const star = system.stars[i];
+      const starPosition = starPositions[i] ?? vec3();
+      const relativeStar = subVec3(this.planetLightScratch, starPosition, planetSystemPos);
+      const distanceAu = Math.max(0.05, lengthVec3(relativeStar) / AU_METERS);
+      const relativeUnit = normalizeVec3(this.planetLightDirectionScratch, relativeStar);
+      light.position.set(
+        (relativeUnit.x * 10),
+        (relativeUnit.y * 10),
+        (relativeUnit.z * 10)
+      );
+      light.color.set(star.baseColor);
+      const intensity = clamp((star.luminositySun ?? 1) / (distanceAu * distanceAu), 0.2, 2.2);
+      light.intensity = intensity;
+      light.visible = true;
+      target.position.set(0, 0, 0);
+    }
 
     const minDistance = Math.max(planet.radiusMeters * 1.2, 5_000);
     this.zoom.setBounds(minDistance, this.galaxyRadiusMeters * 2.5);
@@ -2268,9 +2504,11 @@ export class SpaceView {
     const distanceMeters = distVec3(options.cameraMeters, options.passCenterMeters);
     const distanceUnits = distanceMeters / options.metersPerUnit;
     const extentUnits = Math.max(1, options.passExtentMeters / options.metersPerUnit);
-
-    const near = Math.max(0.05, distanceUnits * 0.02);
-    const far = Math.max(near + 10, distanceUnits + extentUnits * 6);
+    const isPlanetPass = options.metersPerUnit === this.scales.metersPerPlanetUnit;
+    const nearFactor = isPlanetPass ? 0.008 : 0.02;
+    const farFactor = isPlanetPass ? 4 : 6;
+    const near = Math.max(isPlanetPass ? 0.002 : 0.05, distanceUnits * nearFactor);
+    const far = Math.max(near + 8, distanceUnits + extentUnits * farFactor);
 
     this.camera.near = near;
     this.camera.far = far;
@@ -2543,6 +2781,35 @@ export class SpaceView {
     });
   }
 
+  private createOrbitLine(orbit: OrbitElements): {
+    line: THREE.Line | Line2;
+    material: THREE.LineBasicMaterial | LineMaterial;
+    geometry: THREE.BufferGeometry | LineGeometry;
+  } {
+    if (this.orbitLineMode === 'line2') {
+      const geometry = getOrbitLineGeometry(orbit, this.scales.metersPerSystemUnit);
+      const material = new LineMaterial({
+        color: 0x5e6a84,
+        linewidth: 1.2,
+        transparent: true,
+        opacity: 0.4
+      });
+      material.resolution.set(this.sizePx.width, this.sizePx.height);
+      const line = new Line2(geometry, material);
+      line.computeLineDistances();
+      return { line, material, geometry };
+    }
+
+    const geometry = getOrbitGeometry(orbit, this.scales.metersPerSystemUnit);
+    const material = new THREE.LineBasicMaterial({
+      color: '#5e6a84',
+      transparent: true,
+      opacity: 0.4
+    });
+    const line = new THREE.Line(geometry, material);
+    return { line, material, geometry };
+  }
+
   private createSystemAssets(system: SystemViewData): SystemAssets {
     const group = new THREE.Group();
     const orbitGroup = new THREE.Group();
@@ -2587,8 +2854,9 @@ export class SpaceView {
       starPositions[index] = vec3();
     });
 
-    const orbitLines: THREE.Line[] = [];
-    const orbitMaterials: THREE.LineBasicMaterial[] = [];
+    const orbitLines: Array<THREE.Line | Line2> = [];
+    const orbitMaterials: Array<THREE.LineBasicMaterial | LineMaterial> = [];
+    const orbitGeometries: Array<THREE.BufferGeometry | LineGeometry> = [];
     const orbitParents: Array<number | null> = [];
     const orbitParentStars: Array<number | null> = [];
 
@@ -2599,15 +2867,11 @@ export class SpaceView {
 
     bodyData.forEach((body, index) => {
       if (!body.orbit) return;
-      const orbitMaterial = new THREE.LineBasicMaterial({
-        color: '#5e6a84',
-        transparent: true,
-        opacity: 0.4
-      });
-      const orbit = new THREE.Line(getOrbitGeometry(body.orbit, this.scales.metersPerSystemUnit), orbitMaterial);
-      orbitGroup.add(orbit);
-      orbitLines.push(orbit);
-      orbitMaterials.push(orbitMaterial);
+      const { line, material, geometry } = this.createOrbitLine(body.orbit);
+      orbitGroup.add(line);
+      orbitLines.push(line);
+      orbitMaterials.push(material);
+      orbitGeometries.push(geometry);
       orbitParents.push(bodyParentIndex[index]);
       orbitParentStars.push(bodyParentStarIndex[index]);
     });
@@ -2672,6 +2936,7 @@ export class SpaceView {
       starPositions,
       orbitLines,
       orbitMaterials,
+      orbitGeometries,
       bodyMesh,
       bodyMaterial,
       bodyPointGeometry,
@@ -2689,6 +2954,12 @@ export class SpaceView {
 
   private createPlanetAssets(planet: BodyViewData): PlanetAssets {
     const group = new THREE.Group();
+    const tiltGroup = new THREE.Group();
+    const spinGroup = new THREE.Group();
+    tiltGroup.rotation.x = planet.axialTiltRad ?? 0;
+    group.add(tiltGroup);
+    tiltGroup.add(spinGroup);
+
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color(planet.baseColor),
       roughness: 0.7,
@@ -2698,8 +2969,7 @@ export class SpaceView {
     });
     const bodyMesh = new THREE.Mesh(getSphereGeometry(64, 48), bodyMaterial);
     bodyMesh.scale.setScalar(planet.radiusMeters / this.scales.metersPerPlanetUnit);
-    bodyMesh.rotation.z = planet.axialTiltRad ?? 0;
-    group.add(bodyMesh);
+    spinGroup.add(bodyMesh);
 
     const atmosphereMaterial = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(planet.baseColor).lerp(new THREE.Color('#9fd3ff'), 0.35),
@@ -2712,8 +2982,7 @@ export class SpaceView {
     });
     const atmosphereMesh = new THREE.Mesh(getSphereGeometry(64, 48), atmosphereMaterial);
     atmosphereMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.02);
-    atmosphereMesh.rotation.z = planet.axialTiltRad ?? 0;
-    group.add(atmosphereMesh);
+    spinGroup.add(atmosphereMesh);
 
     const cloudMaterial = new THREE.MeshPhysicalMaterial({
       color: '#ffffff',
@@ -2725,8 +2994,7 @@ export class SpaceView {
     });
     const cloudMesh = new THREE.Mesh(getSphereGeometry(64, 48), cloudMaterial);
     cloudMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.035);
-    cloudMesh.rotation.z = planet.axialTiltRad ?? 0;
-    group.add(cloudMesh);
+    spinGroup.add(cloudMesh);
 
     let ringMesh: THREE.Mesh | null = null;
     if (planet.planetClass === 'gas_giant' || planet.planetClass === 'ice_giant') {
@@ -2741,8 +3009,7 @@ export class SpaceView {
       const ringGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
       ringMesh = new THREE.Mesh(ringGeometry, ringMaterial);
       ringMesh.rotation.x = Math.PI / 2;
-      ringMesh.rotation.z = planet.axialTiltRad ?? 0;
-      group.add(ringMesh);
+      tiltGroup.add(ringMesh);
     }
 
     const overlayMaterial = new THREE.LineBasicMaterial({
@@ -2753,7 +3020,7 @@ export class SpaceView {
     const overlayGeometry = new THREE.BufferGeometry();
     const overlayMesh = new THREE.LineSegments(overlayGeometry, overlayMaterial);
     overlayMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.002);
-    group.add(overlayMesh);
+    spinGroup.add(overlayMesh);
 
     let triOverlayMesh: THREE.LineSegments | null = null;
     let triOverlayMaterial: THREE.LineBasicMaterial | null = null;
@@ -2766,17 +3033,29 @@ export class SpaceView {
       const triGeometry = new THREE.WireframeGeometry(getSphereGeometry(24, 18));
       triOverlayMesh = new THREE.LineSegments(triGeometry, triOverlayMaterial);
       triOverlayMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.003);
-      group.add(triOverlayMesh);
+      spinGroup.add(triOverlayMesh);
     }
 
-    const light = new THREE.PointLight('#ffffff', 1.2, 0, 2);
-    group.add(light);
+    const starLights: THREE.DirectionalLight[] = [];
+    const starLightTargets: THREE.Object3D[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const light = new THREE.DirectionalLight('#ffffff', 1);
+      const target = new THREE.Object3D();
+      light.target = target;
+      light.visible = false;
+      group.add(light);
+      group.add(target);
+      starLights.push(light);
+      starLightTargets.push(target);
+    }
 
     const ambient = new THREE.AmbientLight(0x202020, 0.25);
     group.add(ambient);
 
     return {
       group,
+      tiltGroup,
+      spinGroup,
       bodyMesh,
       bodyMaterial,
       atmosphereMesh,
@@ -2796,7 +3075,8 @@ export class SpaceView {
       },
       rotationSpeedRadPerDay: TWO_PI / Math.max(0.1, planet.rotationPeriodDays ?? 1),
       axialTiltRad: planet.axialTiltRad ?? 0,
-      light
+      starLights,
+      starLightTargets
     };
   }
 }

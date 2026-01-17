@@ -425,6 +425,7 @@ const needsStarOrbitNormalization = (orbit: StarOrbit | undefined): boolean => (
   !orbit
   || !isFiniteNumber(orbit.argPeriapsisDeg)
   || !isFiniteNumber(orbit.meanAnomalyAtEpochDeg)
+  || (orbit.eccentricity !== undefined && !isFiniteNumber(orbit.eccentricity))
 );
 
 const needsMoonOrbitNormalization = (moon: MoonData): boolean => (
@@ -678,6 +679,9 @@ const normalizeStarSystemAstro = (astro: StarSystemAstro): StarSystemAstro => {
       ...star,
       orbit: {
         ...star.orbit,
+        eccentricity: isFiniteNumber(star.orbit.eccentricity)
+          ? star.orbit.eccentricity
+          : orbitDefaults.eccentricity ?? 0,
         argPeriapsisDeg: isFiniteNumber(star.orbit.argPeriapsisDeg) ? star.orbit.argPeriapsisDeg : orbitDefaults.argPeriapsisDeg,
         meanAnomalyAtEpochDeg: isFiniteNumber(star.orbit.meanAnomalyAtEpochDeg)
           ? star.orbit.meanAnomalyAtEpochDeg
