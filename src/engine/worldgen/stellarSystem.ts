@@ -448,6 +448,7 @@ export function drawCompanionOrbits(
     const inclinationDeg = rng.range(0, 18);
     const ascendingNodeDeg = rng.range(0, 360);
     const phaseDeg = rng.range(0, 360);
+    const eccentricity = rng.range(0, 0.25);
     const argPeriapsisDeg = rng.range(0, 360);
     const meanAnomalyAtEpochDeg = phaseDeg;
     const periodDays = computeOrbitalPeriodDays(orbitAu, primaryMassSun + massSun);
@@ -457,6 +458,7 @@ export function drawCompanionOrbits(
       phaseDeg,
       inclinationDeg,
       ascendingNodeDeg,
+      eccentricity,
       argPeriapsisDeg,
       meanAnomalyAtEpochDeg
     };

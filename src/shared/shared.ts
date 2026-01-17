@@ -148,6 +148,7 @@ export interface StarOrbit {
   phaseDeg: number;
   inclinationDeg: number;
   ascendingNodeDeg: number;
+  eccentricity?: number;
   argPeriapsisDeg: number;
   meanAnomalyAtEpochDeg: number;
 }
