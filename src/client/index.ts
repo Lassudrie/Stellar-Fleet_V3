@@ -13,7 +13,6 @@ const TAP_SLOP = 10;
 const PINCH_ZOOM_BOOST = 40;
 const PINCH_JITTER_THRESHOLD = 0.015;
 let debugEnabled = true;
-let overlayMode: 'voronoi' | 'triangulated' | 'both' = 'voronoi';
 
 type DragMode = 'orbit' | 'pan';
 
@@ -113,9 +112,6 @@ const updateUrlParams = (scenarioId: string, seed: number, timeScale: number): v
   if (debugEnabled) {
     params.set('debug', '1');
   }
-  if (overlayMode !== 'voronoi') {
-    params.set('overlay', overlayMode);
-  }
   window.history.replaceState(null, '', `?${params.toString()}`);
 };
 
@@ -195,8 +191,7 @@ const createRuntime = (scenarioId: string, seed: number, timeScale: number): Run
     state: engine.state,
     scenario,
     viewOptions: {
-      timeScaleDaysPerSecond: timeScale,
-      debugOverlayMode: overlayMode
+      timeScaleDaysPerSecond: timeScale
     }
   });
 
@@ -220,12 +215,6 @@ const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeS
 const params = new URLSearchParams(window.location.search);
 const debugParam = params.get('debug');
 debugEnabled = debugParam === null ? true : debugParam === '1';
-const overlayParam = params.get('overlay');
-if (overlayParam === 'triangulated' || overlayParam === 'both' || overlayParam === 'voronoi') {
-  overlayMode = overlayParam;
-} else if (overlayParam === 'tri') {
-  overlayMode = 'triangulated';
-}
 debugOverlay.classList.toggle('hidden', !debugEnabled);
 const debugCollapsedStorageKey = 'stellarFleet:debugOverlayCollapsed';
 const initialDebugCollapsed = localStorage.getItem(debugCollapsedStorageKey) === '1';

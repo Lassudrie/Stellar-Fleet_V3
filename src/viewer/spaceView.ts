@@ -20,7 +20,6 @@ import {
 } from '../shared/shared';
 import { getOrbitingSystem } from '../engine/orbit';
 import { createPlanetSurfaceDescriptor, parseAstroRefFromBodyId } from '../engine/worldgen/planetSurfaceGenerator';
-import { buildGeodesicGrid, buildGeodesicVoronoiSegments } from '../engine/worldgen/geodesicGrid';
 import type { GameScenario, ScenarioViewConfig, ScenarioViewFocusMode, ScenarioViewStartScale } from '../content/scenarios';
 import { createPlanetTextureFromSurface } from './planetTextureFromSurface';
 
@@ -1120,7 +1119,6 @@ export interface SpaceViewOptions {
   maxTasksPerFrame?: number;
   floatingOriginSnapMeters?: number;
   timeScaleDaysPerSecond?: number;
-  debugOverlayMode?: 'voronoi' | 'triangulated' | 'both';
   debugSurfaceMode?: 'albedo' | 'biome';
   orbitLineMode?: 'line2' | 'basic';
 }
@@ -1138,7 +1136,7 @@ type SystemAssets = {
   orbitMaterials: Array<THREE.LineBasicMaterial | LineMaterial>;
   orbitGeometries: Array<THREE.BufferGeometry | LineGeometry>;
   bodyMesh: THREE.InstancedMesh;
-  bodyMaterial: THREE.MeshStandardMaterial;
+  bodyMaterial: THREE.MeshBasicMaterial;
   bodyPointGeometry: THREE.BufferGeometry;
   bodyPointMaterial: THREE.PointsMaterial;
   bodyPoints: THREE.Points;
@@ -1157,16 +1155,16 @@ type PlanetAssets = {
   tiltGroup: THREE.Group;
   spinGroup: THREE.Group;
   bodyMesh: THREE.Mesh;
-  bodyMaterial: THREE.MeshStandardMaterial;
+  bodyMaterial: THREE.MeshBasicMaterial;
   atmosphereMesh: THREE.Mesh;
   atmosphereMaterial: THREE.MeshPhysicalMaterial;
   cloudMesh: THREE.Mesh;
   cloudMaterial: THREE.MeshPhysicalMaterial;
   ringMesh: THREE.Mesh | null;
-  overlayMesh: THREE.LineSegments;
-  overlayMaterial: THREE.LineBasicMaterial;
-  triOverlayMesh: THREE.LineSegments | null;
-  triOverlayMaterial: THREE.LineBasicMaterial | null;
+  wireCore: Line2 | THREE.LineSegments;
+  wireGlow: Line2 | THREE.LineSegments;
+  wireCoreMaterial: LineMaterial | THREE.LineBasicMaterial;
+  wireGlowMaterial: LineMaterial | THREE.LineBasicMaterial;
   planetData: BodyViewData;
   textureState: {
     seed: number;
@@ -1190,6 +1188,24 @@ const getSphereGeometry = (() => {
     const geometry = new THREE.SphereGeometry(1, segments, rings);
     geometry.userData.shared = true;
     cache.set(key, geometry);
+    return geometry;
+  };
+})();
+
+const getPlanetWireLineGeometry = (() => {
+  const cache = new Map<string, LineGeometry>();
+  return (detailKey: string): LineGeometry => {
+    const cached = cache.get(detailKey);
+    if (cached) return cached;
+    const [segmentsRaw, ringsRaw] = detailKey.split(':');
+    const segments = Math.max(6, Math.floor(Number(segmentsRaw) || 24));
+    const rings = Math.max(4, Math.floor(Number(ringsRaw) || 18));
+    const wireSource = new THREE.WireframeGeometry(getSphereGeometry(segments, rings));
+    const positions = wireSource.getAttribute('position') as THREE.BufferAttribute;
+    const geometry = new LineGeometry();
+    geometry.setPositions(Array.from(positions.array as ArrayLike<number>));
+    geometry.userData.shared = true;
+    cache.set(detailKey, geometry);
     return geometry;
   };
 })();
@@ -1240,29 +1256,6 @@ const getPlanetImpostorTexture = (() => {
     texture.needsUpdate = true;
     cached = texture;
     return texture;
-  };
-})();
-
-const getVoronoiOverlayGeometry = (() => {
-  const cache = new Map<number, THREE.BufferGeometry>();
-  return (frequency: number): THREE.BufferGeometry => {
-    const freq = Math.max(1, Math.floor(frequency));
-    const cached = cache.get(freq);
-    if (cached) return cached;
-    const grid = buildGeodesicGrid(freq);
-    const segments = buildGeodesicVoronoiSegments(grid);
-    const positions = new Float32Array(segments.length * 3);
-    segments.forEach((segment, index) => {
-      const baseIndex = index * 3;
-      positions[baseIndex] = segment.x;
-      positions[baseIndex + 1] = segment.y;
-      positions[baseIndex + 2] = segment.z;
-    });
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.userData.shared = true;
-    cache.set(freq, geometry);
-    return geometry;
   };
 })();
 
@@ -1422,17 +1415,6 @@ const computeOrbitPositionFromTime = (orbit: OrbitElements, timeDays: number, ou
   return setVec3(out, position.x, position.y, position.z);
 };
 
-const resolveOverlayFrequency = (surfaceFrequency: number | null, screenPx: number): number => {
-  if (!surfaceFrequency) {
-    if (screenPx < 120) return 8;
-    if (screenPx < 220) return 10;
-    if (screenPx < 360) return 12;
-    return 16;
-  }
-  const lodShift = screenPx < 160 ? -2 : screenPx < 260 ? -1 : screenPx < 420 ? 0 : 1;
-  return clamp(surfaceFrequency + lodShift, 2, 32);
-};
-
 const resolveTextureResolution = (screenPx: number): number => {
   if (screenPx < 140) return 128;
   if (screenPx < 260) return 256;
@@ -1556,7 +1538,6 @@ export class SpaceView {
   private cameraRig: CameraRig;
   private timeDays = 0;
   private timeScaleDaysPerSecond: number;
-  private overlayMode: 'voronoi' | 'triangulated' | 'both';
 
   private galaxyRadiusMeters = 1;
   private focusSystemId: string | null = null;
@@ -1669,7 +1650,6 @@ export class SpaceView {
     this.cameraRig = new CameraRig(this.zoom);
 
     this.timeScaleDaysPerSecond = options.timeScaleDaysPerSecond ?? 0;
-    this.overlayMode = options.debugOverlayMode ?? 'voronoi';
     this.debugSurfaceMode = options.debugSurfaceMode ?? 'albedo';
     this.orbitLineMode = options.orbitLineMode ?? 'line2';
 
@@ -2053,6 +2033,14 @@ export class SpaceView {
     this.sizePx = { width, height };
     this.systemAssets.forEach(assets => {
       assets.orbitMaterials.forEach(material => {
+        if (material instanceof LineMaterial) {
+          material.resolution.set(width, height);
+        }
+      });
+    });
+    this.planetAssets.forEach(assets => {
+      const materials = [assets.wireCoreMaterial, assets.wireGlowMaterial];
+      materials.forEach(material => {
         if (material instanceof LineMaterial) {
           material.resolution.set(width, height);
         }
@@ -2699,37 +2687,25 @@ export class SpaceView {
       (planetWorld.z - originMeters.z) / this.scales.metersPerPlanetUnit
     );
 
-    assets.bodyMaterial.opacity = this.planetFade.value;
-    assets.atmosphereMaterial.opacity = this.planetFade.value * (planet.planetType === 'Terrestrial' ? 0.2 : 0.12);
-    assets.cloudMaterial.opacity = this.planetFade.value * (planet.planetType === 'Terrestrial' ? 0.28 : 0.18);
-    assets.tiltGroup.rotation.x = assets.axialTiltRad;
-
-    const showVoronoi = this.overlayMode === 'voronoi' || this.overlayMode === 'both';
-    const showTriangulated = this.overlayMode === 'triangulated' || this.overlayMode === 'both';
-    assets.overlayMesh.visible = showVoronoi;
-    assets.overlayMaterial.opacity = showVoronoi ? this.planetFade.value * 0.35 : 0;
-    if (assets.triOverlayMesh && assets.triOverlayMaterial) {
-      assets.triOverlayMesh.visible = showTriangulated;
-      assets.triOverlayMaterial.opacity = showTriangulated ? this.planetFade.value * 0.25 : 0;
+    const planetFade = this.planetFade.value;
+    assets.bodyMaterial.opacity = planetFade * 0.04;
+    if (assets.bodyMaterial.map) {
+      assets.bodyMaterial.map = null;
+      assets.bodyMaterial.needsUpdate = true;
     }
+    assets.atmosphereMaterial.opacity = 0;
+    assets.atmosphereMesh.visible = false;
+    assets.cloudMaterial.opacity = 0;
+    assets.cloudMesh.visible = false;
+    assets.wireCoreMaterial.opacity = planetFade * 0.95;
+    assets.wireGlowMaterial.opacity = planetFade * 0.35;
+    assets.tiltGroup.rotation.x = assets.axialTiltRad;
 
     const rotation = this.timeDays * assets.rotationSpeedRadPerDay;
     assets.spinGroup.rotation.y = rotation;
     assets.cloudMesh.rotation.y = rotation * 0.15;
     assets.atmosphereMesh.rotation.y = rotation * 0.6;
 
-    const qualityScreenPx = this.lastPlanetScreenPx * this.qualityScale;
-    if (showVoronoi) {
-      const surfaceFrequency =
-        planet.surfaceDescriptor?.config.gridKind === 'geodesic' ? planet.surfaceDescriptor.config.frequency : null;
-      const overlayFrequency = resolveOverlayFrequency(surfaceFrequency, qualityScreenPx);
-      const desiredOverlay = getVoronoiOverlayGeometry(overlayFrequency);
-      if (assets.overlayMesh.geometry !== desiredOverlay) {
-        assets.overlayMesh.geometry = desiredOverlay;
-      }
-    }
-
-    this.requestPlanetTexture(assets, system.id, qualityScreenPx);
 
     const starPositions = this.getStarPositions(system);
     const maxLights = Math.min(assets.starLights.length, system.stars.length);
@@ -3244,14 +3220,15 @@ export class SpaceView {
       orbitParentStars.push(bodyParentStarIndex[index]);
     });
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
+    const bodyMaterial = new THREE.MeshBasicMaterial({
       color: '#ffffff',
-      roughness: 0.8,
-      metalness: 0.05,
       transparent: true,
       opacity: 1,
+      vertexColors: true,
+      wireframe: true,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
-      vertexColors: true
+      toneMapped: false
     });
     const bodyMesh = new THREE.InstancedMesh(getSphereGeometry(16, 12), bodyMaterial, Math.max(1, bodyData.length));
     bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -3349,17 +3326,47 @@ export class SpaceView {
     group.add(tiltGroup);
     tiltGroup.add(spinGroup);
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(planet.baseColor),
-      roughness: 0.7,
-      metalness: 0.05,
+    const baseColor = new THREE.Color(planet.baseColor);
+    const fillColor = baseColor.clone().multiplyScalar(0.08);
+    const bodyMaterial = new THREE.MeshBasicMaterial({
+      color: fillColor,
       transparent: true,
-      opacity: 0,
-      depthWrite: false
+      opacity: 0.04,
+      depthWrite: false,
+      toneMapped: false
     });
     const bodyMesh = new THREE.Mesh(getSphereGeometry(64, 48), bodyMaterial);
     bodyMesh.scale.setScalar(planet.radiusMeters / this.scales.metersPerPlanetUnit);
     spinGroup.add(bodyMesh);
+
+    const wireGeometry = getPlanetWireLineGeometry('24:18');
+    const wireGlowMaterial = new LineMaterial({
+      color: baseColor,
+      linewidth: 2.2,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false
+    });
+    wireGlowMaterial.resolution.set(this.sizePx.width, this.sizePx.height);
+    const wireGlow = new Line2(wireGeometry, wireGlowMaterial);
+    wireGlow.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.006);
+    spinGroup.add(wireGlow);
+
+    const wireCoreMaterial = new LineMaterial({
+      color: baseColor,
+      linewidth: 1.1,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false
+    });
+    wireCoreMaterial.resolution.set(this.sizePx.width, this.sizePx.height);
+    const wireCore = new Line2(wireGeometry, wireCoreMaterial);
+    wireCore.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.003);
+    spinGroup.add(wireCore);
 
     const atmosphereMaterial = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(planet.baseColor).lerp(new THREE.Color('#9fd3ff'), 0.35),
@@ -3403,32 +3410,6 @@ export class SpaceView {
       tiltGroup.add(ringMesh);
     }
 
-    const overlayMaterial = new THREE.LineBasicMaterial({
-      color: '#d8dbe6',
-      transparent: true,
-      opacity: 0,
-      depthWrite: false
-    });
-    const overlayGeometry = new THREE.BufferGeometry();
-    const overlayMesh = new THREE.LineSegments(overlayGeometry, overlayMaterial);
-    overlayMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.002);
-    spinGroup.add(overlayMesh);
-
-    let triOverlayMesh: THREE.LineSegments | null = null;
-    let triOverlayMaterial: THREE.LineBasicMaterial | null = null;
-    if (this.overlayMode === 'triangulated' || this.overlayMode === 'both') {
-      triOverlayMaterial = new THREE.LineBasicMaterial({
-        color: '#91a0c1',
-        transparent: true,
-        opacity: 0,
-        depthWrite: false
-      });
-      const triGeometry = new THREE.WireframeGeometry(getSphereGeometry(24, 18));
-      triOverlayMesh = new THREE.LineSegments(triGeometry, triOverlayMaterial);
-      triOverlayMesh.scale.setScalar((planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.003);
-      spinGroup.add(triOverlayMesh);
-    }
-
     const starLights: THREE.DirectionalLight[] = [];
     const starLightTargets: THREE.Object3D[] = [];
     for (let i = 0; i < 3; i += 1) {
@@ -3456,10 +3437,10 @@ export class SpaceView {
       cloudMesh,
       cloudMaterial,
       ringMesh,
-      overlayMesh,
-      overlayMaterial,
-      triOverlayMesh,
-      triOverlayMaterial,
+      wireCore,
+      wireGlow,
+      wireCoreMaterial,
+      wireGlowMaterial,
       planetData: planet,
       textureState: {
         seed: deriveSeed(hashString(planet.id), 'texture'),
