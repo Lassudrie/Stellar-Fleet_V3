@@ -1606,11 +1606,17 @@ export class SpaceView {
       crossFadeSeconds: 0.6,
       ...options.thresholds
     };
-    if (options.thresholds?.planetMeshEnterPx === undefined) {
-      this.thresholds.planetMeshEnterPx = this.thresholds.planetEnterPx;
+    if (this.thresholds.systemEnterPx <= this.thresholds.systemExitPx) {
+      this.thresholds.systemEnterPx = this.thresholds.systemExitPx + 1;
     }
-    if (options.thresholds?.planetMeshExitPx === undefined) {
-      this.thresholds.planetMeshExitPx = this.thresholds.planetExitPx;
+    if (this.thresholds.planetEnterPx <= this.thresholds.planetExitPx) {
+      this.thresholds.planetEnterPx = this.thresholds.planetExitPx + 1;
+    }
+    if (this.thresholds.planetMeshEnterPx <= this.thresholds.planetMeshExitPx) {
+      this.thresholds.planetMeshEnterPx = this.thresholds.planetMeshExitPx + 1;
+    }
+    if (this.thresholds.planetImpostorExitPx <= this.thresholds.planetImpostorEnterPx) {
+      this.thresholds.planetImpostorExitPx = this.thresholds.planetImpostorEnterPx + 1;
     }
     this.scales = {
       metersPerGalaxyUnit: LY_METERS,
