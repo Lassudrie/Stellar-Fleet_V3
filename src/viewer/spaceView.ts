@@ -1615,6 +1615,12 @@ export class SpaceView {
     this.planetScene.add(this.planetRoot);
     this.shipScene.add(this.shipRoot);
     this.shipRoot.visible = false;
+    const shipAmbient = new THREE.AmbientLight(0xffffff, 0.65);
+    const shipKey = new THREE.DirectionalLight(0xffffff, 1.15);
+    shipKey.position.set(4, 3, 2);
+    const shipRim = new THREE.DirectionalLight(0x88aaff, 0.45);
+    shipRim.position.set(-3, 2, -4);
+    this.shipScene.add(shipAmbient, shipKey, shipRim);
 
     this.activeSystemMaterial = new THREE.PointsMaterial({
       size: 8,
