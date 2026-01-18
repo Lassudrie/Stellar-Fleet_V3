@@ -2313,7 +2313,7 @@ export class SpaceView {
       ? this.lastPlanetScreenPxSmoothed + (bestScore - this.lastPlanetScreenPxSmoothed) * smoothing
       : bestScore;
     this.lastPlanetScreenPx = this.lastPlanetScreenPxSmoothed;
-    const detailed = this.planetGate.update(this.lastPlanetScreenPxSmoothed);
+    const detailed = this.lastPlanetScreenPxSmoothed > 0;
     this.planetFade.update(dtSeconds, detailed);
 
     this.ensurePlanetAssetsImmediate(bestPlanet);
