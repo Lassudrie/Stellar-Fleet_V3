@@ -1137,12 +1137,7 @@ type SystemAssets = {
   orbitGeometries: Array<THREE.BufferGeometry | LineGeometry>;
   bodyMesh: THREE.InstancedMesh;
   bodyMaterial: THREE.MeshBasicMaterial;
-  bodyPointGeometry: THREE.BufferGeometry;
-  bodyPointMaterial: THREE.PointsMaterial;
-  bodyPoints: THREE.Points;
-  bodyImpostors: THREE.Sprite[];
   bodyData: BodyViewData[];
-  bodyPositions: Vec3[];
   bodyParentIndex: Array<number | null>;
   bodyParentStarIndex: Array<number | null>;
   orbitParents: Array<number | null>;
@@ -1207,55 +1202,6 @@ const getPlanetWireLineGeometry = (() => {
     geometry.userData.shared = true;
     cache.set(detailKey, geometry);
     return geometry;
-  };
-})();
-
-const getPlanetImpostorTexture = (() => {
-  let cached: THREE.Texture | null = null;
-  return (): THREE.Texture => {
-    if (cached) return cached;
-    const size = 128;
-    const canvas =
-      typeof OffscreenCanvas !== 'undefined'
-        ? new OffscreenCanvas(size, size)
-        : typeof document !== 'undefined'
-          ? document.createElement('canvas')
-          : null;
-    if (!canvas) {
-      cached = new THREE.Texture();
-      return cached;
-    }
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-    if (!ctx) {
-      cached = new THREE.Texture();
-      return cached;
-    }
-    const center = size * 0.5;
-    const highlight = size * 0.22;
-    const gradient = ctx.createRadialGradient(
-      center - highlight * 0.6,
-      center - highlight * 0.6,
-      highlight * 0.2,
-      center,
-      center,
-      center
-    );
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(0.6, 'rgba(255, 255, 255, 0.92)');
-    gradient.addColorStop(0.9, 'rgba(90, 90, 90, 0.55)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    const texture = new THREE.CanvasTexture(canvas as HTMLCanvasElement);
-    texture.minFilter = THREE.LinearMipMapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.needsUpdate = true;
-    cached = texture;
-    return texture;
   };
 })();
 
@@ -2530,9 +2476,7 @@ export class SpaceView {
       );
 
       const fovRad = this.camera.fov * (Math.PI / 180);
-      const meshRange = Math.max(1, this.thresholds.planetMeshEnterPx - this.thresholds.planetMeshExitPx);
-      const impostorRange = Math.max(1, this.thresholds.planetImpostorExitPx - this.thresholds.planetImpostorEnterPx);
-      let maxDetailBlend = 0;
+      const minVisiblePx = 1;
 
       assets.starMaterials.forEach(material => {
         material.opacity = systemOpacity;
@@ -2564,7 +2508,6 @@ export class SpaceView {
         material.opacity = systemOpacity * clutterFade * 0.6;
       });
 
-      const pointPositions = assets.bodyPointGeometry.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < assets.bodyData.length; i += 1) {
         const body = assets.bodyData[i];
         const position = orbitingPositions[i];
@@ -2578,46 +2521,21 @@ export class SpaceView {
         const dz = this.lastCameraMeters.z - worldZ;
         const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         const screenPx = screenSpaceRadiusPx(body.radiusMeters, distance, fovRad, this.sizePx.height);
-        const meshBlend = clamp((screenPx - this.thresholds.planetMeshExitPx) / meshRange, 0, 1);
-        const impostorBlend = clamp(
-          (screenPx - this.thresholds.planetImpostorEnterPx) / impostorRange,
-          0,
-          1
-        );
-        maxDetailBlend = Math.max(maxDetailBlend, Math.max(meshBlend, impostorBlend));
 
         const unitX = position.x / this.scales.metersPerSystemUnit;
         const unitY = position.y / this.scales.metersPerSystemUnit;
         const unitZ = position.z / this.scales.metersPerSystemUnit;
-        const meshScale = (body.radiusMeters / this.scales.metersPerSystemUnit) * meshBlend;
+        const meshScale =
+          screenPx >= minVisiblePx ? body.radiusMeters / this.scales.metersPerSystemUnit : 0;
         scratchMatrixA.compose(
           scratchVec3A.set(unitX, unitY, unitZ),
           scratchQuatA.identity(),
           scratchVec3B.set(meshScale, meshScale, meshScale)
         );
         assets.bodyMesh.setMatrixAt(i, scratchMatrixA);
-
-        pointPositions.setXYZ(i, unitX, unitY, unitZ);
-
-        const impostor = assets.bodyImpostors[i];
-        if (impostor) {
-          const impostorScale = (body.radiusMeters / this.scales.metersPerSystemUnit) * 2;
-          impostor.position.set(unitX, unitY, unitZ);
-          impostor.scale.setScalar(impostorScale);
-          const impostorOpacity = systemOpacity * clutterFade * impostorBlend * (1 - meshBlend);
-          const impostorMaterial = impostor.material as THREE.SpriteMaterial;
-          impostorMaterial.opacity = impostorOpacity;
-          impostor.visible = impostorOpacity > 0.01;
-        }
       }
 
       assets.bodyMesh.instanceMatrix.needsUpdate = true;
-      pointPositions.needsUpdate = true;
-      const pointOpacity = systemOpacity * clutterFade * (1 - maxDetailBlend);
-      const minPointOpacity = this.planetFade.value < 0.6 ? systemOpacity * 0.12 : 0;
-      const adjustedPointOpacity = Math.max(pointOpacity, minPointOpacity);
-      assets.bodyPointMaterial.opacity = adjustedPointOpacity;
-      assets.bodyPoints.visible = adjustedPointOpacity > 0.01;
       assets.bodyMaterial.opacity = systemOpacity * clutterFade;
 
       assets.orbitLines.forEach((line, index) => {
@@ -3205,7 +3123,6 @@ export class SpaceView {
     const orbitParentStars: Array<number | null> = [];
 
     const bodyData = system.orbitingBodies;
-    const bodyPositions = bodyData.map(() => vec3());
     const bodyParentIndex = system.orbitingParentIndex;
     const bodyParentStarIndex = system.orbitingParentStarIndex;
 
@@ -3244,49 +3161,6 @@ export class SpaceView {
     }
     group.add(bodyMesh);
 
-    const bodyImpostors: THREE.Sprite[] = [];
-    const impostorTexture = getPlanetImpostorTexture();
-    bodyData.forEach(body => {
-      const material = new THREE.SpriteMaterial({
-        map: impostorTexture,
-        color: new THREE.Color(body.baseColor),
-        transparent: true,
-        opacity: 0,
-        depthWrite: false
-      });
-      const sprite = new THREE.Sprite(material);
-      sprite.visible = false;
-      group.add(sprite);
-      bodyImpostors.push(sprite);
-    });
-
-    const pointPositions = new Float32Array(Math.max(1, bodyData.length) * 3);
-    const pointColors = new Float32Array(Math.max(1, bodyData.length) * 3);
-    bodyData.forEach((body, index) => {
-      const baseIndex = index * 3;
-      const color = new THREE.Color(body.baseColor);
-      pointPositions[baseIndex] = 0;
-      pointPositions[baseIndex + 1] = 0;
-      pointPositions[baseIndex + 2] = 0;
-      pointColors[baseIndex] = color.r;
-      pointColors[baseIndex + 1] = color.g;
-      pointColors[baseIndex + 2] = color.b;
-    });
-    const bodyPointGeometry = new THREE.BufferGeometry();
-    bodyPointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPositions, 3));
-    bodyPointGeometry.setAttribute('color', new THREE.BufferAttribute(pointColors, 3));
-    const bodyPointMaterial = new THREE.PointsMaterial({
-      size: 6,
-      sizeAttenuation: false,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.85,
-      depthWrite: false
-    });
-    const bodyPoints = new THREE.Points(bodyPointGeometry, bodyPointMaterial);
-    bodyPoints.frustumCulled = false;
-    group.add(bodyPoints);
-
     const ambient = new THREE.AmbientLight(0x404040, 0.25);
     group.add(ambient);
 
@@ -3304,12 +3178,7 @@ export class SpaceView {
       orbitGeometries,
       bodyMesh,
       bodyMaterial,
-      bodyPointGeometry,
-      bodyPointMaterial,
-      bodyPoints,
-      bodyImpostors,
       bodyData,
-      bodyPositions,
       bodyParentIndex,
       bodyParentStarIndex,
       orbitParents,
