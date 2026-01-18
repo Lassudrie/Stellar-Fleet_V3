@@ -294,6 +294,9 @@ const updateDebugOverlay = () => {
     `Loaded systems: ${info.loadedSystems}`,
     `Loaded planets: ${info.loadedPlanets}`,
     `Planet assets: ${info.planetAssetsLoaded ? 'loaded' : 'missing'} (${info.planetAssetState})`,
+    `Planet preload px: ${info.planetPreloadPx.toFixed(1)}`,
+    `Planet asset queued: ${info.planetAssetQueued ? 'yes' : 'no'}`,
+    `Active planet index: ${info.activePlanetIndex ?? 'none'}`,
     `Draw calls: ${info.drawCalls}`,
     `Triangles: ${info.triangles}`
   ];

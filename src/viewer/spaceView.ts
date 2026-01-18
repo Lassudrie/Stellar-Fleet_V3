@@ -951,6 +951,10 @@ class StreamingQueue {
   private pending = new Set<string>();
   private queue: Array<{ key: string; run: () => void }> = [];
 
+  has(key: string): boolean {
+    return this.pending.has(key);
+  }
+
   enqueue(key: string, run: () => void): void {
     if (this.pending.has(key)) return;
     this.pending.add(key);
@@ -1118,10 +1122,10 @@ export interface SpaceViewOptions {
   minDistanceMeters?: number;
   maxTasksPerFrame?: number;
   floatingOriginSnapMeters?: number;
-  timeScaleDaysPerSecond?: number;
-  debugSurfaceMode?: 'albedo' | 'biome';
-  orbitLineMode?: 'line2' | 'basic';
-}
+    timeScaleDaysPerSecond?: number;
+    debugSurfaceMode?: 'albedo' | 'biome';
+    orbitLineMode?: 'line2' | 'basic';
+  }
 
 type SystemAssets = {
   group: THREE.Group;
@@ -1756,6 +1760,9 @@ export class SpaceView {
     loadedPlanets: number;
     planetAssetsLoaded: boolean;
     planetAssetState: PlanetAssetState;
+    planetAssetQueued: boolean;
+    planetPreloadPx: number;
+    activePlanetIndex: number | null;
     memory: THREE.WebGLInfo['memory'];
     drawCalls: number;
     triangles: number;
@@ -1794,6 +1801,9 @@ export class SpaceView {
       : null;
     const activePlanetAssets = this.activePlanetId ? this.planetAssets.get(this.activePlanetId) ?? null : null;
     const planetAssetsLoaded = Boolean(activePlanetAssets);
+    const planetAssetQueued = this.activePlanetId
+      ? this.streamingQueue.has(`planet:${this.activePlanetId}`)
+      : false;
     const planetAssetState: PlanetAssetState = !this.activePlanetId
       ? 'none'
       : !activePlanetAssets
@@ -1847,6 +1857,9 @@ export class SpaceView {
       loadedPlanets: this.planetAssets.size,
       planetAssetsLoaded,
       planetAssetState,
+      planetAssetQueued,
+      planetPreloadPx: this.thresholds.planetPreloadPx,
+      activePlanetIndex: this.activePlanetIndex,
       memory: this.renderer.info.memory,
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
