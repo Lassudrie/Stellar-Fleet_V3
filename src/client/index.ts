@@ -172,8 +172,8 @@ const updateLabels = (): void => {
     node.dataset.kind = label.kind;
     node.style.left = `${Math.round(label.x)}px`;
     node.style.top = `${Math.round(label.y)}px`;
-    node.style.opacity = `${label.opacity}`;
-    node.style.display = label.opacity > 0.01 ? 'block' : 'none';
+    node.style.opacity = '1';
+    node.style.display = 'block';
   });
 
   labelNodes.forEach((node, id) => {

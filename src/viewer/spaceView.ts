@@ -1879,7 +1879,7 @@ export class SpaceView {
     }
 
     const system = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
-    if (!system || this.systemFade.value <= 0.01) {
+    if (!system) {
       this.labelScratch.length = 0;
       return this.labelScratch;
     }
@@ -1900,11 +1900,6 @@ export class SpaceView {
     });
 
     const fovRad = this.camera.fov * (Math.PI / 180);
-    const baseOpacity = clamp(this.systemFade.value, 0, 1);
-    const starThreshold = Math.max(2, this.thresholds.planetImpostorEnterPx * 0.35);
-    const planetThreshold = Math.max(4, this.thresholds.planetImpostorEnterPx * 0.7);
-    const moonThreshold = Math.max(3, this.thresholds.planetImpostorEnterPx * 0.45);
-
     const labelWorld = this.labelWorldScratch;
     const starPositions = this.getStarPositions(system);
     for (let i = 0; i < system.stars.length; i += 1) {
@@ -1920,7 +1915,6 @@ export class SpaceView {
       const dz = cameraMeters.z - worldZ;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
       const screenPx = screenSpaceRadiusPx(star.radiusMeters, distance, fovRad, this.sizePx.height);
-      if (screenPx < starThreshold) continue;
 
       const screenPos = this.projectMetersToScreen(
         setVec3(labelWorld, worldX, worldY, worldZ),
@@ -1930,7 +1924,7 @@ export class SpaceView {
       if (!screenPos) continue;
 
       const offset = Math.max(12, screenPx * 0.6);
-      this.pushScreenLabel(star, screenPos.x, screenPos.y - offset, baseOpacity);
+      this.pushScreenLabel(star, screenPos.x, screenPos.y - offset);
     }
 
     const orbitingPositions = this.computeOrbitingPositions(system);
@@ -1945,8 +1939,6 @@ export class SpaceView {
       const dz = cameraMeters.z - worldZ;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
       const screenPx = screenSpaceRadiusPx(body.radiusMeters, distance, fovRad, this.sizePx.height);
-      const threshold = body.kind === 'moon' ? moonThreshold : planetThreshold;
-      if (screenPx < threshold) continue;
 
       const screenPos = this.projectMetersToScreen(
         setVec3(labelWorld, worldX, worldY, worldZ),
@@ -1956,14 +1948,14 @@ export class SpaceView {
       if (!screenPos) continue;
 
       const offset = Math.max(10, screenPx * 0.55);
-      this.pushScreenLabel(body, screenPos.x, screenPos.y - offset, baseOpacity);
+      this.pushScreenLabel(body, screenPos.x, screenPos.y - offset);
     }
 
     this.labelScratch.length = this.labelCount;
     return this.labelScratch;
   }
 
-  private pushScreenLabel(body: BodyViewData, x: number, y: number, opacity: number): void {
+  private pushScreenLabel(body: BodyViewData, x: number, y: number): void {
     const index = this.labelCount;
     const label = this.labelScratch[index] ?? {
       id: '',
@@ -1978,7 +1970,7 @@ export class SpaceView {
     label.kind = body.kind;
     label.x = x;
     label.y = y;
-    label.opacity = clamp(opacity, 0, 1);
+    label.opacity = 1;
     this.labelScratch[index] = label;
     this.labelCount += 1;
   }
@@ -2519,7 +2511,7 @@ export class SpaceView {
       });
 
       assets.orbitMaterials.forEach(material => {
-        material.opacity = systemOpacity * clutterFade * 0.6;
+        material.opacity = 0.4;
       });
 
       for (let i = 0; i < assets.bodyData.length; i += 1) {
