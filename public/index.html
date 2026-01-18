@@ -124,6 +124,11 @@
         line-height: 1.4;
         white-space: pre;
         pointer-events: auto;
+        max-width: min(360px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        box-sizing: border-box;
+        -webkit-overflow-scrolling: touch;
       }
 
       .debug-overlay__toggle {
@@ -247,6 +252,27 @@
           right: 12px;
           top: auto;
           bottom: 12px;
+        }
+
+        .debug-overlay {
+          left: 8px;
+          right: 8px;
+          top: 8px;
+          padding: 8px 10px;
+          max-width: none;
+          max-height: calc(100vh - 16px);
+          font-size: 12px;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .debug-overlay__toggle {
+          right: 6px;
+          top: 6px;
+        }
+
+        .debug-overlay__content {
+          margin-top: 22px;
         }
 
         .menu-panel {

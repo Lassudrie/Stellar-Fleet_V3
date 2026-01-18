@@ -55,6 +55,11 @@ const formatMeters = (value: number): string => {
   return `${value.toFixed(0)} m`;
 };
 
+const formatKilometers = (valueMeters: number | null | undefined): string => {
+  if (!Number.isFinite(valueMeters ?? NaN)) return 'n/a';
+  return `${((valueMeters ?? 0) / 1000).toFixed(1)} km`;
+};
+
 const formatVec3 = (value: { x: number; y: number; z: number } | null | undefined): string => {
   if (!value) return 'n/a';
   return `(${formatMeters(value.x)}, ${formatMeters(value.y)}, ${formatMeters(value.z)})`;
@@ -252,11 +257,21 @@ const updateDebugOverlay = () => {
   }
   const info = runtime.view.getDebugInfo();
   const bodyInfo = info.activeBodyInfo;
+  const targetDistanceMeters =
+    info.targetMeters && info.cameraMeters
+      ? Math.hypot(
+          info.cameraMeters.x - info.targetMeters.x,
+          info.cameraMeters.y - info.targetMeters.y,
+          info.cameraMeters.z - info.targetMeters.z
+        )
+      : null;
+  const targetPlanetPx = info.activePlanetId ? info.planetScreenPx.toFixed(1) : 'n/a';
   const lines = [
     `Stage: ${info.stage}`,
     `Zoom: ${formatMeters(info.zoomDistanceMeters)}`,
     `System px: ${info.systemScreenPx.toFixed(1)}`,
-    `Planet px: ${info.planetScreenPx.toFixed(1)}`,
+    `Target planet px: ${targetPlanetPx}`,
+    `Camera->target: ${formatKilometers(targetDistanceMeters)}`,
     `System fade: ${info.systemFade.toFixed(2)}`,
     `Planet fade: ${info.planetFade.toFixed(2)}`,
     `Active system: ${info.activeSystemId ?? 'none'}`,
