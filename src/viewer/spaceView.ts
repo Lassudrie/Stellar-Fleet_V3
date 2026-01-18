@@ -338,6 +338,13 @@ export type ScreenLabel = {
   opacity: number;
 };
 
+export type ScreenMarker = {
+  id: string;
+  kind: BodyKind;
+  x: number;
+  y: number;
+};
+
 const orbitPeriodDaysFromAuMass = (semiMajorAxisAu: number, massSun: number): number => {
   const clamped = Math.max(0.01, semiMajorAxisAu);
   const safeMass = Math.max(0.1, massSun);
@@ -1513,6 +1520,8 @@ export class SpaceView {
   private planetLightDirectionScratch: Vec3 = vec3();
   private labelScratch: ScreenLabel[] = [];
   private labelCount = 0;
+  private markerScratch: ScreenMarker[] = [];
+  private markerCount = 0;
   private labelWorldScratch: Vec3 = vec3();
   private textureCache = new Map<string, { texture: THREE.Texture; resolution: number; lastUsed: number }>();
   private textureCacheMax = 24;
@@ -1955,6 +1964,92 @@ export class SpaceView {
     return this.labelScratch;
   }
 
+  getScreenMarkers(): ScreenMarker[] {
+    this.markerCount = 0;
+    if (this.sizePx.width <= 1 || this.sizePx.height <= 1) {
+      this.markerScratch.length = 0;
+      return this.markerScratch;
+    }
+
+    const system = this.activeSystemId ? this.systemById.get(this.activeSystemId) ?? null : null;
+    if (!system) {
+      this.markerScratch.length = 0;
+      return this.markerScratch;
+    }
+
+    const originMeters = this.lastOriginMeters;
+    const cameraMeters = this.lastCameraMeters;
+    if (!Number.isFinite(cameraMeters.x) || !Number.isFinite(cameraMeters.y) || !Number.isFinite(cameraMeters.z)) {
+      this.markerScratch.length = 0;
+      return this.markerScratch;
+    }
+
+    this.configureCameraForPass({
+      originMeters,
+      cameraMeters,
+      metersPerUnit: this.scales.metersPerSystemUnit,
+      passCenterMeters: system.positionMeters,
+      passExtentMeters: system.extentMeters
+    });
+
+    const fovRad = this.camera.fov * (Math.PI / 180);
+    const width = this.sizePx.width;
+    const height = this.sizePx.height;
+    const margin = 10;
+    const maxX = Math.max(margin, width - margin);
+    const maxY = Math.max(margin, height - margin);
+
+    const pushMarker = (body: BodyViewData, worldX: number, worldY: number, worldZ: number) => {
+      const dx = cameraMeters.x - worldX;
+      const dy = cameraMeters.y - worldY;
+      const dz = cameraMeters.z - worldZ;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const screenPx = screenSpaceRadiusPx(body.radiusMeters, distance, fovRad, height);
+      const screenPos = this.projectMetersToScreenRaw(
+        setVec3(this.labelWorldScratch, worldX, worldY, worldZ),
+        originMeters,
+        this.scales.metersPerSystemUnit
+      );
+      if (!screenPos) return;
+      const onScreen =
+        screenPx >= 1 &&
+        screenPos.z >= -1 &&
+        screenPos.z <= 1 &&
+        screenPos.x >= 0 &&
+        screenPos.x <= width &&
+        screenPos.y >= 0 &&
+        screenPos.y <= height;
+      if (onScreen) return;
+      const clampedX = clamp(screenPos.x, margin, maxX);
+      const clampedY = clamp(screenPos.y, margin, maxY);
+      this.pushScreenMarker(body, clampedX, clampedY);
+    };
+
+    const starPositions = this.getStarPositions(system);
+    for (let i = 0; i < system.stars.length; i += 1) {
+      const star = system.stars[i];
+      const position = starPositions[i];
+      if (!position) continue;
+      const worldX = system.positionMeters.x + position.x;
+      const worldY = system.positionMeters.y + position.y;
+      const worldZ = system.positionMeters.z + position.z;
+      pushMarker(star, worldX, worldY, worldZ);
+    }
+
+    const orbitingPositions = this.computeOrbitingPositions(system);
+    for (let i = 0; i < system.orbitingBodies.length; i += 1) {
+      const body = system.orbitingBodies[i];
+      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeDays);
+      const worldX = system.positionMeters.x + position.x;
+      const worldY = system.positionMeters.y + position.y;
+      const worldZ = system.positionMeters.z + position.z;
+      pushMarker(body, worldX, worldY, worldZ);
+    }
+
+    this.markerScratch.length = this.markerCount;
+    return this.markerScratch;
+  }
+
   private pushScreenLabel(body: BodyViewData, x: number, y: number): void {
     const index = this.labelCount;
     const label = this.labelScratch[index] ?? {
@@ -1973,6 +2068,22 @@ export class SpaceView {
     label.opacity = 1;
     this.labelScratch[index] = label;
     this.labelCount += 1;
+  }
+
+  private pushScreenMarker(body: BodyViewData, x: number, y: number): void {
+    const index = this.markerCount;
+    const marker = this.markerScratch[index] ?? {
+      id: '',
+      kind: 'planet',
+      x: 0,
+      y: 0
+    };
+    marker.id = body.id;
+    marker.kind = body.kind;
+    marker.x = x;
+    marker.y = y;
+    this.markerScratch[index] = marker;
+    this.markerCount += 1;
   }
 
   resize(width: number, height: number, pixelRatio?: number): void {
@@ -2798,6 +2909,23 @@ export class SpaceView {
     );
     vector.project(this.camera);
     if (vector.z < -1 || vector.z > 1) return null;
+    const x = (vector.x * 0.5 + 0.5) * this.sizePx.width;
+    const y = (-vector.y * 0.5 + 0.5) * this.sizePx.height;
+    return { x, y, z: vector.z };
+  }
+
+  private projectMetersToScreenRaw(
+    positionMeters: Vec3,
+    originMeters: Vec3,
+    metersPerUnit: number
+  ): { x: number; y: number; z: number } | null {
+    const vector = scratchVec3A.set(
+      (positionMeters.x - originMeters.x) / metersPerUnit,
+      (positionMeters.y - originMeters.y) / metersPerUnit,
+      (positionMeters.z - originMeters.z) / metersPerUnit
+    );
+    vector.project(this.camera);
+    if (!Number.isFinite(vector.x) || !Number.isFinite(vector.y) || !Number.isFinite(vector.z)) return null;
     const x = (vector.x * 0.5 + 0.5) * this.sizePx.width;
     const y = (-vector.y * 0.5 + 0.5) * this.sizePx.height;
     return { x, y, z: vector.z };

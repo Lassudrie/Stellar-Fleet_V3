@@ -82,6 +82,7 @@ const hud = getElement<HTMLDivElement>('#hud');
 const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
 const debugOverlayToggle = getElement<HTMLButtonElement>('#debug-overlay-toggle');
 const debugOverlayContent = getElement<HTMLPreElement>('#debug-overlay-content');
+const markerLayer = getElement<HTMLDivElement>('#marker-layer');
 const labelLayer = getElement<HTMLDivElement>('#label-layer');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
@@ -98,6 +99,8 @@ const timeScaleInputs = [menuTimeScaleInput, hudTimeScaleInput];
 const timeScaleValues = [menuTimeScaleValue, hudTimeScaleValue];
 const labelNodes = new Map<string, HTMLDivElement>();
 const visibleLabelIds = new Set<string>();
+const markerNodes = new Map<string, HTMLDivElement>();
+const visibleMarkerIds = new Set<string>();
 
 const resolveScenarioId = (candidate: string | null): string => {
   if (candidate && scenarioById.has(candidate)) return candidate;
@@ -134,6 +137,7 @@ const setMenuVisible = (visible: boolean): void => {
   menuScreen.classList.toggle('hidden', !visible);
   hud.classList.toggle('hidden', visible);
   labelLayer.classList.toggle('hidden', visible);
+  markerLayer.classList.toggle('hidden', visible);
 };
 
 const setTimeScaleUI = (value: number): void => {
@@ -149,6 +153,8 @@ const setTimeScaleUI = (value: number): void => {
 const clearLabels = (): void => {
   labelNodes.clear();
   labelLayer.textContent = '';
+  markerNodes.clear();
+  markerLayer.textContent = '';
 };
 
 const updateLabels = (): void => {
@@ -178,6 +184,33 @@ const updateLabels = (): void => {
 
   labelNodes.forEach((node, id) => {
     if (visibleLabelIds.has(id)) return;
+    node.style.display = 'none';
+  });
+};
+
+const updateMarkers = (): void => {
+  if (!runtime || markerLayer.classList.contains('hidden')) return;
+
+  const markers = runtime.view.getScreenMarkers();
+  visibleMarkerIds.clear();
+
+  markers.forEach(marker => {
+    visibleMarkerIds.add(marker.id);
+    let node = markerNodes.get(marker.id);
+    if (!node) {
+      node = document.createElement('div');
+      node.className = 'marker';
+      markerLayer.appendChild(node);
+      markerNodes.set(marker.id, node);
+    }
+    node.dataset.kind = marker.kind;
+    node.style.left = `${Math.round(marker.x)}px`;
+    node.style.top = `${Math.round(marker.y)}px`;
+    node.style.display = 'block';
+  });
+
+  markerNodes.forEach((node, id) => {
+    if (visibleMarkerIds.has(id)) return;
     node.style.display = 'none';
   });
 };
@@ -573,6 +606,7 @@ const frame = (time: number) => {
   }
   updateDebugOverlay();
   updateLabels();
+  updateMarkers();
   window.requestAnimationFrame(frame);
 };
 
