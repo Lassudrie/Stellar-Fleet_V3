@@ -9,11 +9,14 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const outDir = path.join(rootDir, 'dist', 'viewer');
 const publicDir = path.join(rootDir, 'public');
+const content3dDir = path.join(rootDir, 'src', 'content', '3d');
+const outContent3dDir = path.join(outDir, 'content', '3d');
 const entryPoint = path.join(rootDir, 'src', 'client', 'index.ts');
 
 const copyPublic = async () => {
   await mkdir(outDir, { recursive: true });
   await cp(publicDir, outDir, { recursive: true });
+  await cp(content3dDir, outContent3dDir, { recursive: true });
 };
 
 const mode = process.argv[2] ?? 'build';

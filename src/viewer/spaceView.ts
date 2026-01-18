@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   logger,
   sorted,
@@ -29,6 +30,8 @@ const EARTH_RADIUS_METERS = 6_371_000;
 const SUN_RADIUS_METERS = 695_700_000;
 const EARTH_MASS_SUN = 3.003e-6;
 const TWO_PI = Math.PI * 2;
+const TARGET_LENGTH_M = 300;
+const HOMEWORLD_SHIP_MODEL_URL = 'content/3d/object_0.glb';
 
 export type FrameId = string;
 
@@ -303,6 +306,7 @@ export interface SystemViewData {
   orbitingParentStarIndex: Array<number | null>;
   stars: BodyViewData[];
   primaryStarId: string | null;
+  isPlayerHomeworld: boolean;
   defaultFocusPlanetId?: string | null;
 }
 
@@ -584,7 +588,7 @@ const buildBodyViewData = (params: {
   };
 };
 
-const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemViewData => {
+const buildSystemViewData = (system: StarSystem, galaxySeed: number, playerFactionId: string): SystemViewData => {
   const systemSeed = deriveSeed(galaxySeed, `system:${system.id}`);
   const astro = system.astro;
   const bodies: BodyViewData[] = [];
@@ -595,6 +599,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
   const primaryStar = astro?.stars?.[0];
   const starMassSun = primaryStar?.massSun ?? 1;
   const defaultFocusPlanetId = resolveDefaultFocusPlanetId(system);
+  const isPlayerHomeworld = system.isHomeworld && system.ownerFactionId === playerFactionId;
 
   let maxOrbitMeters = 0;
   let maxBodyRadius = 0;
@@ -739,6 +744,7 @@ const buildSystemViewData = (system: StarSystem, galaxySeed: number): SystemView
     orbitingParentStarIndex,
     stars,
     primaryStarId,
+    isPlayerHomeworld,
     defaultFocusPlanetId
   };
 };
@@ -759,7 +765,7 @@ export const buildGalaxyViewDataFromState = (state: GameState): GalaxyViewData =
   const systems = state.systems;
   return {
     seed: state.seed,
-    systems: systems.map(system => buildSystemViewData(system, state.seed)),
+    systems: systems.map(system => buildSystemViewData(system, state.seed, state.playerFactionId)),
     fleets: state.fleets.map(fleet => buildFleetViewData(fleet, systems, factionColors))
   };
 };
@@ -1185,6 +1191,14 @@ type PlanetAssets = {
 
 type PlanetAssetState = 'none' | 'missing' | 'idle' | 'loading' | 'ready';
 
+type ShipModelState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  root: THREE.Object3D | null;
+  scaleFactor: number;
+  radiusMeters: number;
+  lengthUnits: number;
+};
+
 const getSphereGeometry = (() => {
   const cache = new Map<string, THREE.SphereGeometry>();
   return (segments: number, rings: number): THREE.SphereGeometry => {
@@ -1456,10 +1470,12 @@ export class SpaceView {
   private galaxyScene = new THREE.Scene();
   private systemScene = new THREE.Scene();
   private planetScene = new THREE.Scene();
+  private shipScene = new THREE.Scene();
 
   private galaxyRoot = new THREE.Group();
   private systemRoot = new THREE.Group();
   private planetRoot = new THREE.Group();
+  private shipRoot = new THREE.Group();
 
   private galaxyPoints: THREE.Points | null = null;
   private fleetPoints: THREE.Points | null = null;
@@ -1469,6 +1485,20 @@ export class SpaceView {
 
   private systemAssets = new Map<string, SystemAssets>();
   private planetAssets = new Map<string, PlanetAssets>();
+  private homeworldShipState: ShipModelState = {
+    status: 'idle',
+    root: null,
+    scaleFactor: 1,
+    radiusMeters: 0,
+    lengthUnits: 0
+  };
+  private homeworldShipSystemId: string | null = null;
+  private homeworldShipPlanetId: string | null = null;
+  private homeworldShipTargetMeters: Vec3 = vec3();
+  private homeworldShipOffsetMeters: Vec3 = vec3();
+  private homeworldShipActive = false;
+  private homeworldShipAttached = false;
+  private homeworldShipCameraApplied = false;
 
   private data: GalaxyViewData;
   private systemById = new Map<string, SystemViewData>();
@@ -1579,6 +1609,8 @@ export class SpaceView {
     this.galaxyScene.add(this.galaxyRoot);
     this.systemScene.add(this.systemRoot);
     this.planetScene.add(this.planetRoot);
+    this.shipScene.add(this.shipRoot);
+    this.shipRoot.visible = false;
 
     this.activeSystemMaterial = new THREE.PointsMaterial({
       size: 8,
@@ -1625,12 +1657,22 @@ export class SpaceView {
     this.planetAssets.forEach(assets => disposeObject3D(assets.group));
     this.planetAssets.clear();
     this.activePlanetIndex = null;
+    this.homeworldShipSystemId = null;
+    this.homeworldShipPlanetId = null;
+    this.homeworldShipActive = false;
+    this.homeworldShipAttached = false;
+    this.homeworldShipCameraApplied = false;
+    this.shipRoot.visible = false;
 
     let maxDistance = 0;
     data.systems.forEach(system => {
       this.systemById.set(system.id, system);
       maxDistance = Math.max(maxDistance, lengthVec3(system.positionMeters) + system.extentMeters);
     });
+    const homeworldSystem = data.systems.find(system => system.isPlayerHomeworld) ?? null;
+    this.homeworldShipSystemId = homeworldSystem?.id ?? null;
+    this.homeworldShipPlanetId = homeworldSystem?.defaultFocusPlanetId ?? null;
+    this.ensureHomeworldShipModel();
     this.galaxyRadiusMeters = Math.max(1, maxDistance);
 
     this.rebuildGalaxyPoints();
@@ -2172,7 +2214,8 @@ export class SpaceView {
 
   private updateZoomBounds(system: SystemViewData | null): void {
     const maxDistance = this.galaxyRadiusMeters * 2.5;
-    const altitudeMinMeters = 5_000;
+    const shipRadiusMeters = this.homeworldShipActive ? this.homeworldShipState.radiusMeters : 0;
+    const altitudeMinMeters = shipRadiusMeters > 0 ? shipRadiusMeters : 5_000;
     let minDistance = altitudeMinMeters;
 
     if (system) {
@@ -2185,7 +2228,11 @@ export class SpaceView {
       }
 
       if (planet) {
-        minDistance = Math.max(minDistance, planet.radiusMeters + altitudeMinMeters);
+        if (shipRadiusMeters > 0) {
+          minDistance = Math.max(minDistance, shipRadiusMeters);
+        } else {
+          minDistance = Math.max(minDistance, planet.radiusMeters + altitudeMinMeters);
+        }
       }
     }
 
@@ -2236,6 +2283,8 @@ export class SpaceView {
     this.textureCache.forEach(entry => entry.texture.dispose());
     this.textureCache.clear();
     Array.from(this.systemAssets.keys()).forEach(systemId => this.releaseSystemAssets(systemId));
+    disposeObject3D(this.shipRoot);
+    this.shipRoot.clear();
     this.planetAssets.forEach(assets => {
       disposeObject3D(assets.group);
     });
@@ -2697,15 +2746,27 @@ export class SpaceView {
   }
 
   private updatePlanetAssets(system: SystemViewData | null, originMeters: Vec3): void {
-    if (!system || !this.activePlanetId) return;
-    if (this.planetFade.value <= 0) return;
+    if (!system || !this.activePlanetId) {
+      this.setHomeworldShipInactive();
+      return;
+    }
+    if (this.planetFade.value <= 0) {
+      this.setHomeworldShipInactive();
+      return;
+    }
 
     const planetIndex = this.activePlanetIndex;
     const planet = planetIndex !== null ? system.orbitingBodies[planetIndex] ?? null : null;
-    if (!planet || planet.id !== this.activePlanetId) return;
+    if (!planet || planet.id !== this.activePlanetId) {
+      this.setHomeworldShipInactive();
+      return;
+    }
 
     const assets = this.planetAssets.get(planet.id);
-    if (!assets) return;
+    if (!assets) {
+      this.setHomeworldShipInactive();
+      return;
+    }
 
     if (!this.planetRoot.children.includes(assets.group)) {
       this.planetRoot.clear();
@@ -2769,6 +2830,7 @@ export class SpaceView {
       target.position.set(0, 0, 0);
     }
 
+    this.updateHomeworldShip(system, planet, planetWorld, originMeters);
   }
 
   private updateFocusTarget(system: SystemViewData | null, dtSeconds: number): void {
@@ -2780,12 +2842,15 @@ export class SpaceView {
     const focusPlanetBlend = this.activePlanetWorldMeters
       ? (this.focusPlanetId ? Math.max(planetBlend, systemFadeBlend) : planetBlend)
       : 0;
+    const shipTarget = this.homeworldShipActive ? this.homeworldShipTargetMeters : null;
 
     copyVec3(this.focusTargetMeters, this.cameraRig.targetMeters);
     if (systemBlend > 0) {
       lerpVec3(this.focusTargetMeters, this.focusTargetMeters, system.positionMeters, systemBlend);
     }
-    if (this.activePlanetWorldMeters && focusPlanetBlend > 0) {
+    if (shipTarget && focusPlanetBlend > 0) {
+      lerpVec3(this.focusTargetMeters, this.focusTargetMeters, shipTarget, focusPlanetBlend);
+    } else if (this.activePlanetWorldMeters && focusPlanetBlend > 0) {
       lerpVec3(this.focusTargetMeters, this.focusTargetMeters, this.activePlanetWorldMeters, focusPlanetBlend);
     }
 
@@ -2848,6 +2913,18 @@ export class SpaceView {
           activeSystem?.positionMeters ??
           this.activePlanetWorldMeters ??
           vec3()
+      });
+    }
+
+    if (this.homeworldShipActive && this.homeworldShipState.radiusMeters > 0) {
+      this.renderer.clearDepth();
+      this.renderPass({
+        scene: this.shipScene,
+        originMeters,
+        cameraMeters,
+        metersPerUnit: this.scales.metersPerPlanetUnit,
+        passExtentMeters: this.homeworldShipState.radiusMeters,
+        passCenterMeters: this.homeworldShipTargetMeters
       });
     }
   }
@@ -3178,6 +3255,123 @@ export class SpaceView {
     if (this.planetAssets.has(planet.id)) return;
     const assets = this.createPlanetAssets(planet);
     this.planetAssets.set(planet.id, assets);
+  }
+
+  private ensureHomeworldShipModel(): void {
+    if (!this.homeworldShipPlanetId) return;
+    if (this.homeworldShipState.status !== 'idle') return;
+
+    this.homeworldShipState.status = 'loading';
+    const loader = new GLTFLoader();
+    loader.load(
+      HOMEWORLD_SHIP_MODEL_URL,
+      gltf => {
+        const root = gltf.scene ?? gltf.scenes[0];
+        if (!root) {
+          this.homeworldShipState.status = 'error';
+          return;
+        }
+        const preScaleBox = new THREE.Box3().setFromObject(root);
+        const size = preScaleBox.getSize(new THREE.Vector3());
+        const modelLengthUnits = Math.max(size.x, size.y, size.z);
+        if (!(modelLengthUnits > 0)) {
+          this.homeworldShipState.status = 'error';
+          return;
+        }
+        const metersPerUnit = this.scales.metersPerPlanetUnit;
+        const targetLengthUnits = TARGET_LENGTH_M / metersPerUnit;
+        const scaleFactor = targetLengthUnits / modelLengthUnits;
+        root.scale.multiplyScalar(scaleFactor);
+
+        const scaledBox = new THREE.Box3().setFromObject(root);
+        const sphere = new THREE.Sphere();
+        scaledBox.getBoundingSphere(sphere);
+        const radiusMeters = sphere.radius * metersPerUnit;
+
+        this.homeworldShipState = {
+          status: 'ready',
+          root,
+          scaleFactor,
+          radiusMeters,
+          lengthUnits: modelLengthUnits
+        };
+        this.homeworldShipAttached = false;
+      },
+      undefined,
+      () => {
+        this.homeworldShipState.status = 'error';
+      }
+    );
+  }
+
+  private setHomeworldShipInactive(): void {
+    if (!this.homeworldShipActive && !this.shipRoot.visible) return;
+    this.homeworldShipActive = false;
+    this.shipRoot.visible = false;
+    this.homeworldShipCameraApplied = false;
+  }
+
+  private applyHomeworldShipCameraFrame(radiusMeters: number): void {
+    if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) return;
+    const fovRad = this.camera.fov * (Math.PI / 180);
+    const horizontalFov = 2 * Math.atan(Math.tan(fovRad / 2) * this.camera.aspect);
+    const fitFov = Math.min(fovRad, horizontalFov);
+    const distanceMeters = radiusMeters / Math.sin(Math.max(1e-6, fitFov * 0.5));
+    const minDistance = Math.max(1, radiusMeters);
+    const maxDistance = Math.max(this.galaxyRadiusMeters * 2.5, distanceMeters * 12);
+    this.zoom.setBounds(minDistance, maxDistance);
+    this.zoom.setDistanceMeters(distanceMeters);
+  }
+
+  private updateHomeworldShip(
+    system: SystemViewData,
+    planet: BodyViewData,
+    planetWorld: Vec3,
+    originMeters: Vec3
+  ): void {
+    if (
+      !system.isPlayerHomeworld ||
+      this.homeworldShipSystemId !== system.id ||
+      !this.homeworldShipPlanetId ||
+      planet.id !== this.homeworldShipPlanetId
+    ) {
+      this.setHomeworldShipInactive();
+      return;
+    }
+
+    this.ensureHomeworldShipModel();
+    if (this.homeworldShipState.status !== 'ready' || !this.homeworldShipState.root) return;
+
+    if (!this.homeworldShipAttached) {
+      this.shipRoot.clear();
+      this.shipRoot.add(this.homeworldShipState.root);
+      this.homeworldShipAttached = true;
+    }
+
+    const shipRadiusMeters = this.homeworldShipState.radiusMeters;
+    const offsetMeters = planet.radiusMeters + shipRadiusMeters * 4;
+    setVec3(this.homeworldShipOffsetMeters, offsetMeters, 0, 0);
+    setVec3(
+      this.homeworldShipTargetMeters,
+      planetWorld.x + this.homeworldShipOffsetMeters.x,
+      planetWorld.y + this.homeworldShipOffsetMeters.y,
+      planetWorld.z + this.homeworldShipOffsetMeters.z
+    );
+
+    this.shipRoot.visible = true;
+    this.homeworldShipActive = true;
+
+    const metersPerUnit = this.scales.metersPerPlanetUnit;
+    this.shipRoot.position.set(
+      (this.homeworldShipTargetMeters.x - originMeters.x) / metersPerUnit,
+      (this.homeworldShipTargetMeters.y - originMeters.y) / metersPerUnit,
+      (this.homeworldShipTargetMeters.z - originMeters.z) / metersPerUnit
+    );
+
+    if (!this.homeworldShipCameraApplied) {
+      this.applyHomeworldShipCameraFrame(shipRadiusMeters);
+      this.homeworldShipCameraApplied = true;
+    }
   }
 
   private createOrbitLine(orbit: OrbitElements): {
