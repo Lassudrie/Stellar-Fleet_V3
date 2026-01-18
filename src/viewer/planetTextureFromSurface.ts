@@ -8,7 +8,7 @@ import type {
   MoonData,
   Vec3
 } from '../shared/shared';
-import { generateSurfaceMap, surfaceDirFromUv } from '../engine/worldgen/planetSurfaceGenerator';
+import { generateSurfaceMap } from '../engine/worldgen/planetSurfaceGenerator';
 import { buildGeodesicGrid } from '../engine/worldgen/geodesicGrid';
 
 export type SurfaceTextureMode = 'albedo' | 'biome';
@@ -55,6 +55,20 @@ const clamp = (value: number, min: number, max: number): number => Math.min(max,
 
 const dot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
 
+const TWO_PI = Math.PI * 2;
+const HALF_PI = Math.PI / 2;
+
+const writeSurfaceDirFromUv = (u: number, v: number, out: Vec3): void => {
+  const lon = u * TWO_PI - Math.PI;
+  const lat = v * Math.PI - HALF_PI;
+  const cosLat = Math.cos(lat);
+  out.x = Math.cos(lon) * cosLat;
+  out.y = Math.sin(lat);
+  out.z = Math.sin(lon) * cosLat;
+};
+
+const MAX_GEODESIC_RESOLUTION = 256;
+
 const getTileColor = (
   tile: PlanetSurfaceTile,
   seaLevelElev: number,
@@ -82,13 +96,13 @@ const createCanvas = (
   width: number,
   height: number
 ): HTMLCanvasElement | OffscreenCanvas | null => {
-  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height);
   if (typeof document !== 'undefined') {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     return canvas;
   }
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height);
   return null;
 };
 
@@ -130,8 +144,10 @@ const resolveTileIndexGeodesic = (dir: Vec3, tileDirs: Vec3[]): number => {
 
 export const createPlanetTextureFromSurface = (params: SurfaceTextureParams): THREE.Texture | null => {
   if (params.resolution <= 0) return null;
-  const width = params.resolution * 2;
-  const height = params.resolution;
+  const isGeodesic = params.descriptor.config.gridKind === 'geodesic';
+  const resolution = isGeodesic ? Math.min(params.resolution, MAX_GEODESIC_RESOLUTION) : params.resolution;
+  const width = resolution * 2;
+  const height = resolution;
 
   const canvas = createCanvas(width, height);
   if (!canvas) return null;
@@ -154,12 +170,13 @@ export const createPlanetTextureFromSurface = (params: SurfaceTextureParams): TH
   if (map.descriptor.config.gridKind === 'geodesic') {
     const grid = getGeodesicGrid(map.descriptor.config.frequency);
     const tileDirs = grid.vertices;
+    const dir = { x: 0, y: 0, z: 0 };
 
     for (let y = 0; y < height; y += 1) {
       const v = (y + 0.5) / height;
       for (let x = 0; x < width; x += 1) {
         const u = (x + 0.5) / width;
-        const dir = surfaceDirFromUv(u, v);
+        writeSurfaceDirFromUv(u, v, dir);
         const tileIndex = resolveTileIndexGeodesic(dir, tileDirs);
         const colorIndex = tileIndex * 3;
         const base = (y * width + x) * 4;

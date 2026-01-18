@@ -61,6 +61,11 @@ const formatVec3 = (value: { x: number; y: number; z: number } | null | undefine
   return `(${formatMeters(value.x)}, ${formatMeters(value.y)}, ${formatMeters(value.z)})`;
 };
 
+const getCanvasPoint = (event: MouseEvent | PointerEvent): { x: number; y: number } => {
+  const rect = canvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+};
+
 const getElement = <T extends HTMLElement>(selector: string): T => {
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing element ${selector}`);
@@ -442,12 +447,13 @@ canvas.addEventListener('contextmenu', event => event.preventDefault());
 
 canvas.addEventListener('pointerdown', event => {
   canvas.setPointerCapture(event.pointerId);
+  const point = getCanvasPoint(event);
   if (event.pointerType === 'touch') {
-    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    touchPoints.set(event.pointerId, { x: point.x, y: point.y });
     if (touchPoints.size === 1) {
       tapState.activeId = event.pointerId;
-      tapState.startX = event.clientX;
-      tapState.startY = event.clientY;
+      tapState.startX = point.x;
+      tapState.startY = point.y;
       tapState.moved = false;
     } else {
       tapState.activeId = null;
@@ -458,8 +464,8 @@ canvas.addEventListener('pointerdown', event => {
     return;
   }
   pointerState.active = true;
-  pointerState.lastX = event.clientX;
-  pointerState.lastY = event.clientY;
+  pointerState.lastX = point.x;
+  pointerState.lastY = point.y;
   pointerState.mode = event.button === 2 || event.shiftKey ? 'pan' : 'orbit';
 });
 
@@ -467,18 +473,19 @@ canvas.addEventListener('pointermove', event => {
   if (event.pointerType === 'touch') {
     const point = touchPoints.get(event.pointerId);
     if (!point) return;
-    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const nextPoint = getCanvasPoint(event);
+    touchPoints.set(event.pointerId, { x: nextPoint.x, y: nextPoint.y });
     if (tapState.activeId === event.pointerId) {
-      const dx = event.clientX - tapState.startX;
-      const dy = event.clientY - tapState.startY;
+      const dx = nextPoint.x - tapState.startX;
+      const dy = nextPoint.y - tapState.startY;
       if (Math.hypot(dx, dy) > TAP_SLOP) {
         tapState.moved = true;
       }
     }
     if (!runtime) return;
     if (touchPoints.size === 1) {
-      const deltaX = event.clientX - point.x;
-      const deltaY = event.clientY - point.y;
+      const deltaX = nextPoint.x - point.x;
+      const deltaY = nextPoint.y - point.y;
       runtime.view.applyOrbit(-deltaX, -deltaY);
       return;
     }
@@ -487,10 +494,11 @@ canvas.addEventListener('pointermove', event => {
   }
 
   if (!pointerState.active || !runtime) return;
-  const deltaX = event.clientX - pointerState.lastX;
-  const deltaY = event.clientY - pointerState.lastY;
-  pointerState.lastX = event.clientX;
-  pointerState.lastY = event.clientY;
+  const point = getCanvasPoint(event);
+  const deltaX = point.x - pointerState.lastX;
+  const deltaY = point.y - pointerState.lastY;
+  pointerState.lastX = point.x;
+  pointerState.lastY = point.y;
 
   if (pointerState.mode === 'pan') {
     runtime.view.applyPan(deltaX, deltaY);
@@ -504,13 +512,14 @@ const endDrag = (event: PointerEvent) => {
     const wasSingleTouch = touchPoints.size === 1;
     touchPoints.delete(event.pointerId);
     if (tapState.activeId === event.pointerId) {
-      const dx = event.clientX - tapState.startX;
-      const dy = event.clientY - tapState.startY;
+      const point = getCanvasPoint(event);
+      const dx = point.x - tapState.startX;
+      const dy = point.y - tapState.startY;
       const moved = tapState.moved || Math.hypot(dx, dy) > TAP_SLOP;
       tapState.activeId = null;
       tapState.moved = false;
       if (wasSingleTouch && !moved) {
-        registerTap(event.clientX, event.clientY);
+        registerTap(point.x, point.y);
       }
     }
     if (touchPoints.size < 2) {
@@ -543,12 +552,13 @@ canvas.addEventListener(
 
 canvas.addEventListener('dblclick', event => {
   if (!runtime) return;
-  runtime.view.focusAtScreen(event.clientX, event.clientY);
+  const point = getCanvasPoint(event);
+  runtime.view.focusAtScreen(point.x, point.y);
 });
 
 let lastTime = performance.now();
 const frame = (time: number) => {
-  const dt = (time - lastTime) / 1000;
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
   if (runtime) {
     const dayOverride = Math.abs(runtime.timeScale) < 1e-6 ? runtime.engine.state.day : undefined;

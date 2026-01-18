@@ -2085,6 +2085,7 @@ export class SpaceView {
     this.updateQuality(dtSeconds);
     this.streamingQueue.process(this.maxTasksPerFrame);
 
+    this.updateZoomBounds(this.resolveSystemForBounds());
     const cameraState = this.cameraRig.update(dtSeconds);
     const originMeters = this.floatingOrigin.update(cameraState.positionMeters);
     copyVec3(this.lastOriginMeters, originMeters);
@@ -2101,6 +2102,38 @@ export class SpaceView {
 
     this.camera.quaternion.copy(cameraState.quaternion);
     this.render(originMeters, cameraState.positionMeters);
+  }
+
+  private resolveSystemForBounds(): SystemViewData | null {
+    if (this.focusSystemId) {
+      return this.systemById.get(this.focusSystemId) ?? null;
+    }
+    if (this.activeSystemId) {
+      return this.systemById.get(this.activeSystemId) ?? null;
+    }
+    return null;
+  }
+
+  private updateZoomBounds(system: SystemViewData | null): void {
+    const maxDistance = this.galaxyRadiusMeters * 2.5;
+    const altitudeMinMeters = 5_000;
+    let minDistance = altitudeMinMeters;
+
+    if (system) {
+      let planet: BodyViewData | null = null;
+      if (this.activePlanetId) {
+        const index = system.orbitingIndexById[this.activePlanetId];
+        planet = index !== undefined ? system.orbitingBodies[index] ?? null : null;
+      } else if (this.activePlanetIndex !== null) {
+        planet = system.orbitingBodies[this.activePlanetIndex] ?? null;
+      }
+
+      if (planet) {
+        minDistance = Math.max(minDistance, planet.radiusMeters + altitudeMinMeters);
+      }
+    }
+
+    this.zoom.setBounds(minDistance, maxDistance);
   }
 
   private updateQuality(dtSeconds: number): void {
@@ -2632,11 +2665,6 @@ export class SpaceView {
       );
       (this.systemFleetPoints.material as THREE.PointsMaterial).opacity = systemOpacity * clutterFade;
     }
-
-    const activePlanet =
-      this.activePlanetIndex !== null ? system.orbitingBodies[this.activePlanetIndex] ?? null : null;
-    const minDistance = Math.max(5_000, (activePlanet?.radiusMeters ?? 0) * 1.2);
-    this.zoom.setBounds(minDistance, this.galaxyRadiusMeters * 2.5);
   }
 
   private updatePlanetAssets(system: SystemViewData | null, originMeters: Vec3): void {
@@ -2724,8 +2752,6 @@ export class SpaceView {
       target.position.set(0, 0, 0);
     }
 
-    const minDistance = Math.max(planet.radiusMeters * 1.2, 5_000);
-    this.zoom.setBounds(minDistance, this.galaxyRadiusMeters * 2.5);
   }
 
   private updateFocusTarget(system: SystemViewData | null, dtSeconds: number): void {
@@ -2834,7 +2860,13 @@ export class SpaceView {
     const isPlanetPass = options.metersPerUnit === this.scales.metersPerPlanetUnit;
     const nearFactor = isPlanetPass ? 0.004 : 0.02;
     const farFactor = isPlanetPass ? 4 : 6;
-    const near = Math.max(isPlanetPass ? 0.001 : 0.05, distanceUnits * nearFactor);
+    const nearMin = isPlanetPass ? 0.001 : 0.05;
+    let near = Math.max(nearMin, distanceUnits * nearFactor);
+    if (isPlanetPass) {
+      const altitudeUnits = Math.max(0, distanceUnits - extentUnits);
+      const altitudeNear = altitudeUnits * 0.35;
+      near = clamp(altitudeNear, nearMin, near);
+    }
     const far = Math.max(near + 8, distanceUnits + extentUnits * farFactor);
 
     this.camera.near = near;
@@ -3119,7 +3151,8 @@ export class SpaceView {
         color: 0x5e6a84,
         linewidth: 1.2,
         transparent: true,
-        opacity: 0.4
+        opacity: 0.4,
+        depthWrite: false
       });
       material.resolution.set(this.sizePx.width, this.sizePx.height);
       const line = new Line2(geometry, material);
@@ -3131,7 +3164,8 @@ export class SpaceView {
     const material = new THREE.LineBasicMaterial({
       color: '#5e6a84',
       transparent: true,
-      opacity: 0.4
+      opacity: 0.4,
+      depthWrite: false
     });
     const line = new THREE.Line(geometry, material);
     return { line, material, geometry };
@@ -3153,7 +3187,8 @@ export class SpaceView {
       const material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(star.baseColor),
         transparent: true,
-        opacity: 1
+        opacity: 1,
+        depthWrite: false
       });
       const mesh = new THREE.Mesh(getSphereGeometry(32, 24), material);
       mesh.scale.setScalar(star.radiusMeters / this.scales.metersPerSystemUnit);
@@ -3209,12 +3244,14 @@ export class SpaceView {
       metalness: 0.05,
       transparent: true,
       opacity: 1,
+      depthWrite: false,
       vertexColors: true
     });
     const bodyMesh = new THREE.InstancedMesh(getSphereGeometry(16, 12), bodyMaterial, Math.max(1, bodyData.length));
     bodyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     bodyMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, bodyData.length) * 3), 3);
     bodyMesh.count = bodyData.length;
+    bodyMesh.frustumCulled = false;
     if (bodyMesh.instanceColor) {
       bodyData.forEach((body, index) => {
         const color = new THREE.Color(body.baseColor);
@@ -3260,9 +3297,11 @@ export class SpaceView {
       sizeAttenuation: false,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.85,
+      depthWrite: false
     });
     const bodyPoints = new THREE.Points(bodyPointGeometry, bodyPointMaterial);
+    bodyPoints.frustumCulled = false;
     group.add(bodyPoints);
 
     const ambient = new THREE.AmbientLight(0x404040, 0.25);
@@ -3309,7 +3348,8 @@ export class SpaceView {
       roughness: 0.7,
       metalness: 0.05,
       transparent: true,
-      opacity: 0
+      opacity: 0,
+      depthWrite: false
     });
     const bodyMesh = new THREE.Mesh(getSphereGeometry(64, 48), bodyMaterial);
     bodyMesh.scale.setScalar(planet.radiusMeters / this.scales.metersPerPlanetUnit);
@@ -3346,6 +3386,7 @@ export class SpaceView {
         color: '#cfd6e6',
         transparent: true,
         opacity: 0.6,
+        depthWrite: false,
         side: THREE.DoubleSide
       });
       const innerRadius = (planet.radiusMeters / this.scales.metersPerPlanetUnit) * 1.4;
@@ -3359,7 +3400,8 @@ export class SpaceView {
     const overlayMaterial = new THREE.LineBasicMaterial({
       color: '#d8dbe6',
       transparent: true,
-      opacity: 0
+      opacity: 0,
+      depthWrite: false
     });
     const overlayGeometry = new THREE.BufferGeometry();
     const overlayMesh = new THREE.LineSegments(overlayGeometry, overlayMaterial);
@@ -3372,7 +3414,8 @@ export class SpaceView {
       triOverlayMaterial = new THREE.LineBasicMaterial({
         color: '#91a0c1',
         transparent: true,
-        opacity: 0
+        opacity: 0,
+        depthWrite: false
       });
       const triGeometry = new THREE.WireframeGeometry(getSphereGeometry(24, 18));
       triOverlayMesh = new THREE.LineSegments(triGeometry, triOverlayMaterial);
