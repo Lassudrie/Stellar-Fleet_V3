@@ -93,6 +93,11 @@ const hudTimeScaleValue = getElement<HTMLDivElement>('#time-scale-value-hud');
 const startButton = getElement<HTMLButtonElement>('#start-button');
 const menuButton = getElement<HTMLButtonElement>('#menu-button');
 const scenarioDescription = getElement<HTMLParagraphElement>('#scenario-description');
+const hudTabView = getElement<HTMLButtonElement>('#hud-tab-view');
+const hudTabShips = getElement<HTMLButtonElement>('#hud-tab-ships');
+const hudPanelView = getElement<HTMLDivElement>('#hud-panel-view');
+const hudPanelShips = getElement<HTMLDivElement>('#hud-panel-ships');
+const shipSelect = getElement<HTMLSelectElement>('#ship-select');
 
 const scenarioById = new Map(SCENARIO_TEMPLATES.map(template => [template.id, template]));
 const timeScaleInputs = [menuTimeScaleInput, hudTimeScaleInput];
@@ -150,11 +155,49 @@ const setTimeScaleUI = (value: number): void => {
   });
 };
 
+const setHudTab = (tab: 'view' | 'ships'): void => {
+  const isView = tab === 'view';
+  hudTabView.classList.toggle('is-active', isView);
+  hudTabShips.classList.toggle('is-active', !isView);
+  hudPanelView.classList.toggle('is-active', isView);
+  hudPanelShips.classList.toggle('is-active', !isView);
+};
+
 const clearLabels = (): void => {
   labelNodes.clear();
   labelLayer.textContent = '';
   markerNodes.clear();
   markerLayer.textContent = '';
+};
+
+const populateShipSelect = (view: Runtime['view']): void => {
+  shipSelect.textContent = '';
+  const noneOption = document.createElement('option');
+  noneOption.value = 'none';
+  noneOption.textContent = 'None';
+  shipSelect.appendChild(noneOption);
+
+  const options = view.getShipOptions();
+  if (options.length === 0) {
+    shipSelect.disabled = true;
+    shipSelect.value = 'none';
+    return;
+  }
+
+  options.forEach(option => {
+    const node = document.createElement('option');
+    node.value = option.id;
+    node.textContent = option.label;
+    shipSelect.appendChild(node);
+  });
+  shipSelect.disabled = false;
+  shipSelect.value = 'none';
+};
+
+const applyShipSelection = (): void => {
+  if (!runtime) return;
+  const value = shipSelect.value;
+  runtime.view.setShipFocus(value === 'none' ? null : value);
 };
 
 const updateLabels = (): void => {
@@ -347,6 +390,9 @@ const resize = () => {
 const launchScenario = (scenarioId: string, seed: number, timeScale: number): Runtime => {
   const next = runtime ? applyScenario(runtime, scenarioId, seed, timeScale) : createRuntime(scenarioId, seed, timeScale);
   updateUrlParams(next.scenarioId, next.seed, next.timeScale);
+  populateShipSelect(next.view);
+  next.view.setShipFocus(null);
+  setHudTab('view');
   resize();
   return next;
 };
@@ -377,6 +423,10 @@ menuButton.addEventListener('click', openMenu);
 scenarioSelect.addEventListener('change', () => {
   updateDescription(resolveScenarioId(scenarioSelect.value));
 });
+
+hudTabView.addEventListener('click', () => setHudTab('view'));
+hudTabShips.addEventListener('click', () => setHudTab('ships'));
+shipSelect.addEventListener('change', applyShipSelection);
 
 seedInput.addEventListener('keydown', event => {
   if (event.key !== 'Enter') return;

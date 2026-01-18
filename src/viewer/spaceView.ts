@@ -31,6 +31,8 @@ const SUN_RADIUS_METERS = 695_700_000;
 const EARTH_MASS_SUN = 3.003e-6;
 const TWO_PI = Math.PI * 2;
 const TARGET_LENGTH_M = 300;
+const HOMEWORLD_SHIP_ID = 'homeworld_model0';
+const HOMEWORLD_SHIP_LABEL = 'Homeworld Model 0';
 const HOMEWORLD_SHIP_MODEL_URL = 'content/3d/object_0.glb';
 
 export type FrameId = string;
@@ -1499,6 +1501,8 @@ export class SpaceView {
   private homeworldShipActive = false;
   private homeworldShipAttached = false;
   private homeworldShipCameraApplied = false;
+  private homeworldShipTargetValid = false;
+  private shipFocusId: string | null = null;
 
   private data: GalaxyViewData;
   private systemById = new Map<string, SystemViewData>();
@@ -1662,6 +1666,8 @@ export class SpaceView {
     this.homeworldShipActive = false;
     this.homeworldShipAttached = false;
     this.homeworldShipCameraApplied = false;
+    this.homeworldShipTargetValid = false;
+    this.shipFocusId = null;
     this.shipRoot.visible = false;
 
     let maxDistance = 0;
@@ -1708,6 +1714,40 @@ export class SpaceView {
     if (pose.distanceMeters !== undefined) {
       this.zoom.setDistanceMeters(pose.distanceMeters);
     }
+  }
+
+  getShipOptions(): Array<{ id: string; label: string }> {
+    if (!this.homeworldShipSystemId || !this.homeworldShipPlanetId) return [];
+    return [{ id: HOMEWORLD_SHIP_ID, label: HOMEWORLD_SHIP_LABEL }];
+  }
+
+  setShipFocus(shipId: string | null): void {
+    if (shipId !== HOMEWORLD_SHIP_ID) {
+      this.shipFocusId = null;
+      this.homeworldShipCameraApplied = false;
+      return;
+    }
+
+    this.shipFocusId = HOMEWORLD_SHIP_ID;
+    this.ensureHomeworldShipModel();
+
+    const system = this.homeworldShipSystemId ? this.systemById.get(this.homeworldShipSystemId) ?? null : null;
+    if (!system || !this.homeworldShipPlanetId) return;
+    const planetIndex = system.orbitingIndexById[this.homeworldShipPlanetId];
+    const planet = planetIndex !== undefined ? system.orbitingBodies[planetIndex] ?? null : null;
+    if (!planet) return;
+
+    this.focusSystemId = system.id;
+    this.focusPlanetId = planet.id;
+
+    const planetSystemPos = computeOrbitPositionMeters(planet, this.timeDays);
+    const planetWorld = addVec3(vec3(), system.positionMeters, planetSystemPos);
+    const shipRadiusMeters = this.getHomeworldShipRadiusMeters();
+    this.updateHomeworldShipTarget(planetWorld, planet.radiusMeters, shipRadiusMeters);
+    this.cameraRig.setTargetMeters(this.homeworldShipTargetMeters);
+
+    this.applyHomeworldShipCameraFrame(shipRadiusMeters);
+    this.homeworldShipCameraApplied = this.homeworldShipState.status === 'ready';
   }
 
   setTimeScaleDaysPerSecond(value: number): void {
@@ -2214,7 +2254,7 @@ export class SpaceView {
 
   private updateZoomBounds(system: SystemViewData | null): void {
     const maxDistance = this.galaxyRadiusMeters * 2.5;
-    const shipRadiusMeters = this.homeworldShipActive ? this.homeworldShipState.radiusMeters : 0;
+    const shipRadiusMeters = this.shipFocusId === HOMEWORLD_SHIP_ID ? this.getHomeworldShipRadiusMeters() : 0;
     const altitudeMinMeters = shipRadiusMeters > 0 ? shipRadiusMeters : 5_000;
     let minDistance = altitudeMinMeters;
 
@@ -2842,7 +2882,8 @@ export class SpaceView {
     const focusPlanetBlend = this.activePlanetWorldMeters
       ? (this.focusPlanetId ? Math.max(planetBlend, systemFadeBlend) : planetBlend)
       : 0;
-    const shipTarget = this.homeworldShipActive ? this.homeworldShipTargetMeters : null;
+    const shipTarget =
+      this.shipFocusId === HOMEWORLD_SHIP_ID && this.homeworldShipTargetValid ? this.homeworldShipTargetMeters : null;
 
     copyVec3(this.focusTargetMeters, this.cameraRig.targetMeters);
     if (systemBlend > 0) {
@@ -3257,6 +3298,22 @@ export class SpaceView {
     this.planetAssets.set(planet.id, assets);
   }
 
+  private getHomeworldShipRadiusMeters(): number {
+    return this.homeworldShipState.radiusMeters > 0 ? this.homeworldShipState.radiusMeters : TARGET_LENGTH_M * 0.5;
+  }
+
+  private updateHomeworldShipTarget(planetWorld: Vec3, planetRadiusMeters: number, shipRadiusMeters: number): void {
+    const offsetMeters = planetRadiusMeters + shipRadiusMeters * 4;
+    setVec3(this.homeworldShipOffsetMeters, offsetMeters, 0, 0);
+    setVec3(
+      this.homeworldShipTargetMeters,
+      planetWorld.x + this.homeworldShipOffsetMeters.x,
+      planetWorld.y + this.homeworldShipOffsetMeters.y,
+      planetWorld.z + this.homeworldShipOffsetMeters.z
+    );
+    this.homeworldShipTargetValid = true;
+  }
+
   private ensureHomeworldShipModel(): void {
     if (!this.homeworldShipPlanetId) return;
     if (this.homeworldShipState.status !== 'idle') return;
@@ -3349,14 +3406,7 @@ export class SpaceView {
     }
 
     const shipRadiusMeters = this.homeworldShipState.radiusMeters;
-    const offsetMeters = planet.radiusMeters + shipRadiusMeters * 4;
-    setVec3(this.homeworldShipOffsetMeters, offsetMeters, 0, 0);
-    setVec3(
-      this.homeworldShipTargetMeters,
-      planetWorld.x + this.homeworldShipOffsetMeters.x,
-      planetWorld.y + this.homeworldShipOffsetMeters.y,
-      planetWorld.z + this.homeworldShipOffsetMeters.z
-    );
+    this.updateHomeworldShipTarget(planetWorld, planet.radiusMeters, shipRadiusMeters);
 
     this.shipRoot.visible = true;
     this.homeworldShipActive = true;
@@ -3368,7 +3418,7 @@ export class SpaceView {
       (this.homeworldShipTargetMeters.z - originMeters.z) / metersPerUnit
     );
 
-    if (!this.homeworldShipCameraApplied) {
+    if (!this.homeworldShipCameraApplied && this.shipFocusId === HOMEWORLD_SHIP_ID) {
       this.applyHomeworldShipCameraFrame(shipRadiusMeters);
       this.homeworldShipCameraApplied = true;
     }
