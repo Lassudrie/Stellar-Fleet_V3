@@ -2316,6 +2316,7 @@ export class SpaceView {
     const detailed = this.planetGate.update(this.lastPlanetScreenPxSmoothed);
     this.planetFade.update(dtSeconds, detailed);
 
+    this.ensurePlanetAssetsImmediate(bestPlanet);
     if (bestScore >= this.thresholds.planetPreloadPx) {
       this.ensurePlanetAssets(bestPlanet);
     }
@@ -3051,6 +3052,12 @@ export class SpaceView {
       const assets = this.createPlanetAssets(planet);
       this.planetAssets.set(planet.id, assets);
     });
+  }
+
+  private ensurePlanetAssetsImmediate(planet: BodyViewData): void {
+    if (this.planetAssets.has(planet.id)) return;
+    const assets = this.createPlanetAssets(planet);
+    this.planetAssets.set(planet.id, assets);
   }
 
   private createOrbitLine(orbit: OrbitElements): {
