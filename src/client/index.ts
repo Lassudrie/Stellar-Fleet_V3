@@ -4,9 +4,10 @@ import { generateWorld } from '../engine/worldgen/worldGenerator';
 import { createScenarioView, syncSpaceViewWithState } from '../viewer';
 
 const DEFAULT_SEED = 42;
-const DEFAULT_TIME_SCALE = 0;
-const TIME_SCALE_MIN = -5;
-const TIME_SCALE_MAX = 5;
+const SIM_SPEEDS = [1, 2, 4, 8, 16, 32, 64, 100];
+const DEFAULT_SIM_SPEED = 1;
+const SIM_STEP_MS = 50;
+const MAX_STEPS_PER_FRAME = 40;
 const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DIST = 32;
 const TAP_SLOP = 10;
@@ -15,6 +16,7 @@ const PINCH_JITTER_THRESHOLD = 0.015;
 let debugEnabled = true;
 
 type DragMode = 'orbit' | 'pan';
+type UiMode = 'mainMenu' | 'loading' | 'inGame';
 
 type PointerState = {
   active: boolean;
@@ -26,10 +28,18 @@ type PointerState = {
 type Runtime = {
   scenarioId: string;
   seed: number;
-  timeScale: number;
+  simSpeedMultiplier: number;
+  simPaused: boolean;
   engine: GameEngine;
   view: ReturnType<typeof createScenarioView>['view'];
   unsubscribe: () => void;
+};
+
+type PreparedScenario = {
+  scenarioId: string;
+  seed: number;
+  scenario: ReturnType<typeof buildScenario>;
+  state: ReturnType<typeof generateWorld>['state'];
 };
 
 const parseNumberParam = (value: string | null, fallback: number): number => {
@@ -40,9 +50,17 @@ const parseNumberParam = (value: string | null, fallback: number): number => {
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
-const formatTimeScale = (value: number): string => {
-  const text = value.toFixed(1);
-  return text.endsWith('.0') ? text.slice(0, -2) : text;
+const formatSimSpeed = (value: number): string => `x${value}`;
+
+const normalizeSimSpeed = (value: number): number => {
+  if (!Number.isFinite(value)) return DEFAULT_SIM_SPEED;
+  const min = SIM_SPEEDS[0];
+  const max = SIM_SPEEDS[SIM_SPEEDS.length - 1];
+  const clamped = Math.max(min, Math.min(max, value));
+  return SIM_SPEEDS.reduce((closest, speed) =>
+    Math.abs(speed - clamped) < Math.abs(closest - clamped) ? speed : closest,
+    SIM_SPEEDS[0]
+  );
 };
 
 const formatMeters = (value: number): string => {
@@ -78,7 +96,13 @@ const getElement = <T extends HTMLElement>(selector: string): T => {
 
 const canvas = getElement<HTMLCanvasElement>('#galaxy');
 const menuScreen = getElement<HTMLDivElement>('#menu-screen');
-const hud = getElement<HTMLDivElement>('#hud');
+const loadingScreen = getElement<HTMLDivElement>('#loading-screen');
+const loadingStage = getElement<HTMLParagraphElement>('#loading-stage');
+const loadingProgress = getElement<HTMLDivElement>('#loading-progress');
+const burgerButton = getElement<HTMLButtonElement>('#burger-button');
+const burgerDrawer = getElement<HTMLDivElement>('#burger-drawer');
+const burgerBackdrop = getElement<HTMLDivElement>('#burger-backdrop');
+const returnMenuButton = getElement<HTMLButtonElement>('#return-menu-button');
 const debugOverlay = getElement<HTMLDivElement>('#debug-overlay');
 const debugOverlayToggle = getElement<HTMLButtonElement>('#debug-overlay-toggle');
 const debugOverlayContent = getElement<HTMLPreElement>('#debug-overlay-content');
@@ -86,12 +110,12 @@ const markerLayer = getElement<HTMLDivElement>('#marker-layer');
 const labelLayer = getElement<HTMLDivElement>('#label-layer');
 const scenarioSelect = getElement<HTMLSelectElement>('#scenario-select');
 const seedInput = getElement<HTMLInputElement>('#seed-input');
-const menuTimeScaleInput = getElement<HTMLInputElement>('#time-scale-menu');
-const hudTimeScaleInput = getElement<HTMLInputElement>('#time-scale-hud');
-const menuTimeScaleValue = getElement<HTMLDivElement>('#time-scale-value-menu');
-const hudTimeScaleValue = getElement<HTMLDivElement>('#time-scale-value-hud');
+const menuSimSpeedGroup = getElement<HTMLDivElement>('#sim-speed-menu');
+const hudSimSpeedGroup = getElement<HTMLDivElement>('#sim-speed-hud');
+const menuSimSpeedValue = getElement<HTMLDivElement>('#sim-speed-value-menu');
+const hudSimSpeedValue = getElement<HTMLDivElement>('#sim-speed-value-hud');
+const simPauseButton = getElement<HTMLButtonElement>('#sim-pause-button');
 const startButton = getElement<HTMLButtonElement>('#start-button');
-const menuButton = getElement<HTMLButtonElement>('#menu-button');
 const scenarioDescription = getElement<HTMLParagraphElement>('#scenario-description');
 const hudTabView = getElement<HTMLButtonElement>('#hud-tab-view');
 const hudTabShips = getElement<HTMLButtonElement>('#hud-tab-ships');
@@ -100,8 +124,10 @@ const hudPanelShips = getElement<HTMLDivElement>('#hud-panel-ships');
 const shipSelect = getElement<HTMLSelectElement>('#ship-select');
 
 const scenarioById = new Map(SCENARIO_TEMPLATES.map(template => [template.id, template]));
-const timeScaleInputs = [menuTimeScaleInput, hudTimeScaleInput];
-const timeScaleValues = [menuTimeScaleValue, hudTimeScaleValue];
+const menuSpeedButtons = Array.from(menuSimSpeedGroup.querySelectorAll<HTMLButtonElement>('button[data-speed]'));
+const hudSpeedButtons = Array.from(hudSimSpeedGroup.querySelectorAll<HTMLButtonElement>('button[data-speed]'));
+const simSpeedButtons = [...menuSpeedButtons, ...hudSpeedButtons];
+const simSpeedValues = [menuSimSpeedValue, hudSimSpeedValue];
 const labelNodes = new Map<string, HTMLDivElement>();
 const visibleLabelIds = new Set<string>();
 const markerNodes = new Map<string, HTMLDivElement>();
@@ -117,11 +143,16 @@ const updateDescription = (scenarioId: string): void => {
   scenarioDescription.textContent = template?.meta.description ?? 'Scenario not found.';
 };
 
-const updateUrlParams = (scenarioId: string, seed: number, timeScale: number): void => {
+const simSpeedStorageKey = 'stellarFleet:simSpeedMultiplier';
+const legacySimSpeedStorageKey = 'stellarFleet:simSpeedDaysPerSecond';
+const lastScenarioStorageKey = 'stellarFleet:lastScenario';
+const lastSeedStorageKey = 'stellarFleet:lastSeed';
+
+const updateUrlParams = (scenarioId: string, seed: number, simSpeedMultiplier: number): void => {
   const params = new URLSearchParams();
   params.set('scenario', scenarioId);
   params.set('seed', String(seed));
-  params.set('timeScale', formatTimeScale(timeScale));
+  params.set('simSpeed', String(simSpeedMultiplier));
   if (debugEnabled) {
     params.set('debug', '1');
   }
@@ -138,21 +169,52 @@ const populateScenarioOptions = () => {
   });
 };
 
-const setMenuVisible = (visible: boolean): void => {
-  menuScreen.classList.toggle('hidden', !visible);
-  hud.classList.toggle('hidden', visible);
-  labelLayer.classList.toggle('hidden', visible);
-  markerLayer.classList.toggle('hidden', visible);
+const setLoadingProgress = (stage: string, progress: number): void => {
+  loadingStage.textContent = stage;
+  loadingProgress.style.width = `${Math.max(0, Math.min(1, progress)) * 100}%`;
 };
 
-const setTimeScaleUI = (value: number): void => {
-  const text = formatTimeScale(value);
-  timeScaleInputs.forEach(input => {
-    input.value = String(value);
+const setSimSpeedUI = (value: number, paused = false): void => {
+  const text = paused ? `Paused (${formatSimSpeed(value)})` : formatSimSpeed(value);
+  simSpeedButtons.forEach(button => {
+    const speed = Number(button.dataset.speed ?? NaN);
+    button.classList.toggle('is-active', Number.isFinite(speed) && speed === value);
   });
-  timeScaleValues.forEach(label => {
+  simSpeedValues.forEach(label => {
     label.textContent = text;
   });
+  simPauseButton.classList.toggle('is-active', paused);
+  simPauseButton.textContent = paused ? 'Resume' : 'Pause';
+};
+
+const setBurgerOpen = (open: boolean): void => {
+  if (uiMode !== 'inGame') {
+    burgerOpen = false;
+    burgerDrawer.classList.remove('is-open');
+    burgerBackdrop.classList.remove('is-visible');
+    burgerButton.classList.remove('is-active');
+    return;
+  }
+
+  burgerOpen = open;
+  burgerDrawer.classList.toggle('is-open', open);
+  burgerBackdrop.classList.toggle('is-visible', open);
+  burgerButton.classList.toggle('is-active', open);
+};
+
+const setUiMode = (mode: UiMode): void => {
+  uiMode = mode;
+  const inGame = mode === 'inGame';
+  menuScreen.classList.toggle('hidden', mode !== 'mainMenu');
+  loadingScreen.classList.toggle('hidden', mode !== 'loading');
+  burgerButton.classList.toggle('hidden', !inGame);
+  burgerDrawer.classList.toggle('hidden', !inGame);
+  burgerBackdrop.classList.toggle('hidden', !inGame);
+  labelLayer.classList.toggle('hidden', !inGame);
+  markerLayer.classList.toggle('hidden', !inGame);
+  if (!inGame) {
+    setBurgerOpen(false);
+  }
 };
 
 const setHudTab = (tab: 'view' | 'ships'): void => {
@@ -259,20 +321,22 @@ const updateMarkers = (): void => {
 };
 
 const readSeed = (): number => Math.floor(parseNumberParam(seedInput.value, DEFAULT_SEED));
-const readTimeScale = (value: string): number => clamp(parseNumberParam(value, DEFAULT_TIME_SCALE), TIME_SCALE_MIN, TIME_SCALE_MAX);
+const parseSimSpeedParam = (value: string | null, fallback: number): number => {
+  if (value === null || value === '') return fallback;
+  const cleaned = value.startsWith('x') || value.startsWith('X') ? value.slice(1) : value;
+  return normalizeSimSpeed(parseNumberParam(cleaned, fallback));
+};
 
-const createRuntime = (scenarioId: string, seed: number, timeScale: number): Runtime => {
-  const scenario = buildScenario(scenarioId, seed);
-  const { state } = generateWorld(scenario);
-  const engine = new GameEngine(state);
-  document.title = `${scenario.meta.title} | Stellar Fleet`;
+const createRuntime = (prepared: PreparedScenario, simSpeedMultiplier: number): Runtime => {
+  const engine = new GameEngine(prepared.state);
+  document.title = `${prepared.scenario.meta.title} | Stellar Fleet`;
 
   const { view } = createScenarioView({
     canvas,
     state: engine.state,
-    scenario,
+    scenario: prepared.scenario,
     viewOptions: {
-      timeScaleDaysPerSecond: timeScale
+      timeScaleSecondsPerSecond: 0
     }
   });
 
@@ -280,16 +344,28 @@ const createRuntime = (scenarioId: string, seed: number, timeScale: number): Run
     syncSpaceViewWithState(view, engine.state);
   });
 
-  return { scenarioId, seed, timeScale, engine, view, unsubscribe };
+  return {
+    scenarioId: prepared.scenarioId,
+    seed: prepared.seed,
+    simSpeedMultiplier,
+    simPaused: false,
+    engine,
+    view,
+    unsubscribe
+  };
 };
 
-const applyScenario = (runtime: Runtime, scenarioId: string, seed: number, timeScale: number): Runtime => {
+const applyScenario = (
+  runtime: Runtime,
+  prepared: PreparedScenario,
+  simSpeedMultiplier: number
+): Runtime => {
   runtime.unsubscribe();
   runtime.view.dispose();
   clearLabels();
-  updateDescription(scenarioId);
+  updateDescription(prepared.scenarioId);
 
-  const next = createRuntime(scenarioId, seed, timeScale);
+  const next = createRuntime(prepared, simSpeedMultiplier);
   return next;
 };
 
@@ -309,26 +385,39 @@ debugOverlayToggle.addEventListener('click', () => {
 });
 populateScenarioOptions();
 
-const initialScenarioId = resolveScenarioId(params.get('scenario'));
+const storedScenarioId = resolveScenarioId(localStorage.getItem(lastScenarioStorageKey));
+const storedSeed = Math.floor(parseNumberParam(localStorage.getItem(lastSeedStorageKey), DEFAULT_SEED));
+const storedSimSpeed = parseSimSpeedParam(
+  localStorage.getItem(simSpeedStorageKey) ?? localStorage.getItem(legacySimSpeedStorageKey),
+  DEFAULT_SIM_SPEED
+);
+
+const initialScenarioId = resolveScenarioId(params.get('scenario') ?? storedScenarioId);
 if (!initialScenarioId) {
   throw new Error('No scenarios available to load.');
 }
 
-const initialSeed = Math.floor(parseNumberParam(params.get('seed'), DEFAULT_SEED));
-const initialTimeScale = clamp(parseNumberParam(params.get('timeScale'), DEFAULT_TIME_SCALE), TIME_SCALE_MIN, TIME_SCALE_MAX);
+const initialSeed = Math.floor(parseNumberParam(params.get('seed'), storedSeed));
+const simSpeedParam = params.get('simSpeed') ?? params.get('speed') ?? params.get('timeScale');
+const initialSimSpeed = parseSimSpeedParam(simSpeedParam, storedSimSpeed);
 
 scenarioSelect.value = initialScenarioId;
 seedInput.value = String(initialSeed);
-setTimeScaleUI(initialTimeScale);
+setSimSpeedUI(initialSimSpeed);
 updateDescription(initialScenarioId);
-setMenuVisible(true);
+let uiMode: UiMode = 'mainMenu';
+let burgerOpen = false;
+setUiMode('mainMenu');
 
+let selectedSimSpeed = initialSimSpeed;
 let runtime: Runtime | null = null;
+let simAccumulatorMs = 0;
 
 const updateDebugOverlay = () => {
   if (!debugEnabled) return;
   if (!runtime) {
-    debugOverlayContent.textContent = 'Stage: menu';
+    const stage = uiMode === 'loading' ? 'loading' : 'menu';
+    debugOverlayContent.textContent = `Stage: ${stage}`;
     return;
   }
   const info = runtime.view.getDebugInfo();
@@ -387,9 +476,40 @@ const resize = () => {
   }
 };
 
-const launchScenario = (scenarioId: string, seed: number, timeScale: number): Runtime => {
-  const next = runtime ? applyScenario(runtime, scenarioId, seed, timeScale) : createRuntime(scenarioId, seed, timeScale);
-  updateUrlParams(next.scenarioId, next.seed, next.timeScale);
+const persistScenarioInputs = (scenarioId: string, seed: number): void => {
+  localStorage.setItem(lastScenarioStorageKey, scenarioId);
+  localStorage.setItem(lastSeedStorageKey, String(seed));
+};
+
+const persistSimSpeed = (value: number): void => {
+  localStorage.setItem(simSpeedStorageKey, String(value));
+};
+
+const setSimSpeed = (value: number): void => {
+  const normalized = normalizeSimSpeed(value);
+  selectedSimSpeed = normalized;
+  persistSimSpeed(normalized);
+  if (!runtime) {
+    updateUrlParams(resolveScenarioId(scenarioSelect.value), readSeed(), normalized);
+    setSimSpeedUI(normalized);
+    return;
+  }
+  runtime.simSpeedMultiplier = normalized;
+  updateUrlParams(runtime.scenarioId, runtime.seed, runtime.simSpeedMultiplier);
+  setSimSpeedUI(runtime.simSpeedMultiplier, runtime.simPaused);
+};
+
+const setSimPaused = (paused: boolean): void => {
+  if (!runtime) return;
+  runtime.simPaused = paused;
+  setSimSpeedUI(runtime.simSpeedMultiplier, runtime.simPaused);
+};
+
+const applyPreparedScenario = (prepared: PreparedScenario, simSpeedMultiplier: number): Runtime => {
+  const next = runtime ? applyScenario(runtime, prepared, simSpeedMultiplier) : createRuntime(prepared, simSpeedMultiplier);
+  updateUrlParams(next.scenarioId, next.seed, next.simSpeedMultiplier);
+  persistScenarioInputs(next.scenarioId, next.seed);
+  persistSimSpeed(next.simSpeedMultiplier);
   populateShipSelect(next.view);
   next.view.setShipFocus(null);
   setHudTab('view');
@@ -397,28 +517,51 @@ const launchScenario = (scenarioId: string, seed: number, timeScale: number): Ru
   return next;
 };
 
-const openMenu = () => {
+const destroyRuntime = (): void => {
+  if (!runtime) return;
+  runtime.unsubscribe();
+  runtime.view.dispose();
+  clearLabels();
+  runtime = null;
+  simAccumulatorMs = 0;
+};
+
+const startScenario = async (scenarioId: string, seed: number, simSpeedMultiplier: number): Promise<void> => {
+  setUiMode('loading');
+  setLoadingProgress('Preparing scenario', 0.25);
+  await new Promise(requestAnimationFrame);
+  const scenario = buildScenario(scenarioId, seed);
+  setLoadingProgress('Generating world', 0.5);
+  const { state } = generateWorld(scenario);
+  setLoadingProgress('Initializing viewer', 0.75);
+  const prepared: PreparedScenario = { scenarioId, seed, scenario, state };
+  runtime = applyPreparedScenario(prepared, simSpeedMultiplier);
+  simAccumulatorMs = 0;
+  setLoadingProgress('Finalizing', 1);
+  setUiMode('inGame');
+};
+
+const returnToMainMenu = (): void => {
   if (runtime) {
     scenarioSelect.value = runtime.scenarioId;
     seedInput.value = String(runtime.seed);
-    setTimeScaleUI(runtime.timeScale);
+    selectedSimSpeed = runtime.simSpeedMultiplier;
+    setSimSpeedUI(selectedSimSpeed);
     updateDescription(runtime.scenarioId);
   }
-  setMenuVisible(true);
+  destroyRuntime();
+  setUiMode('mainMenu');
 };
 
-startButton.addEventListener('click', () => {
+startButton.addEventListener('click', async () => {
   const nextScenarioId = resolveScenarioId(scenarioSelect.value);
   scenarioSelect.value = nextScenarioId;
   const nextSeed = readSeed();
-  const nextTimeScale = readTimeScale(menuTimeScaleInput.value);
+  const nextSimSpeed = selectedSimSpeed;
   seedInput.value = String(nextSeed);
-  setTimeScaleUI(nextTimeScale);
-  runtime = launchScenario(nextScenarioId, nextSeed, nextTimeScale);
-  setMenuVisible(false);
+  setSimSpeedUI(nextSimSpeed);
+  await startScenario(nextScenarioId, nextSeed, nextSimSpeed);
 });
-
-menuButton.addEventListener('click', openMenu);
 
 scenarioSelect.addEventListener('change', () => {
   updateDescription(resolveScenarioId(scenarioSelect.value));
@@ -433,19 +576,39 @@ seedInput.addEventListener('keydown', event => {
   startButton.click();
 });
 
-const onTimeScaleChange = (event: Event) => {
-  const target = event.target as HTMLInputElement | null;
-  const value = readTimeScale(target?.value ?? menuTimeScaleInput.value);
-  setTimeScaleUI(value);
-  if (!runtime) return;
-  runtime.timeScale = value;
-  runtime.view.setTimeScaleDaysPerSecond(value);
-  updateUrlParams(runtime.scenarioId, runtime.seed, runtime.timeScale);
+const onSpeedButtonClick = (event: Event) => {
+  const target = event.currentTarget as HTMLButtonElement | null;
+  const value = Number(target?.dataset.speed ?? NaN);
+  if (!Number.isFinite(value)) return;
+  setSimSpeed(value);
 };
 
-timeScaleInputs.forEach(input => {
-  input.addEventListener('input', onTimeScaleChange);
-  input.addEventListener('change', onTimeScaleChange);
+simSpeedButtons.forEach(button => {
+  button.addEventListener('click', onSpeedButtonClick);
+});
+
+simPauseButton.addEventListener('click', () => {
+  if (!runtime) return;
+  setSimPaused(!runtime.simPaused);
+});
+
+burgerButton.addEventListener('click', () => {
+  setBurgerOpen(!burgerOpen);
+});
+
+burgerBackdrop.addEventListener('click', () => {
+  setBurgerOpen(false);
+});
+
+returnMenuButton.addEventListener('click', () => {
+  setBurgerOpen(false);
+  returnToMainMenu();
+});
+
+window.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    setBurgerOpen(false);
+  }
 });
 
 window.addEventListener('resize', resize);
@@ -648,11 +811,22 @@ canvas.addEventListener('dblclick', event => {
 
 let lastTime = performance.now();
 const frame = (time: number) => {
-  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  const dtSeconds = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
   if (runtime) {
-    const dayOverride = Math.abs(runtime.timeScale) < 1e-6 ? runtime.engine.state.day : undefined;
-    runtime.view.update(dt, dayOverride);
+    const canSimulate = uiMode === 'inGame' && !burgerOpen && !runtime.simPaused;
+    const effectiveSimSpeed = canSimulate ? runtime.simSpeedMultiplier : 0;
+    if (effectiveSimSpeed > 0) {
+      simAccumulatorMs += dtSeconds * 1000 * effectiveSimSpeed;
+      const steps = Math.min(Math.floor(simAccumulatorMs / SIM_STEP_MS), MAX_STEPS_PER_FRAME);
+      if (steps > 0) {
+        const advanceMs = steps * SIM_STEP_MS;
+        runtime.engine.advanceTime(advanceMs);
+        simAccumulatorMs -= advanceMs;
+      }
+    }
+    const simTimeSeconds = (runtime.engine.state.timeMs + simAccumulatorMs) / 1000;
+    runtime.view.update(dtSeconds, simTimeSeconds);
   }
   updateDebugOverlay();
   updateLabels();

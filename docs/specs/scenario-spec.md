@@ -158,7 +158,7 @@ Structure :
     type: "elimination" | "domination" | "survival" | "king_of_the_hill";
     value?: number | string;
   }>;
-  maxTurns?: number;
+  maxTimeMs?: number;
 }
 ```
 
@@ -167,8 +167,8 @@ Structure :
 * **OR logique :** une seule condition de `win` suffit. Si la liste est vide, l'élimination sert de fallback par faction.
 * **`domination` :** `value` attendu en pourcentage 0..100 (défaut 50). Le moteur compare la part de systèmes possédés.  
 * **`king_of_the_hill` :** `value` doit être l'ID d'un système existant (idéalement défini dans `staticSystems`).  
-* **`survival` :** se combine avec `maxTurns`. Quand `day >= maxTurns`, la victoire revient à la faction du joueur si elle a encore présence (sinon `draw`). La condition ne se déclenche pas avant cette limite.
-* **`maxTurns` :** borne dure. Sans `survival`, la résolution dépend de la possession de systèmes (égalité possible).
+* **`survival` :** se combine avec `maxTimeMs`. Quand `timeMs >= maxTimeMs`, la victoire revient à la faction du joueur si elle a encore présence (sinon `draw`). La condition ne se déclenche pas avant cette limite.
+* **`maxTimeMs` :** borne dure en millisecondes. Sans `survival`, la résolution dépend de la possession de systèmes (égalité possible).
 
 ---
 
@@ -216,7 +216,7 @@ Règles :
 1. **Intégrité référentielle :** `ownerFactionId` des flottes et des planètes statiques doit correspondre à une faction déclarée (ou `null` pour neutre).  
 2. **Règles de base :** au moins deux factions pour un mode compétitif ; `systemCount` ≥ `factions.length`.  
 3. **Formats :** `colorHex` = `#RRGGBB`; `minimumSystemSpacingLy` ≥ 0.  
-4. **Conditions :** `domination.value` en pourcentage, `king_of_the_hill.value` pointe un système existant, `survival` doit être accompagné d'un `maxTurns` cohérent.
+4. **Conditions :** `domination.value` en pourcentage, `king_of_the_hill.value` pointe un système existant, `survival` doit être accompagné d'un `maxTimeMs` cohérent.
 
 ---
 

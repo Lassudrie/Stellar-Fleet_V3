@@ -16,7 +16,7 @@ export interface LoadOpsParams extends ArmyOpsOptions {
     fleet: Fleet;
     system: StarSystem;
     armies: Army[];
-    day: number;
+    timeMs: number;
     rng: RNG;
     allowedArmyIds?: Set<string>;
     allowedShipIds?: Set<string>;
@@ -26,10 +26,10 @@ export interface UnloadOpsParams extends ArmyOpsOptions {
     fleet: Fleet;
     system: StarSystem;
     armies: Army[];
-    day: number;
+    timeMs: number;
     rng: RNG;
     targetPlanetId?: string;
-    deployTurn?: number;
+    deployTimeMs?: number;
     allowedArmyIds?: Set<string>;
     allowedShipIds?: Set<string>;
 }
@@ -48,7 +48,7 @@ export interface ContestedLandingRiskParams {
     systemName: string;
     planetName?: string;
     targetPlanetId?: string;
-    day: number;
+    timeMs: number;
     rng: RNG;
 }
 
@@ -72,7 +72,7 @@ const getLoadLogText = (count: number, system: StarSystem, fleetLabel: string, o
 };
 
 export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
-    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds } = params;
+    const { fleet, system, armies, timeMs, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds } = params;
     const label = fleetLabel ?? shortId(fleet.id);
 
     const validPlanetIds = new Set(system.planets.filter(planet => planet.isSolid).map(planet => planet.id));
@@ -128,7 +128,7 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
     const logs: LogEntry[] = [
         {
             id: rng.id('log'),
-            day,
+            timeMs,
             text: getLoadLogText(loadableArmies, system, label, logText),
             type: 'move'
         }
@@ -138,9 +138,9 @@ export const computeLoadOps = (params: LoadOpsParams): ArmyOpsResult => {
 };
 
 export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
-    const { fleet, system, armies, day, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds, targetPlanetId, deployTurn } = params;
+    const { fleet, system, armies, timeMs, rng, fleetLabel, logText, allowedArmyIds, allowedShipIds, targetPlanetId, deployTimeMs } = params;
     const label = fleetLabel ?? shortId(fleet.id);
-    const effectiveDeployTurn = Number.isFinite(deployTurn) ? deployTurn : day;
+    const effectiveDeployTimeMs = Number.isFinite(deployTimeMs) ? deployTimeMs : timeMs;
     const fallbackPlanet = getDefaultSolidPlanet(system);
     const targetPlanet =
         system.planets.find(planet => planet.id === targetPlanetId && planet.isSolid) ??
@@ -185,14 +185,14 @@ export const computeUnloadOps = (params: UnloadOpsParams): ArmyOpsResult => {
             ...army,
             state: ArmyState.DEPLOYED,
             containerId: targetPlanet.id,
-            lastDeployedTurn: effectiveDeployTurn
+            lastDeployedTimeMs: effectiveDeployTimeMs
         };
     });
 
     const logs: LogEntry[] = [
         {
             id: rng.id('log'),
-            day,
+            timeMs,
             text: getLogText(unloadedArmyIds.size, system, label, targetPlanet.name, logText),
             type: 'move'
         }
@@ -244,7 +244,7 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
         systemName,
         planetName,
         targetPlanetId,
-        day,
+        timeMs,
         rng
     } = params;
 
@@ -278,7 +278,7 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
                     condition: Math.max(0, Math.min(1, army.condition - conditionLoss)),
                     state: ArmyState.DEPLOYED,
                     containerId: targetPlanetId ?? army.containerId,
-                    lastDeployedTurn: day
+                    lastDeployedTimeMs: timeMs
                 };
             }
             failed.push(army.id);
@@ -310,14 +310,14 @@ export const applyContestedLandingRisk = (params: ContestedLandingRiskParams): {
                 : `Army ${armyId} dodged enemy fire while unloading at ${locationLabel}.`;
             logs.push({
                 id: rng.id('log'),
-                day,
+                timeMs,
                 text,
                 type: 'combat'
             });
         } else if (!outcome.success) {
             logs.push({
                 id: rng.id('log'),
-                day,
+                timeMs,
                 text: `Dropships took fire while deploying army ${armyId} at ${locationLabel}, losing ${outcome.strengthLoss} strength and aborting landing.`,
                 type: 'combat'
             });

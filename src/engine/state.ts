@@ -56,12 +56,12 @@ export function deepFreezeDev<T>(obj: T): T {
 
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
-const isSortedByDayThenId = (entries: Array<{ day: number; id: string }>): boolean => {
+const isSortedByTimeThenId = (entries: Array<{ timeMs: number; id: string }>): boolean => {
   for (let i = 1; i < entries.length; i++) {
     const prev = entries[i - 1];
     const curr = entries[i];
-    if (curr.day < prev.day) return false;
-    if (curr.day === prev.day && compareIds(curr.id, prev.id) < 0) return false;
+    if (curr.timeMs < prev.timeMs) return false;
+    if (curr.timeMs === prev.timeMs && compareIds(curr.id, prev.id) < 0) return false;
   }
   return true;
 };
@@ -157,23 +157,23 @@ export const canonicalizeBattles = (battles: Battle[]): Battle[] => {
 };
 
 /**
- * Canonicalize logs array - sorted by day (ascending), then by ID
- * Preserves chronological order while ensuring determinism within a day
+ * Canonicalize logs array - sorted by time (ascending), then by ID
+ * Preserves chronological order while ensuring determinism within a time slice
  */
 export const canonicalizeLogs = (logs: LogEntry[]): LogEntry[] => {
-  if (isSortedByDayThenId(logs)) return logs;
+  if (isSortedByTimeThenId(logs)) return logs;
   return sorted(logs, (a, b) => {
-    const dayDiff = a.day - b.day;
-    if (dayDiff !== 0) return dayDiff;
+    const timeDiff = a.timeMs - b.timeMs;
+    if (timeDiff !== 0) return timeDiff;
     return compareIds(a.id, b.id);
   });
 };
 
 export const canonicalizeMessages = (messages: GameMessage[]): GameMessage[] => {
-  if (isSortedByDayThenId(messages)) return messages;
+  if (isSortedByTimeThenId(messages)) return messages;
   return sorted(messages, (a, b) => {
-    const dayDiff = a.day - b.day;
-    if (dayDiff !== 0) return dayDiff;
+    const timeDiff = a.timeMs - b.timeMs;
+    if (timeDiff !== 0) return timeDiff;
     return compareIds(a.id, b.id);
   });
 };
@@ -261,12 +261,12 @@ export const isCanonical = (state: GameState): boolean => {
   }
 
   // Check logs order
-  if (!isSortedByDayThenId(state.logs)) {
+  if (!isSortedByTimeThenId(state.logs)) {
     return false;
   }
 
   // Check messages order
-  if (!isSortedByDayThenId(state.messages)) {
+  if (!isSortedByTimeThenId(state.messages)) {
     return false;
   }
 

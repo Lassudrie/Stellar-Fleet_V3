@@ -17,7 +17,8 @@ import {
   type MoonType,
   type Fleet,
   type PlanetSurfaceDescriptor,
-  type Vec3
+  type Vec3,
+  SECONDS_PER_DAY
 } from '../shared/shared';
 import { getOrbitingSystem } from '../engine/orbit';
 import { createPlanetSurfaceDescriptor, parseAstroRefFromBodyId } from '../engine/worldgen/planetSurfaceGenerator';
@@ -818,6 +819,7 @@ export const resolveScenarioViewSettings = (
   scenario?: GameScenario
 ): ScenarioViewSettings => {
   const view = scenario?.view;
+  const timeSeconds = state.timeMs / 1000;
   const focusSystemId = resolveFocusSystemId(state, view);
   const dataSystems = sorted(data.systems, (a, b) => a.id.localeCompare(b.id));
   const focusSystemData =
@@ -831,7 +833,7 @@ export const resolveScenarioViewSettings = (
 
   const targetMeters =
     focusSystemData && planetData
-      ? addVec3(vec3(), focusSystemData.positionMeters, computeOrbitPositionMeters(planetData, state.day))
+      ? addVec3(vec3(), focusSystemData.positionMeters, computeOrbitPositionMeters(planetData, timeSeconds))
       : focusSystemData?.positionMeters ?? vec3();
 
   let distanceMeters = view?.camera?.distanceMeters;
@@ -891,7 +893,7 @@ export const createScenarioView = (options: CreateScenarioViewOptions): Scenario
     pitchRad: settings.pitchRad,
     distanceMeters: settings.distanceMeters
   });
-  view.update(0, options.state.day);
+  view.update(0, options.state.timeMs / 1000);
   return { view, data, settings };
 };
 
@@ -1137,10 +1139,10 @@ export interface SpaceViewOptions {
   minDistanceMeters?: number;
   maxTasksPerFrame?: number;
   floatingOriginSnapMeters?: number;
-    timeScaleDaysPerSecond?: number;
-    debugSurfaceMode?: 'albedo' | 'biome';
-    orbitLineMode?: 'line2' | 'basic';
-  }
+  timeScaleSecondsPerSecond?: number;
+  debugSurfaceMode?: 'albedo' | 'biome';
+  orbitLineMode?: 'line2' | 'basic';
+}
 
 type SystemAssets = {
   group: THREE.Group;
@@ -1372,8 +1374,9 @@ const screenSpaceRadiusPx = (radiusMeters: number, distanceMeters: number, fovRa
   return (radiusMeters * projectionFactor) / distanceMeters;
 };
 
-const computeOrbitPositionMeters = (body: BodyViewData, timeDays: number, out?: Vec3): Vec3 => {
+const computeOrbitPositionMeters = (body: BodyViewData, timeSeconds: number, out?: Vec3): Vec3 => {
   if (!body.orbit) return out ? setVec3(out, 0, 0, 0) : vec3();
+  const timeDays = timeSeconds / SECONDS_PER_DAY;
   const meanMotion = TWO_PI / Math.max(1e-6, body.orbit.periodDays);
   const meanAnomaly = body.orbit.meanAnomalyAtEpochRad + meanMotion * (timeDays - body.orbit.epochDays);
   const position = computeOrbitPositionFromMeanAnomaly(body.orbit, meanAnomaly, scratchVec3A);
@@ -1381,7 +1384,8 @@ const computeOrbitPositionMeters = (body: BodyViewData, timeDays: number, out?: 
   return setVec3(result, position.x, position.y, position.z);
 };
 
-const computeOrbitPositionFromTime = (orbit: OrbitElements, timeDays: number, out: Vec3): Vec3 => {
+const computeOrbitPositionFromTime = (orbit: OrbitElements, timeSeconds: number, out: Vec3): Vec3 => {
+  const timeDays = timeSeconds / SECONDS_PER_DAY;
   const meanMotion = TWO_PI / Math.max(1e-6, orbit.periodDays);
   const meanAnomaly = orbit.meanAnomalyAtEpochRad + meanMotion * (timeDays - orbit.epochDays);
   const position = computeOrbitPositionFromMeanAnomaly(orbit, meanAnomaly, scratchVec3A);
@@ -1527,8 +1531,8 @@ export class SpaceView {
   private floatingOrigin: FloatingOriginManager;
   private zoom: ZoomController;
   private cameraRig: CameraRig;
-  private timeDays = 0;
-  private timeScaleDaysPerSecond: number;
+  private timeSeconds = 0;
+  private timeScaleSecondsPerSecond: number;
 
   private galaxyRadiusMeters = 1;
   private focusSystemId: string | null = null;
@@ -1650,7 +1654,7 @@ export class SpaceView {
     this.zoom = new ZoomController(initialDistance, minDistance, maxDistance);
     this.cameraRig = new CameraRig(this.zoom);
 
-    this.timeScaleDaysPerSecond = options.timeScaleDaysPerSecond ?? 0;
+    this.timeScaleSecondsPerSecond = options.timeScaleSecondsPerSecond ?? 0;
     this.debugSurfaceMode = options.debugSurfaceMode ?? 'albedo';
     this.orbitLineMode = options.orbitLineMode ?? 'line2';
 
@@ -1746,7 +1750,7 @@ export class SpaceView {
     this.focusSystemId = system.id;
     this.focusPlanetId = planet.id;
 
-    const planetSystemPos = computeOrbitPositionMeters(planet, this.timeDays);
+    const planetSystemPos = computeOrbitPositionMeters(planet, this.timeSeconds);
     const planetWorld = addVec3(vec3(), system.positionMeters, planetSystemPos);
     const shipRadiusMeters = this.getHomeworldShipRadiusMeters();
     this.updateHomeworldShipTarget(planetWorld, planet.radiusMeters, shipRadiusMeters);
@@ -1756,8 +1760,8 @@ export class SpaceView {
     this.homeworldShipCameraApplied = this.homeworldShipState.status === 'ready';
   }
 
-  setTimeScaleDaysPerSecond(value: number): void {
-    this.timeScaleDaysPerSecond = value;
+  setTimeScaleSecondsPerSecond(value: number): void {
+    this.timeScaleSecondsPerSecond = value;
   }
 
   applyZoomDelta(delta: number): void {
@@ -2027,7 +2031,7 @@ export class SpaceView {
     const orbitingPositions = this.computeOrbitingPositions(system);
     for (let i = 0; i < system.orbitingBodies.length; i += 1) {
       const body = system.orbitingBodies[i];
-      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeDays);
+      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeSeconds);
       const worldX = system.positionMeters.x + position.x;
       const worldY = system.positionMeters.y + position.y;
       const worldZ = system.positionMeters.z + position.z;
@@ -2127,7 +2131,7 @@ export class SpaceView {
     const orbitingPositions = this.computeOrbitingPositions(system);
     for (let i = 0; i < system.orbitingBodies.length; i += 1) {
       const body = system.orbitingBodies[i];
-      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeDays);
+      const position = orbitingPositions[i] ?? computeOrbitPositionMeters(body, this.timeSeconds);
       const worldX = system.positionMeters.x + position.x;
       const worldY = system.positionMeters.y + position.y;
       const worldZ = system.positionMeters.z + position.z;
@@ -2217,11 +2221,11 @@ export class SpaceView {
     this.lastFrameMs = 0;
   }
 
-  update(dtSeconds: number, timeDaysOverride?: number): void {
-    if (Number.isFinite(timeDaysOverride)) {
-      this.timeDays = Number(timeDaysOverride);
-    } else if (this.timeScaleDaysPerSecond !== 0) {
-      this.timeDays += dtSeconds * this.timeScaleDaysPerSecond;
+  update(dtSeconds: number, timeSecondsOverride?: number): void {
+    if (Number.isFinite(timeSecondsOverride)) {
+      this.timeSeconds = Number(timeSecondsOverride);
+    } else if (this.timeScaleSecondsPerSecond !== 0) {
+      this.timeSeconds += dtSeconds * this.timeScaleSecondsPerSecond;
     }
 
     this.frameId += 1;
@@ -2447,7 +2451,7 @@ export class SpaceView {
     const positions = this.computeOrbitingPositions(system);
     let bestPlanetIndex = -1;
     if (focusedPlanet && focusedIndex !== null) {
-      const orbitPosition = positions[focusedIndex] ?? computeOrbitPositionMeters(focusedPlanet, this.timeDays);
+      const orbitPosition = positions[focusedIndex] ?? computeOrbitPositionMeters(focusedPlanet, this.timeSeconds);
       const planetWorldX = system.positionMeters.x + orbitPosition.x;
       const planetWorldY = system.positionMeters.y + orbitPosition.y;
       const planetWorldZ = system.positionMeters.z + orbitPosition.z;
@@ -2547,7 +2551,7 @@ export class SpaceView {
       const primary = system.stars[0];
       const companion = system.stars[1];
       if (companion.orbit) {
-        const relative = computeOrbitPositionFromTime(companion.orbit, this.timeDays, scratchVec3C);
+        const relative = computeOrbitPositionFromTime(companion.orbit, this.timeSeconds, scratchVec3C);
         const totalMass = (primary.massSun ?? 1) + (companion.massSun ?? 1);
         const primaryOffsetScale = -(companion.massSun ?? 1) / totalMass;
         const companionOffsetScale = (primary.massSun ?? 1) / totalMass;
@@ -2560,7 +2564,7 @@ export class SpaceView {
     for (let i = 0; i < system.stars.length; i += 1) {
       const star = system.stars[i];
       if (star.orbit) {
-        computeOrbitPositionMeters(star, this.timeDays, out[i]);
+        computeOrbitPositionMeters(star, this.timeSeconds, out[i]);
       } else {
         setVec3(out[i], 0, 0, 0);
       }
@@ -2582,7 +2586,7 @@ export class SpaceView {
     for (let i = 0; i < system.orbitingBodies.length; i += 1) {
       if (!positions[i]) positions[i] = vec3();
       const body = system.orbitingBodies[i];
-      computeOrbitPositionMeters(body, this.timeDays, positions[i]);
+      computeOrbitPositionMeters(body, this.timeSeconds, positions[i]);
 
       const parentIndex = system.orbitingParentIndex[i];
       const parentStarIndex = system.orbitingParentStarIndex[i];
@@ -2820,7 +2824,7 @@ export class SpaceView {
     }
 
     const positions = this.computeOrbitingPositions(system);
-    const planetSystemPos = positions[planetIndex] ?? computeOrbitPositionMeters(planet, this.timeDays);
+    const planetSystemPos = positions[planetIndex] ?? computeOrbitPositionMeters(planet, this.timeSeconds);
     const planetWorld = this.activePlanetWorldMeters ?? addVec3(vec3(), system.positionMeters, planetSystemPos);
 
     assets.group.position.set(
@@ -2843,7 +2847,7 @@ export class SpaceView {
     assets.wireGlowMaterial.opacity = planetFade * 0.35;
     assets.tiltGroup.rotation.x = assets.axialTiltRad;
 
-    const rotation = this.timeDays * assets.rotationSpeedRadPerDay;
+    const rotation = (this.timeSeconds / SECONDS_PER_DAY) * assets.rotationSpeedRadPerDay;
     assets.spinGroup.rotation.y = rotation;
     assets.cloudMesh.rotation.y = rotation * 0.15;
     assets.atmosphereMesh.rotation.y = rotation * 0.6;

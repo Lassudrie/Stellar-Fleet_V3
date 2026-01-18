@@ -4,6 +4,11 @@ export interface Vec3 {
   z: number;
 }
 
+export const MS_PER_SECOND = 1000;
+export const MS_PER_MINUTE = 60 * MS_PER_SECOND;
+export const SECONDS_PER_DAY = 86400;
+export const MS_PER_DAY = SECONDS_PER_DAY * MS_PER_SECOND;
+
 // ============================================================
 // Shared game types (was: shared/shared.ts)
 // ============================================================
@@ -330,7 +335,7 @@ export type SettlementId = string;
 
 export interface SettlementControlState {
   factionId: FactionId | null;
-  lastCaptureTurn: number;
+  lastCaptureTimeMs: number;
 }
 
 export interface PlanetSurfaceMap {
@@ -420,8 +425,7 @@ export interface ShipConsumables {
 
 export interface ShipKillRecord {
   id: string;
-  day: number;
-  turn: number;
+  timeMs: number;
   targetId: string;
   targetType: ShipType;
   targetFactionId: FactionId;
@@ -434,7 +438,7 @@ export interface ShipEntity {
   maxHp: number;
   fuel: number;
   carriedArmyId: string | null;
-  transferBusyUntilDay?: number;
+  transferBusyUntilTimeMs?: number;
   consumables?: ShipConsumables;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -456,19 +460,19 @@ export interface Army {
   // --- Metadata (not part of combat formulas) ---
   unitType: GroundUnitType;
   posture?: GroundPosture;
-  postureSetTurn?: number;
+  postureSetTimeMs?: number;
   groundOrders?: GroundOrders;
   landingOrder?: GroundLandOrder;
   /**
-   * Turn index when the army last transitioned to DEPLOYED.
-   * Used for amphibious/airborne assault penalties (first turn after landing).
+   * Time (ms) when the army last transitioned to DEPLOYED.
+   * Used for amphibious/airborne assault penalties (first interval after landing).
    */
-  lastDeployedTurn?: number;
+  lastDeployedTimeMs?: number;
   /**
-   * Turn index when the army last participated in a ground engagement.
+   * Time (ms) when the army last participated in a ground engagement.
    * Used for morale/condition recovery timing.
    */
-  lastCombatTurn?: number;
+  lastCombatTimeMs?: number;
 
   // --- Strict combat profile (used by ground resolver) ---
   maxMembers: number; // MM
@@ -509,7 +513,7 @@ export interface Fleet {
   state: FleetState;
   targetSystemId: string | null;
   targetPosition: Vec3 | null;
-  stateStartTurn: number; // Turn when the current state began
+  stateStartTimeMs: number; // Time (ms) when the current state began
   retreating?: boolean; // True if the fleet is forced to retreat after a defeat
   invasionTargetSystemId?: string | null; // If set, fleet will unload armies automatically upon arrival at this system
   invasionTargetPlanetId?: string | null; // Preferred planet target for invasion orders
@@ -529,14 +533,14 @@ export interface Station {
 
 export interface LogEntry {
   id: string;
-  day: number;
+  timeMs: number;
   text: string;
   type: 'info' | 'combat' | 'move' | 'ai';
 }
 
 export interface GameMessage {
   id: string;
-  day: number;
+  timeMs: number;
   type: string;
   priority: number;
   title: string;
@@ -545,7 +549,7 @@ export interface GameMessage {
   payload: Record<string, unknown>;
   read: boolean;
   dismissed: boolean;
-  createdAtTurn: number;
+  createdAtTimeMs: number;
 }
 
 export type BattleStatus = 'scheduled' | 'resolved';
@@ -576,8 +580,8 @@ export type BattleAmmunitionByFaction = Record<FactionId, BattleAmmunitionBreakd
 export interface Battle {
   id: string;
   systemId: string;
-  turnCreated: number;
-  turnResolved?: number;
+  timeCreatedMs: number;
+  timeResolvedMs?: number;
   status: BattleStatus;
   involvedFleetIds: string[];
   logs: string[];
@@ -596,18 +600,18 @@ export interface EnemySighting {
   factionId: FactionId;
   systemId: string | null;
   position: Vec3;
-  daySeen: number;
+  timeSeenMs: number;
   estimatedPower: number;
   confidence: number;
-  lastUpdateDay?: number;
+  lastUpdateTimeMs?: number;
 }
 
 export interface AIState {
   sightings: Record<string, EnemySighting>;
   targetPriorities: Record<string, number>;
-  systemLastSeen: Record<string, number>;
+  systemLastSeenTimeMs: Record<string, number>;
   lastOwnerBySystemId: Record<string, FactionId | null>;
-  holdUntilTurnBySystemId: Record<string, number>;
+  holdUntilTimeMsBySystemId: Record<string, number>;
 }
 
 export type VictoryType = 'elimination' | 'domination' | 'survival' | 'king_of_the_hill';
@@ -619,7 +623,7 @@ export interface VictoryCondition {
 
 export interface GameObjectives {
   conditions: VictoryCondition[];
-  maxTurns?: number;
+  maxTimeMs?: number;
 }
 
 export interface GameplayRules {
@@ -642,7 +646,7 @@ export interface GameState {
   rngState: number;
   idRngState?: number;
   startYear: number;
-  day: number;
+  timeMs: number;
   systems: StarSystem[];
   fleets: Fleet[];
   stations?: Station[];
@@ -667,7 +671,7 @@ export interface GameState {
    */
   settlementControl?: Record<SettlementId, SettlementControlState>;
   /**
-   * Tiles bombarded during the current turn, keyed by bodyId.
+   * Tiles bombarded during the current strategic tick, keyed by bodyId.
    */
   bombardedTilesByBodyId?: Record<string, number[]>;
   objectives: GameObjectives;

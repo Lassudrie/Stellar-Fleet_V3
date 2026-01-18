@@ -1105,7 +1105,7 @@ export const generateWorld = (
           state: state,
           targetSystemId: targetSystemId,
           targetPosition: targetPosition,
-          stateStartTurn: 0
+          stateStartTimeMs: 0
       };
 
       // Generate Embarked Armies
@@ -1184,7 +1184,7 @@ export const generateWorld = (
   reportStep('finalize', 0);
   const initLog = {
       id: rng.id('log'),
-      day: 1,
+      timeMs: 0,
       text: `Simulation initialized. Seed: ${scenario.seed}. Topology: ${topology}`,
       type: 'info' as const
   };
@@ -1200,7 +1200,7 @@ export const generateWorld = (
       rngState,
       idRngState,
       startYear: 2300,
-      day: 1,
+      timeMs: 0,
       systems,
       fleets,
       stations: [],
@@ -1213,7 +1213,7 @@ export const generateWorld = (
       groundBuildings: [],
       objectives: {
           conditions: scenario.objectives.win,
-          maxTurns: scenario.objectives.maxTurns
+          maxTimeMs: scenario.objectives.maxTimeMs
       },
       rules: scenario.rules,
       aiState: undefined 

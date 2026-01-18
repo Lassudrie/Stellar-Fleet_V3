@@ -16,10 +16,11 @@ import {
   ShipType,
   StarSystem
 } from '../shared/shared';
+import { MS_PER_DAY, MS_PER_MINUTE } from '../shared/shared';
 import { RNG } from './rng';
 import { deepFreezeDev } from './state';
 import { canonicalizeMessages, canonicalizeState, isCanonical } from './state';
-import { createEmptyAIState, getLegacyAiFactionId, planAiTurn, AI_HOLD_TURNS } from './ai';
+import { createEmptyAIState, getLegacyAiFactionId, planAiTick, AI_HOLD_DAYS } from './ai';
 import { applyCommand } from './commands';
 import { detectNewBattles, pruneBattles, resolveBattle } from './battle';
 import { moveFleet, executeArrivalOperations, MovementStepResult } from './movement';
@@ -72,17 +73,26 @@ import { sanitizeArmies } from './army';
 import { quantizeFuel } from './logistics/fuel';
 import { sorted } from '../shared/shared';
 
-export interface TurnContext {
-  turn: number;
+export interface StrategicContext {
+  timeMs: number;
+  timeDays: number;
+  deltaMs: number;
   rng: RNG;
 }
 
-export const runTurn = (state: GameState, rng: RNG): GameState => {
+const STRATEGIC_TICK_MS = MS_PER_MINUTE;
+
+export const runStrategicTick = (state: GameState, rng: RNG): GameState => {
   // Enforce Immutability on Input
   deepFreezeDev(state);
 
-  const turn = state.day + 1;
-  const ctx: TurnContext = { rng, turn };
+  const timeMs = state.timeMs;
+  const ctx: StrategicContext = {
+    rng,
+    timeMs,
+    timeDays: timeMs / MS_PER_DAY,
+    deltaMs: STRATEGIC_TICK_MS
+  };
   const shouldMeasure = (import.meta as any).env?.DEV && typeof performance !== 'undefined';
   const timings: Array<{ label: string; ms: number }> = [];
   const measure = <T>(label: string, fn: () => T): T => {
@@ -95,9 +105,9 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
 
   // --- CANONICALIZE INPUT STATE ---
   // Ensures consistent iteration order for deterministic RNG consumption
-  let nextState = { ...state, day: turn };
+  let nextState = { ...state, timeMs };
   if ((import.meta as any).env?.DEV && !isCanonical(nextState)) {
-    console.warn('[RunTurn] Input state not canonical; normalizing for determinism.');
+    console.warn('[StrategicTick] Input state not canonical; normalizing for determinism.');
     nextState = canonicalizeState(nextState);
   }
 
@@ -125,20 +135,20 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 7. Check Victory Objectives
   nextState = measure('objectives', () => phaseObjectives(nextState, ctx));
 
-  // SAFETY: Ensure all battles are resolved before cleanup so turnResolved is always set
+  // SAFETY: Ensure all battles are resolved before cleanup so timeResolvedMs is always set
   const remainingBattles = nextState.battles.filter(b => b.status === 'scheduled');
   if (remainingBattles.length > 0) {
-    console.error(`[RunTurn] CRITICAL: Scheduled battles remaining at end of turn ${ctx.turn}: ${remainingBattles.map(b => b.id).join(', ')}. Force-resolving.`);
+    console.error(`[StrategicTick] CRITICAL: Scheduled battles remaining at time ${ctx.timeMs}: ${remainingBattles.map(b => b.id).join(', ')}. Force-resolving.`);
     nextState = {
       ...nextState,
       battles: nextState.battles.map(b =>
         b.status === 'scheduled'
           ? {
               ...b,
-              turnResolved: ctx.turn,
+              timeResolvedMs: ctx.timeMs,
               status: 'resolved' as const,
               winnerFactionId: 'draw' as const,
-              logs: [...b.logs, 'Battle force-resolved due to turn processing error.']
+              logs: [...b.logs, 'Battle force-resolved due to strategic tick processing error.']
             }
           : b
       )
@@ -148,18 +158,18 @@ export const runTurn = (state: GameState, rng: RNG): GameState => {
   // 8. Cleanup & Maintenance
   nextState = measure('cleanup', () => phaseCleanup(nextState, ctx));
 
-  // 8. Canonicalize output & Time Advance
+  // 8. Canonicalize output
   nextState = canonicalizeState(nextState);
 
   if (shouldMeasure && timings.length > 0) {
     const total = timings.reduce((sum, timing) => sum + timing.ms, 0);
     const details = timings.map(timing => `${timing.label}=${timing.ms.toFixed(2)}`).join(', ');
-    console.debug(`[RunTurn] phase timings (ms): ${details} | total=${total.toFixed(2)}`);
+    console.debug(`[StrategicTick] phase timings (ms): ${details} | total=${total.toFixed(2)}`);
   }
 
   return {
       ...nextState,
-      day: turn
+      timeMs
   };
 };
 
@@ -244,8 +254,8 @@ function invalidateStaleInvasionDecisions(
   return changed ? updatedMessages : messages;
 }
 
-export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameState {
-  const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
+export function phaseBattleResolution(state: GameState, ctx: StrategicContext): GameState {
+  const currentTickState = state.timeMs === ctx.timeMs ? state : { ...state, timeMs: ctx.timeMs };
 
   // 1. Identify Scheduled Battles
   const scheduledBattles = sorted(
@@ -270,7 +280,7 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
   // 2. Resolve Each Battle
   scheduledBattles.forEach(battle => {
     const fleetsInBattle = nextFleets.filter(fleet => battle.involvedFleetIds.includes(fleet.id));
-    const result = resolveBattle(battle, { ...currentTurnState, fleets: nextFleets }, ctx.turn);
+    const result = resolveBattle(battle, { ...currentTickState, fleets: nextFleets }, ctx.timeMs);
 
     // Update Battle in list (Mark as resolved, add logs, stats)
     nextBattles = nextBattles.map(b => (b.id === battle.id ? result.updatedBattle : b));
@@ -320,10 +330,10 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
 
     // Global Notification
     if (result.updatedBattle.winnerFactionId) {
-      const sysName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+      const sysName = currentTickState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
       nextLogs.push({
         id: ctx.rng.id('log'),
-        day: ctx.turn,
+        timeMs: ctx.timeMs,
         text: `Combat resolved at ${sysName}. Outcome: ${result.updatedBattle.winnerFactionId.toUpperCase()}.`,
         type: 'combat'
       });
@@ -332,14 +342,14 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
     // Battle Message
     const involvedFactionIdsSet = new Set<FactionId>();
     battle.involvedFleetIds.forEach(fleetId => {
-      const fleet = currentTurnState.fleets.find(f => f.id === fleetId) || nextFleets.find(f => f.id === fleetId);
+      const fleet = currentTickState.fleets.find(f => f.id === fleetId) || nextFleets.find(f => f.id === fleetId);
       if (fleet) involvedFactionIdsSet.add(fleet.factionId as FactionId);
     });
     Object.keys(result.updatedBattle.shipsLost ?? {}).forEach(factionId => involvedFactionIdsSet.add(factionId as FactionId));
     const involvedFactionIds = sorted(Array.from(involvedFactionIdsSet), (a, b) => a.localeCompare(b));
 
-    const systemName = currentTurnState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
-    const isPlayerInvolved = involvedFactionIds.includes(currentTurnState.playerFactionId);
+    const systemName = currentTickState.systems.find(s => s.id === battle.systemId)?.name || 'Unknown';
+    const isPlayerInvolved = involvedFactionIds.includes(currentTickState.playerFactionId);
     const ammunitionTotals = aggregateAmmunitionTotals(result.updatedBattle.ammunitionByFaction);
     const battleSystemName = systemName || battle.systemId;
 
@@ -347,7 +357,7 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
       sorted(lostArmyIds).forEach(armyId => {
         nextLogs.push({
           id: ctx.rng.id('log'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           text: `Army ${armyId} was lost with its transport during the battle at ${battleSystemName}.`,
           type: 'combat'
         });
@@ -356,7 +366,7 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
 
     const message: GameMessage = {
       id: ctx.rng.id('msg'),
-      day: ctx.turn,
+      timeMs: ctx.timeMs,
       type: 'battle_resolution',
       priority: isPlayerInvolved ? 2 : 1,
       title: `Battle resolved at ${systemName}`,
@@ -372,16 +382,16 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
       },
       read: false,
       dismissed: false,
-      createdAtTurn: ctx.turn
+      createdAtTimeMs: ctx.timeMs
     };
 
     nextMessages = canonicalizeMessages([...nextMessages, message]);
   });
 
-  nextMessages = invalidateStaleInvasionDecisions(nextMessages, nextFleets, currentTurnState.systems);
+  nextMessages = invalidateStaleInvasionDecisions(nextMessages, nextFleets, currentTickState.systems);
 
   return {
-    ...currentTurnState,
+    ...currentTickState,
     battles: nextBattles,
     fleets: nextFleets,
     armies: nextArmies,
@@ -390,18 +400,18 @@ export function phaseBattleResolution(state: GameState, ctx: TurnContext): GameS
   };
 }
 
-export function phaseAI(state: GameState, ctx: TurnContext): GameState {
+export function phaseAI(state: GameState, ctx: StrategicContext): GameState {
   if (!state.rules.aiEnabled) return state;
 
-  const currentTurnState = state.day === ctx.turn ? state : { ...state, day: ctx.turn };
+  const currentTickState = state.timeMs === ctx.timeMs ? state : { ...state, timeMs: ctx.timeMs };
 
   const aiFactions = sorted(
     state.factions.filter(faction => faction.aiProfile),
     (a, b) => a.id.localeCompare(b.id)
   );
 
-  const ensuredAiStates: Record<FactionId, AIState> = { ...(currentTurnState.aiStates ?? {}) };
-  const legacyAiFactionId = getLegacyAiFactionId(currentTurnState.factions);
+  const ensuredAiStates: Record<FactionId, AIState> = { ...(currentTickState.aiStates ?? {}) };
+  const legacyAiFactionId = getLegacyAiFactionId(currentTickState.factions);
 
   aiFactions.forEach(faction => {
     if (!ensuredAiStates[faction.id]) {
@@ -410,26 +420,26 @@ export function phaseAI(state: GameState, ctx: TurnContext): GameState {
     }
   });
 
-  let nextState: GameState = { ...currentTurnState, aiStates: ensuredAiStates };
+  let nextState: GameState = { ...currentTickState, aiStates: ensuredAiStates };
 
   for (const faction of aiFactions) {
     const existingAiState = (nextState.aiStates ?? ensuredAiStates)[faction.id] ?? createEmptyAIState();
-    const commands = planAiTurn(nextState, faction.id, existingAiState, ctx.rng);
+    const commands = planAiTick(nextState, faction.id, existingAiState, ctx.rng);
 
     for (const cmd of commands) {
-      const result = applyCommand(nextState, cmd, ctx.rng, ctx.turn);
+      const result = applyCommand(nextState, cmd, ctx.rng, ctx.timeMs);
       const updatedState = result.state;
-      nextState = updatedState.day === ctx.turn ? updatedState : { ...updatedState, day: ctx.turn };
+      nextState = updatedState.timeMs === ctx.timeMs ? updatedState : { ...updatedState, timeMs: ctx.timeMs };
     }
   }
 
   const mergedAiStates = { ...ensuredAiStates, ...(nextState.aiStates ?? {}) };
-  const alignedState = nextState.day === ctx.turn ? nextState : { ...nextState, day: ctx.turn };
+  const alignedState = nextState.timeMs === ctx.timeMs ? nextState : { ...nextState, timeMs: ctx.timeMs };
   return { ...alignedState, aiStates: mergedAiStates };
 }
 
-export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
-  const nextDay = ctx.turn; // Movement projects to current turn positions
+export function phaseMovement(state: GameState, ctx: StrategicContext): GameState {
+  const tickTimeMs = ctx.timeMs; // Movement projects to current tick positions
   const fleetsToProcess = sorted(state.fleets, (a, b) => a.id.localeCompare(b.id));
   const newLogs: LogEntry[] = [];
   let nextMessages = state.messages;
@@ -448,7 +458,7 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
 
   // First pass: compute final positions for all fleets without arrival operations
   fleetsToProcess.forEach(fleet => {
-    const moveResult = moveFleet(fleet, state.systems, nextDay, ctx.rng);
+    const moveResult = moveFleet(fleet, state.systems, tickTimeMs, ctx.deltaMs, ctx.rng);
     movementResults.push({
       ...moveResult,
       invasionTargetSystemId: fleet.invasionTargetSystemId ?? null,
@@ -485,7 +495,7 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
 
       const message: GameMessage = {
         id: ctx.rng.id('msg'),
-        day: ctx.turn,
+        timeMs: ctx.timeMs,
         type: 'INVASION_DECISION',
         priority: 2,
         title: `Invasion in orbit: ${system.name}`,
@@ -500,7 +510,7 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
         },
         read: false,
         dismissed: false,
-        createdAtTurn: ctx.turn
+        createdAtTimeMs: ctx.timeMs
       };
 
       nextMessages = canonicalizeMessages([...nextMessages, message]);
@@ -514,7 +524,15 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
       unloadTargetSystemId: result.unloadTargetSystemId
     };
 
-    const arrivalOutcome = executeArrivalOperations(state, arrivalFleet, system, workingArmies, workingFleets, ctx.rng, nextDay);
+    const arrivalOutcome = executeArrivalOperations(
+      state,
+      arrivalFleet,
+      system,
+      workingArmies,
+      workingFleets,
+      ctx.rng,
+      tickTimeMs
+    );
 
     workingArmies = arrivalOutcome.armies;
     workingFleets = workingFleets.map(existing =>
@@ -540,12 +558,12 @@ export function phaseMovement(state: GameState, ctx: TurnContext): GameState {
   });
 }
 
-export function phaseBattleDetection(state: GameState, ctx: TurnContext): GameState {
+export function phaseBattleDetection(state: GameState, ctx: StrategicContext): GameState {
   // Only detect if advanced combat is enabled
   if (!state.rules.useAdvancedCombat) return state;
 
   // 1. Detect New Battles based on positions
-  const newBattles = detectNewBattles(state, ctx.turn);
+  const newBattles = detectNewBattles(state, ctx.timeMs);
   if (newBattles.length === 0) return state;
 
   // 2. Collect IDs of all fleets engaged
@@ -553,14 +571,14 @@ export function phaseBattleDetection(state: GameState, ctx: TurnContext): GameSt
   newBattles.forEach(b => b.involvedFleetIds.forEach(id => involvedFleetIds.add(id)));
 
   // 3. Update Fleets to COMBAT state
-  // This locks them from moving next turn until resolved
+  // This locks them from moving next tick until resolved
   const nextFleets = state.fleets.map(f => {
     if (involvedFleetIds.has(f.id)) {
       // Force stop movement
       return {
         ...f,
         state: FleetState.COMBAT,
-        stateStartTurn: ctx.turn, // Mark conflict start
+        stateStartTimeMs: ctx.timeMs, // Mark conflict start
         targetSystemId: null,
         targetPosition: null,
         invasionTargetSystemId: null,
@@ -594,7 +612,7 @@ function hasUncontestedOrbitalDominance(state: GameState): boolean {
   });
 }
 
-export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): GameState {
+export function phaseOrbitalBombardment(state: GameState, ctx: StrategicContext): GameState {
   if (!hasUncontestedOrbitalDominance(state)) {
     return {
       ...state,
@@ -622,7 +640,7 @@ export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): Gam
   result.logs.forEach(text => {
     nextLogs.push({
       id: ctx.rng.id('log'),
-      day: ctx.turn,
+      timeMs: ctx.timeMs,
       text,
       type: 'combat'
     });
@@ -636,7 +654,7 @@ export function phaseOrbitalBombardment(state: GameState, ctx: TurnContext): Gam
   };
 }
 
-export function phaseGround(state: GameState, ctx: TurnContext): GameState {
+export function phaseGround(state: GameState, ctx: StrategicContext): GameState {
   let nextLogs = [...state.logs];
   let nextMessages = [...state.messages];
   let nextAiStates: Record<FactionId, AIState> = { ...(state.aiStates ?? {}) };
@@ -675,7 +693,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
   });
 
   // NOTE: `settlementControl` is intentionally sparse.
-  // Generating all surface maps every turn (to pre-seed entries) is extremely expensive and can stall processing.
+  // Generating all surface maps every tick (to pre-seed entries) is extremely expensive and can stall processing.
   // Missing entries fall back to the settlement's generated `factionId` when needed.
   let settlementControl = state.settlementControl ? { ...state.settlementControl } : {};
 
@@ -978,14 +996,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         const loss = lossesById[army.id] ?? 0;
         const membersAfter = Math.max(0, army.members - loss);
         const targetPos = toSurfacePos(map, tileId);
-        const updated: Army = {
+          const updated: Army = {
           ...army,
           state: ArmyState.DEPLOYED,
           containerId: bodyId,
           surfacePos: targetPos,
           members: membersAfter,
           landingOrder: undefined,
-          lastDeployedTurn: ctx.turn
+          lastDeployedTimeMs: ctx.timeMs
         };
         armiesById.set(army.id, updated);
         landedArmyIds.add(army.id);
@@ -994,7 +1012,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         }
         nextLogs.push({
           id: ctx.rng.id('log'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           type: 'combat',
           text: `Landing on ${bodyId} (${coord ? `${coord.q},${coord.r}` : `tile ${tileId}`}): ${army.id} lost ${loss} members.`
         });
@@ -1155,7 +1173,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       if (result.moved) {
         nextLogs.push({
           id: ctx.rng.id('log'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           type: 'move',
           text: `Ground unit ${current.id} moved ${result.steps} tiles on ${bodyId}.`
         });
@@ -1317,7 +1335,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       if (attackers.length === 0) return;
 
       const engagement = resolveEngagement({
-        turn: ctx.turn,
+        timeMs: ctx.timeMs,
         map,
         buildings,
         bombardedTileIds,
@@ -1332,7 +1350,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       engagement.attackersAfter.forEach(updated => {
         const attackerAfter: Army =
           updated.posture === 'prepared_defense'
-            ? { ...updated, posture: 'normal', postureSetTurn: undefined }
+            ? { ...updated, posture: 'normal', postureSetTimeMs: undefined }
             : updated;
         armiesById.set(attackerAfter.id, attackerAfter);
         combatParticipants.add(attackerAfter.id);
@@ -1361,7 +1379,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
       nextLogs.push({
         id: ctx.rng.id('log'),
-        day: ctx.turn,
+        timeMs: ctx.timeMs,
         type: 'combat',
         text: `Ground combat on ${bodyId}: ${engagement.defenderId} vs ${engagement.attackerIds.join(', ')} losses A=${engagement.lossesAtkTotal} D=${engagement.lossesDef}.`
       });
@@ -1417,11 +1435,11 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           if (!current || current.factionId !== factionId) {
             settlementControl = {
               ...settlementControl,
-              [settlement.id]: { factionId, lastCaptureTurn: ctx.turn }
+              [settlement.id]: { factionId, lastCaptureTimeMs: ctx.timeMs }
             };
             nextLogs.push({
               id: ctx.rng.id('log'),
-              day: ctx.turn,
+              timeMs: ctx.timeMs,
               type: 'combat',
               text: `Settlement ${settlement.name} captured by ${factionId} on ${bodyId}.`
             });
@@ -1477,13 +1495,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         };
 
         const isPlayerInvolved = involvedFactionIds.has(state.playerFactionId);
+        const timeMinutes = ctx.timeMs / MS_PER_MINUTE;
         const message: GameMessage = {
           id: ctx.rng.id('msg'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           type: 'PLANET_CONQUERED',
           priority: isPlayerInvolved ? 2 : 1,
           title: `${bodyName} conquered`,
-          subtitle: `${systemName} • Turn ${ctx.turn}`,
+          subtitle: `${systemName} • T+${timeMinutes}m`,
           lines: ['Losses - see combat log', formatRemainingLine()],
           payload: {
             planetId: bodyId,
@@ -1492,7 +1511,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           },
           read: false,
           dismissed: false,
-          createdAtTurn: ctx.turn
+          createdAtTimeMs: ctx.timeMs
         };
         nextMessages = canonicalizeMessages([...nextMessages, message]);
       }
@@ -1510,8 +1529,8 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
     postCombatArmies.forEach(army => {
       if (removeArmyIds.has(army.id)) return;
       if (combatParticipants.has(army.id)) return;
-      const lastCombatTurn = army.lastCombatTurn ?? -Infinity;
-      if (lastCombatTurn > ctx.turn - 2) return;
+      const lastCombatTimeMs = army.lastCombatTimeMs ?? -Infinity;
+      if (lastCombatTimeMs > ctx.timeMs - 2 * MS_PER_MINUTE) return;
       const morale = Math.min(1, army.morale + MORALE_RECOVERY);
       const condition = Math.min(1, army.condition + CONDITION_RECOVERY);
       const fatigue = Math.max(0, army.fatigue - FATIGUE_RECOVERY);
@@ -1569,7 +1588,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
         ...nextLogs,
         {
           id: ctx.rng.id('log'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           text: `System ${system.name} control set to ${newOwnerFactionId} after ground conquest.`,
           type: 'combat'
         }
@@ -1578,13 +1597,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
       const isPlayerInvolved = newOwnerFactionId === state.playerFactionId || system.ownerFactionId === state.playerFactionId;
 
       if (isPlayerInvolved) {
+        const timeMinutes = ctx.timeMs / MS_PER_MINUTE;
         const systemMessage: GameMessage = {
           id: ctx.rng.id('msg'),
-          day: ctx.turn,
+          timeMs: ctx.timeMs,
           type: 'SYSTEM_SECURED',
           priority: newOwnerFactionId === state.playerFactionId ? 2 : 1,
           title: `${system.name} secured`,
-          subtitle: `Turn ${ctx.turn}`,
+          subtitle: `T+${timeMinutes}m`,
           lines: [
             `Solid bodies held: ${
               sortedBodies.filter(body => body.ownerFactionId === newOwnerFactionId).map(body => body.name).join(', ') || 'None'
@@ -1597,7 +1617,7 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
           },
           read: false,
           dismissed: false,
-          createdAtTurn: ctx.turn
+          createdAtTimeMs: ctx.timeMs
         };
 
         nextMessages = canonicalizeMessages([...nextMessages, systemMessage]);
@@ -1620,13 +1640,14 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
 
     Object.entries(holdUpdates).forEach(([factionId, systemIds]) => {
       const existingState: AIState = nextAiStates[factionId] ?? createEmptyAIState();
+      const holdUntilTimeMs = ctx.timeMs + AI_HOLD_DAYS * MS_PER_DAY;
 
       const updatedState: AIState = {
         ...existingState,
-        holdUntilTurnBySystemId: {
-          ...existingState.holdUntilTurnBySystemId,
+        holdUntilTimeMsBySystemId: {
+          ...existingState.holdUntilTimeMsBySystemId,
           ...systemIds.reduce<Record<string, number>>((acc, systemId) => {
-            acc[systemId] = ctx.turn + AI_HOLD_TURNS;
+            acc[systemId] = holdUntilTimeMs;
             return acc;
           }, {})
         }
@@ -1648,10 +1669,10 @@ export function phaseGround(state: GameState, ctx: TurnContext): GameState {
   };
 }
 
-export function phaseObjectives(state: GameState, ctx: TurnContext): GameState {
+export function phaseObjectives(state: GameState, ctx: StrategicContext): GameState {
   if (state.winnerFactionId) return state; // Already decided
 
-  const winnerFactionId = checkVictoryConditions({ ...state, day: ctx.turn });
+  const winnerFactionId = checkVictoryConditions({ ...state, timeMs: ctx.timeMs });
 
   if (winnerFactionId) {
     return { ...state, winnerFactionId };
@@ -1854,9 +1875,9 @@ function applyTankerTransfers(state: GameState): GameState {
   return { ...state, fleets };
 }
 
-export function phaseCleanup(state: GameState, ctx: TurnContext): GameState {
+export function phaseCleanup(state: GameState, ctx: StrategicContext): GameState {
   // 1. Prune Old Battles
-  const activeBattles = pruneBattles(state.battles, ctx.turn);
+  const activeBattles = pruneBattles(state.battles, ctx.timeMs);
   const fleetIds = new Set(state.fleets.map(fleet => fleet.id));
 
   const carrierLossLogs: string[] = [];
@@ -1885,7 +1906,7 @@ export function phaseCleanup(state: GameState, ctx: TurnContext): GameState {
   [...carrierLossLogs, ...sanitizationLogs].forEach(txt => {
     newLogs.push({
       id: ctx.rng.id('log'),
-      day: ctx.turn,
+      timeMs: ctx.timeMs,
       text: `[SYSTEM] ${txt}`,
       type: 'info'
     });

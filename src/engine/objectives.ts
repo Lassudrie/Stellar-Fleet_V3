@@ -8,13 +8,12 @@ import { GameState, FactionId } from '../shared/shared';
 export const checkVictoryConditions = (state: GameState): FactionId | 'draw' | null => {
   const factionIds = state.factions.map(f => f.id);
 
-  // 1. Check Max Turns (Draw/Timeout)
-  // If maxTurns is reached, the game ends.
-  // In a typical scenario, if you haven't won by X turns, you might lose, or it might be a score check.
-  // For now, if 'survival' is a condition and turns are reached, Blue wins. Otherwise null/draw.
-  // Turn limit is inclusive: reaching the specified day should immediately trigger end-of-game logic.
-  if (state.objectives.maxTurns && state.day >= state.objectives.maxTurns) {
-    return resolveTurnLimitOutcome(state);
+  // 1. Check Max Time (Draw/Timeout)
+  // If maxTimeMs is reached, the game ends.
+  // For now, if 'survival' is a condition and time is reached, the player wins. Otherwise null/draw.
+  // Time limit is inclusive: reaching the specified time should immediately trigger end-of-game logic.
+  if (state.objectives.maxTimeMs && state.timeMs >= state.objectives.maxTimeMs) {
+    return resolveTimeLimitOutcome(state);
   }
 
   // 2. Check each Faction against Global Conditions
@@ -47,9 +46,9 @@ const checkFactionVictory = (factionId: FactionId, state: GameState): boolean =>
       case 'king_of_the_hill':
         return checkKingOfTheHill(factionId, state, condition.value);
       case 'survival':
-        // Survival is time-based, checked in the main loop above (MaxTurns).
+        // Survival is time-based, checked in the main loop above (maxTimeMs).
         // It cannot be triggered "early".
-        return false; 
+        return false;
       default:
         return false;
     }
@@ -106,7 +105,7 @@ const hasActivePresence = (state: GameState, factionId: FactionId): boolean => {
   return state.fleets.some(f => f.factionId === factionId && f.ships.length > 0);
 };
 
-const resolveTurnLimitOutcome = (state: GameState): FactionId | 'draw' => {
+const resolveTimeLimitOutcome = (state: GameState): FactionId | 'draw' => {
   const survivalCondition = state.objectives.conditions.find(c => c.type === 'survival');
   if (survivalCondition) {
     const playerAlive = hasActivePresence(state, state.playerFactionId);

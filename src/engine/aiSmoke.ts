@@ -1,25 +1,25 @@
 import { GameEngine } from './GameEngine';
-import { createEmptyAIState, getLegacyAiFactionId, planAiTurn } from './ai';
+import { createEmptyAIState, getLegacyAiFactionId, planAiTick } from './ai';
 import { RNG } from './rng';
 import { buildScenario } from '../content/scenarios';
 import { generateWorld } from './worldgen/worldGenerator';
-import { Fleet, GameState, StarSystem } from '../shared/shared';
+import { Fleet, GameState, StarSystem, MS_PER_MINUTE } from '../shared/shared';
 import { devLog } from '../shared/shared';
 import { sorted } from '../shared/shared';
 
-const parseTurnCount = (): number => {
-  const raw = process.env.SMOKE_TURNS ?? '100';
-  const turns = Number.parseInt(raw, 10);
+const parseMinuteCount = (): number => {
+  const raw = process.env.SMOKE_MINUTES ?? process.env.SMOKE_TURNS ?? '100';
+  const minutes = Number.parseInt(raw, 10);
 
-  if (!Number.isInteger(turns)) {
-    throw new Error(`SMOKE_TURNS must be an integer (received: ${raw})`);
+  if (!Number.isInteger(minutes)) {
+    throw new Error(`SMOKE_MINUTES must be an integer (received: ${raw})`);
   }
 
-  if (turns < 50 || turns > 200) {
-    throw new Error(`SMOKE_TURNS must be between 50 and 200 (received: ${turns})`);
+  if (minutes < 50 || minutes > 200) {
+    throw new Error(`SMOKE_MINUTES must be between 50 and 200 (received: ${minutes})`);
   }
 
-  return turns;
+  return minutes;
 };
 
 const parseSeed = (): number => {
@@ -49,7 +49,7 @@ const assertVectorFinite = (vec: { x: number; y: number; z: number }, label: str
 };
 
 const assertStateIsFinite = (state: GameState) => {
-  assertFiniteNumber(state.day, 'state.day');
+  assertFiniteNumber(state.timeMs, 'state.timeMs');
   assertFiniteNumber(state.startYear, 'state.startYear');
   assertFiniteNumber(state.rngState, 'state.rngState');
 
@@ -64,7 +64,7 @@ const assertStateIsFinite = (state: GameState) => {
       assertVectorFinite(fleet.targetPosition, `fleet:${fleet.id}.targetPosition`);
     }
 
-    assertFiniteNumber(fleet.stateStartTurn, `fleet:${fleet.id}.stateStartTurn`);
+    assertFiniteNumber(fleet.stateStartTimeMs, `fleet:${fleet.id}.stateStartTimeMs`);
 
     fleet.ships.forEach(ship => {
       assertFiniteNumber(ship.hp, `ship:${ship.id}.hp`);
@@ -83,7 +83,7 @@ const countAiOrders = (state: GameState, rngSnapshot: RNG): number => {
   sorted(aiFactions, (a, b) => a.id.localeCompare(b.id)).forEach(faction => {
     const legacyState = faction.id === legacyAiFactionId ? state.aiState : undefined;
     const aiState = state.aiStates?.[faction.id] ?? legacyState ?? createEmptyAIState();
-    const commands = planAiTurn(state, faction.id, aiState, rngSnapshot);
+    const commands = planAiTick(state, faction.id, aiState, rngSnapshot);
     commandCount += commands.filter(cmd => cmd.type !== 'AI_UPDATE_STATE').length;
   });
 
@@ -91,43 +91,43 @@ const countAiOrders = (state: GameState, rngSnapshot: RNG): number => {
 };
 
 const runSmokeTest = () => {
-  const turnsToPlay = parseTurnCount();
+  const minutesToPlay = parseMinuteCount();
   const seed = parseSeed();
   const scenario = buildScenario('conquest_sandbox', seed);
   const { state } = generateWorld(scenario);
   const engine = new GameEngine(state);
-  const minActiveTurns = Math.max(2, Math.floor(turnsToPlay / 25));
+  const minActiveTicks = Math.max(2, Math.floor(minutesToPlay / 25));
 
-  let aiOrderTurns = 0;
+  let aiOrderTicks = 0;
   let totalAiOrders = 0;
 
-  for (let turnIndex = 0; turnIndex < turnsToPlay; turnIndex += 1) {
+  for (let tickIndex = 0; tickIndex < minutesToPlay; tickIndex += 1) {
     const previewRng = new RNG(engine.state.seed);
     previewRng.setState(engine.rng.getState());
 
-    const ordersThisTurn = countAiOrders(engine.state, previewRng);
-    if (ordersThisTurn > 0) {
-      aiOrderTurns += 1;
-      totalAiOrders += ordersThisTurn;
+    const ordersThisTick = countAiOrders(engine.state, previewRng);
+    if (ordersThisTick > 0) {
+      aiOrderTicks += 1;
+      totalAiOrders += ordersThisTick;
     }
 
-    engine.advanceTurn();
+    engine.advanceTime(MS_PER_MINUTE);
     assertStateIsFinite(engine.state);
 
   }
 
-  if (aiOrderTurns === 0) {
+  if (aiOrderTicks === 0) {
     throw new Error('AI inactivity detected: no orders were generated during the smoke run.');
   }
 
-  if (aiOrderTurns < minActiveTurns) {
-    throw new Error(`AI inactivity detected: orders were issued on ${aiOrderTurns} turns (minimum ${minActiveTurns}).`);
+  if (aiOrderTicks < minActiveTicks) {
+    throw new Error(`AI inactivity detected: orders were issued on ${aiOrderTicks} ticks (minimum ${minActiveTicks}).`);
   }
 
   // Final validation after completing the loop
-  const totalRuntimeTurns = engine.state.day - state.day;
-  devLog(`AI smoke test completed: ${totalRuntimeTurns} turns with seed ${seed}.`);
-  devLog(`AI issued ${totalAiOrders} commands across ${aiOrderTurns} active turns.`);
+  const totalRuntimeMinutes = (engine.state.timeMs - state.timeMs) / MS_PER_MINUTE;
+  devLog(`AI smoke test completed: ${totalRuntimeMinutes} minutes with seed ${seed}.`);
+  devLog(`AI issued ${totalAiOrders} commands across ${aiOrderTicks} active ticks.`);
 };
 
 runSmokeTest();

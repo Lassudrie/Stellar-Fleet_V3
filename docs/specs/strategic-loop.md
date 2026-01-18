@@ -1,4 +1,4 @@
-# Spécification Technique : Boucle de Tour
+# Spécification Technique : Boucle stratégique
 
 **Responsable :** Engine Team
 
@@ -6,33 +6,33 @@
 
 ## 1. Principe général
 
-`runTurn` applique une pipeline déterministe sur l’état courant pour produire l’état du tour suivant (`day + 1`). Chaque phase consomme l’état en entrée et peut muter des sous-ensembles (flottes, armées, systèmes, batailles, logs, messages, IA). Les phases sont strictement séquentielles : aucune phase ultérieure ne peut s’exécuter partiellement ou en parallèle.
+`runStrategicTick` applique une pipeline déterministe sur l’état courant pour produire l’état du tick stratégique suivant (cadence fixe, minute logique). Chaque phase consomme l’état en entrée et peut muter des sous-ensembles (flottes, armées, systèmes, batailles, logs, messages, IA). Les phases sont strictement séquentielles : aucune phase ultérieure ne peut s’exécuter partiellement ou en parallèle.
 
 **Règles globales d’ordre et de logs**
 
-- **Canonicalisation** : avant toute phase et juste avant l’incrément du jour, `canonicalizeState` trie `systems`, `fleets` (et leurs `ships`), `armies`, `battles`, `logs` et `messages` par ID (ou jour puis ID pour les journaux/messages). Cela garantit un ordre d’itération stable pour la consommation du RNG et la comparaison d’états.
+- **Canonicalisation** : avant toute phase et juste avant la sortie, `canonicalizeState` trie `systems`, `fleets` (et leurs `ships`), `armies`, `battles`, `logs` et `messages` par ID (ou `timeMs` puis ID pour les journaux/messages). Cela garantit un ordre d’itération stable pour la consommation du RNG et la comparaison d’états.
 - **Tri intra‑phase** : certaines phases imposent un tri supplémentaire pour stabiliser le RNG ou les effets :
-  - **AI** : les factions IA sont parcourues par `id` croissant avant d’appeler `planAiTurn` puis `applyCommand`.
+  - **AI** : les factions IA sont parcourues par `id` croissant avant d’appeler `planAiTick` puis `applyCommand`.
   - **Mouvement** : les flottes sont déplacées dans l’ordre lexicographique de `fleet.id` puis leurs opérations d’arrivée sont évaluées sur les positions finales.
   - **Résolution de bataille** : les batailles `scheduled` sont triées par `systemId` puis `battle.id` avant résolution.
-- **Logs** : chaque phase ajoute ses entrées avec `day = ctx.turn` et un `id` RNG, puis la canonicalisation finale réordonne par jour/ID si nécessaire.
-- **Messages** : les messages sont fusionnés puis `canonicalizeMessages` applique le tri jour/ID dès la génération.
+- **Logs** : chaque phase ajoute ses entrées avec `timeMs = ctx.timeMs` et un `id` RNG, puis la canonicalisation finale réordonne par `timeMs`/ID si nécessaire.
+- **Messages** : les messages sont fusionnés puis `canonicalizeMessages` applique le tri `timeMs`/ID dès la génération.
 
 ## 2. Phases détaillées (entrées → sorties, invariants)
 
 ### 2.1. Phase AI (`phaseAI`)
 
-- **Entrée** : état canonicalisé, `ctx.turn` (jour cible) et `ctx.rng` partagé.
+- **Entrée** : état canonicalisé, `ctx.timeMs`/`ctx.deltaMs` et `ctx.rng` partagé.
 - **Traitement** :
   - Ignore la phase si `rules.aiEnabled` est faux.
   - Trie les factions disposant d’un profil IA par `id` et garantit un `AIState` pour chacune (compatibilité avec `aiState` legacy).
-  - Pour chaque faction : `planAiTurn` génère des commandes appliquées immédiatement via `applyCommand` dans l’ordre reçu.
+  - Pour chaque faction : `planAiTick` génère des commandes appliquées immédiatement via `applyCommand` dans l’ordre reçu.
 - **Sortie** : état mis à jour (flottes, armées, ordres consommés, logs éventuels émis par les commandes) et `aiStates` fusionné.
-- **Invariants** : l’IA ne modifie pas `day`; les commandes sont appliquées sur un état déjà trié, assurant une consommation RNG stable.
+- **Invariants** : l’IA ne modifie pas `timeMs`; les commandes sont appliquées sur un état déjà trié, assurant une consommation RNG stable.
 
 ### 2.2. Phase Mouvement (`phaseMovement`)
 
-- **Entrée** : état issu de l’AI, `ctx.turn` pour dater les positions cibles.
+- **Entrée** : état issu de l’AI, `ctx.timeMs` et `ctx.deltaMs`.
 - **Traitement** :
   - Trie les flottes par `id` pour déplacer chacune via `moveFleet`, accumulant leurs positions finales et logs.
   - Exécute ensuite `executeArrivalOperations` pour chaque résultat (chargement/débarquement/invasion) sur les positions déjà mises à jour.
@@ -41,7 +41,7 @@
 
 ### 2.3. Phase Détection des batailles (`phaseBattleDetection`)
 
-- **Entrée** : état après mouvement, `ctx.turn`.
+- **Entrée** : état après mouvement, `ctx.timeMs`.
 - **Traitement** :
   - Court‑circuite si `rules.useAdvancedCombat` est faux.
   - `detectNewBattles` crée des batailles `scheduled` selon la co‑présence de flottes opposées.
@@ -55,7 +55,7 @@
 - **Traitement** :
   - Trie les batailles `scheduled` par `systemId` puis `battle.id` et les résout via `resolveBattle`.
   - Pour chaque résultat : met à jour l’entrée `Battle`, remplace les flottes engagées par les survivants, ajoute un log global de fin de combat et un `GameMessage` synthétique (pertes, munitions).
-- **Sortie** : batailles marquées `resolved` avec `turnResolved`, flottes nettoyées/ajoutées, logs/messages enrichis.
+- **Sortie** : batailles marquées `resolved` avec `timeResolvedMs`, flottes nettoyées/ajoutées, logs/messages enrichis.
 - **Invariants** :
   - Toutes les batailles `scheduled` doivent ressortir résolues. Si des `scheduled` persistent après la phase (ou par erreur en aval), un garde‑fou force la résolution en « draw » avant le cleanup.
   - Les résultats de RNG sont isolés par bataille (seed propre dans `resolveBattle`).
@@ -66,15 +66,15 @@
 - **Entrée** : état après résolution spatiale.
 - **Traitement** :
   - `resolveOrbitalBombardment` applique des pertes/morale aux armées déployées selon la présence orbitale et retourne des logs textuels.
-  - Marque les hex bombardés du tour (utilisés par la phase de débarquement) et applique la mitigation anti‑orbitale si présente.
-- **Sortie** : armées patchées (force/morale), hex bombardés du tour, logs combat ajoutés si l’action a eu lieu.
+  - Marque les hex bombardés du tick (utilisés par la phase de débarquement) et applique la mitigation anti‑orbitale si présente.
+- **Sortie** : armées patchées (force/morale), hex bombardés du tick, logs combat ajoutés si l’action a eu lieu.
 - **Invariants** : pas d’effet si aucun bombardement; aucune suppression d’armée directe, seulement des mises à jour de stats.
 
 ### 2.6. Phase Combat terrestre & conquête (`phaseGround`)
 
 - **Entrée** : état après bombardement, incluant positions orbitale/sol.
 - **Traitement** :
-  - Exécute les ordres terrestres persistés sur les unités pour les unités `DEPLOYED` sur surface map hex.
+  - Exécute les ordres terrestres persistés sur les unités `DEPLOYED` sur surface map hex.
   - Pipeline normatif (cf. `ground-surface-combat-v2.md`) :
     1) exécution des ordres de débarquement (pertes de débarquement, placement des survivants) ;
     2) calcul supply (BFS par body et faction depuis settlements contrôlés et buildings) ;
@@ -96,10 +96,10 @@
 
 ### 2.7. Phase Objectifs (`phaseObjectives`)
 
-- **Entrée** : état courant, `ctx.turn` pour la datation du check.
+- **Entrée** : état courant, `ctx.timeMs` pour la datation du check.
 - **Traitement** :
   - Court‑circuit si `winnerFactionId` est déjà défini.
-  - `checkVictoryConditions` évalue les conditions (avec `day` forcé à `ctx.turn`).
+  - `checkVictoryConditions` évalue les conditions (avec `timeMs` courant).
 - **Sortie** : éventuellement `winnerFactionId` fixé; sinon état inchangé.
 - **Invariants** : aucune modification d’autre entité; un gagnant figé n’est jamais écrasé par la suite.
 
@@ -107,15 +107,15 @@
 
 - **Entrée** : état post‑objectifs (et post garde‑fou de batailles).
 - **Traitement** :
-  - `pruneBattles` purge les rapports trop anciens (retention 5 tours).
+  - `pruneBattles` purge les rapports trop anciens (rétention 5 minutes).
   - `sanitizeArmies` retire/recorrige les références d’armées orphelines, produisant des logs système.
   - Extraction passive du gaz : chaque flotte orbitant un système gazeux tente de siphonner du carburant avec ses Extractors, mais l’opération est bloquée si l’orbite est contestée ou si une flotte ennemie est dans le rayon de capture.
   - Tronque `logs` à 2000 entrées max, en conservant les plus récentes.
-- **Sortie** : état prêt à être canonicalisé puis à incrémenter `day`.
+- **Sortie** : état prêt à être canonicalisé puis renvoyé au moteur.
 - **Invariants** : aucune bataille `scheduled` ne subsiste; les logs système ajoutés sont préfixés `[SYSTEM]`.
 
 ## 3. Canonicalisation finale et incrément du temps
 
-Après le cleanup, l’état est de nouveau passé par `canonicalizeState` pour figer l’ordre des collections avec les mutations finales. Enfin, `day` est fixé à `ctx.turn` et renvoyé au moteur. Toute consommation du RNG pendant ce tour a été réalisée dans un ordre déterminé par :
+Après le cleanup, l’état est de nouveau passé par `canonicalizeState` pour figer l’ordre des collections avec les mutations finales. Le temps `timeMs` est conservé tel que fourni par l’appelant. Toute consommation du RNG pendant ce tick a été réalisée dans un ordre déterminé par :
 
-1) la canonicalisation d’entrée ; 2) les tris intra‑phases ci‑dessus ; 3) la canonicalisation de sortie des logs/messages. Cela garantit la reproductibilité des tours sur la même `seed` et le même set d’ordres.
+1) la canonicalisation d’entrée ; 2) les tris intra‑phases ci‑dessus ; 3) la canonicalisation de sortie des logs/messages. Cela garantit la reproductibilité des ticks sur la même `seed` et le même set d’ordres.

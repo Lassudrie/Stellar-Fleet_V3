@@ -22,14 +22,6 @@
         touch-action: none;
       }
 
-      .hud {
-        position: fixed;
-        left: 18px;
-        top: 18px;
-        z-index: 2;
-        pointer-events: none;
-      }
-
       .label-layer {
         position: fixed;
         inset: 0;
@@ -105,8 +97,37 @@
           linear-gradient(160deg, rgba(5, 7, 12, 0.98), rgba(6, 9, 16, 0.92));
       }
 
+      .loading-screen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 3;
+        background: radial-gradient(circle at 30% 20%, rgba(20, 44, 74, 0.45), transparent 55%),
+          radial-gradient(circle at 70% 0%, rgba(60, 32, 52, 0.3), transparent 50%),
+          linear-gradient(160deg, rgba(5, 7, 12, 0.98), rgba(6, 10, 18, 0.94));
+      }
+
       .hidden {
         display: none;
+      }
+
+      .loading-bar {
+        width: 100%;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(20, 30, 48, 0.8);
+        border: 1px solid rgba(84, 115, 150, 0.45);
+        overflow: hidden;
+      }
+
+      .loading-bar__fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(120deg, rgba(125, 211, 252, 0.2), rgba(125, 211, 252, 0.95));
+        transition: width 0.2s ease;
       }
 
       .panel {
@@ -127,6 +148,87 @@
       .panel.slim {
         width: min(300px, 86vw);
         padding: 12px 14px;
+      }
+
+      .burger-button {
+        position: fixed;
+        top: 18px;
+        left: 18px;
+        z-index: 3;
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        border: 1px solid rgba(93, 120, 156, 0.45);
+        background: rgba(10, 18, 28, 0.75);
+        color: #e6edf3;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 0;
+      }
+
+      .burger-button span {
+        display: block;
+        width: 18px;
+        height: 2px;
+        background: rgba(230, 237, 243, 0.9);
+        border-radius: 999px;
+        transition: transform 0.2s ease, opacity 0.2s ease;
+      }
+
+      .burger-button.is-active span:nth-child(1) {
+        transform: translateY(6px) rotate(45deg);
+      }
+
+      .burger-button.is-active span:nth-child(2) {
+        opacity: 0;
+      }
+
+      .burger-button.is-active span:nth-child(3) {
+        transform: translateY(-6px) rotate(-45deg);
+      }
+
+      .burger-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        background: rgba(5, 8, 14, 0.65);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+
+      .burger-backdrop.is-visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .burger-drawer {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: min(360px, 86vw);
+        padding: 18px;
+        box-sizing: border-box;
+        z-index: 3;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        pointer-events: none;
+      }
+
+      .burger-drawer.is-open {
+        transform: translateX(0);
+        pointer-events: auto;
+      }
+
+      .burger-drawer .panel {
+        width: 100%;
+        max-height: calc(100vh - 36px);
+        overflow: auto;
       }
 
       .panel h1 {
@@ -231,17 +333,52 @@
         accent-color: #7dd3fc;
       }
 
-      .range-row {
+      .speed-row {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        margin-top: 6px;
       }
 
-      .range-value {
-        min-width: 44px;
+      .speed-value {
+        min-width: 110px;
         text-align: right;
         font-variant-numeric: tabular-nums;
         color: #d9f2ff;
+        margin-left: auto;
+      }
+
+      .speed-button {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(125, 211, 252, 0.35);
+        background: rgba(12, 18, 28, 0.85);
+        color: #cbd5e1;
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .speed-button.is-active {
+        border-color: rgba(125, 211, 252, 0.9);
+        color: #f8fafc;
+        background: linear-gradient(130deg, rgba(56, 189, 248, 0.25), rgba(14, 116, 144, 0.55));
+        box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.25);
+      }
+
+      .speed-button.pause {
+        border-color: rgba(251, 191, 36, 0.55);
+        color: #fde68a;
+        background: rgba(88, 63, 8, 0.35);
+      }
+
+      .speed-button.pause.is-active {
+        border-color: rgba(251, 191, 36, 0.9);
+        color: #fff7ed;
+        background: rgba(120, 53, 15, 0.65);
       }
 
       .actions {
@@ -307,11 +444,14 @@
       }
 
       @media (max-width: 720px) {
-        .hud {
+        .burger-button {
+          top: 12px;
           left: 12px;
-          right: 12px;
-          top: auto;
-          bottom: 12px;
+        }
+
+        .burger-drawer {
+          width: min(320px, 90vw);
+          padding: 12px;
         }
 
         .debug-overlay {
@@ -351,17 +491,24 @@
     <div id="label-layer" class="label-layer hidden"></div>
     <div id="menu-screen" class="menu-screen">
       <div class="panel menu-panel">
-        <div class="menu-eyebrow">Scenario Gate</div>
+        <div class="menu-eyebrow">Main Menu</div>
         <h1>Stellar Fleet</h1>
         <p id="scenario-description">Loading scenario...</p>
         <label for="scenario-select">Scenario</label>
         <select id="scenario-select"></select>
         <label for="seed-input">Seed</label>
         <input id="seed-input" type="number" step="1" />
-        <label for="time-scale-menu">Time Scale (days/s)</label>
-        <div class="range-row">
-          <input id="time-scale-menu" type="range" min="-5" max="5" step="0.1" />
-          <div class="range-value" id="time-scale-value-menu">0</div>
+        <label>Vitesse simulation</label>
+        <div class="speed-row" id="sim-speed-menu">
+          <button class="speed-button" type="button" data-speed="1">x1</button>
+          <button class="speed-button" type="button" data-speed="2">x2</button>
+          <button class="speed-button" type="button" data-speed="4">x4</button>
+          <button class="speed-button" type="button" data-speed="8">x8</button>
+          <button class="speed-button" type="button" data-speed="16">x16</button>
+          <button class="speed-button" type="button" data-speed="32">x32</button>
+          <button class="speed-button" type="button" data-speed="64">x64</button>
+          <button class="speed-button" type="button" data-speed="100">x100</button>
+          <div class="speed-value" id="sim-speed-value-menu">x1</div>
         </div>
         <div class="actions">
           <button id="start-button" type="button">Launch Mission</button>
@@ -369,22 +516,48 @@
         <div class="hint">Pinch or scroll to zoom. Double tap to focus. Drag to orbit. Two-finger drag to pan.</div>
       </div>
     </div>
-    <div id="hud" class="hud hidden">
+    <div id="loading-screen" class="loading-screen hidden">
+      <div class="panel menu-panel">
+        <div class="menu-eyebrow">Loading</div>
+        <h1>Stellar Fleet</h1>
+        <p id="loading-stage">Preparing scenario...</p>
+        <div class="loading-bar">
+          <div id="loading-progress" class="loading-bar__fill"></div>
+        </div>
+      </div>
+    </div>
+    <button id="burger-button" class="burger-button hidden" type="button" aria-label="Open menu">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+    <div id="burger-backdrop" class="burger-backdrop hidden"></div>
+    <div id="burger-drawer" class="burger-drawer hidden">
       <div class="panel slim">
         <div class="tabs">
           <button id="hud-tab-view" class="tab is-active" type="button">View</button>
           <button id="hud-tab-ships" class="tab" type="button">Ships</button>
         </div>
         <div id="hud-panel-view" class="tab-panel is-active">
-          <label for="time-scale-hud">Time Scale (days/s)</label>
-          <div class="range-row">
-            <input id="time-scale-hud" type="range" min="-5" max="5" step="0.1" />
-            <div class="range-value" id="time-scale-value-hud">0</div>
+          <label>Vitesse simulation</label>
+          <div class="speed-row" id="sim-speed-hud">
+            <button class="speed-button" type="button" data-speed="1">x1</button>
+            <button class="speed-button" type="button" data-speed="2">x2</button>
+            <button class="speed-button" type="button" data-speed="4">x4</button>
+            <button class="speed-button" type="button" data-speed="8">x8</button>
+            <button class="speed-button" type="button" data-speed="16">x16</button>
+            <button class="speed-button" type="button" data-speed="32">x32</button>
+            <button class="speed-button" type="button" data-speed="64">x64</button>
+            <button class="speed-button" type="button" data-speed="100">x100</button>
+          </div>
+          <div class="speed-row">
+            <button id="sim-pause-button" class="speed-button pause" type="button">Pause</button>
+            <div class="speed-value" id="sim-speed-value-hud">x1</div>
           </div>
           <div class="actions">
-            <button id="menu-button" type="button">Menu</button>
+            <button id="return-menu-button" type="button">Return to main menu</button>
           </div>
-          <div class="hint">Double tap to focus. Drag to orbit. Shift or right-drag to pan. Scroll or pinch to zoom.</div>
+          <div class="hint">Close the drawer to resume simulation controls.</div>
         </div>
         <div id="hud-panel-ships" class="tab-panel">
           <label for="ship-select">Ship Focus</label>

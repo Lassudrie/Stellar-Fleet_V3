@@ -8,7 +8,7 @@ import { CAPTURE_RANGE, CAPTURE_RANGE_SQ, COLORS, ORBITAL_BOMBARDMENT_MIN_STRENG
 import { GROUND_UNIT_STATS } from '../../content/data/groundUnits';
 import { detectNewBattles, resolveBattle } from '../battle';
 import { SHIP_STATS } from '../../content/data/static';
-import { AI_HOLD_TURNS, createEmptyAIState, planAiTurn } from '../ai';
+import { AI_HOLD_DAYS, createEmptyAIState, planAiTick } from '../ai';
 import { applyCommand, GameCommand } from '../commands';
 import {
   Army,
@@ -31,15 +31,17 @@ import {
   ShipEntity,
   ShipType,
   StarSystem,
-  SurfacePos
+  SurfacePos,
+  MS_PER_DAY,
+  MS_PER_MINUTE
 } from '../../shared/shared';
 import { shortId } from '../../shared/shared';
 import { Vec3 } from '../math/vec3';
 import { GameEngine } from '../GameEngine';
-import { runTurn } from '../runTurn';
+import { runStrategicTick } from '../strategicSimulation';
 import { RNG } from '../rng';
-import type { TurnContext } from '../runTurn';
-import { phaseBattleResolution, phaseCleanup, phaseGround, phaseBattleDetection, phaseMovement, phaseOrbitalBombardment } from '../runTurn';
+import type { StrategicContext } from '../strategicSimulation';
+import { phaseBattleResolution, phaseCleanup, phaseGround, phaseBattleDetection, phaseMovement, phaseOrbitalBombardment } from '../strategicSimulation';
 import ts from 'typescript';
 import { getTerritoryOwner } from '../territory';
 import { resolveBattleOutcome, FactionRegistry } from '../battle';
@@ -145,7 +147,7 @@ const createFleet = (id: string, factionId: string, position: Vec3, ships: TestS
   state: FleetState.ORBIT,
   targetSystemId: null,
   targetPosition: null,
-  stateStartTurn: 0
+  stateStartTimeMs: 0
 });
 
 const createArmy = (
@@ -214,7 +216,7 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     seed: 1,
     rngState: 1,
     startYear: 0,
-    day: 0,
+    timeMs: 0,
     systems: [],
     fleets: [],
     armies: [],
@@ -227,6 +229,13 @@ const createBaseState = (overrides: Partial<GameState>): GameState => {
     ...restOverrides
   };
 };
+
+const createStrategicCtx = (timeMs: number, rng: RNG, deltaMs = MS_PER_MINUTE): StrategicContext => ({
+  timeMs,
+  timeDays: timeMs / MS_PER_DAY,
+  deltaMs,
+  rng
+});
 
 const getFactionColor = (factionId: FactionId | null): string =>
   factions.find(faction => faction.id === factionId)?.color ?? COLORS.star;
@@ -331,7 +340,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-alpha-beta',
         systemId: 'sys-alpha-beta',
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [alphaFleet.id, betaFleet.id],
         logs: []
@@ -350,9 +359,9 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'Battle resolution uses the context turn for dating effects',
+    name: 'Battle resolution uses the context time for dating effects',
     run: () => {
-      const system = createSystem('sys-turn-sync', null);
+      const system = createSystem('sys-time-sync', null);
       const attackerShip: TestShipInput = {
         id: 'attacker-sync',
         type: ShipType.CRUISER,
@@ -368,27 +377,27 @@ const tests: TestCase[] = [
         carriedArmyId: null
       };
 
-      const attackerFleet = createFleet('fleet-turn-attacker', 'blue', { ...baseVec }, [attackerShip]);
-      const defenderFleet = createFleet('fleet-turn-defender', 'red', { ...baseVec }, [defenderShip]);
+      const attackerFleet = createFleet('fleet-time-attacker', 'blue', { ...baseVec }, [attackerShip]);
+      const defenderFleet = createFleet('fleet-time-defender', 'red', { ...baseVec }, [defenderShip]);
 
       const battle: Battle = {
-        id: 'battle-turn-sync',
+        id: 'battle-time-sync',
         systemId: system.id,
-        turnCreated: 2,
+        timeCreatedMs: 2 * MS_PER_MINUTE,
         status: 'scheduled',
         involvedFleetIds: [attackerFleet.id, defenderFleet.id],
         logs: []
       };
 
       const state = createBaseState({
-        day: 2,
+        timeMs: 2 * MS_PER_MINUTE,
         seed: 12,
         systems: [system],
         fleets: [attackerFleet, defenderFleet],
         battles: [battle]
       });
 
-      const ctx = { rng: new RNG(42), turn: 5 };
+      const ctx = createStrategicCtx(5 * MS_PER_MINUTE, new RNG(42));
       const resolved = phaseBattleResolution(state, ctx);
       const survivingFleet = resolved.fleets.find(fleet => fleet.id === attackerFleet.id);
       const survivingShip = survivingFleet?.ships.find(ship => ship.id === attackerShip.id);
@@ -398,8 +407,7 @@ const tests: TestCase[] = [
       const killHistory = survivingShip?.killHistory ?? [];
       assert.ok(killHistory.length > 0, 'Kill history should record the destroyed defender');
       killHistory.forEach(record => {
-        assert.strictEqual(record.day, ctx.turn, 'Kill day must match the context turn');
-        assert.strictEqual(record.turn, ctx.turn, 'Kill turn must match the context turn');
+        assert.strictEqual(record.timeMs, ctx.timeMs, 'Kill time must match the context tick');
       });
     }
   },
@@ -420,7 +428,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-attrition-winner',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueFleet.id],
         logs: []
@@ -460,19 +468,19 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'ORDER_LOAD_MOVE applique le chargement après un runTurn',
+    name: 'ORDER_LOAD_MOVE applique le chargement après un tick stratégique',
     run: () => {
-      const system = createSystem('sys-load-runturn', 'blue');
+      const system = createSystem('sys-load-tick', 'blue');
       const transport: TestShipInput = {
-        id: 'blue-transport-runturn',
+        id: 'blue-transport-tick',
         type: ShipType.TRANSPORTER,
         hp: 40,
         maxHp: 40,
         carriedArmyId: null
       };
 
-      const fleet = createFleet('fleet-blue-runturn', 'blue', { ...baseVec }, [transport]);
-      const army = createArmy('army-blue-runturn', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
+      const fleet = createFleet('fleet-blue-tick', 'blue', { ...baseVec }, [transport]);
+      const army = createArmy('army-blue-tick', 'blue', 12000, ArmyState.DEPLOYED, system.planets[0].id);
 
       const initialState = createBaseState({ systems: [system], fleets: [fleet], armies: [army] });
       const withOrder = applyCommand(
@@ -481,7 +489,7 @@ const tests: TestCase[] = [
         new RNG(3)
       ).state;
 
-      const result = runTurn(withOrder, new RNG(3));
+      const result = runStrategicTick(withOrder, new RNG(3));
       const updatedArmy = result.armies.find(a => a.id === army.id);
       const updatedFleet = result.fleets.find(f => f.id === fleet.id);
       const updatedTransport = updatedFleet?.ships.find(ship => ship.id === transport.id);
@@ -495,12 +503,12 @@ const tests: TestCase[] = [
       assert.strictEqual(
         updatedTransport?.carriedArmyId,
         army.id,
-        'Le transport doit porter l’armée après le runTurn'
+        'Le transport doit porter l’armée après un tick stratégique'
       );
       assert.strictEqual(
         updatedFleet?.loadTargetSystemId,
         null,
-        'L’ordre de chargement doit être consommé pendant le runTurn'
+        'L’ordre de chargement doit être consommé pendant un tick stratégique'
       );
     }
   },
@@ -580,7 +588,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-green-win',
         systemId: 'sys-green-win',
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [greenFleet.id, blueFleet.id],
         logs: []
@@ -629,7 +637,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-outcome-1',
         systemId: 'sys-x',
-        turnCreated: 1,
+        timeCreatedMs: 1 * MS_PER_MINUTE,
         status: 'resolved',
         involvedFleetIds: [],
         logs: [],
@@ -645,26 +653,25 @@ const tests: TestCase[] = [
     }
   },
   {
-    name: 'Max turns victory triggers on the exact turn limit',
+    name: 'Max time victory triggers on the exact time limit',
     run: () => {
-      const playerFleet = createFleet('fleet-blue-turncap', 'blue', baseVec, [
+      const playerFleet = createFleet('fleet-blue-timecap', 'blue', baseVec, [
         { id: 'blue-ship-1', type: ShipType.FIGHTER, hp: 50, maxHp: 50, carriedArmyId: null }
       ]);
 
-      const stateAtTurnLimit = createBaseState({
-        day: 4,
+      const stateAtTimeLimit = createBaseState({
+        timeMs: 5 * MS_PER_MINUTE,
         fleets: [playerFleet],
         systems: [createSystem('sys-home', 'blue')],
-        objectives: { maxTurns: 5, conditions: [{ type: 'survival' }] }
+        objectives: { maxTimeMs: 5 * MS_PER_MINUTE, conditions: [{ type: 'survival' }] }
       });
 
-      const nextState = runTurn(stateAtTurnLimit, new RNG(9));
+      const nextState = runStrategicTick(stateAtTimeLimit, new RNG(9));
 
-      assert.strictEqual(nextState.day, 5, 'The turn counter should advance to the limit');
       assert.strictEqual(
         nextState.winnerFactionId,
         'blue',
-        'Survival objectives should resolve as soon as the max turn is reached'
+        'Survival objectives should resolve as soon as the max time is reached'
       );
     }
   },
@@ -715,7 +722,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-outcome-2',
         systemId: 'sys-y',
-        turnCreated: 2,
+        timeCreatedMs: 2,
         status: 'resolved',
         involvedFleetIds: [],
         logs: [],
@@ -852,7 +859,7 @@ const tests: TestCase[] = [
 
       const blueFleet = createFleet('fleet-blue-extract', 'blue', { ...baseVec }, [extractor]);
       const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet] });
-      const ctx = { turn: state.day + 1, rng: new RNG(29) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(29));
 
       const nextState = phaseCleanup(state, ctx);
       const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
@@ -881,7 +888,7 @@ const tests: TestCase[] = [
       ]);
 
       const state = createBaseState({ systems: [gasSystem], fleets: [blueFleet, redFleet] });
-      const ctx = { turn: state.day + 1, rng: new RNG(31) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(31));
 
       const nextState = phaseCleanup(state, ctx);
       const updatedFleet = nextState.fleets.find(fleet => fleet.id === blueFleet.id);
@@ -915,7 +922,7 @@ const tests: TestCase[] = [
         fleets: [blueFleet],
         armies: [redArmyA, redArmyB]
       });
-      const ctx = { turn: state.day + 1, rng: new RNG(11) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(11));
 
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updatedA = nextState.armies.find(army => army.id === redArmyA.id);
@@ -950,7 +957,7 @@ const tests: TestCase[] = [
         fleets: [blueFleet, redFleet],
         armies: [redArmy]
       });
-      const ctx = { turn: state.day + 1, rng: new RNG(13) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(13));
 
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
@@ -978,7 +985,7 @@ const tests: TestCase[] = [
         fleets: [blueFleet, redFleet],
         armies: [redArmy]
       });
-      const ctx = { turn: state.day + 1, rng: new RNG(23) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(23));
 
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
@@ -1007,7 +1014,7 @@ const tests: TestCase[] = [
         fleets: [transportFleet],
         armies: [redArmy]
       });
-      const ctx = { turn: state.day + 1, rng: new RNG(17) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(17));
 
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
@@ -1044,7 +1051,7 @@ const tests: TestCase[] = [
         fleets: [blueFleet],
         armies: [redArmy]
       });
-      const ctx = { turn: state.day + 1, rng: new RNG(19) };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(19));
 
       const nextState = phaseOrbitalBombardment(state, ctx);
       const updated = nextState.armies.find(army => army.id === redArmy.id);
@@ -1197,7 +1204,16 @@ const tests: TestCase[] = [
       const rng = new RNG(11);
 
       const state = createBaseState({ systems: [system], fleets: [movingFleet], armies: [groundArmy] });
-      const result = resolveFleetMovement(state, movingFleet, [system], [groundArmy], 3, rng, [movingFleet]);
+      const result = resolveFleetMovement(
+        state,
+        movingFleet,
+        [system],
+        [groundArmy],
+        3 * MS_PER_MINUTE,
+        MS_PER_MINUTE,
+        rng,
+        [movingFleet]
+      );
 
       const updatedFleet = result.nextFleet;
       const loadedShip = updatedFleet.ships.find(ship => ship.id === transport.id);
@@ -1266,7 +1282,7 @@ const tests: TestCase[] = [
 
       assert.strictEqual(updated.logs.length, state.logs.length, 'UNLOAD_ARMY does not emit logs (landing is resolved in phaseGround)');
 
-      const afterGround = phaseGround(updated, { turn: 1, rng: new RNG(2) });
+      const afterGround = phaseGround(updated, createStrategicCtx(1 * MS_PER_MINUTE, new RNG(2)));
       const landedArmy = afterGround.armies.find(army => army.id === blueArmy.id);
       assert.ok(landedArmy, 'Army should still exist after landing resolution');
       assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Landing should deploy the army onto the surface');
@@ -1326,7 +1342,7 @@ const tests: TestCase[] = [
       assert.ok(queuedArmy?.landingOrder, 'Landing order should be queued');
       assert.strictEqual(updated.logs.length, state.logs.length, 'UNLOAD_ARMY does not emit logs directly');
 
-      const afterGround = phaseGround(updated, { turn: 1, rng: new RNG(5) });
+      const afterGround = phaseGround(updated, createStrategicCtx(1 * MS_PER_MINUTE, new RNG(5)));
       const landedArmy = afterGround.armies.find(army => army.id === blueArmy.id);
       assert.ok(landedArmy, 'Army should still exist after landing resolution');
       assert.strictEqual(landedArmy?.state, ArmyState.DEPLOYED, 'Landing should deploy the army even under contested orbit');
@@ -1353,7 +1369,7 @@ const tests: TestCase[] = [
       };
       const fleet = createFleet('fleet-transfer', 'blue', { ...baseVec }, [transport]);
 
-      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army], day: 4 });
+      const state = createBaseState({ systems: [system], fleets: [fleet], armies: [army], timeMs: 4 * MS_PER_MINUTE });
       const rng = new RNG(5);
 
       const updated = applyCommand(
@@ -1372,42 +1388,42 @@ const tests: TestCase[] = [
       const updatedShip = updated.fleets[0].ships[0];
 
       assert.strictEqual(movedArmy?.containerId, toPlanet.id, 'Army should move to the destination planet');
-      assert.strictEqual(updatedShip.transferBusyUntilDay, state.day, 'Transport should be marked busy for the current day');
+      assert.strictEqual(updatedShip.transferBusyUntilTimeMs, state.timeMs, 'Transport should be marked busy for the current time');
     }
   },
   {
-    name: 'Fleet movement commands stamp stateStartTurn using provided turn or current day',
+    name: 'Fleet movement commands stamp stateStartTimeMs using provided time or current time',
     run: () => {
       const system = createSystem('sys-move-time', null);
       const fleet = createFleet('fleet-move-time', 'blue', { ...baseVec }, []);
       const rng = new RNG(3);
 
-      const stateAtDay = createBaseState({ day: 5, systems: [system], fleets: [fleet] });
+      const stateAtTime = createBaseState({ timeMs: 5 * MS_PER_MINUTE, systems: [system], fleets: [fleet] });
       const moved = applyCommand(
-        stateAtDay,
+        stateAtTime,
         { type: 'MOVE_FLEET', fleetId: fleet.id, targetSystemId: system.id },
         rng
       ).state;
 
       const movedFleet = moved.fleets.find(f => f.id === fleet.id);
       assert.strictEqual(
-        movedFleet?.stateStartTurn,
-        stateAtDay.day,
-        'Movement without an explicit turn should use the current day'
+        movedFleet?.stateStartTimeMs,
+        stateAtTime.timeMs,
+        'Movement without an explicit time should use the current time'
       );
 
-      const customTurn = 12;
-      const movedWithTurn = applyCommand(
-        stateAtDay,
-        { type: 'ORDER_INVASION_MOVE', fleetId: fleet.id, targetSystemId: system.id, turn: customTurn },
+      const customTimeMs = 12 * MS_PER_MINUTE;
+      const movedWithTime = applyCommand(
+        stateAtTime,
+        { type: 'ORDER_INVASION_MOVE', fleetId: fleet.id, targetSystemId: system.id, timeMs: customTimeMs },
         rng
       ).state;
 
-      const invasionFleet = movedWithTurn.fleets.find(f => f.id === fleet.id);
+      const invasionFleet = movedWithTime.fleets.find(f => f.id === fleet.id);
       assert.strictEqual(
-        invasionFleet?.stateStartTurn,
-        customTurn,
-        'Movement commands should respect an explicit turn override'
+        invasionFleet?.stateStartTimeMs,
+        customTimeMs,
+        'Movement commands should respect an explicit time override'
       );
     }
   },
@@ -1459,10 +1475,10 @@ const tests: TestCase[] = [
         ...createFleet('fleet-combat-locked', 'blue', { ...baseVec }, []),
         state: FleetState.COMBAT,
         targetSystemId: 'engaged-system',
-        stateStartTurn: 7
+        stateStartTimeMs: 7 * MS_PER_MINUTE
       };
 
-      const baseState = createBaseState({ day: 3, systems: [system], fleets: [combatFleet] });
+      const baseState = createBaseState({ timeMs: 3 * MS_PER_MINUTE, systems: [system], fleets: [combatFleet] });
 
       const commands: GameCommand[] = [
         { type: 'MOVE_FLEET', fleetId: combatFleet.id, targetSystemId: system.id },
@@ -1566,7 +1582,16 @@ const tests: TestCase[] = [
         planetSurfaceDescriptorsByBodyId: descriptors
       });
 
-      const arrival = resolveFleetMovement(state, fleet, [system], [attackerArmy1, attackerArmy2, defenderA, defenderB], 0, rng, [fleet]);
+      const arrival = resolveFleetMovement(
+        state,
+        fleet,
+        [system],
+        [attackerArmy1, attackerArmy2, defenderA, defenderB],
+        0,
+        MS_PER_MINUTE,
+        rng,
+        [fleet]
+      );
 
       const updatedArmies = [attackerArmy1, attackerArmy2, defenderA, defenderB].map(army => {
         const update = arrival.armyUpdates.find(change => change.id === army.id);
@@ -1647,7 +1672,16 @@ const tests: TestCase[] = [
         planetSurfaceDescriptorsByBodyId: descriptors
       });
 
-      const arrival = resolveFleetMovement(state, fleet, [system], [...attackers, ...defenders], 0, rng, [fleet]);
+      const arrival = resolveFleetMovement(
+        state,
+        fleet,
+        [system],
+        [...attackers, ...defenders],
+        0,
+        MS_PER_MINUTE,
+        rng,
+        [fleet]
+      );
 
       const armiesAfterArrival = [...attackers, ...defenders].map(army => {
         const update = arrival.armyUpdates.find(change => change.id === army.id);
@@ -1706,7 +1740,16 @@ const tests: TestCase[] = [
         planetSurfaceDescriptorsByBodyId: { [system.planets[0].id]: descriptor }
       });
 
-      const initialStep = resolveFleetMovement(baseState, movingFleet, [system], [army], 0, rng, [movingFleet]);
+      const initialStep = resolveFleetMovement(
+        baseState,
+        movingFleet,
+        [system],
+        [army],
+        0,
+        MS_PER_DAY,
+        rng,
+        [movingFleet]
+      );
       const fleetsAfterFirstStep = [initialStep.nextFleet];
       const armiesAfterFirstStep = [army];
 
@@ -1716,7 +1759,8 @@ const tests: TestCase[] = [
         initialStep.nextFleet,
         [system],
         armiesAfterFirstStep,
-        1,
+        MS_PER_DAY,
+        MS_PER_DAY,
         rng,
         fleetsAfterFirstStep
       );
@@ -1774,7 +1818,16 @@ const tests: TestCase[] = [
 
       const rng = new RNG(11);
       const state = createBaseState({ systems: [gasSystem], fleets: [movingFleet], armies: [embarkedArmy] });
-      const arrival = resolveFleetMovement(state, movingFleet, [gasSystem], [embarkedArmy], 0, rng, [movingFleet]);
+      const arrival = resolveFleetMovement(
+        state,
+        movingFleet,
+        [gasSystem],
+        [embarkedArmy],
+        0,
+        MS_PER_DAY,
+        rng,
+        [movingFleet]
+      );
 
       assert.strictEqual(
         arrival.nextFleet.invasionTargetSystemId,
@@ -1915,7 +1968,7 @@ const tests: TestCase[] = [
       };
 
       const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet] });
-      const ctx = { turn: 3, rng: new RNG(5) };
+      const ctx = createStrategicCtx(3 * MS_PER_MINUTE, new RNG(5));
 
       const nextState = phaseBattleDetection(state, ctx);
 
@@ -1950,7 +2003,7 @@ const tests: TestCase[] = [
       const scheduledBattle: Battle = {
         id: 'battle-contested',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueTransport.id, redFleet.id],
         logs: []
@@ -1966,7 +2019,7 @@ const tests: TestCase[] = [
         battles: [scheduledBattle]
       });
 
-      const nextState = runTurn(state, new RNG(7));
+      const nextState = runStrategicTick(state, new RNG(7));
 
       const survivingBlueFleet = nextState.fleets.find(fleet => fleet.id === blueTransport.id);
       assert.strictEqual(survivingBlueFleet, undefined, 'Transport fleet should be destroyed in the space battle');
@@ -1994,7 +2047,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-transport-loss',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [transportFleet.id, attackerFleet.id],
         logs: []
@@ -2033,7 +2086,7 @@ const tests: TestCase[] = [
       const scheduledBattle: Battle = {
         id: 'battle-battle-clean',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [carrierFleet.id, interceptorFleet.id],
         logs: []
@@ -2047,11 +2100,11 @@ const tests: TestCase[] = [
           { ...interceptorFleet, state: FleetState.COMBAT }
         ],
         battles: [scheduledBattle],
-        day: 2,
+        timeMs: 2 * MS_PER_MINUTE,
         seed: 23
       });
 
-      const ctx = { turn: state.day, rng: new RNG(11) };
+      const ctx = createStrategicCtx(state.timeMs, new RNG(11));
       const afterBattle = phaseBattleResolution(state, ctx);
 
       assert.strictEqual(
@@ -2078,7 +2131,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-repair',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueFleet.id],
         logs: []
@@ -2121,7 +2174,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-position',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueFleet.id],
         logs: []
@@ -2161,22 +2214,22 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-ammo',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueFleet.id, redFleet.id],
         logs: []
       };
 
-      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], seed: 99, day: 5 });
+      const state = createBaseState({ systems: [system], fleets: [blueFleet, redFleet], seed: 99, timeMs: 5 * MS_PER_MINUTE });
 
-      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 5);
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 5 * MS_PER_MINUTE);
 
       assert.strictEqual(updatedBattle.winnerFactionId, 'blue', 'Heavier fleet should secure victory');
       assert.ok(updatedBattle.ammunitionByFaction, 'Ammunition summary should be recorded on the battle result');
       assert.ok(updatedBattle.logs.length > 0, 'Battle resolution should emit detailed combat logs');
       assert.ok(
-        updatedBattle.logs.every(entry => entry.startsWith('[Turn 5]')),
-        'All battle logs should be prefixed with the turn reference'
+        updatedBattle.logs.every(entry => entry.startsWith('[t+5m]')),
+        'All battle logs should be prefixed with the time reference'
       );
 
       const blueTotals = updatedBattle.ammunitionByFaction?.blue;
@@ -2216,8 +2269,7 @@ const tests: TestCase[] = [
 
       assert.ok(killLogEntries.length > 0, 'Survivors should record confirmed kills when defeating opponents');
       killLogEntries.forEach(entry => {
-        assert.strictEqual(entry.turn, 5, 'Kill log turn should use the active turn reference');
-        assert.strictEqual(entry.day, 5, 'Kill log day should align with the chosen turn reference');
+        assert.strictEqual(entry.timeMs, 5 * MS_PER_MINUTE, 'Kill log time should use the active time reference');
       });
     }
   },
@@ -2252,7 +2304,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-massive',
         systemId: system.id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [blueFleet.id, redFleet.id, greenFleet.id],
         logs: []
@@ -2261,12 +2313,12 @@ const tests: TestCase[] = [
       const state = createBaseState({
         systems: [system],
         fleets: [blueFleet, redFleet, greenFleet],
-        day: 12,
+        timeMs: 12 * MS_PER_MINUTE,
         seed: 2025
       });
 
       const start = performance.now();
-      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 1);
+      const { updatedBattle, survivingFleets } = resolveBattle(battle, state, 1 * MS_PER_MINUTE);
       const duration = performance.now() - start;
 
       assert.ok(duration < 3000, `Large-scale battle should resolve quickly (took ${duration.toFixed(2)}ms)`);
@@ -2296,7 +2348,7 @@ const tests: TestCase[] = [
       const map = getSurfaceMapOrThrow(stateBase, body.id);
       assert.ok(map.settlements.length > 0, 'Expected settlements to validate idle ground phase.');
 
-      const ctx = { rng: new RNG(1), turn: stateBase.day + 1 };
+      const ctx = createStrategicCtx(stateBase.timeMs + MS_PER_MINUTE, new RNG(1));
       const nextState = phaseGround(stateBase, ctx);
 
       assert.deepStrictEqual(nextState.settlementControl, {}, 'Idle ground phase should not pre-seed settlement control.');
@@ -2322,7 +2374,7 @@ const tests: TestCase[] = [
       const greenArmies = createArmiesOnSettlements({ map, factionId: 'green', baseId: 'army-green', members: 8000 });
 
       const state = { ...stateBase, armies: greenArmies };
-      const ctx = { rng: new RNG(21), turn: state.day + 1 };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(21));
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
@@ -2331,8 +2383,8 @@ const tests: TestCase[] = [
       assert.strictEqual(updatedSystem?.color, factions[2].color, 'Captured system color should match the winner faction color');
       assert.ok(nextState.aiStates?.green, 'AI state should be initialized for AI-controlled victors');
       assert.strictEqual(
-        nextState.aiStates?.green?.holdUntilTurnBySystemId?.[system.id],
-        ctx.turn + AI_HOLD_TURNS,
+        nextState.aiStates?.green?.holdUntilTimeMsBySystemId?.[system.id],
+        ctx.timeMs + AI_HOLD_DAYS * MS_PER_DAY,
         'AI hold orders should be scheduled for newly conquered systems'
       );
     }
@@ -2359,7 +2411,7 @@ const tests: TestCase[] = [
         ...createArmiesOnSettlements({ map: mapB, factionId: 'blue', baseId: 'army-blue-b', members: 6000 })
       ];
       const state = { ...stateBase, armies: blueArmies };
-      const ctx = { rng: new RNG(42), turn: state.day + 1 };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(42));
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
@@ -2392,7 +2444,7 @@ const tests: TestCase[] = [
       ];
 
       const state = { ...stateBase, armies: greenArmies };
-      const ctx = { rng: new RNG(17), turn: state.day + 1 };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(17));
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
@@ -2426,7 +2478,7 @@ const tests: TestCase[] = [
       ];
 
       const state = { ...stateBase, armies: redArmies };
-      const ctx = { rng: new RNG(13), turn: state.day + 1 };
+      const ctx = createStrategicCtx(state.timeMs + MS_PER_MINUTE, new RNG(13));
 
       const nextState = phaseGround(state, ctx);
       const updatedSystem = nextState.systems.find(sys => sys.id === system.id);
@@ -2465,7 +2517,7 @@ const tests: TestCase[] = [
       const redGarrisonB = createArmiesOnSettlements({ map: mapB, factionId: 'red', baseId: 'army-red-b', members: 8000 });
 
       const initialState = { ...stateBase, armies: [...blueAssaultA, ...redGarrisonB] };
-      const ctxFirst = { rng: new RNG(25), turn: initialState.day + 1 };
+      const ctxFirst = createStrategicCtx(initialState.timeMs + MS_PER_MINUTE, new RNG(25));
 
       const afterFirst = phaseGround(initialState, ctxFirst);
       const systemAfterFirst = afterFirst.systems.find(sys => sys.id === system.id);
@@ -2485,7 +2537,7 @@ const tests: TestCase[] = [
         ...afterFirst,
         armies: [...afterFirst.armies.filter(army => !army.id.startsWith('army-red-b')), ...blueAssaultB]
       };
-      const ctxSecond = { rng: new RNG(27), turn: ctxFirst.turn + 1 };
+      const ctxSecond = createStrategicCtx(ctxFirst.timeMs + MS_PER_MINUTE, new RNG(27));
 
       const afterSecond = phaseGround(reinforcedState, ctxSecond);
       const systemAfterSecond = afterSecond.systems.find(sys => sys.id === system.id);
@@ -2609,15 +2661,15 @@ const tests: TestCase[] = [
 
       const aiState: AIState = {
         ...createEmptyAIState(),
-        holdUntilTurnBySystemId: {
-          [greenOutpost.id]: 4,
-          [greenHome.id]: 3
+        holdUntilTimeMsBySystemId: {
+          [greenOutpost.id]: 4 * MS_PER_MINUTE,
+          [greenHome.id]: 3 * MS_PER_MINUTE
         },
         targetPriorities: {
           [redFront.id]: 200,
           [greenOutpost.id]: 110
         },
-        systemLastSeen: {
+        systemLastSeenTimeMs: {
           [greenHome.id]: 0,
           [greenOutpost.id]: 0,
           [redFront.id]: 0
@@ -2632,7 +2684,7 @@ const tests: TestCase[] = [
       const rules: GameplayRules = { fogOfWar: false, useAdvancedCombat: true, aiEnabled: true, totalWar: false, unlimitedFuel: false };
 
       const state = createBaseState({
-        day: 2,
+        timeMs: 2 * MS_PER_MINUTE,
         systems: [greenHome, greenOutpost, redFront],
         fleets: [greenFleet, redFleet],
         aiStates: { green: aiState },
@@ -2640,11 +2692,11 @@ const tests: TestCase[] = [
       });
 
       const seed = 99;
-      const commandsBefore = planAiTurn(state, 'green', aiState, new RNG(seed));
+      const commandsBefore = planAiTick(state, 'green', aiState, new RNG(seed));
 
       const restored = deserializeGameState(serializeGameState(state));
       assert.ok(restored.aiStates?.green, 'Restored AI state should be preserved after serialization');
-      const commandsAfter = planAiTurn(restored, 'green', restored.aiStates?.green, new RNG(seed));
+      const commandsAfter = planAiTick(restored, 'green', restored.aiStates?.green, new RNG(seed));
 
       assert.deepStrictEqual(commandsAfter, commandsBefore, 'AI commands should remain stable after serialization round-trip');
     }
@@ -2679,7 +2731,7 @@ const tests: TestCase[] = [
         playerFactionId: enemyFaction.id
       });
 
-      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(13));
+      const commands = planAiTick(state, aiFaction.id, createEmptyAIState(), new RNG(13));
       const moveCommands = commands.filter((cmd): cmd is Extract<GameCommand, { type: 'MOVE_FLEET' }> => cmd.type === 'MOVE_FLEET');
 
       const hasAttackMove = moveCommands.some(
@@ -2707,7 +2759,7 @@ const tests: TestCase[] = [
       };
 
       const state = createBaseState({
-        day: 5,
+        timeMs: 5 * MS_PER_MINUTE,
         factions: [aiFaction, enemyFaction],
         systems: [enemySystem],
         fleets: [observerFleet],
@@ -2715,14 +2767,14 @@ const tests: TestCase[] = [
         playerFactionId: enemyFaction.id
       });
 
-      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(7));
+      const commands = planAiTick(state, aiFaction.id, createEmptyAIState(), new RNG(7));
       const update = commands.find((cmd): cmd is Extract<GameCommand, { type: 'AI_UPDATE_STATE' }> => cmd.type === 'AI_UPDATE_STATE');
       assert.ok(update, 'Expected AI_UPDATE_STATE command to be generated');
 
       assert.strictEqual(
-        update.newState.systemLastSeen[enemySystem.id],
-        state.day,
-        'Observed system should refresh systemLastSeen even if the observing fleet is in combat'
+        update.newState.systemLastSeenTimeMs[enemySystem.id],
+        state.timeMs,
+        'Observed system should refresh systemLastSeenTimeMs even if the observing fleet is in combat'
       );
       assert.strictEqual(
         update.newState.lastOwnerBySystemId[enemySystem.id],
@@ -2738,7 +2790,7 @@ const tests: TestCase[] = [
       const strandedArmy = createArmy('army-cleanup-loss', 'blue', 12000, ArmyState.EMBARKED, 'fleet-missing');
 
       const state = createBaseState({ systems: [system], armies: [strandedArmy], fleets: [] });
-      const ctx = { rng: new RNG(31), turn: 4 };
+      const ctx = createStrategicCtx(4 * MS_PER_MINUTE, new RNG(31));
 
       const cleaned = phaseCleanup(state, ctx);
 
@@ -2884,7 +2936,7 @@ const tests: TestCase[] = [
       const baseState = createBaseState({
         systems: [origin, target],
         fleets: [fleet],
-        day: 4,
+        timeMs: 4 * MS_PER_MINUTE,
         rngState: 5,
         seed: 99
       });
@@ -2893,7 +2945,7 @@ const tests: TestCase[] = [
         type: 'MOVE_FLEET',
         fleetId: fleet.id,
         targetSystemId: target.id,
-        turn: baseState.day,
+        timeMs: baseState.timeMs,
         reason: 'ai-move'
       };
 
@@ -2962,7 +3014,7 @@ const tests: TestCase[] = [
       const battle: Battle = {
         id: 'battle-frontier',
         systemId: systems[0].id,
-        turnCreated: 0,
+        timeCreatedMs: 0,
         status: 'scheduled',
         involvedFleetIds: [combatFleet.id, enemyBattleFleet.id],
         logs: []
@@ -2977,7 +3029,7 @@ const tests: TestCase[] = [
         playerFactionId: enemyFaction.id
       });
 
-      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(99));
+      const commands = planAiTick(state, aiFaction.id, createEmptyAIState(), new RNG(99));
       const moveCommands = commands.filter(cmd => cmd.type === 'MOVE_FLEET');
 
       assert.strictEqual(moveCommands.length, 1, 'AI should issue one move toward the frontier system');
@@ -3023,7 +3075,7 @@ const tests: TestCase[] = [
         playerFactionId: enemyFaction.id
       });
 
-      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(7));
+      const commands = planAiTick(state, aiFaction.id, createEmptyAIState(), new RNG(7));
       const moveCommands = commands.filter(cmd => cmd.type === 'MOVE_FLEET');
 
       assert.strictEqual(moveCommands.length, 1, 'AI should still act with available fleets');
@@ -3070,7 +3122,7 @@ const tests: TestCase[] = [
         playerFactionId: enemyFaction.id
       });
 
-      const commands = planAiTurn(state, aiFaction.id, createEmptyAIState(), new RNG(13));
+      const commands = planAiTick(state, aiFaction.id, createEmptyAIState(), new RNG(13));
       const moveCommands = commands.filter((cmd): cmd is Extract<GameCommand, { type: 'MOVE_FLEET' }> => cmd.type === 'MOVE_FLEET');
 
       assert.strictEqual(moveCommands.length, 2, 'AI should commit multiple fleets to overcome ground defenses');
@@ -3137,7 +3189,7 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        stateStartTurn: 0
+        stateStartTimeMs: 0
       });
 
       const state: GameState = {
@@ -3147,7 +3199,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [system],
         fleets: [mkFleet('fleet-blue', 'blue', inRange), mkFleet('fleet-red', 'red', -inRange)],
         armies: [],
@@ -3205,7 +3257,7 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        stateStartTurn: 0
+        stateStartTimeMs: 0
       });
 
       const state: GameState = {
@@ -3215,7 +3267,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [system],
         fleets: [mkFleet('fleet-blue', 'blue', outOfRange), mkFleet('fleet-red', 'red', -outOfRange)],
         armies: [],
@@ -3284,7 +3336,7 @@ tests.push(
         state: FleetState.ORBIT,
         targetSystemId: null,
         targetPosition: null,
-        stateStartTurn: 0
+        stateStartTimeMs: 0
       });
 
       const state: GameState = {
@@ -3294,7 +3346,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [systemBeta, systemAlpha],
         fleets: [mkFleet('fleet-blue', 'blue'), mkFleet('fleet-red', 'red')],
         armies: [],
@@ -4152,23 +4204,31 @@ const engine_ps_createArmy = (params: {
   });
 };
 
-const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string): { state: GameState; body: PlanetBody } => {
-  const astro = generateStellarSystem({ worldSeed, systemId });
-  const system = {
+const engine_ps_createStateWithOneSurface = (worldSeedInput: number, systemId: string): { state: GameState; body: PlanetBody } => {
+  let worldSeed = worldSeedInput;
+  let astro = generateStellarSystem({ worldSeed, systemId });
+  let system: StarSystem = {
     id: systemId,
     name: systemId,
     position: { x: 0, y: 0, z: 0 },
     color: '#ffffff',
     size: 1,
     ownerFactionId: 'blue',
-    resourceType: 'none' as const,
+    resourceType: 'none',
     isHomeworld: false,
     astro,
     planets: [] as PlanetBody[]
   };
 
   system.planets = buildPlanetBodies({ id: system.id, name: system.name, ownerFactionId: system.ownerFactionId }, astro, []);
-  const candidatePlanets = system.planets.filter(p => p.isSolid && p.bodyType === 'planet');
+  let candidatePlanets = system.planets.filter(p => p.isSolid);
+  if (candidatePlanets.length === 0) {
+    const fallback = findSystemWithSolidBodies({ systemId, seed: worldSeedInput, minSolids: 1, ownerFactionId: system.ownerFactionId });
+    worldSeed = fallback.worldSeed;
+    system = fallback.system;
+    astro = system.astro;
+    candidatePlanets = fallback.solidBodies;
+  }
   assert.ok(candidatePlanets.length > 0, 'Expected at least one solid planet body');
 
   let body = candidatePlanets[0];
@@ -4209,7 +4269,7 @@ const engine_ps_createStateWithOneSurface = (worldSeed: number, systemId: string
     seed: worldSeed,
     rngState: worldSeed,
     startYear: 0,
-    day: 1,
+    timeMs: 1 * MS_PER_MINUTE,
     systems: [system],
     fleets: [],
     stations: [],
@@ -4456,7 +4516,7 @@ tests.push(
         state: FleetState.MOVING,
         targetSystemId: enemySystem.id,
         targetPosition: enemySystem.position,
-        stateStartTurn: base.day,
+        stateStartTimeMs: base.timeMs,
         invasionTargetSystemId: enemySystem.id,
         invasionTargetPlanetId: body.id
       };
@@ -4469,7 +4529,7 @@ tests.push(
         armies: [defenderArmy, attackerArmy]
       };
 
-      const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
+      const next = phaseMovement(state, createStrategicCtx(state.timeMs, new RNG(2)));
       const queued = next.armies.find(a => a.id === attackerArmyId);
       assert.ok(queued, 'Expected attacker army to exist after movement phase');
       assert.strictEqual(queued.state, ArmyState.EMBARKED, 'AI invasion should queue landing orders during movement (deployment happens in phaseGround)');
@@ -4484,7 +4544,7 @@ tests.push(
       const plannedBiome = map.tiles[plannedTileId].biome;
       assert.ok(!engine_ps_isWater(plannedBiome), `landingOrder should target passable terrain, got biome '${plannedBiome}'`);
 
-      const afterGround = phaseGround(next, { turn: state.day, rng: new RNG(3) });
+      const afterGround = phaseGround(next, createStrategicCtx(state.timeMs, new RNG(3)));
       const landed = afterGround.armies.find(a => a.id === attackerArmyId);
       assert.ok(landed, 'Expected attacker army to exist after ground phase');
       assert.strictEqual(landed.state, ArmyState.DEPLOYED, 'Expected landingOrder to be resolved during phaseGround');
@@ -4534,7 +4594,7 @@ tests.push(
         state: FleetState.MOVING,
         targetSystemId: enemySystem.id,
         targetPosition: enemySystem.position,
-        stateStartTurn: base.day,
+        stateStartTimeMs: base.timeMs,
         invasionTargetSystemId: enemySystem.id,
         invasionTargetPlanetId: body.id
       };
@@ -4546,7 +4606,7 @@ tests.push(
         armies: [attackerArmy]
       };
 
-      const next = phaseMovement(state, { turn: state.day, rng: new RNG(2) });
+      const next = phaseMovement(state, createStrategicCtx(state.timeMs, new RNG(2)));
 
       const landed = next.armies.find(a => a.id === attackerArmyId);
       assert.ok(landed, 'Expected attacker army to exist after movement phase');
@@ -4592,7 +4652,7 @@ tests.push(
         state: FleetState.COMBAT,
         targetSystemId: null,
         targetPosition: null,
-        stateStartTurn: 1
+        stateStartTimeMs: 1 * MS_PER_MINUTE
       };
 
       const enemyFleet: Fleet = {
@@ -4612,12 +4672,12 @@ tests.push(
         state: FleetState.COMBAT,
         targetSystemId: null,
         targetPosition: null,
-        stateStartTurn: 1
+        stateStartTimeMs: 1 * MS_PER_MINUTE
       };
 
       const decisionMessage: GameMessage = {
         id: 'msg-invasion',
-        day: 1,
+        timeMs: 1 * MS_PER_MINUTE,
         type: 'INVASION_DECISION',
         priority: 2,
         title: 'Invasion in orbit',
@@ -4630,13 +4690,13 @@ tests.push(
         },
         read: false,
         dismissed: false,
-        createdAtTurn: 1
+        createdAtTimeMs: 1 * MS_PER_MINUTE
       };
 
       const battle: Battle = {
         id: 'battle-inv',
         systemId: system.id,
-        turnCreated: 1,
+        timeCreatedMs: 1 * MS_PER_MINUTE,
         status: 'scheduled',
         involvedFleetIds: [playerFleet.id, enemyFleet.id],
         logs: []
@@ -4649,7 +4709,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 1,
+        timeMs: 1 * MS_PER_MINUTE,
         systems: [system],
         fleets: [playerFleet, enemyFleet],
         armies: [],
@@ -4662,7 +4722,7 @@ tests.push(
         rules: { fogOfWar: false, useAdvancedCombat: true, aiEnabled: false, totalWar: false, unlimitedFuel: false }
       };
 
-      const next = phaseBattleResolution(state, { turn: 1, rng: new RNG(1) });
+      const next = phaseBattleResolution(state, createStrategicCtx(1 * MS_PER_MINUTE, new RNG(1)));
       const updated = next.messages.find(msg => msg.id === decisionMessage.id);
       assert.ok(updated, 'Expected invasion decision message to remain in state');
       assert.strictEqual(updated?.dismissed, true, 'Expected invasion decision message to be dismissed');
@@ -4689,7 +4749,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [
           {
             id: 'alpha',
@@ -4723,7 +4783,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           },
           {
             id: 'red-1',
@@ -4733,7 +4793,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           }
         ],
         armies: [],
@@ -4771,7 +4831,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [
           {
             id: 'alpha',
@@ -4805,7 +4865,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           },
           {
             id: 'red-1',
@@ -4815,7 +4875,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           }
         ],
         armies: [],
@@ -4862,7 +4922,7 @@ tests.push(
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [
           {
             id: 'alpha',
@@ -4896,7 +4956,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           },
           {
             id: 'red-1',
@@ -4906,7 +4966,7 @@ tests.push(
             state: FleetState.ORBIT,
             targetSystemId: null,
             targetPosition: null,
-            stateStartTurn: 0
+            stateStartTimeMs: 0
           }
         ],
         armies: [],
@@ -5005,7 +5065,7 @@ tests.push({
       state: FleetState.ORBIT,
       targetSystemId: null,
       targetPosition: null,
-      stateStartTurn: 0
+      stateStartTimeMs: 0
     });
 
     const createStateLocal = (fleets: Fleet[]): GameState => {
@@ -5017,7 +5077,7 @@ tests.push({
         seed: 1,
         rngState: 1,
         startYear: 0,
-        day: 0,
+        timeMs: 0,
         systems: [],
         fleets,
         armies: [],
@@ -5038,7 +5098,7 @@ tests.push({
 
     const fleet = createFleetLocal('fleet-1', [tankerA, cruiser, destroyer, tankerB, fighter]);
     const state = createStateLocal([fleet]);
-    const ctx: TurnContext = { turn: 0, rng: new RNG(1) };
+    const ctx = createStrategicCtx(0, new RNG(1));
 
     const result = phaseCleanup(state, ctx);
     const [updatedFleet] = result.fleets;
@@ -5165,7 +5225,7 @@ const engine_sr_createFleet = (id: string, system: StarSystem): Fleet => {
     state: FleetState.ORBIT,
     targetSystemId: null,
     targetPosition: null,
-    stateStartTurn: 0
+    stateStartTimeMs: 0
   };
 };
 
@@ -5180,7 +5240,7 @@ const engine_sr_createBaseState = (): GameState => {
     seed: 42,
     rngState: 42,
     startYear: 0,
-    day: 0,
+    timeMs: 0,
     systems: [system],
     fleets: [fleet],
     armies: [],
@@ -5241,7 +5301,7 @@ tests.push(
         {
           id: 'battle-bad',
           systemId,
-          turnCreated: 0,
+          timeCreatedMs: 0,
           status: 'unknown',
           involvedFleetIds: [fleetId],
           logs: []
@@ -5260,14 +5320,14 @@ tests.push(
 
       save.state.logs = Array.from({ length: 6000 }, (_, i) => ({
         id: `log-${i}`,
-        day: i,
+        timeMs: i,
         text: 'test',
         type: 'info'
       }));
 
       save.state.messages = Array.from({ length: 1500 }, (_, i) => ({
         id: `message-${i}`,
-        day: i,
+        timeMs: i,
         type: 'generic',
         priority: 0,
         title: 'Test',
@@ -5276,7 +5336,7 @@ tests.push(
         payload: {},
         read: false,
         dismissed: false,
-        createdAtTurn: i
+        createdAtTimeMs: i
       }));
 
       const restored = deserializeGameState(JSON.stringify(save));
@@ -5345,7 +5405,7 @@ tests.push({
       seed,
       rngState: seed,
       startYear: 0,
-      day: 1,
+      timeMs: 1 * MS_PER_MINUTE,
       systems: [system],
       fleets: [],
       stations: [],
@@ -5531,7 +5591,7 @@ tests.push(
     }
   },
   {
-    name: 'SET_GROUND_POSTURE writes postureSetTurn (and clears it on normal)',
+    name: 'SET_GROUND_POSTURE writes postureSetTimeMs (and clears it on normal)',
     run: () => {
       const base = engine_sr_createBaseState();
       const bodyId = 'body-ground-orders';
@@ -5542,7 +5602,7 @@ tests.push(
         surfacePos: { bodyId, q: 0, r: 0 }
       });
 
-      const state: GameState = { ...base, day: 12, armies: [army] };
+      const state: GameState = { ...base, timeMs: 12 * MS_PER_MINUTE, armies: [army] };
 
       const prepared = applyCommand(
         state,
@@ -5553,7 +5613,7 @@ tests.push(
       const preparedArmy = prepared.state.armies.find(a => a.id === army.id);
       assert.ok(preparedArmy);
       assert.strictEqual(preparedArmy.posture, 'prepared_defense');
-      assert.strictEqual(preparedArmy.postureSetTurn, 12);
+      assert.strictEqual(preparedArmy.postureSetTimeMs, 12 * MS_PER_MINUTE);
 
       const cleared = applyCommand(
         prepared.state,
@@ -5564,7 +5624,7 @@ tests.push(
       const clearedArmy = cleared.state.armies.find(a => a.id === army.id);
       assert.ok(clearedArmy);
       assert.strictEqual(clearedArmy.posture, 'normal');
-      assert.strictEqual(clearedArmy.postureSetTurn, undefined);
+      assert.strictEqual(clearedArmy.postureSetTimeMs, undefined);
     }
   },
   {
@@ -5630,7 +5690,7 @@ tests.push(
     }
   },
   {
-    name: 'engagement RNG is deterministic per (turn, attackerId, defenderId)',
+    name: 'engagement RNG is deterministic per (time, attackerId, defenderId)',
     run: () => {
       const attacker = groundCombatMkArmy({
         id: 'a',
@@ -5646,14 +5706,14 @@ tests.push(
       });
 
       const a = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
         defender: { army: defender, supplied: true, stackingFactor: 1 }
       });
       const b = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
@@ -5681,7 +5741,7 @@ tests.push(
       });
 
       const normal = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
@@ -5689,7 +5749,7 @@ tests.push(
       });
 
       const bombarded = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         bombardedTileIds: new Set([groundCombatTileId(1, 0)]),
@@ -5723,7 +5783,7 @@ tests.push(
       });
 
       const normal = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
@@ -5731,7 +5791,7 @@ tests.push(
       });
 
       const bombarded = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         bombardedTileIds: new Set([groundCombatTileId(0, 0)]),
@@ -5749,7 +5809,7 @@ tests.push(
     }
   },
   {
-    name: 'prepared defense applies only from next turn',
+    name: 'prepared defense applies only from next tick',
     run: () => {
       const attacker = groundCombatMkArmy({
         id: 'a',
@@ -5763,7 +5823,7 @@ tests.push(
       });
 
       const normal = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
@@ -5771,23 +5831,23 @@ tests.push(
       });
 
       const preparedActive = resolveEngagement({
-        turn: 7,
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
-        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTurn: 6 }, supplied: true, stackingFactor: 1 }
+        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTimeMs: 6 * MS_PER_MINUTE }, supplied: true, stackingFactor: 1 }
       });
 
-      const preparedThisTurn = resolveEngagement({
-        turn: 7,
+      const preparedThisTick = resolveEngagement({
+        timeMs: 7 * MS_PER_MINUTE,
         map: groundCombatMap,
         buildings: [],
         attackers: [{ army: attacker, supplied: true, stackingFactor: 1 }],
-        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTurn: 7 }, supplied: true, stackingFactor: 1 }
+        defender: { army: { ...defenderBase, posture: 'prepared_defense', postureSetTimeMs: 7 * MS_PER_MINUTE }, supplied: true, stackingFactor: 1 }
       });
 
       assert.ok(Math.abs(preparedActive.defensePower - normal.defensePower * PREPARED_DEFENSE_MULT) < 1e-12);
-      assert.ok(Math.abs(preparedThisTurn.defensePower - normal.defensePower) < 1e-12);
+      assert.ok(Math.abs(preparedThisTick.defensePower - normal.defensePower) < 1e-12);
     }
   },
   {
@@ -5876,6 +5936,39 @@ tests.push(
     }
   }
 );
+
+tests.push({
+  name: 'GameEngine advanceTime matches repeated advanceTime',
+  run: () => {
+    const systemA = createSystem('alpha', 'blue');
+    const fleetA = createFleet('fleet-alpha', 'blue', baseVec, []);
+    const systemB = createSystem('alpha', 'blue');
+    const fleetB = createFleet('fleet-alpha', 'blue', baseVec, []);
+    const baseStateA = createBaseState({
+      systems: [systemA],
+      fleets: [fleetA],
+      seed: 7,
+      rngState: 7
+    });
+    const baseStateB = createBaseState({
+      systems: [systemB],
+      fleets: [fleetB],
+      seed: 7,
+      rngState: 7
+    });
+
+    const engineA = new GameEngine(baseStateA);
+    const engineB = new GameEngine(baseStateB);
+    const stepMs = MS_PER_MINUTE;
+
+    for (let i = 0; i < 5; i += 1) {
+      engineA.advanceTime(stepMs);
+    }
+    engineB.advanceTime(5 * stepMs);
+
+    assert.deepStrictEqual(engineB.state, engineA.state);
+  }
+});
 
 // --- rng.spec.ts ---
 

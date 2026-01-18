@@ -10,25 +10,25 @@ Le Battle System V1 remplace la résolution instantanée par une simulation dét
 
 ## 2. Cycle de Vie d'une Bataille
 
-### Phase A : Détection (Tour N)
+### Phase A : Détection (Tick stratégique)
 1.  Après tous les mouvements, le moteur scanne chaque système.
 2.  Si des flottes **BLUE** et **RED** sont présentes dans le rayon de capture (`CAPTURE_RANGE`).
-3.  Une entité `Battle` est créée avec le statut `scheduled` et `turnCreated = turn`.
+3.  Une entité `Battle` est créée avec le statut `scheduled` et `timeCreatedMs = timeMs`.
 4.  Les flottes concernées passent en état `COMBAT`.
-5.  **Note Importante** : Si un système contient déjà une bataille *active* (statut `scheduled` ou `resolving`), aucune nouvelle bataille n'est créée. Cependant, si une bataille passée est `resolved`, elle ne bloque pas la détection d'un nouveau conflit si des ennemis sont toujours présents au tour suivant.
+5.  **Note Importante** : Si un système contient déjà une bataille *active* (statut `scheduled` ou `resolving`), aucune nouvelle bataille n'est créée. Cependant, si une bataille passée est `resolved`, elle ne bloque pas la détection d'un nouveau conflit si des ennemis sont toujours présents au tick suivant.
 
-### Phase B : Résolution (Tour N)
-1.  Les batailles `scheduled` sont résolues immédiatement dans le même tour.
+### Phase B : Résolution (Tick stratégique)
+1.  Les batailles `scheduled` sont résolues immédiatement dans le même tick.
 2.  La résolution est atomique (instantanée du point de vue CPU) mais simule plusieurs "Rounds" tactiques.
-3.  Une `seed` spécifique est générée pour chaque bataille (`hash(battleId + turn)`) pour garantir l'isolation RNG.
-4.  À la fin de la résolution, `turnResolved` est défini au tour courant (`turn`).
+3.  Une `seed` spécifique est générée pour chaque bataille (`hash(battleId + timeMs)`) pour garantir l'isolation RNG.
+4.  À la fin de la résolution, `timeResolvedMs` est défini au tick courant (`timeMs`).
 
 ### Phase C : Application & Nettoyage
 1.  Les dégâts sont appliqués aux flottes persistantes.
 2.  Les vaisseaux détruits sont retirés.
 3.  Un rapport de combat (`BattleLog`) est généré.
 4.  Le statut passe à `resolved`.
-5.  Les batailles résolues sont conservées dans l'état pendant 5 tours (`pruneBattles`) pour permettre au joueur de consulter les rapports, puis sont supprimées pour alléger la sauvegarde.
+5.  Les batailles résolues sont conservées dans l'état pendant 5 minutes (`pruneBattles`) pour permettre au joueur de consulter les rapports, puis sont supprimées pour alléger la sauvegarde.
 
 ## 3. Algorithme de Résolution (Par Round)
 

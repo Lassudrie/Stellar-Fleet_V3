@@ -15,8 +15,8 @@ Définir les règles de bombardement orbital pour les batailles surface/orbite a
 4. **Coût d'ordre** : un ordre de bombardement consomme un slot d'action de flotte. Si la flotte n'a plus d'actions, la planification est ignorée.
 
 ## 3. Cycle de résolution
-1. **Planification** : au début du tour, chaque flotte en orbite planifie un événement `OrbitalStrike` par cible éligible (ou groupé par faction selon `STRIKE_GROUPING = byFaction`).
-2. **Vérification d'orbite** : si le statut d'orbite est `ORBITAL_CONTROLLED`, l'événement passe à `resolving`. Si `CONTESTED`, il reste `blocked` et sera réévalué au tour suivant.
+1. **Planification** : au début du tick, chaque flotte en orbite planifie un événement `OrbitalStrike` par cible éligible (ou groupé par faction selon `STRIKE_GROUPING = byFaction`).
+2. **Vérification d'orbite** : si le statut d'orbite est `ORBITAL_CONTROLLED`, l'événement passe à `resolving`. Si `CONTESTED`, il reste `blocked` et sera réévalué au tick suivant.
 3. **Jet de bombardement** : pour chaque cible, calcul d'un score d'impact (`impactScore`) qui alimente les pertes matérielles et morales (cf. §4).
 4. **Application** : les pertes sont appliquées aux pools surface, puis les caps sont évalués (cf. §5).
 5. **Log** : un `BombardmentLog` est généré et attaché à la cible et à la flotte exécutante (cf. §8).
@@ -41,7 +41,7 @@ strengthLoss = clamp(
 ```
 * `hardenedReduction` : 0.35 par défaut pour les structures `HARDENED`, sinon 0.
 * `coverBonus` : réduit les dégâts selon le terrain (`0.1` plaine, `0.25` montagne).
-* `MIN_STRENGTH_LOSS` : 1% du pool de strength de la cible, `MAX_STRENGTH_LOSS` : 30% par tour.
+* `MIN_STRENGTH_LOSS` : 1% du pool de strength de la cible, `MAX_STRENGTH_LOSS` : 30% par tick.
 
 ### 4.3. Pertes morales (morale)
 ```
@@ -52,7 +52,7 @@ moraleLoss = clamp(
 )
 ```
 * `moraleSensitivity` : coefficient par type d'unité (`Infantry = 1.0`, `Armor = 0.7`, `Fortification = 0.5`).
-* `MIN_MORALE_LOSS` : 5 points, `MAX_MORALE_LOSS` : 25 points par tour.
+* `MIN_MORALE_LOSS` : 5 points, `MAX_MORALE_LOSS` : 25 points par tick.
 * Si `strengthLoss` atteint `MAX_STRENGTH_LOSS`, appliquer un `panicDebuff = -10 morale` additionnel.
 
 ### 4.4. Échec ou dissipation
@@ -60,8 +60,8 @@ moraleLoss = clamp(
 * Les pertes sont arrondies au supérieur pour éviter les zéros silencieux.
 
 ## 5. Caps, limites et sécurité
-1. **Cap global par cible** : pas plus de `MAX_STRIKES_PER_TARGET = 2` bombardements appliqués par tour et par cible, tous attaquants confondus. Les événements supplémentaires restent en statut `queued`.
-2. **Cap côté flotte** : une flotte ne peut résoudre qu'un seul `OrbitalStrike` par tour si son statut `weaponCooldown` est actif.
+1. **Cap global par cible** : pas plus de `MAX_STRIKES_PER_TARGET = 2` bombardements appliqués par tick et par cible, tous attaquants confondus. Les événements supplémentaires restent en statut `queued`.
+2. **Cap côté flotte** : une flotte ne peut résoudre qu'un seul `OrbitalStrike` par tick si son statut `weaponCooldown` est actif.
 3. **Dégâts résiduels** : aucune perte ne peut réduire `strength` sous 1 ni `morale` sous 0. Les valeurs sont clampées après application.
 4. **Propagation multi-cibles** : si `impactScore` dépasse `OVERKILL_THRESHOLD`, l'excédent n'est pas redistribué : il est perdu pour préserver la lisibilité et éviter les divergences.
 
@@ -73,12 +73,12 @@ moraleLoss = clamp(
 
 ## 7. Gestion d'une orbite contestée
 1. Tant que le statut `CONTESTED` persiste, aucun tir n'est résolu et les événements restent en `blocked`.
-2. Si l'orbite devient `ORBITAL_CONTROLLED` durant le même tour (ex : après un combat spatial), les événements `blocked` sont re-évalués immédiatement après la résolution spatiale.
+2. Si l'orbite devient `ORBITAL_CONTROLLED` durant le même tick (ex : après un combat spatial), les événements `blocked` sont re-évalués immédiatement après la résolution spatiale.
 3. Si l'orbite passe à `LOST`, tous les événements `blocked` ou `queued` sont annulés et loggés avec le motif `orbit_lost`.
 
 ## 8. Journalisation
-Chaque résolution (ou annulation) crée un `BombardmentLog` persistant 5 tours :
-* `turn`, `systemId`, `attackerFleetId`, `defenderFactionId`.
+Chaque résolution (ou annulation) crée un `LogEntry` daté par `timeMs` :
+* `timeMs`, `systemId`, `attackerFleetId`, `defenderFactionId`.
 * `impactScore`, `strengthLoss`, `moraleLoss`, `panicDebuffApplied`.
 * `status` : `resolved`, `blocked`, `queued`, `cancelled`.
 * `orbitState` observé au moment du log (`ORBITAL_CONTROLLED`, `CONTESTED`, `LOST`).

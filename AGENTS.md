@@ -40,7 +40,7 @@ npm run lint
 Outils de debug/simulation :
 
 ```bash
-SMOKE_TURNS=100 npm run smoke      # smoke test IA (50-200 tours)
+SMOKE_MINUTES=100 npm run smoke      # smoke test IA (50-200 minutes)
 npm run battle:sim -- --help       # simulateur de combat/balance
 ```
 
@@ -55,11 +55,11 @@ node --experimental-specifier-resolution=node --loader ./tools/tsSmokeLoader.mjs
 
 - `src/shared/` : types metier et utilitaires runtime partages. Ne depend de rien.
 - `src/content/` : donnees statiques et scenarios. Depend uniquement de `src/shared/`.
-- `src/engine/` : moteur de simulation deterministe (tour, IA, mouvement, combat, generation, serialisation). Depend de `src/shared/` et `src/content/`.
+- `src/engine/` : moteur de simulation deterministe (tick strategique, IA, mouvement, combat, generation, serialisation). Depend de `src/shared/` et `src/content/`.
 - `docs/` : specs et architecture. Garder la doc alignee avec le code lorsqu'on modifie des regles.
 
 Entrees importantes :
-- Boucle de tour : `src/engine/runTurn.ts` et `src/engine/turn/phases/*`.
+- Boucle strategique : `src/engine/strategicSimulation.ts`.
 - Commandes : `src/engine/commands.ts`.
 - Serialisation / sauvegardes : `src/engine/serialization.ts`, `src/engine/saveFormat.ts`.
 - Scenarios : `src/content/scenarios/*`.
@@ -69,21 +69,21 @@ Entrees importantes :
 
 ### 1) Determinisme (moteur)
 
-But : a `seed` identique et suite de commandes identique, l'etat au tour N doit etre identique (machine / navigateur / moment independants).
+But : a `seed` identique et suite de commandes identique, l'etat au temps T doit etre identique (machine / navigateur / moment independants).
 
 Regles (voir `docs/architecture/determinism-and-state.md`) :
 
 - Interdiction d'utiliser `Math.random()`, `crypto.randomUUID()`, ou toute source non deterministe dans `src/engine`, `src/shared`, `src/content`.
-- Interdiction d'utiliser `Date.now()` / `performance.now()` pour influencer la logique moteur. Le temps logique est discret (`state.day`).
+- Interdiction d'utiliser `Date.now()` / `performance.now()` pour influencer la logique moteur. Le temps logique est discret (`state.timeMs`).
   - Exception : metadonnees hors-etat (ex. horodatage d'export) peuvent utiliser le temps systeme.
 - RNG unique : utiliser la classe `RNG` (`src/engine/rng.ts`). Le curseur RNG (`rngState`) est persiste dans le `GameState`.
 - Ordre d'iteration stable : tout ce qui consomme la RNG doit iterer dans un ordre deterministe.
   - Toujours trier par `id` (ou appliquer `canonicalizeState`) avant une boucle qui consomme la RNG.
   - Si vous iterez des cles d'objets/records (`Object.keys`, `Object.entries`), triez explicitement les cles.
-- Isolation locale de RNG : les sous-systemes “complexes” (ex. resolution de bataille) doivent deriver une RNG locale (seed stable) pour eviter l'effet papillon sur le reste du tour.
+- Isolation locale de RNG : les sous-systemes “complexes” (ex. resolution de bataille) doivent deriver une RNG locale (seed stable) pour eviter l'effet papillon sur le reste du tick.
 
 Points d'attention :
-- Ne changez pas l'ordre des phases de `runTurn` sans mettre a jour `docs/specs/turn-loop.md` et les tests.
+- Ne changez pas l'ordre des phases de `runStrategicTick` sans mettre a jour `docs/specs/strategic-loop.md` et les tests.
 - Ne changez pas l'ordre des logs/messages si cela modifie la consommation RNG ou les ID generes.
 
 
@@ -100,10 +100,10 @@ Regles pratiques :
 
 ### 3) Canonicalisation (ordre stable des collections)
 
-`canonicalizeState` (`src/engine/state/canonicalize.ts`) impose un ordre canonique (lexicographique par `id`, ou `day` puis `id` pour logs/messages). C'est un pilier du determinisme.
+`canonicalizeState` (`src/engine/state/canonicalize.ts`) impose un ordre canonique (lexicographique par `id`, ou `timeMs` puis `id` pour logs/messages). C'est un pilier du determinisme.
 
 Si vous ajoutez une nouvelle collection dans `GameState` (ex. `something[]`) qui est :
-- iteree pendant un tour, ou
+- iteree pendant un tick strategique, ou
 - serialisee et comparee,
 
 alors vous devez tres probablement :
@@ -147,7 +147,7 @@ Contraintes :
 
 TypeScript :
 - Dans `src/engine`, viser la compatibilite `tsconfig.strict.json` (strict). Eviter `any` (ou l'isoler et le justifier).
-- Conserver des fonctions pures dans l'engine (entrees -> sorties), et passer les dependances (RNG, contexte de tour) explicitement.
+- Conserver des fonctions pures dans l'engine (entrees -> sorties), et passer les dependances (RNG, contexte de tick) explicitement.
 - Prevoir des API deterministes et documentees pour les sous-systemes sensibles.
 
 IDs :
@@ -179,13 +179,13 @@ Decision rapide avant de coder :
 - `npm run typecheck:strict` si modifications engine.
 - `npm run lint` si touche au code partage/UI.
 - `npm run battle:sim` pour l'equilibrage combat.
-- `SMOKE_TURNS=100 npm run smoke` pour IA/turn loop.
+- `SMOKE_MINUTES=100 npm run smoke` pour IA/boucle strategique.
 - Comparaison visuelle ou golden images si rendu/asset modifie.
 
 
 ## Performance, qualite, observabilite
 
-- Eviter les allocations lourdes dans les boucles de tour.
+- Eviter les allocations lourdes dans les boucles de tick.
 - Cache et pre-calculs deterministes preferes aux recalculs.
 - Assurer un budget clair si un pipeline graphique est implique.
 - Logguer via `logger` (niveaux), pas via `console`.

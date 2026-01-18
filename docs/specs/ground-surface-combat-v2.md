@@ -68,7 +68,7 @@ Champs ajoutes:
 - fatigue: number (0..1)
 - rangeMin, rangeMax: number (hex)
 - projectionRange: number (hex) pour ZOC / projection de force
-- lastCombatTurn?: number (tour du dernier engagement)
+- lastCombatTimeMs?: number (temps du dernier engagement)
 - groundOrders?: {
     move?: { type: 'move'; to: SurfacePos }
     attack?: { type: 'attack'; targetArmyId: string }
@@ -81,8 +81,8 @@ Notes:
   - break: morale < BREAK_THRESHOLD
   - une fois routed, l'unite reste routed tant que morale < RALLY_THRESHOLD
   - etat persiste via `Army.routed` (champ dedie)
-- Dans l'implementation, `posture` et `postureSetTurn` sont des champs de `Army` (pas dans `groundOrders`).
-- `prepared_defense` : defensePower *= PREPARED_DEFENSE_MULT, actif si turn > postureSetTurn; annule si l'unite bouge ou attaque.
+- Dans l'implementation, `posture` et `postureSetTimeMs` sont des champs de `Army` (pas dans `groundOrders`).
+- `prepared_defense` : defensePower *= PREPARED_DEFENSE_MULT, actif si timeMs > postureSetTimeMs; annule si l'unite bouge ou attaque.
 
 ### 4.2 Stats unite (GROUND_UNIT_STATS)
 

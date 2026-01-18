@@ -2,7 +2,8 @@
 import { ArmyState, Fleet, FleetState, GameMessage, GameState, StarSystem } from '../shared/shared';
 import { RNG } from './rng';
 import { applyCommand, GameCommand, CommandResult } from './commands';
-import { runTurn } from './runTurn';
+import { MS_PER_MINUTE } from '../shared/shared';
+import { runStrategicTick } from './strategicSimulation';
 import { isFleetWithinOrbitProximity } from './orbit';
 import { getDefaultSolidPlanet } from './planets';
 import { canonicalizeMessages, canonicalizeState } from './state';
@@ -38,9 +39,15 @@ export class GameEngine {
         this.rng.setIdState(idRngState);
     }
 
-    private commitState(nextState: GameState) {
+    private commitState(nextState: GameState, notify = true) {
         this.state = this.withSyncedRngState(canonicalizeState(nextState));
-        this.notify();
+        if (notify) {
+            this.notify();
+        }
+    }
+
+    private commitTime(timeMs: number) {
+        this.state = this.withSyncedRngState({ ...this.state, timeMs });
     }
 
     private withSyncedRngState(state: GameState): GameState {
@@ -79,8 +86,31 @@ export class GameEngine {
         return () => this.listeners.delete(fn);
     }
 
-    advanceTurn() {
-        this.commitState(runTurn(this.state, this.rng));
+    advanceTime(deltaMs: number) {
+        const stepMs = Math.max(0, Math.floor(deltaMs));
+        if (stepMs === 0) return;
+        const startTimeMs = this.state.timeMs;
+        const endTimeMs = startTimeMs + stepMs;
+        const startTick = Math.floor(startTimeMs / MS_PER_MINUTE);
+        const endTick = Math.floor(endTimeMs / MS_PER_MINUTE);
+        let nextState = this.state;
+        let didTick = false;
+
+        for (let tickIndex = startTick + 1; tickIndex <= endTick; tickIndex += 1) {
+            const tickTimeMs = tickIndex * MS_PER_MINUTE;
+            nextState = runStrategicTick({ ...nextState, timeMs: tickTimeMs }, this.rng);
+            didTick = true;
+        }
+
+        if (nextState.timeMs !== endTimeMs) {
+            nextState = { ...nextState, timeMs: endTimeMs };
+        }
+
+        if (didTick) {
+            this.commitState(nextState);
+        } else {
+            this.commitTime(endTimeMs);
+        }
     }
 
     dispatchCommand(cmd: GameCommand): CommandResult {

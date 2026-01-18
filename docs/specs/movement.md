@@ -2,22 +2,22 @@
 
 ## Formule de vitesse
 - La vitesse d'une flotte est déterminée par le vaisseau le plus lent.
-- Calcul (par tour) : `BASE_FLEET_SPEED * min(ship.speed)` sur l'ensemble des vaisseaux présents.
+- Calcul (par jour logique) : `BASE_FLEET_SPEED * min(ship.speed)` sur l'ensemble des vaisseaux présents (appliqué via `deltaMs / MS_PER_DAY`).
 - Si la flotte est vide ou si aucune vitesse n'est trouvée, la valeur par défaut `BASE_FLEET_SPEED` est utilisée.
 
-Référence : `getFleetSpeed(fleet)` dans `src/engine/movement/fleetSpeed.ts`.
+Référence : `getFleetSpeed(fleet)` dans `src/engine/movement.ts`.
 
 ## Step de déplacement : `moveFleet`
-- Entrées : `fleet`, `systems`, `day`, `rng`.
+- Entrées : `fleet`, `systems`, `timeMs`, `deltaMs`, `rng`.
 - Précondition : `fleet.state === MOVING` et `fleet.targetPosition` défini, sinon aucun déplacement.
 - Processus :
   - Direction = `targetPosition - position`, distance = norme.
-  - `moveDistance = getFleetSpeed(fleet)`.
+  - `moveDistance = getFleetSpeed(fleet) * (deltaMs / MS_PER_DAY)`.
   - Si la distance à couvrir est **strictement supérieure** à `moveDistance`, la flotte avance d'un vecteur normalisé multiplié par `moveDistance` et reste en état `MOVING`.
   - Sinon, la flotte arrive à destination :
     - Passage en `FleetState.ORBIT`.
     - Position forcée à `targetPosition` (clone du vecteur).
-    - `stateStartTurn` mis au jour courant.
+    - `stateStartTimeMs` mis au temps courant.
     - Drapeaux de mouvement remis à zéro : `targetPosition`, `targetSystemId`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId`.
     - Journal d'arrivée ajouté si la cible correspond à un système connu (type `move`).
 
@@ -25,10 +25,10 @@ Référence : `moveFleet` dans `src/engine/movement/movementPhase.ts`.
 
 ## Transition ORBIT ↔ MOVING
 - **Départ** : la mise en mouvement (hors de ce scope) place la flotte en `FleetState.MOVING` avec une `targetPosition` et, le cas échéant, `targetSystemId`.
-- **Arrivée** : `moveFleet` déclenche la bascule vers `FleetState.ORBIT` quand la distance restante est couverte par la vitesse du tour. La position est alignée exactement sur la cible.
+- **Arrivée** : `moveFleet` déclenche la bascule vers `FleetState.ORBIT` quand la distance restante est couverte par la distance du tick. La position est alignée exactement sur la cible.
 
 ## Effets à l'arrivée dans un système
-Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de tour exécute automatiquement des opérations d'arrivée via `executeArrivalOperations` :
+Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de tick exécute automatiquement des opérations d'arrivée via `executeArrivalOperations` :
 
 1) **Réinitialisation des ordres spéciaux**
    - Les champs `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` sont conservés pendant l'appel puis remis à `null` après les opérations.
@@ -43,7 +43,7 @@ Lorsqu'`arrivalSystemId` est défini à la fin de `moveFleet`, la résolution de
    - **Auto invasion** si `invasionTargetSystemId` correspond au système d'arrivée :
      - **Factions IA (non joueur)** : déploiement automatique identique à la v1.
      - **Faction joueur** : aucun débarquement automatique ; un `GameMessage` `INVASION_DECISION` est créé pour proposer « Siège (bombardement orbital) » ou « Attaque (débarquement) ».
-     - Si la flotte est détruite ou n'est plus en orbite après la résolution des batailles du tour, le message est automatiquement invalidé (dismissed).
+     - Si la flotte est détruite ou n'est plus en orbite après la résolution des batailles du tick, le message est automatiquement invalidé (dismissed).
      - Si aucune planète solide n'est disponible, la décision est limitée (débarquement impossible) et le message doit le signaler aux consommateurs.
 
 Référence : `executeArrivalOperations` et `resolveFleetMovement` dans `src/engine/movement.ts`.

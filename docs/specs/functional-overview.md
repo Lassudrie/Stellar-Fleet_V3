@@ -7,7 +7,7 @@
 ---
 
 ## 1. Concept Global
-Stellar Fleet est un jeu de stratégie et de simulation spatiale au tour par tour. Le joueur incarne l'une des nombreuses factions jouables d'une galaxie générée procéduralement ; plusieurs IA peuvent coexister et chaque faction possède sa propre couleur, son nom et son espace vital. Les scénarios peuvent définir plusieurs participants (joueurs ou IA), leurs couleurs et leurs objectifs propres.
+Stellar Fleet est un jeu de stratégie et de simulation spatiale en temps réel déterministe, cadencé par des ticks stratégiques. Le joueur incarne l'une des nombreuses factions jouables d'une galaxie générée procéduralement ; plusieurs IA peuvent coexister et chaque faction possède sa propre couleur, son nom et son espace vital. Les scénarios peuvent définir plusieurs participants (joueurs ou IA), leurs couleurs et leurs objectifs propres.
 
 ## 2. Génération de l'Univers
 Au démarrage d'une partie (ou restart), un univers est généré via une `seed`.
@@ -15,8 +15,8 @@ Au démarrage d'une partie (ou restart), un univers est généré via une `seed`
 - **Territoire Initial** : Chaque faction reçoit un système capital et un cluster de systèmes adjacents.
 - **Ressources** : Certains systèmes sont de type `GAS`, d'autres `NONE`. (Impact futur sur l'économie).
 
-## 3. Gestion du Temps et Tours
-Le jeu repose sur une boucle de jeu séquentielle :
+## 3. Gestion du temps et ticks
+Le jeu repose sur une boucle stratégique séquentielle exécutée à intervalle fixe :
 1.  **Phase d'IA** : Génération et exécution des ordres IA.
 2.  **Phase de Mouvement** : Mise à jour des positions des flottes.
 3.  **Détection des combats** : Verrouillage des combats spatiaux à résoudre.
@@ -24,7 +24,7 @@ Le jeu repose sur une boucle de jeu séquentielle :
 5.  **Bombardement orbital** : Application automatique des bombardements sur les armées au sol exposées.
 6.  **Combat terrestre & Conquête** : Résolution des combats au sol et application de la capture.
 7.  **Objectifs de victoire** : Vérification des conditions de victoire configurées.
-8.  **Nettoyage & Avancement** : Maintenance de l'état, canonicalisation et incrémentation du `day` de +1.
+8.  **Nettoyage & Avancement** : Maintenance de l'état, canonicalisation et mise à jour du temps (`timeMs`).
 
 ## 4. Flottes, Brouillard de Guerre et Vaisseaux
 Une flotte est une entité composée d'un ou plusieurs vaisseaux.
@@ -57,9 +57,9 @@ Pour capturer ou défendre un système :
     *   La supériorité orbitale réduit ce risque sans la supprimer.
 
 ### 6.2. Résolution du Conflit Terrestre
-À la fin du tour, si des armées de factions opposées sont présentes au sol (`ArmyState.DEPLOYED`) :
+À la fin du tick stratégique, si des armées de factions opposées sont présentes au sol (`ArmyState.DEPLOYED`) :
 1.  **Puissance pondérée par la morale** : chaque armée contribue `puissance = strength × facteur_morale`, où le facteur de morale est borné (clamp) pour rester dans des bornes stables, sans pouvoir descendre sous le plancher ni dépasser le plafond.
-2.  **Attrition proportionnelle** : chaque camp subit des pertes proportionnelles à la pression adverse avec un plafond de pourcentage de pertes par tour. Les pertes s'appliquent à toutes les armées du camp ; la morale est également réduite en fonction de la fraction de pertes.
+2.  **Attrition proportionnelle** : chaque camp subit des pertes proportionnelles à la pression adverse avec un plafond de pourcentage de pertes par tick. Les pertes s'appliquent à toutes les armées du camp ; la morale est également réduite en fonction de la fraction de pertes.
 3.  **Seuil de destruction** : toute armée dont la `strength` tombe sous `ARMY_DESTROY_THRESHOLD(maxStrength)` est supprimée. Les armées restantes doivent aussi rester au‑dessus du minimum de création (`MIN_ARMY_CREATION_STRENGTH`) pour être considérées comme survivantes.
 4.  **Issues possibles** :
     *   Victoire d'un camp (l'autre n'a plus d'armées au‑dessus du seuil).
@@ -84,6 +84,6 @@ Les conditions de victoire sont entièrement configurables par scénario (`objec
 - **Élimination (`elimination`)** : une faction gagne si tous ses adversaires n'ont plus ni flottes actives ni systèmes contrôlés.
 - **Domination (`domination`)** : une faction gagne si elle contrôle au moins `X%` des systèmes (50% par défaut si la valeur n'est pas précisée).
 - **Roi de la Colline (`king_of_the_hill`)** : une faction gagne si elle possède un système cible spécifique.
-- **Survie (`survival`)** : utilisée avec un `maxTurns` ; le joueur remporte la partie s'il est encore présent (flottes actives) lorsque le tour limite est atteint, sinon la partie se termine en match nul.
+- **Survie (`survival`)** : utilisée avec un `maxTimeMs` ; le joueur remporte la partie s'il est encore présent (flottes actives) lorsque la limite de temps est atteinte, sinon la partie se termine en match nul.
 
-Les conditions sont évaluées en "OU" pour chaque faction à la fin du tour (phase 7). Si un `maxTurns` est défini et atteint, la résolution est immédiate : priorité à `survival` pour la faction du joueur, sinon victoire du ou des leaders en nombre de systèmes contrôlés (égalité = match nul).
+Les conditions sont évaluées en "OU" pour chaque faction à la fin du tick stratégique (phase 7). Si un `maxTimeMs` est défini et atteint, la résolution est immédiate : priorité à `survival` pour la faction du joueur, sinon victoire du ou des leaders en nombre de systèmes contrôlés (égalité = match nul).

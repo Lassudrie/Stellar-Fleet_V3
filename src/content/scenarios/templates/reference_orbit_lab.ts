@@ -1,3 +1,4 @@
+import { MS_PER_DAY } from '../../../shared/shared';
 import { ScenarioTemplate } from '../schema';
 
 // Scenario data is intentionally isolated in this file.
@@ -39,7 +40,8 @@ export const referenceOrbitLab: ScenarioTemplate = {
     ]
   },
   objectives: {
-    win: [{ type: 'survival', value: 20 }]
+    win: [{ type: 'survival' }],
+    maxTimeMs: 20 * MS_PER_DAY
   },
   view: {
     focus: { mode: 'player_homeworld' },

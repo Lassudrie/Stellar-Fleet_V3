@@ -59,7 +59,7 @@ export const getTerritoryOwner = (systems: StarSystem[], position: Vec3): Factio
   return closestSystem.ownerFactionId;
 };
 
-export const buildTerritoryResolver = (systems: StarSystem[], currentDay?: number) => {
+export const buildTerritoryResolver = (systems: StarSystem[], currentTimeMs?: number) => {
   const ownedSystems = sorted(
     systems.filter(system => system.ownerFactionId !== null),
     (a, b) => a.id.localeCompare(b.id)
@@ -69,16 +69,16 @@ export const buildTerritoryResolver = (systems: StarSystem[], currentDay?: numbe
     return (_position: Vec3): FactionId | null => null;
   }
 
-  const index = new SpatialIndex(ownedSystems, TERRITORY_RADIUS, currentDay);
+  const index = new SpatialIndex(ownedSystems, TERRITORY_RADIUS, currentTimeMs);
 
   return (position: Vec3): FactionId | null => {
-    const nearest = index.findNearest(position, undefined, { currentTurn: currentDay });
+    const nearest = index.findNearest(position, undefined, { currentTimeMs });
     if (!nearest) return null;
 
     const minDistSq = nearest.distanceSq;
     if (minDistSq > TERRITORY_RADIUS_SQ) return null;
 
-    const contenders = index.queryRadius(position, Math.sqrt(minDistSq), { currentTurn: currentDay });
+    const contenders = index.queryRadius(position, Math.sqrt(minDistSq), { currentTimeMs });
     const owner = nearest.item.ownerFactionId;
 
     const contested = contenders.some(system =>

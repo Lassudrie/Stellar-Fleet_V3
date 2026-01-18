@@ -11,22 +11,22 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 ## GameCommand
 
 ### MOVE_FLEET
-- **Entrée** : `fleetId`, `targetSystemId`, `reason?`, `turn?`.
+- **Entrée** : `fleetId`, `targetSystemId`, `reason?`.
 - **Préconditions/erreurs** : le système cible doit exister ; la flotte doit exister et ne pas être bloquée (combat ou retraite). Les validations échouées annulent le changement d’état sans message additionnel.
-- **Effets** : le moteur place la flotte en `MOVING`, définit `targetSystemId`/`targetPosition` sur la position du système, renseigne `stateStartTurn`, et purge les ordres précédents (`invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId`).
+- **Effets** : le moteur place la flotte en `MOVING`, définit `targetSystemId`/`targetPosition` sur la position du système, renseigne `stateStartTimeMs`, et purge les ordres précédents (`invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId`).
 
 ### ORDER_INVASION_MOVE
-- **Entrée** : `fleetId`, `targetSystemId`, `reason?`, `turn?`.
+- **Entrée** : `fleetId`, `targetSystemId`, `reason?`.
 - **Préconditions/erreurs** : identiques à `MOVE_FLEET` (système et flotte doivent exister, flotte non bloquée).
 - **Effets** : identiques à `MOVE_FLEET`, mais `invasionTargetSystemId` est fixé au système cible (les autres ordres sont vidés).
 
 ### ORDER_LOAD_MOVE
-- **Entrée** : `fleetId`, `targetSystemId`, `reason?`, `turn?`.
+- **Entrée** : `fleetId`, `targetSystemId`, `reason?`.
 - **Préconditions/erreurs** : identiques à `MOVE_FLEET`.
 - **Effets** : passage en `MOVING`, alignement de la cible, et mémorisation de `loadTargetSystemId` (les autres ordres sont vidés).
 
 ### ORDER_UNLOAD_MOVE
-- **Entrée** : `fleetId`, `targetSystemId`, `reason?`, `turn?`.
+- **Entrée** : `fleetId`, `targetSystemId`, `reason?`.
 - **Préconditions/erreurs** : identiques à `MOVE_FLEET`.
 - **Effets** : passage en `MOVING`, alignement de la cible, et mémorisation de `unloadTargetSystemId` (les autres ordres sont vidés).
 
@@ -38,7 +38,7 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 ### ADD_LOG
 - **Entrée** : `text`, `logType` (`info` | `combat` | `move` | `ai`).
 - **Préconditions/erreurs** : aucune.
-- **Effets** : ajoute un `LogEntry` daté du jour courant avec un identifiant généré.
+- **Effets** : ajoute un `LogEntry` daté du temps courant (`timeMs`) avec un identifiant généré.
 
 ### LOAD_ARMY
 - **Entrée** : `fleetId`, `shipId`, `armyId`, `systemId`, `reason?`.
@@ -68,10 +68,10 @@ Cette spécification recense toutes les commandes consommées par le moteur (`Ga
 - **Préconditions/erreurs** :
   - L’armée doit exister, être `DEPLOYED` et localisée sur `fromPlanetId`.
   - Les planètes source et destination doivent exister, être solides et appartenir au même système que `systemId`.
-  - Un transport de la faction de l’armée doit être disponible en orbite : flotte en `ORBIT` dans la portée `ORBIT_PROXIMITY_RANGE_SQ`, vaisseau `TRANSPORTER` libre et non occupé (`transferBusyUntilDay` strictement inférieur au jour courant).
+  - Un transport de la faction de l’armée doit être disponible en orbite : flotte en `ORBIT` dans la portée `ORBIT_PROXIMITY_RANGE_SQ`, vaisseau `TRANSPORTER` libre et non occupé (`transferBusyUntilTimeMs` strictement inférieur au temps courant).
   - Si aucun transport n’est disponible ou si une précondition échoue, la commande est ignorée.
 - **Effets** :
-  - Marque le vaisseau transporteur comme occupé (`transferBusyUntilDay = state.day`).
+  - Marque le vaisseau transporteur comme occupé (`transferBusyUntilTimeMs = state.timeMs`).
   - Déplace l’armée vers `toPlanetId` (champ `containerId`).
   - Ajoute un log de mouvement (texte par défaut ou `reason` personnalisé).
 

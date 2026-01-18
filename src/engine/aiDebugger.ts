@@ -56,10 +56,10 @@ export interface SplitMergeLog {
   details: string;
 }
 
-export interface AIDebugTurnLog {
-  turn: number;
+export interface AIDebugTickLog {
+  timeMs: number;
   factionId: FactionId;
-  timestamp: number;
+  timestampMs: number;
   meta: {
     totalFleets: number;
     ownedSystems: number;
@@ -76,8 +76,8 @@ export interface AIDebugTurnLog {
 
 class AIDebugger {
   private isEnabled: boolean = false;
-  private history: AIDebugTurnLog[] = [];
-  private currentLog: AIDebugTurnLog | null = null;
+  private history: AIDebugTickLog[] = [];
+  private currentLog: AIDebugTickLog | null = null;
   private readonly MAX_HISTORY = 100;
 
   public setEnabled(enabled: boolean) {
@@ -91,13 +91,13 @@ class AIDebugger {
     return this.isEnabled;
   }
 
-  public startTurn(turn: number, factionId: FactionId, meta: { totalFleets: number, ownedSystems: number }) {
+  public startTick(timeMs: number, factionId: FactionId, meta: { totalFleets: number, ownedSystems: number }) {
     if (!this.isEnabled) return;
 
     this.currentLog = {
-      turn,
+      timeMs,
       factionId,
-      timestamp: turn,
+      timestampMs: timeMs,
       meta: {
         ...meta,
         globalThreat: 0 // Will be updated during analysis via setGlobalThreat
@@ -116,7 +116,7 @@ class AIDebugger {
       }
   }
 
-  public commitTurn() {
+  public commitTick() {
     if (!this.isEnabled || !this.currentLog) return;
     
     this.history.push(this.currentLog);

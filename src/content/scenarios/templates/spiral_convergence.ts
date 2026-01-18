@@ -1,3 +1,4 @@
+import { MS_PER_DAY } from '../../../shared/shared';
 import { ScenarioTemplate } from '../schema';
 
 // Scenario data is intentionally isolated in this file.
@@ -115,7 +116,7 @@ export const spiralConvergence: ScenarioTemplate = {
   },
   objectives: {
     win: [{ type: 'domination', value: 60 }],
-    maxTurns: 200
+    maxTimeMs: 200 * MS_PER_DAY
   },
   view: {
     focus: { mode: 'player_homeworld' },

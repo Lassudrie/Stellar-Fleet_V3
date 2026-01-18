@@ -92,7 +92,7 @@ const applyLosses = (
  *
  * Rules:
  * - Effective power = strength × morale factor (clamped for stability).
- * - Each side suffers proportional losses capped per turn, applied across armies.
+ * - Each side suffers proportional losses capped per tick, applied across armies.
  * - Surviving armies update strength and morale; units below the destruction threshold are removed.
  * - Conquest only triggers when one faction retains armies above the threshold and the opponent has none.
  */

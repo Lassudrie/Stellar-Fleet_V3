@@ -1,3 +1,4 @@
+import { MS_PER_DAY } from '../../../shared/shared';
 import { ScenarioTemplate } from '../schema';
 
 export const referenceOrbitNoMoons: ScenarioTemplate = {
@@ -36,7 +37,8 @@ export const referenceOrbitNoMoons: ScenarioTemplate = {
     ]
   },
   objectives: {
-    win: [{ type: 'survival', value: 20 }]
+    win: [{ type: 'survival' }],
+    maxTimeMs: 20 * MS_PER_DAY
   },
   view: {
     focus: { mode: 'player_homeworld' },
@@ -87,7 +89,8 @@ export const referenceOrbitWithMoons: ScenarioTemplate = {
     ]
   },
   objectives: {
-    win: [{ type: 'survival', value: 20 }]
+    win: [{ type: 'survival' }],
+    maxTimeMs: 20 * MS_PER_DAY
   },
   view: {
     focus: { mode: 'player_homeworld' },
@@ -138,7 +141,8 @@ export const referenceOrbitBinarySystem: ScenarioTemplate = {
     ]
   },
   objectives: {
-    win: [{ type: 'survival', value: 20 }]
+    win: [{ type: 'survival' }],
+    maxTimeMs: 20 * MS_PER_DAY
   },
   view: {
     focus: { mode: 'player_homeworld' },

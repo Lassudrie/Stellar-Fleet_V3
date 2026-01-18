@@ -220,7 +220,7 @@ R = 1 + t * ε         // ∈ [1-ε, 1+ε]
 Chaque engagement utilise une RNG locale avec seed :
 
 ```
-seed = hash32(turn, attackerId, defenderId, "ground")
+seed = hash32(timeMs, attackerId, defenderId, "ground")
 localRng = new RNG(seed)
 ```
 

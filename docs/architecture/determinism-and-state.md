@@ -2,7 +2,7 @@
 
 ## 1. Le Principe de Déterminisme
 Stellar Fleet est conçu pour être strictement déterministe.
-**Définition** : Pour une `seed` initiale donnée et une suite de commandes joueurs identique, l'état du jeu au tour N sera **toujours** identique, quel que soit la machine, le navigateur ou le moment de l'exécution.
+**Définition** : Pour une `seed` initiale donnée et une suite de commandes joueurs identique, l'état du jeu à l'instant T sera **toujours** identique, quel que soit la machine, le navigateur ou le moment de l'exécution.
 
 ### Pourquoi ?
 *   **Replayabilité** : Possibilité de rejouer une partie.
@@ -14,12 +14,12 @@ Stellar Fleet est conçu pour être strictement déterministe.
 ### Règle #1 : Isolation de la RNG
 *   Interdiction totale d'utiliser `Math.random()`.
 *   Utilisation exclusive de la classe `RNG` (`src/engine/rng.ts`), basée sur l'algorithme Mulberry32.
-*   L'instance `RNG` est passée dans toute la chaîne d'appel de `runTurn`.
+*   L'instance `RNG` est passée dans toute la chaîne d'appel des ticks stratégiques.
 *   Les identifiants (logs/messages/batailles) utilisent un flux RNG dédié (`idRngState`) qui n'altère pas les tirages gameplay.
 
 ### Règle #2 : Pas de temps système dans la logique
 *   Interdiction d'utiliser `Date.now()` ou `performance.now()` pour influencer la logique de jeu.
-*   Le temps est discret (`state.day`).
+*   Le temps est discret en millisecondes (`state.timeMs`).
 *   Seules des métadonnées hors-état (ex. horodatage d'export) peuvent utiliser le temps système.
 
 ### Règle #3 : Ordre des opérations stable
@@ -36,7 +36,7 @@ battleShips.sort((a, b) => a.shipId.localeCompare(b.shipId));
 ### Règle #4 : Isolation RNG locale
 Pour éviter que l'ordre de résolution des batailles n'influence le reste de la galaxie (effet papillon indésirable sur la génération procédurale future) :
 *   Les sous-systèmes complexes (comme Battle V1) doivent instancier leur propre `RNG` dérivée.
-*   `const battleRng = new RNG(hashJoin32(seed, 'battle', turn, systemId, ...fleetIds))`.
+*   `const battleRng = new RNG(hashJoin32(seed, 'battle', timeMs, systemId, ...fleetIds))`.
 
 ## 3. Sérialisation et Sauvegarde
 Le système de sauvegarde repose sur la sérialisation complète du `GameState`.

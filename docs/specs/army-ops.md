@@ -14,10 +14,10 @@ Cette spécification décrit les règles de chargement, de débarquement et de t
 - La planète cible doit être solide. À défaut, le jeu choisit la planète solide par défaut du système.
 - Les transports concernés sont vidés (`carriedArmyId` remis à `null`) et les armées passent à l'état `DEPLOYED` sur la planète cible, avec journal associé.
 
-## Sélection des transports et `transferBusyUntilDay`
-- Les transports candidats sont filtrés en orbite autour du système, sans armée embarquée et non occupés (`transferBusyUntilDay` < jour courant).
+## Sélection des transports et `transferBusyUntilTimeMs`
+- Les transports candidats sont filtrés en orbite autour du système, sans armée embarquée et non occupés (`transferBusyUntilTimeMs` < temps courant).
 - Les candidats sont triés par identifiant de flotte puis de vaisseau pour garantir une sélection stable.
-- Lors d'un transfert planète→planète, le transport utilisé est marqué occupé pour le jour courant (`transferBusyUntilDay = day`) afin d'empêcher tout second transfert ce tour-là.
+- Lors d'un transfert planète→planète, le transport utilisé est marqué occupé pour le temps courant (`transferBusyUntilTimeMs = timeMs`) afin d'empêcher tout second transfert au même tick.
 
 ## Risque de débarquement en orbite contestée
 - Le débarquement reste autorisé en orbite contestée (`isOrbitContested`).
@@ -35,4 +35,4 @@ Cette spécification décrit les règles de chargement, de débarquement et de t
 - Portée orbitale : `ORBIT_PROXIMITY_RANGE_SQ` (contrôles de chargement/débarquement et disponibilité des transports).
 - Types éligibles : `ShipType.TRANSPORTER`.
 - Risque d'orbite contestée : `CONTESTED_UNLOAD_FAILURE_THRESHOLD = 0.35`, `CONTESTED_UNLOAD_LOSS_FRACTION = 0.35`.
-- Gel d'utilisation des transports : `transferBusyUntilDay` fixé au jour courant après un transfert planétaire.
+- Gel d'utilisation des transports : `transferBusyUntilTimeMs` fixé au temps courant après un transfert planétaire.

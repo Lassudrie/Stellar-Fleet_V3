@@ -44,15 +44,15 @@ Lors du recalcul de l'état filtré :
 * Chaque flotte ennemie visible génère (ou remplace) un sighting avec :
   - `fleetId`, `factionId`, `position` (copie de la position actuelle).
   - `systemId` : `null` (réservé à l'IA, cf. section 4).
-  - `daySeen` : jour courant du `GameState` **avant** filtrage.
+  - `timeSeenMs` : temps courant du `GameState` **avant** filtrage.
   - `estimatedPower` : résultat de `calculateFleetPower`.
   - `confidence` : `1.0` (confiance totale pour une observation directe).
-* Le sighting est remplacé si le jour évolue ou si la position change.
+* Le sighting est remplacé si le temps évolue ou si la position change.
 
 ### 3.2. Expiration et bornes
-* **Durée de vie** : tout sighting dont `daySeen < (day - ENEMY_SIGHTING_MAX_AGE_DAYS = 30)` est supprimé.
-* **Quota** : au-delà de `ENEMY_SIGHTING_LIMIT = 200` entrées, seuls les 200 sightings les plus récents (par `daySeen`) sont conservés.
-* `lastUpdateDay` n'est pas utilisé côté joueur : l'âge provient uniquement de `daySeen`.
+* **Durée de vie** : tout sighting dont `timeSeenMs < (timeMs - ENEMY_SIGHTING_MAX_AGE_DAYS * MS_PER_DAY)` est supprimé.
+* **Quota** : au-delà de `ENEMY_SIGHTING_LIMIT = 200` entrées, seuls les 200 sightings les plus récents (par `timeSeenMs`) sont conservés.
+* `lastUpdateTimeMs` n'est pas utilisé côté joueur : l'âge provient uniquement de `timeSeenMs`.
 
 ---
 
@@ -63,19 +63,19 @@ Lors du recalcul de l'état filtré :
 * **Avec brouillard** : `perceivedState = applyFogOfWar(state, factionId)`. L'IA ne voit que les flottes détectées selon les règles 2.x et doit s'appuyer sur sa mémoire pour le reste.
 
 ### 4.2. Mise à jour des sightings IA
-À chaque tour (via `updateMemory`) :
+À chaque tick stratégique (via `updateMemory`) :
 * Les flottes ennemies visibles créent/rafraîchissent un sighting :
   - `systemId` : système le plus proche dans `CAPTURE_RANGE`, sinon `null`.
-  - `daySeen` et `lastUpdateDay` : jour courant.
+  - `timeSeenMs` et `lastUpdateTimeMs` : temps courant.
   - `estimatedPower` : calculé via `calculateFleetPower`.
   - `confidence` : `1.0`.
 * Les sightings non rafraîchis sont vieillis :
-  - **Oubli dur** : suppression si `day - daySeen > sightingForgetAfterTurns` (par défaut 12).
-  - **Décroissance de confiance** : `confidence *= (1 - sightingConfidenceDecayPerTurn)^(turnsSinceUpdate)` avec un pas par jour (`sightingConfidenceDecayPerTurn` par défaut 0.1). `lastUpdateDay` est mis à jour lors du calcul.
+  - **Oubli dur** : suppression si `daysSinceSeen > sightingForgetAfterDays` (par défaut 12).
+  - **Décroissance de confiance** : `confidence *= (1 - sightingConfidenceDecayPerDay)^(daysSinceUpdate)` avec un pas par jour (`sightingConfidenceDecayPerDay` par défaut 0.1). `lastUpdateTimeMs` est mis à jour lors du calcul.
   - **Plancher** : suppression si `confidence < sightingMinConfidence` (par défaut 0.05).
 
 ### 4.3. Exploitation des sightings
-* Les systèmes observés mettent à jour `systemLastSeen` et `lastOwnerBySystemId`.
+* Les systèmes observés mettent à jour `systemLastSeenTimeMs` et `lastOwnerBySystemId`.
 * Lors de l'évaluation stratégique d'un système :
   - **Menace visible** : somme de la puissance des flottes ennemies visibles dans `CAPTURE_RANGE`.
   - **Menace mémorisée** : somme des `estimatedPower * confidence` des sightings liés au système (`systemId`), atténuée par l'âge du brouillard (`fogAge`).

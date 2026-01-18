@@ -37,7 +37,7 @@ import { GROUND_UNIT_STATS } from '../content/data/groundUnits';
 import { STACKING_CAP, tileKey } from './ground';
 
 export type GameCommand =
-  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; timeMs?: number }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'LOAD_ARMIES'; fleetId: string; systemId: string; reason?: string }
@@ -54,9 +54,9 @@ export type GameCommand =
   | { type: 'BUILD_AT'; factionId: FactionId; buildingType: GroundBuildingType; at: SurfacePos; name?: string }
   | { type: 'SPLIT_FLEET'; originalFleetId: string; shipIds: string[] }
   | { type: 'MERGE_FLEETS'; sourceFleetId: string; targetFleetId: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null; reason?: string; turn?: number }
-  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
-  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; targetPlanetId?: string | null; reason?: string; timeMs?: number }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; timeMs?: number }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; timeMs?: number };
 
 export interface CommandResult {
     ok: boolean;
@@ -83,7 +83,7 @@ const getAvailableTransportsInOrbit = (
         fleet.ships.forEach((ship, index) => {
             if (ship.type !== ShipType.TRANSPORTER) return;
             if (ship.carriedArmyId) return;
-            if ((ship.transferBusyUntilDay ?? -Infinity) >= state.day) return;
+            if ((ship.transferBusyUntilTimeMs ?? -Infinity) >= state.timeMs) return;
             candidates.push({ fleet, shipIndex: index });
         });
     });
@@ -102,7 +102,7 @@ const toSurfacePos = (descriptor: PlanetSurfaceDescriptor, bodyId: string, tileI
     return coord ? { bodyId, tileId, q: coord.q, r: coord.r } : { bodyId, tileId };
 };
 
-export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, executionTurn?: number): CommandResult => {
+export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, executionTimeMs?: number): CommandResult => {
     // Enforce Immutability in Dev
     deepFreezeDev(state);
 
@@ -210,14 +210,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
             const army = state.armies.find(a => a.id === command.armyId);
             if (!army) return fail('Army not found');
             if (army.factionId !== state.playerFactionId) return fail('Not your army');
-            const postureSetTurn = Number.isFinite(executionTurn) ? executionTurn : state.day;
+            const postureSetTimeMs = Number.isFinite(executionTimeMs) ? executionTimeMs : state.timeMs;
             return ok({
                 ...state,
                 armies: state.armies.map(a =>
                   a.id === army.id
                     ? (command.posture === 'prepared_defense'
-                        ? ({ ...a, posture: command.posture, postureSetTurn })
-                        : ({ ...a, posture: command.posture, postureSetTurn: undefined }))
+                        ? ({ ...a, posture: command.posture, postureSetTimeMs })
+                        : ({ ...a, posture: command.posture, postureSetTimeMs: undefined }))
                     : a
                 )
             });
@@ -308,7 +308,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'MOVE_FLEET': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
-            const stateStartTurn = command.turn ?? state.day;
+            const stateStartTimeMs = command.timeMs ?? state.timeMs;
 
             // Validation
             if (!system) return fail('System not found');
@@ -331,14 +331,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     if (fleet.retreating) return fleet;
 
                     const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
-                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const nextStateStartTimeMs = validation.alreadyEnRoute ? fleet.stateStartTimeMs : stateStartTimeMs;
 
                     return {
                         ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn: nextStateStartTurn,
+                        stateStartTimeMs: nextStateStartTimeMs,
                         invasionTargetSystemId: null, // Clear previous orders
                         invasionTargetPlanetId: null,
                         loadTargetSystemId: null,
@@ -351,7 +351,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'ORDER_INVASION_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
-            const stateStartTurn = command.turn ?? state.day;
+            const stateStartTimeMs = command.timeMs ?? state.timeMs;
 
             if (!system) return fail('System not found');
             const fleet = state.fleets.find(f => f.id === command.fleetId);
@@ -370,14 +370,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     if (fleet.retreating) return fleet;
 
                     const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
-                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const nextStateStartTimeMs = validation.alreadyEnRoute ? fleet.stateStartTimeMs : stateStartTimeMs;
 
                     return {
                         ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn: nextStateStartTurn,
+                        stateStartTimeMs: nextStateStartTimeMs,
                         invasionTargetSystemId: system.id, // Set invasion order
                         invasionTargetPlanetId: command.targetPlanetId ?? null,
                         loadTargetSystemId: null,
@@ -390,7 +390,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'ORDER_LOAD_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
-            const stateStartTurn = command.turn ?? state.day;
+            const stateStartTimeMs = command.timeMs ?? state.timeMs;
 
             if (!system) return fail('System not found');
             const fleet = state.fleets.find(f => f.id === command.fleetId);
@@ -409,14 +409,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     if (fleet.retreating) return fleet;
 
                     const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
-                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const nextStateStartTimeMs = validation.alreadyEnRoute ? fleet.stateStartTimeMs : stateStartTimeMs;
 
                     return {
                         ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn: nextStateStartTurn,
+                        stateStartTimeMs: nextStateStartTimeMs,
                         invasionTargetSystemId: null,
                         invasionTargetPlanetId: null,
                         loadTargetSystemId: system.id,
@@ -429,7 +429,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
         case 'ORDER_UNLOAD_MOVE': {
             const system = getSystemById(state.systems, command.targetSystemId);
 
-            const stateStartTurn = command.turn ?? state.day;
+            const stateStartTimeMs = command.timeMs ?? state.timeMs;
 
             if (!system) return fail('System not found');
             const fleet = state.fleets.find(f => f.id === command.fleetId);
@@ -448,14 +448,14 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                     if (fleet.retreating) return fleet;
 
                     const debitedFleet = validation.alreadyEnRoute ? fleet : validation.updatedFleet;
-                    const nextStateStartTurn = validation.alreadyEnRoute ? fleet.stateStartTurn : stateStartTurn;
+                    const nextStateStartTimeMs = validation.alreadyEnRoute ? fleet.stateStartTimeMs : stateStartTimeMs;
 
                     return {
                         ...debitedFleet,
                         state: FleetState.MOVING,
                         targetSystemId: system.id,
                         targetPosition: clone(system.position),
-                        stateStartTurn: nextStateStartTurn,
+                        stateStartTimeMs: nextStateStartTimeMs,
                         invasionTargetSystemId: null,
                         invasionTargetPlanetId: null,
                         loadTargetSystemId: null,
@@ -483,7 +483,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 ...state,
                 logs: [...state.logs, {
                     id: rng.id('log'),
-                    day: state.day,
+                    timeMs: state.timeMs,
                     text: command.text,
                     type: command.logType
                 }]
@@ -501,7 +501,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 fleet,
                 system,
                 armies: state.armies,
-                day: state.day,
+                timeMs: state.timeMs,
                 rng,
                 fleetLabel: fleet.id
             });
@@ -638,7 +638,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 fleet,
                 system,
                 armies: state.armies,
-                day: state.day,
+                timeMs: state.timeMs,
                 rng,
                 fleetLabel: fleet.id,
                 allowedArmyIds: new Set([command.armyId]),
@@ -752,7 +752,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
                 if (fleet.id !== carrier.fleet.id) return fleet;
                 const ships = fleet.ships.map((ship, index) => {
                     if (index !== carrier.shipIndex) return ship;
-                    return { ...ship, transferBusyUntilDay: state.day };
+                    return { ...ship, transferBusyUntilTimeMs: state.timeMs };
                 });
                 return { ...fleet, ships };
             });
@@ -767,7 +767,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
 
             const transferLog: LogEntry = {
                 id: rng.id('log'),
-                day: state.day,
+                timeMs: state.timeMs,
                 text: logText,
                 type: 'move'
             };
@@ -822,7 +822,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
 
             const splitLog: LogEntry = {
                 id: rng.id('log'),
-                day: state.day,
+                timeMs: state.timeMs,
                 text: `Fleet ${fleet.id} split into ${updatedOriginalFleet.id} and ${newFleet.id}. ${newFleet.id} received ${splitShips.length} ships.`,
                 type: 'info'
             };
@@ -861,7 +861,7 @@ export const applyCommand = (state: GameState, command: GameCommand, rng: RNG, e
 
             const mergeLog: LogEntry = {
                 id: rng.id('log'),
-                day: state.day,
+                timeMs: state.timeMs,
                 text: `Fleet ${sourceFleet.id} merged into ${targetFleet.id}, transferring ${sourceFleet.ships.length} ships.`,
                 type: 'info'
             };

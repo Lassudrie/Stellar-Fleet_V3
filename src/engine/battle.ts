@@ -1,5 +1,5 @@
 import { CAPTURE_RANGE_SQ, SHIP_STATS } from '../content/data/static';
-import { devWarn } from '../shared/shared';
+import { devWarn, MS_PER_MINUTE } from '../shared/shared';
 import { sorted } from '../shared/shared';
 import {
   type Battle,
@@ -122,13 +122,13 @@ export const MAX_LAUNCH_PER_ROUND = BALANCE_PROFILE.pacing.maxLaunchPerRound;
 const DISTANCE_TOLERANCE = 1e-6;
 const compareIds = (a: string, b: string): number => a.localeCompare(b, 'en', { sensitivity: 'base' });
 
-const buildBattleId = (turn: number, systemId: string, fleetIds: string[]): string => {
-  const hash = hashJoin32('battle', turn, systemId, ...fleetIds) >>> 0;
-  return `battle_${turn}_${systemId}_${hash.toString(16).padStart(8, '0')}`;
+const buildBattleId = (timeMs: number, systemId: string, fleetIds: string[]): string => {
+  const hash = hashJoin32('battle', timeMs, systemId, ...fleetIds) >>> 0;
+  return `battle_${timeMs}_${systemId}_${hash.toString(16).padStart(8, '0')}`;
 };
 
-const computeBattleSeed = (seed: number, turn: number, systemId: string, fleetIds: string[]): number => {
-  return hashJoin32(seed, 'battle', turn, systemId, ...fleetIds) >>> 0;
+const computeBattleSeed = (seed: number, timeMs: number, systemId: string, fleetIds: string[]): number => {
+  return hashJoin32(seed, 'battle', timeMs, systemId, ...fleetIds) >>> 0;
 };
 
 // Targeting
@@ -380,7 +380,7 @@ export function selectTarget(
  * Scans the galaxy for contested systems.
  * Rule: A battle starts if at least two DIFFERENT factions have fleets within range.
  */
-export function detectNewBattles(state: GameState, turn: number): Battle[] {
+export function detectNewBattles(state: GameState, timeMs: number): Battle[] {
   const newBattles: Battle[] = [];
 
   const activeBattleSystemIds = new Set(state.battles.filter(b => b.status !== 'resolved').map(b => b.systemId));
@@ -440,12 +440,12 @@ export function detectNewBattles(state: GameState, turn: number): Battle[] {
 
     if (presentFactionIds.size > 1) {
       const involvedFleetIds = sorted([...fleetIds], compareIds);
-      const battleId = buildBattleId(turn, system.id, involvedFleetIds);
+      const battleId = buildBattleId(timeMs, system.id, involvedFleetIds);
 
       const battle: Battle = {
         id: battleId,
         systemId: system.id,
-        turnCreated: turn,
+        timeCreatedMs: timeMs,
         status: 'scheduled',
         involvedFleetIds,
         logs: [`Battle detected at ${system.name}. Factions involved: ${Array.from(presentFactionIds).join(', ')}.`]
@@ -458,12 +458,12 @@ export function detectNewBattles(state: GameState, turn: number): Battle[] {
   return newBattles;
 }
 
-export function pruneBattles(battles: Battle[], currentTurn: number): Battle[] {
-  const KEEP_HISTORY = 5;
+export function pruneBattles(battles: Battle[], currentTimeMs: number): Battle[] {
+  const KEEP_HISTORY_MS = 5 * MS_PER_MINUTE;
   return battles.filter(b => {
     if (b.status !== 'resolved') return true;
-    const resolutionTurn = b.turnResolved ?? b.turnCreated ?? currentTurn;
-    return resolutionTurn >= currentTurn - KEEP_HISTORY;
+    const resolutionTimeMs = b.timeResolvedMs ?? b.timeCreatedMs ?? currentTimeMs;
+    return resolutionTimeMs >= currentTimeMs - KEEP_HISTORY_MS;
   });
 }
 
@@ -601,13 +601,14 @@ export interface BattleResolutionResult {
 }
 
 // Optimization: Removed unused masterRng param. The battle creates its own isolated RNG.
-export function resolveBattle(battle: Battle, state: GameState, turn: number): BattleResolutionResult {
-  const logReference = `[Turn ${turn}]`;
+export function resolveBattle(battle: Battle, state: GameState, timeMs: number): BattleResolutionResult {
+  const timeMinutes = timeMs / MS_PER_MINUTE;
+  const logReference = `[t+${timeMinutes}m]`;
   const formatLog = (message: string) => `${logReference} ${message}`;
 
   // 1. SETUP - Isolate Determinism
   const sortedFleetIds = sorted(battle.involvedFleetIds, compareIds);
-  const seed = computeBattleSeed(state.seed, battle.turnCreated, battle.systemId, sortedFleetIds);
+  const seed = computeBattleSeed(state.seed, battle.timeCreatedMs, battle.systemId, sortedFleetIds);
   const rng = new RNG(seed);
 
   // 2. INITIALIZE BATTLE STATE
@@ -662,7 +663,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
     return {
       updatedBattle: {
         ...battle,
-        turnResolved: turn,
+        timeResolvedMs: timeMs,
         status: 'resolved',
         initialShips: [],
         logs: [...battle.logs, formatLog('Battle resolved as draw - no valid combatants.')],
@@ -699,8 +700,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
 
     attacker.killHistory.push({
       id: rng.id('kill'),
-      day: turn,
-      turn,
+      timeMs,
       targetId: target.shipId,
       targetType: target.type,
       targetFactionId: target.faction
@@ -1042,7 +1042,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
         ships: newShips,
         position: { ...orbitPosition },
         state: FleetState.ORBIT,
-        stateStartTurn: turn
+        stateStartTimeMs: timeMs
       };
       survivingFleets.push(updatedFleet);
     }
@@ -1075,7 +1075,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
     });
 
     if (penalizedShips.length > 0) {
-      attritionAdjustedFleets.push({ ...fleet, ships: penalizedShips, stateStartTurn: turn });
+      attritionAdjustedFleets.push({ ...fleet, ships: penalizedShips, stateStartTimeMs: timeMs });
     }
   });
 
@@ -1127,7 +1127,7 @@ export function resolveBattle(battle: Battle, state: GameState, turn: number): B
 
   const updatedBattle: Battle = {
     ...battle,
-    turnResolved: turn,
+    timeResolvedMs: timeMs,
     status: 'resolved',
     initialShips: initialShips,
     logs: [...battle.logs, ...logs],

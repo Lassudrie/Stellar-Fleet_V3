@@ -1,4 +1,4 @@
-# Spécification du format de sauvegarde `SaveFileV6`
+# Spécification du format de sauvegarde `SaveFileV7`
 
 **Version :** 1.0  
 **Statut :** Brouillon
@@ -6,18 +6,18 @@
 ---
 
 ## 1. Objectif et enveloppe
-`SaveFileV6` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
+`SaveFileV7` décrit la structure JSON des sauvegardes générées par le moteur. Chaque fichier est sérialisé avec `JSON.stringify(..., 2)` pour rester diffable en contrôle de source.
 
 ### 1.1. Conteneur racine
 ```json
 {
-  "version": 6,
+  "version": 7,
   "createdAt": "<timestamp ISO 8601>",
   "state": { /* GameStateDTO */ }
 }
 ```
 
-- `version` : entier **obligatoire** fixé à `6` lors de l’écriture.
+- `version` : entier **obligatoire** fixé à `7` lors de l’écriture.
 - `createdAt` : horodatage ISO 8601 généré au moment de la sérialisation.
 - `state` : objet `GameStateDTO` complet (voir ci‑dessous).
 
@@ -31,7 +31,7 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - `seed` : graine monde **obligatoire** (number) utilisée pour les régénérations.
 - `rngState` : état RNG en cours (number). Si absent en lecture, il hérite de `seed`.
 - `idRngState` : état RNG dédié aux identifiants (number). Si absent en lecture, il hérite de `rngState`.
-- `startYear`, `day` : repères temporels (numbers).
+- `startYear`, `timeMs` : repères temporels (numbers).
 - `rules` : options de gameplay (`fogOfWar`, `aiEnabled`, `useAdvancedCombat`, `totalWar`).
 
 ### 2.2. Monde
@@ -46,17 +46,17 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 ### 2.3. Forces et conflits
 - `fleets` : flottes avec position (`Vector3DTO`), état (`FleetState`), cibles, rayon et liste de vaisseaux.
 - `stations`: structures orbitales (id, systemId, factionId, type, anchorBodyId?, slotIndex?).
-- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, `surfacePos` optionnelle avec `tileId` et éventuels `q/r` legacy, ordres persistants, `landingOrder`, `lastDeployedTurn`/`lastCombatTurn`, morale/fatigue, ranges, projection).
+- `armies` : unités terrestres embarquées ou déployées (`ArmyState`, profil strict, conteneur, `surfacePos` optionnelle avec `tileId` et éventuels `q/r` legacy, ordres persistants, `landingOrder`, `lastDeployedTimeMs`/`lastCombatTimeMs`, morale/fatigue, ranges, projection).
 - `groundBuildings` : bâtiments persistés en surface (type, position, tags, anti‑orbital, `surfacePos` avec `tileId` et éventuellement `q/r` pour les surfaces rectangulaires legacy).
-- `settlementControl` : contrôle persisté des settlements (factionId + lastCaptureTurn).
-- `bombardedTilesByBodyId` : tuiles bombardées au tour courant, indexées par `bodyId` (liste de `tileId`).
+- `settlementControl` : contrôle persisté des settlements (factionId + lastCaptureTimeMs).
+- `bombardedTilesByBodyId` : tuiles bombardées au tick courant, indexées par `bodyId` (liste de `tileId`).
 - `battles` : résolutions spatiales, incluant `winnerFactionId`, `initialShips`, `survivorShipIds`, pertes et compteurs.
 - `logs` : journaux texte.
 - `messages` : notifications joueur (payloads arbitraires sérialisables JSON).
 
 ### 2.4. IA et objectifs
 - `aiState` (hérité) ou `aiStates` (par faction) avec observations et priorités.
-- `objectives` : conditions de victoire (`type`, `value?`) et éventuel `maxTurns`.
+- `objectives` : conditions de victoire (`type`, `value?`) et éventuel `maxTimeMs`.
 - `winnerFactionId` : gagnant (`<factionId>`, `'draw'` ou `null`).
 
 ## 3. Champs sensibles et validations
@@ -66,18 +66,19 @@ Les champs reprennent l’état jouable sans données dérivées. Les noms des p
 - **Points de vie et consommables** : `hp` est clampé à `[0, maxHp]`; les munitions (`offensiveMissiles`, `torpedoes`, `interceptors`) sont remises à leur stock du vaisseau quand la valeur est manquante ou invalide.
 - **Kill history & messages** : les entrées sont assainies (`id` par défaut, dates numériques, chaînes forcées) pour éviter les charges arbitraires.
 
-## 4. Politique de compatibilité V6
+## 4. Politique de compatibilité V7
 
-- **Aucune rétro‑compatibilité** : toute version différente de `6` est rejetée au chargement.
-- Les champs absents ou invalides sont assainis uniquement pour la version courante.
+- **Lecture tolérante** : les versions `2` à `7` sont acceptées et migrées vers le runtime courant.
+- **Écriture stricte** : toute version différente de `7` est rejetée à l’écriture.
+- Les champs absents ou invalides sont assainis pour préserver le déterminisme.
 
 ## 5. Gestion des champs manquants
 - `factions` ou `playerFactionId` absents : injection de factions par défaut (Blue/Red) et sélection du joueur sur la première faction disponible.
 - `systems`, `fleets`, `armies`, `battles`, `logs`, `messages` : remplacés par des tableaux vides si absents (mais un type incorrect provoque une erreur explicite).
-- `stateStartTurn`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
+- `stateStartTimeMs`, `retreating`, `invasionTargetSystemId`, `loadTargetSystemId`, `unloadTargetSystemId` : valeurs par défaut (`0`, `false`, `null`).
 - `idRngState` : hérite de `rngState` si absent.
 - `members/maxMembers/condition/morale/fatigue` : valeurs clampées ou défauts issus des stats d’unité si absentes.
-- `lastDeployedTurn` / `lastCombatTurn` : optionnels, ignorés si absents ou invalides.
+- `lastDeployedTimeMs` / `lastCombatTimeMs` : optionnels, ignorés si absents ou invalides.
 - `bombardedTilesByBodyId` : valeur par défaut `{}` si absente. Le legacy `bombardedHexesByBodyId` est accepté en lecture et converti en `tileId`.
 - `objectives` et `rules` : valeurs par défaut si manquantes (`conditions: []`, règles activées).
 - **Échecs bloquants** : positions invalides, `seed`/`rngState` non finis (ou `idRngState` non fini s’il est fourni) ou formats non array (`systems`, `fleets`) interrompent immédiatement le chargement avec un message d’erreur explicite.

@@ -162,7 +162,7 @@ export interface ScenarioSetup {
     contiguity?: 'clustered';
   };
 
-  /** Flottes présentes au début du tour 1 */
+  /** Flottes présentes au début de la simulation */
   initialFleets: FleetDefinition[];
 }
 
@@ -177,7 +177,7 @@ export interface WinCondition {
 
 export interface VictoryConditions {
   win: WinCondition[];
-  maxTurns?: number;
+  maxTimeMs?: number;
 }
 
 // --- 5. RULES (Gameplay Mutators) ---

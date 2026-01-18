@@ -1,5 +1,5 @@
 import { BASE_FLEET_SPEED, SHIP_STATS } from '../content/data/static';
-import { sorted } from '../shared/shared';
+import { MS_PER_DAY, sorted } from '../shared/shared';
 import type { Army, Fleet, GameState, LogEntry, StarSystem, SurfacePos } from '../shared/shared';
 import { ArmyState, FleetState } from '../shared/shared';
 import { computeLoadOps } from './armyOps';
@@ -16,7 +16,7 @@ import { STACKING_CAP, tileKey } from './ground';
 // -----------------------------------------
 
 /**
- * Calculates the movement speed of a fleet per turn.
+ * Calculates the movement speed of a fleet per day.
  * Rule: A fleet moves as fast as its slowest ship.
  * Formula: BASE_FLEET_SPEED * min(ship.speedModifier)
  */
@@ -84,14 +84,20 @@ export interface MovementStepResult {
   logs: LogEntry[];
 }
 
-export const moveFleet = (fleet: Fleet, systems: StarSystem[], day: number, rng: RNG): MovementStepResult => {
+export const moveFleet = (
+  fleet: Fleet,
+  systems: StarSystem[],
+  timeMs: number,
+  deltaMs: number,
+  rng: RNG
+): MovementStepResult => {
   if (fleet.state !== FleetState.MOVING || !fleet.targetPosition) {
     return { fleet, logs: [] };
   }
 
   const dir = sub(fleet.targetPosition, fleet.position);
   const dist = len(dir);
-  const moveDistance = getFleetSpeed(fleet);
+  const moveDistance = getFleetSpeed(fleet) * (deltaMs / MS_PER_DAY);
 
   if (dist > moveDistance) {
     const moveVec = scale(normalize(dir), moveDistance);
@@ -105,7 +111,7 @@ export const moveFleet = (fleet: Fleet, systems: StarSystem[], day: number, rng:
     ? [
         {
           id: rng.id('log'),
-          day,
+          timeMs,
           text: `Fleet ${shortId(fleet.id)} (${fleet.factionId}) arrived at ${arrivalSystem.name}.`,
           type: 'move' as const
         }
@@ -117,7 +123,7 @@ export const moveFleet = (fleet: Fleet, systems: StarSystem[], day: number, rng:
       ...fleet,
       position: clone(fleet.targetPosition),
       state: FleetState.ORBIT,
-      stateStartTurn: day,
+      stateStartTimeMs: timeMs,
       targetPosition: null,
       targetSystemId: null,
       retreating: false,
@@ -138,7 +144,7 @@ export const executeArrivalOperations = (
   armies: Army[],
   fleets: Fleet[],
   rng: RNG,
-  day: number
+  timeMs: number
 ): { fleet: Fleet; armies: Army[]; logs: LogEntry[] } => {
   const generatedLogs: LogEntry[] = [];
   let currentFleet = fleet;
@@ -231,7 +237,7 @@ export const executeArrivalOperations = (
           const suffix = contestedOrbit ? ' Orbit is contested, landing losses will increase.' : '';
           generatedLogs.push({
             id: rng.id('log'),
-            day,
+            timeMs,
             text: `Fleet ${shortId(fleet.id)} queued ${landingPosByArmyId.size} landings in ${system.name}.${suffix}`.trim(),
             type: 'move'
           });
@@ -246,7 +252,7 @@ export const executeArrivalOperations = (
       fleet: currentFleet,
       system,
       armies: armiesAfterOps,
-      day,
+      timeMs,
       rng,
       fleetLabel: shortId(fleet.id)
     });
@@ -264,7 +270,7 @@ export const executeArrivalOperations = (
     if (!invasionPlanet) {
       generatedLogs.push({
         id: rng.id('log'),
-        day,
+        timeMs,
         text: `Invasion aborted: Fleet ${shortId(fleet.id)} reached ${system.name}, but the system has no solid bodies to land on. The invasion order has been cleared.`,
         type: 'combat'
       });
@@ -406,7 +412,7 @@ export const executeArrivalOperations = (
 
           generatedLogs.push({
             id: rng.id('log'),
-            day,
+            timeMs,
             text: `INVASION STARTED: Fleet ${shortId(fleet.id)} queued ${landingPosByArmyId.size} landings onto ${planetLabels.join(', ')} in ${system.name}.${suffix}`.trim(),
             type: 'combat'
           });
@@ -414,7 +420,7 @@ export const executeArrivalOperations = (
       } else if (embarkedArmies.length > 0) {
         generatedLogs.push({
           id: rng.id('log'),
-          day,
+          timeMs,
           text: `Invasion skipped: Fleet ${shortId(fleet.id)} found no eligible planets to target in ${system.name}.`,
           type: 'combat'
         });
@@ -432,7 +438,8 @@ export const resolveFleetMovement = (
   fleet: Fleet,
   systems: StarSystem[],
   allArmies: Army[],
-  day: number,
+  timeMs: number,
+  deltaMs: number,
   rng: RNG,
   fleets: Fleet[]
 ): FleetMovementResult => {
@@ -441,7 +448,7 @@ export const resolveFleetMovement = (
   const loadTargetSystemId = fleet.loadTargetSystemId;
   const unloadTargetSystemId = fleet.unloadTargetSystemId;
 
-  const moveResult = moveFleet(fleet, systems, day, rng);
+  const moveResult = moveFleet(fleet, systems, timeMs, deltaMs, rng);
   let armiesAfterOps: Army[] = allArmies;
   let nextFleet: Fleet = moveResult.fleet;
   const generatedLogs: LogEntry[] = [...moveResult.logs];
@@ -458,7 +465,7 @@ export const resolveFleetMovement = (
         unloadTargetSystemId
       };
 
-      const arrivalOutcome = executeArrivalOperations(state, arrivalFleet, system, armiesAfterOps, fleetContext, rng, day);
+      const arrivalOutcome = executeArrivalOperations(state, arrivalFleet, system, armiesAfterOps, fleetContext, rng, timeMs);
       armiesAfterOps = arrivalOutcome.armies;
       nextFleet = {
         ...arrivalOutcome.fleet,

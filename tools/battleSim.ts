@@ -11,6 +11,7 @@ import {
   GameObjectives,
   GameState,
   GameplayRules,
+  MS_PER_MINUTE,
   ShipEntity,
   ShipType,
   StarSystem
@@ -31,7 +32,7 @@ interface SimulationPreset {
   factionAName?: string;
   factionBName?: string;
   seed?: number;
-  turn?: number;
+  timeMs?: number;
   fleetA: FleetSpec;
   fleetB: FleetSpec;
   runs?: number;
@@ -40,7 +41,7 @@ interface SimulationPreset {
 interface SimulationInput {
   runs: number;
   seed: number;
-  turn: number;
+  timeMs: number;
   presetName: string;
   fleetA: FleetSpec;
   fleetB: FleetSpec;
@@ -67,7 +68,7 @@ interface SimulationSummary {
   preset: string;
   runs: number;
   seed: number;
-  turn: number;
+  timeMs: number;
   fleets: {
     blue: {
       composition: FleetComposition;
@@ -92,7 +93,8 @@ interface CliArgs {
   preset?: string;
   runs?: number;
   seed?: number;
-  turn?: number;
+  timeMs?: number;
+  minutes?: number;
   fleetA?: string;
   fleetB?: string;
   jsonPath?: string;
@@ -102,7 +104,7 @@ interface CliArgs {
 
 const SYSTEM_ID = 'sim-system';
 const DEFAULT_SEED = 1337;
-const DEFAULT_TURN = 0;
+const DEFAULT_TIME_MS = 0;
 const DEFAULT_RUNS = 200;
 const DEFAULT_PRESET = 'core';
 
@@ -289,8 +291,11 @@ const parseArgs = (argv: string[]): CliArgs => {
       case '--seed':
         args.seed = Number(argv[++i]);
         break;
-      case '--turn':
-        args.turn = Number(argv[++i]);
+      case '--timeMs':
+        args.timeMs = Number(argv[++i]);
+        break;
+      case '--minutes':
+        args.minutes = Number(argv[++i]);
         break;
       case '--fleetA':
         args.fleetA = argv[++i];
@@ -469,7 +474,7 @@ const createFleet = (
   position: Vec3,
   systemId: string,
   composition: FleetComposition,
-  turn: number
+  timeMs: number
 ): Fleet => {
   const ships: ShipEntity[] = [];
   Object.entries(composition).forEach(([type, count]) => {
@@ -488,7 +493,7 @@ const createFleet = (
     state: FleetState.ORBIT,
     targetSystemId: systemId,
     targetPosition: cloneVec(position),
-    stateStartTurn: turn
+    stateStartTimeMs: timeMs
   };
 };
 
@@ -497,7 +502,7 @@ const createBaseState = (
   fleetA: Fleet,
   fleetB: Fleet,
   seed: number,
-  turn: number,
+  timeMs: number,
   factionAName: string,
   factionBName: string
 ): GameState => {
@@ -525,7 +530,7 @@ const createBaseState = (
     seed,
     rngState: seed,
     startYear: 0,
-    day: turn,
+    timeMs,
     systems: [system],
     fleets: [fleetA, fleetB],
     armies: [],
@@ -545,15 +550,15 @@ const runSingleBattle = (
 ) => {
   const systemPosition: Vec3 = { x: 0, y: 0, z: 0 };
   const system = createSystem(SYSTEM_ID, systemPosition);
-  const fleetA = createFleet('fleet-blue', 'blue', systemPosition, SYSTEM_ID, compositions.blue, params.turn);
-  const fleetB = createFleet('fleet-red', 'red', systemPosition, SYSTEM_ID, compositions.red, params.turn);
+  const fleetA = createFleet('fleet-blue', 'blue', systemPosition, SYSTEM_ID, compositions.blue, params.timeMs);
+  const fleetB = createFleet('fleet-red', 'red', systemPosition, SYSTEM_ID, compositions.red, params.timeMs);
 
   const state = createBaseState(
     system,
     fleetA,
     fleetB,
     params.seed,
-    params.turn,
+    params.timeMs,
     params.factionAName,
     params.factionBName
   );
@@ -561,13 +566,13 @@ const runSingleBattle = (
   const battle: Battle = {
     id: `sim-${params.presetName}-${iteration}`,
     systemId: SYSTEM_ID,
-    turnCreated: params.turn,
+    timeCreatedMs: params.timeMs,
     status: 'scheduled',
     involvedFleetIds: [fleetA.id, fleetB.id],
     logs: []
   };
 
-  return resolveBattle(battle, state, params.turn).updatedBattle;
+  return resolveBattle(battle, state, params.timeMs).updatedBattle;
 };
 
 const aggregateResults = (
@@ -647,7 +652,7 @@ const aggregateResults = (
     preset: params.presetName,
     runs: params.runs,
     seed: params.seed,
-    turn: params.turn,
+    timeMs: params.timeMs,
     fleets: {
       blue: {
         composition: compositions.blue,
@@ -680,7 +685,7 @@ const printSummary = (summary: SimulationSummary): void => {
   console.log('=== BattleSim - Résumé ===');
   console.log(`Preset        : ${summary.preset}`);
   console.log(`Itérations    : ${summary.runs}`);
-  console.log(`Seed / Tour   : ${summary.seed} / ${summary.turn}`);
+  console.log(`Seed / Temps  : ${summary.seed} / ${summary.timeMs} ms`);
   console.log('');
   console.log(`Blue (${summary.fleets.blue.cost} crédits) : ${formatCounts(summary.fleets.blue.composition)}`);
   console.log(`Red  (${summary.fleets.red.cost} crédits) : ${formatCounts(summary.fleets.red.composition)}`);
@@ -731,7 +736,8 @@ const main = async () => {
     console.log('  --preset <nom>        Sélectionne un preset (core, bomber_spam, invasion_transports)');
     console.log('  --runs <N>            Nombre d’itérations (200 à 2000 recommandé)');
     console.log('  --seed <number>       Seed globale du GameState (par défaut 1337)');
-    console.log('  --turn <number>       Tour utilisé pour la résolution (par défaut 0)');
+    console.log('  --timeMs <number>     Temps utilisé pour la résolution (par défaut 0)');
+    console.log('  --minutes <number>    Alias minutes (converti en ms via MS_PER_MINUTE)');
     console.log('  --fleetA <spec>       Composition custom pour Blue');
     console.log('  --fleetB <spec>       Composition custom pour Red');
     console.log('  --json <path>         Exporte le résumé au format JSON');
@@ -754,7 +760,11 @@ const main = async () => {
 
   const runs = Number.isFinite(args.runs) ? Number(args.runs) : preset.runs ?? DEFAULT_RUNS;
   const seed = Number.isFinite(args.seed) ? Number(args.seed) : preset.seed ?? DEFAULT_SEED;
-  const turn = Number.isFinite(args.turn) ? Number(args.turn) : preset.turn ?? DEFAULT_TURN;
+  const timeMs = Number.isFinite(args.timeMs)
+    ? Number(args.timeMs)
+    : Number.isFinite(args.minutes)
+      ? Number(args.minutes) * MS_PER_MINUTE
+      : preset.timeMs ?? DEFAULT_TIME_MS;
 
   const fleetSpecA = args.fleetA ? parseFleetSpecString(args.fleetA) : preset.fleetA;
   const fleetSpecB = args.fleetB ? parseFleetSpecString(args.fleetB) : preset.fleetB;
@@ -767,7 +777,7 @@ const main = async () => {
   const params: SimulationInput = {
     runs,
     seed,
-    turn,
+    timeMs,
     presetName,
     fleetA: fleetSpecA,
     fleetB: fleetSpecB,

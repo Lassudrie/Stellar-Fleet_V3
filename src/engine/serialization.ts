@@ -43,7 +43,8 @@ import {
   VictoryType,
   PlanetData,
   MoonData,
-  logger
+  logger,
+  MS_PER_DAY
 } from '../shared/shared';
 import { Vec3, vec3 } from './math/vec3';
 import { getAiFactionIds, getLegacyAiFactionId } from './ai';
@@ -70,7 +71,7 @@ import { BREAK_THRESHOLD, RALLY_THRESHOLD } from './ground';
 // Save format + DTOs (was: engine/saveFormat.ts)
 // ============================================================
 
-export const SAVE_VERSION = 6 as const;
+export const SAVE_VERSION = 7 as const;
 
 // --- DTOs (Data Transfer Objects) ---
 
@@ -88,8 +89,7 @@ export interface ShipConsumablesDTO {
 
 export interface ShipKillRecordDTO {
   id: string;
-  day: number;
-  turn: number;
+  timeMs: number;
   targetId: string;
   targetType: ShipType;
   targetFactionId: string;
@@ -101,7 +101,7 @@ export interface ShipDTO {
   hp: number;
   maxHp: number;
   carriedArmyId?: string | null;
-  transferBusyUntilDay?: number;
+  transferBusyUntilTimeMs?: number;
   consumables?: ShipConsumablesDTO;
   offensiveMissilesLeft?: number;
   torpedoesLeft?: number;
@@ -117,7 +117,7 @@ export interface FleetDTO {
   state: FleetState;
   targetSystemId: string | null;
   targetPosition: Vector3DTO | null;
-  stateStartTurn: number;
+  stateStartTimeMs: number;
   retreating?: boolean;
   invasionTargetSystemId?: string | null;
   invasionTargetPlanetId?: string | null;
@@ -157,12 +157,12 @@ export interface ArmyDTO {
   projectionRange?: number;
 
   posture?: 'normal' | 'prepared_defense';
-  postureSetTurn?: number;
+  postureSetTimeMs?: number;
   groundOrder?: any;
   groundOrders?: any;
   landingOrder?: any;
-  lastDeployedTurn?: number;
-  lastCombatTurn?: number;
+  lastDeployedTimeMs?: number;
+  lastCombatTimeMs?: number;
   state: ArmyState;
   containerId: string;
   surfacePos?: SurfacePos;
@@ -195,8 +195,8 @@ export interface BattleShipSnapshotDTO {
 export interface BattleDTO {
   id: string;
   systemId: string;
-  turnCreated: number;
-  turnResolved?: number;
+  timeCreatedMs: number;
+  timeResolvedMs?: number;
   status: BattleStatus;
   involvedFleetIds: string[];
   initialShips?: BattleShipSnapshotDTO[];
@@ -215,18 +215,18 @@ export interface EnemySightingDTO {
   factionId: string;
   systemId: string | null;
   position: Vector3DTO;
-  daySeen: number;
+  timeSeenMs: number;
   estimatedPower: number;
   confidence: number;
-  lastUpdateDay?: number;
+  lastUpdateTimeMs?: number;
 }
 
 export interface AIStateDTO {
   sightings: Record<string, EnemySightingDTO>;
   targetPriorities: Record<string, number>;
-  systemLastSeen: Record<string, number>;
+  systemLastSeenTimeMs: Record<string, number>;
   lastOwnerBySystemId?: Record<string, string | null>;
-  holdUntilTurnBySystemId?: Record<string, number>;
+  holdUntilTimeMsBySystemId?: Record<string, number>;
 }
 
 export interface VictoryConditionDTO {
@@ -236,12 +236,12 @@ export interface VictoryConditionDTO {
 
 export interface GameObjectivesDTO {
   conditions: VictoryConditionDTO[];
-  maxTurns?: number;
+  maxTimeMs?: number;
 }
 
 export interface GameMessageDTO {
   id: string;
-  day: number;
+  timeMs: number;
   type: string;
   priority: number;
   title: string;
@@ -250,7 +250,7 @@ export interface GameMessageDTO {
   payload: Record<string, unknown>;
   read: boolean;
   dismissed: boolean;
-  createdAtTurn: number;
+  createdAtTimeMs: number;
 }
 
 export interface GameStateDTO {
@@ -265,7 +265,7 @@ export interface GameStateDTO {
   rngState?: number;
   idRngState?: number;
   startYear: number;
-  day: number;
+  timeMs: number;
   systems: StarSystemDTO[];
   fleets: FleetDTO[];
   stations?: StationDTO[];
@@ -316,7 +316,13 @@ export interface SaveFileV6 {
   state: GameStateDTO;
 }
 
-export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4 | SaveFileV5 | SaveFileV6;
+export interface SaveFileV7 {
+  version: 7;
+  createdAt: string;
+  state: GameStateDTO;
+}
+
+export type SaveFile = SaveFileV2 | SaveFileV3 | SaveFileV4 | SaveFileV5 | SaveFileV6 | SaveFileV7;
 
 export type DeserializeProgressDetail = { current: number; total: number };
 export type DeserializeProgressUpdate = {
@@ -808,8 +814,13 @@ const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
   return entries
     .map((entry, index) => ({
       id: typeof entry?.id === 'string' ? entry.id : `kill-${index}`,
-      day: Number.isFinite(entry?.day) ? entry.day : 0,
-      turn: Number.isFinite(entry?.turn) ? entry.turn : (Number.isFinite(entry?.day) ? entry.day : 0),
+      timeMs: isFiniteNumber(entry?.timeMs)
+        ? entry.timeMs
+        : isFiniteNumber(entry?.day)
+          ? entry.day * MS_PER_DAY
+          : isFiniteNumber(entry?.turn)
+            ? entry.turn * MS_PER_DAY
+            : 0,
       targetId: typeof entry?.targetId === 'string' ? entry.targetId : 'unknown',
       targetType: normalizeShipType(entry?.targetType) ?? ShipType.FRIGATE,
       targetFactionId: entry?.targetFactionId ?? 'unknown'
@@ -819,7 +830,13 @@ const sanitizeKillHistory = (entries: any[] | undefined): ShipKillRecord[] => {
 
 const sanitizeLogEntry = (entry: any, index: number): LogEntry | null => {
   const id = typeof entry?.id === 'string' ? entry.id : `log-${index}`;
-  const day = isFiniteNumber(entry?.day) ? entry.day : 0;
+  const timeMs = isFiniteNumber(entry?.timeMs)
+    ? entry.timeMs
+    : isFiniteNumber(entry?.day)
+      ? entry.day * MS_PER_DAY
+      : isFiniteNumber(entry?.turn)
+        ? entry.turn * MS_PER_DAY
+        : 0;
   const text = clampText(entry?.text, MAX_LOG_TEXT_LENGTH, '');
   const type = entry?.type;
   const normalizedType = type === 'info' || type === 'combat' || type === 'move' || type === 'ai'
@@ -828,7 +845,7 @@ const sanitizeLogEntry = (entry: any, index: number): LogEntry | null => {
 
   if (!text) return null;
 
-  return { id, day, text, type: normalizedType };
+  return { id, timeMs, text, type: normalizedType };
 };
 
 const sanitizeNumberRecord = (value: unknown): Record<string, number> => {
@@ -877,8 +894,12 @@ const sanitizeSettlementControl = (
       raw.factionId === null
         ? null
         : (typeof raw.factionId === 'string' && validFactionIds.has(raw.factionId) ? raw.factionId : null);
-    const lastCaptureTurn = isFiniteNumber(raw.lastCaptureTurn) ? Math.max(0, Math.floor(raw.lastCaptureTurn)) : 0;
-    out[key] = { factionId, lastCaptureTurn };
+    const lastCaptureTimeMs = isFiniteNumber(raw.lastCaptureTimeMs)
+      ? Math.max(0, Math.floor(raw.lastCaptureTimeMs))
+      : isFiniteNumber(raw.lastCaptureTurn)
+        ? Math.max(0, Math.floor(raw.lastCaptureTurn)) * MS_PER_DAY
+        : 0;
+    out[key] = { factionId, lastCaptureTimeMs };
   });
   return Object.keys(out).length > 0 ? out : undefined;
 };
@@ -1232,7 +1253,7 @@ const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   Object.entries(aiState.sightings).forEach(([key, s]) => {
     sightings[key] = {
       ...s,
-      lastUpdateDay: s.lastUpdateDay ?? s.daySeen,
+      lastUpdateTimeMs: s.lastUpdateTimeMs ?? s.timeSeenMs,
       position: serializeVector3(s.position)
     };
   });
@@ -1240,9 +1261,9 @@ const serializeAiState = (aiState?: AIState): AIStateDTO | undefined => {
   return {
     sightings,
     targetPriorities: aiState.targetPriorities,
-    systemLastSeen: aiState.systemLastSeen,
+    systemLastSeenTimeMs: aiState.systemLastSeenTimeMs,
     lastOwnerBySystemId: aiState.lastOwnerBySystemId,
-    holdUntilTurnBySystemId: aiState.holdUntilTurnBySystemId
+    holdUntilTimeMsBySystemId: aiState.holdUntilTimeMsBySystemId
   };
 };
 
@@ -1264,29 +1285,45 @@ const deserializeAiState = (
       throw new Error(`AI sighting references unknown faction '${factionId}'.`);
     }
 
-    if (!isFiniteNumber(s.daySeen) || !isFiniteNumber(s.estimatedPower) || !isFiniteNumber(s.confidence)) {
+    const timeSeenMs = isFiniteNumber(s.timeSeenMs)
+      ? s.timeSeenMs
+      : isFiniteNumber(s.daySeen)
+        ? s.daySeen * MS_PER_DAY
+        : undefined;
+
+    if (!isFiniteNumber(timeSeenMs) || !isFiniteNumber(s.estimatedPower) || !isFiniteNumber(s.confidence)) {
       return;
     }
 
     const systemId = typeof s.systemId === 'string' ? s.systemId : null;
     const confidence = Math.max(0, Math.min(1, s.confidence));
-    const daySeen = s.daySeen;
-    const lastUpdateDay = isFiniteNumber(s.lastUpdateDay) ? s.lastUpdateDay : daySeen;
+    const lastUpdateTimeMs = isFiniteNumber(s.lastUpdateTimeMs)
+      ? s.lastUpdateTimeMs
+      : isFiniteNumber(s.lastUpdateDay)
+        ? s.lastUpdateDay * MS_PER_DAY
+        : timeSeenMs;
 
     sightings[key] = {
       ...s,
       factionId,
       fleetId: typeof s.fleetId === 'string' ? s.fleetId : key,
       systemId,
-      daySeen,
+      timeSeenMs,
       estimatedPower: s.estimatedPower,
       confidence,
-      lastUpdateDay,
+      lastUpdateTimeMs,
       position: deserializeVector3(s.position, `AI sighting '${key}' position`)
     };
   });
 
-  const sanitizedHold = sanitizeNumberRecord(aiStateDto.holdUntilTurnBySystemId);
+  const holdSource =
+    aiStateDto.holdUntilTimeMsBySystemId ?? (aiStateDto as any).holdUntilTurnBySystemId;
+  const sanitizedHold = sanitizeNumberRecord(holdSource);
+  if (!aiStateDto.holdUntilTimeMsBySystemId && (aiStateDto as any).holdUntilTurnBySystemId) {
+    Object.keys(sanitizedHold).forEach(key => {
+      sanitizedHold[key] = sanitizedHold[key] * MS_PER_DAY;
+    });
+  }
   Object.keys(sanitizedHold).forEach(key => {
     if (sanitizedHold[key] < 0) {
       delete sanitizedHold[key];
@@ -1296,9 +1333,18 @@ const deserializeAiState = (
   return {
     sightings,
     targetPriorities: sanitizeNumberRecord(aiStateDto.targetPriorities),
-    systemLastSeen: sanitizeNumberRecord(aiStateDto.systemLastSeen),
+    systemLastSeenTimeMs: (() => {
+      const source = aiStateDto.systemLastSeenTimeMs ?? (aiStateDto as any).systemLastSeen;
+      const sanitized = sanitizeNumberRecord(source);
+      if (!aiStateDto.systemLastSeenTimeMs && (aiStateDto as any).systemLastSeen) {
+        Object.keys(sanitized).forEach(key => {
+          sanitized[key] = sanitized[key] * MS_PER_DAY;
+        });
+      }
+      return sanitized;
+    })(),
     lastOwnerBySystemId: sanitizeOwnerRecord(aiStateDto.lastOwnerBySystemId, validFactionIds),
-    holdUntilTurnBySystemId: sanitizedHold
+    holdUntilTimeMsBySystemId: sanitizedHold
   };
 };
 
@@ -1351,7 +1397,7 @@ export const serializeGameState = (state: GameState): string => {
     rngState: state.rngState,
     idRngState: state.idRngState ?? state.rngState,
     startYear: state.startYear,
-    day: state.day,
+    timeMs: state.timeMs,
     systems: state.systems.map(s => ({
       ...s,
       color: s.color || factionColorById.get(s.ownerFactionId ?? '') || '#ffffff',
@@ -1376,7 +1422,7 @@ export const serializeGameState = (state: GameState): string => {
           maxHp: s.maxHp,
           fuel: s.fuel,
           carriedArmyId: s.carriedArmyId || null,
-          transferBusyUntilDay: Number.isFinite(s.transferBusyUntilDay) ? s.transferBusyUntilDay : undefined,
+          transferBusyUntilTimeMs: Number.isFinite(s.transferBusyUntilTimeMs) ? s.transferBusyUntilTimeMs : undefined,
           consumables: extractConsumables(s, s.type),
           offensiveMissilesLeft: s.offensiveMissilesLeft ?? s.consumables?.offensiveMissiles,
           torpedoesLeft: s.torpedoesLeft ?? s.consumables?.torpedoes,
@@ -1390,7 +1436,7 @@ export const serializeGameState = (state: GameState): string => {
       factionId: a.factionId,
       unitType: a.unitType,
       posture: a.posture ?? 'normal',
-      postureSetTurn: Number.isFinite(a.postureSetTurn) ? a.postureSetTurn : undefined,
+      postureSetTimeMs: Number.isFinite(a.postureSetTimeMs) ? a.postureSetTimeMs : undefined,
       groundOrders: a.groundOrders,
       landingOrder: a.landingOrder,
       maxMembers: a.maxMembers,
@@ -1404,8 +1450,8 @@ export const serializeGameState = (state: GameState): string => {
       rangeMin: a.rangeMin,
       rangeMax: a.rangeMax,
       projectionRange: a.projectionRange,
-      lastDeployedTurn: Number.isFinite(a.lastDeployedTurn) ? a.lastDeployedTurn : undefined,
-      lastCombatTurn: Number.isFinite(a.lastCombatTurn) ? a.lastCombatTurn : undefined,
+      lastDeployedTimeMs: Number.isFinite(a.lastDeployedTimeMs) ? a.lastDeployedTimeMs : undefined,
+      lastCombatTimeMs: Number.isFinite(a.lastCombatTimeMs) ? a.lastCombatTimeMs : undefined,
       state: a.state,
       containerId: a.containerId,
       surfacePos: a.surfacePos
@@ -1470,8 +1516,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
   if (!isFiniteNumber(raw.version)) {
     throw new Error('Save file version must be a number.');
   }
-  if (raw.version !== SAVE_VERSION) {
-    throw new Error(`Save file version ${raw.version} is not supported (expected ${SAVE_VERSION}).`);
+  if (raw.version < 2 || raw.version > SAVE_VERSION) {
+    throw new Error(`Save file version ${raw.version} is not supported (expected <= ${SAVE_VERSION}).`);
   }
   if (!raw.state) {
     throw new Error('Save file is missing the state payload.');
@@ -1635,6 +1681,11 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
 
           const consumables = extractConsumables(ship, shipType);
           const killHistory = sanitizeKillHistory(ship.killHistory);
+          const transferBusyUntilTimeMs = isFiniteNumber(ship.transferBusyUntilTimeMs)
+            ? ship.transferBusyUntilTimeMs
+            : isFiniteNumber(ship.transferBusyUntilDay)
+              ? ship.transferBusyUntilDay * MS_PER_DAY
+              : undefined;
 
           return {
             id: ship.id,
@@ -1643,7 +1694,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
             maxHp,
             fuel,
             carriedArmyId: typeof ship.carriedArmyId === 'string' ? ship.carriedArmyId : null,
-            transferBusyUntilDay: Number.isFinite(ship.transferBusyUntilDay) ? ship.transferBusyUntilDay : undefined,
+            transferBusyUntilTimeMs,
             consumables,
             offensiveMissilesLeft: ship.offensiveMissilesLeft ?? consumables.offensiveMissiles,
             torpedoesLeft: ship.torpedoesLeft ?? consumables.torpedoes,
@@ -1658,6 +1709,11 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       const targetPosition = f.targetPosition
         ? deserializeVector3(f.targetPosition, `fleet '${f.id ?? 'unknown'}' targetPosition`)
         : null;
+      const stateStartTimeMs = isFiniteNumber(f.stateStartTimeMs)
+        ? f.stateStartTimeMs
+        : isFiniteNumber(f.stateStartTurn)
+          ? f.stateStartTurn * MS_PER_DAY
+          : 0;
 
       const baseFleet: Fleet = {
         id: f.id,
@@ -1666,7 +1722,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         state: fleetState,
         targetSystemId,
         targetPosition,
-        stateStartTurn: Number.isFinite(f.stateStartTurn) ? f.stateStartTurn : 0,
+        stateStartTimeMs,
         retreating: f.retreating ?? false,
         invasionTargetSystemId: f.invasionTargetSystemId ?? null,
         invasionTargetPlanetId: f.invasionTargetPlanetId ?? null,
@@ -1815,16 +1871,28 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         const legacyGroundOrder = sanitizeGroundOrder(a.groundOrder, planetIds);
         const groundOrders = sanitizeGroundOrders(a.groundOrders, planetIds) ?? toGroundOrders(legacyGroundOrder);
         const landingOrder = sanitizeGroundLandOrder(a.landingOrder, planetIds);
-        const lastDeployedTurn = isFiniteNumber(a.lastDeployedTurn) ? Math.max(0, Math.floor(a.lastDeployedTurn)) : undefined;
-        const lastCombatTurn = isFiniteNumber(a.lastCombatTurn) ? Math.max(0, Math.floor(a.lastCombatTurn)) : undefined;
-        const postureSetTurn = isFiniteNumber(a.postureSetTurn) ? Math.max(0, Math.floor(a.postureSetTurn)) : undefined;
+        const lastDeployedTimeMs = isFiniteNumber(a.lastDeployedTimeMs)
+          ? Math.max(0, Math.floor(a.lastDeployedTimeMs))
+          : isFiniteNumber(a.lastDeployedTurn)
+            ? Math.max(0, Math.floor(a.lastDeployedTurn)) * MS_PER_DAY
+            : undefined;
+        const lastCombatTimeMs = isFiniteNumber(a.lastCombatTimeMs)
+          ? Math.max(0, Math.floor(a.lastCombatTimeMs))
+          : isFiniteNumber(a.lastCombatTurn)
+            ? Math.max(0, Math.floor(a.lastCombatTurn)) * MS_PER_DAY
+            : undefined;
+        const postureSetTimeMs = isFiniteNumber(a.postureSetTimeMs)
+          ? Math.max(0, Math.floor(a.postureSetTimeMs))
+          : isFiniteNumber(a.postureSetTurn)
+            ? Math.max(0, Math.floor(a.postureSetTurn)) * MS_PER_DAY
+            : undefined;
 
         const baseArmy: Army = {
           id: a.id,
           factionId,
           unitType,
           posture,
-          ...(postureSetTurn !== undefined ? { postureSetTurn } : {}),
+          ...(postureSetTimeMs !== undefined ? { postureSetTimeMs } : {}),
           groundOrders,
           landingOrder,
           maxMembers,
@@ -1841,8 +1909,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
           state: a.state,
           containerId: a.containerId,
           ...(normalizedSurfacePos ? { surfacePos: normalizedSurfacePos } : {}),
-          ...(lastDeployedTurn !== undefined ? { lastDeployedTurn } : {}),
-          ...(lastCombatTurn !== undefined ? { lastCombatTurn } : {})
+          ...(lastDeployedTimeMs !== undefined ? { lastDeployedTimeMs } : {}),
+          ...(lastCombatTimeMs !== undefined ? { lastCombatTimeMs } : {})
         };
 
         return baseArmy;
@@ -1875,9 +1943,17 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         .filter((entry): entry is string => Boolean(entry));
       const clampedLogs = clampArray(logs, MAX_BATTLE_LOGS, `battle logs for ${b.id}`, true, 'info');
 
-      const turnCreated = isFiniteNumber(b.turnCreated) ? b.turnCreated : 0;
-      const rawTurnResolved = isFiniteNumber(b.turnResolved) ? b.turnResolved : undefined;
-      const turnResolved = b.status === 'resolved' ? (rawTurnResolved ?? turnCreated) : rawTurnResolved;
+      const timeCreatedMs = isFiniteNumber(b.timeCreatedMs)
+        ? b.timeCreatedMs
+        : isFiniteNumber(b.turnCreated)
+          ? b.turnCreated * MS_PER_DAY
+          : 0;
+      const rawTimeResolvedMs = isFiniteNumber(b.timeResolvedMs)
+        ? b.timeResolvedMs
+        : isFiniteNumber(b.turnResolved)
+          ? b.turnResolved * MS_PER_DAY
+          : undefined;
+      const timeResolvedMs = b.status === 'resolved' ? (rawTimeResolvedMs ?? timeCreatedMs) : rawTimeResolvedMs;
 
       const winnerRaw = b.winnerFactionId !== undefined ? b.winnerFactionId : b.winner;
       const winnerFactionId =
@@ -1934,8 +2010,8 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       const battle: Battle = {
         id: b.id,
         systemId: b.systemId,
-        turnCreated,
-        turnResolved,
+        timeCreatedMs,
+        timeResolvedMs,
         status: b.status as BattleStatus,
         involvedFleetIds,
         logs: clampedLogs,
@@ -1966,9 +2042,19 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     const clampedMessagesDto = clampArray(messagesDto, MAX_MESSAGE_ENTRIES, 'messages', true, 'info');
     const messages: GameMessage[] = clampedMessagesDto.map((m: any, index: number) => {
       reportLoopProgress(index, messagesTotal);
+      const timeMs = isFiniteNumber(m.timeMs)
+        ? m.timeMs
+        : isFiniteNumber(m.day)
+          ? m.day * MS_PER_DAY
+          : 0;
+      const createdAtTimeMs = isFiniteNumber(m.createdAtTimeMs)
+        ? m.createdAtTimeMs
+        : isFiniteNumber(m.createdAtTurn)
+          ? m.createdAtTurn * MS_PER_DAY
+          : timeMs;
       return {
         id: typeof m.id === 'string' ? m.id : `message-${index}`,
-        day: isFiniteNumber(m.day) ? m.day : 0,
+        timeMs,
         type: clampText(m.type, MAX_MESSAGE_TYPE_LENGTH, 'generic'),
         priority: isFiniteNumber(m.priority) ? m.priority : 0,
         title: clampText(m.title, MAX_MESSAGE_TITLE_LENGTH, 'Untitled message'),
@@ -1977,7 +2063,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
         payload: sanitizeMessagePayload(m.payload),
         read: Boolean(m.read),
         dismissed: Boolean(m.dismissed),
-        createdAtTurn: isFiniteNumber(m.createdAtTurn) ? m.createdAtTurn : 0
+        createdAtTimeMs
       };
     });
     processed += messagesTotal;
@@ -2031,7 +2117,11 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
     }
 
     const startYear = Number.isFinite(dto.startYear) ? dto.startYear : 0;
-    const day = Number.isFinite(dto.day) ? dto.day : 0;
+    const timeMs = Number.isFinite(dto.timeMs)
+      ? dto.timeMs
+      : Number.isFinite(dto.day)
+        ? dto.day * MS_PER_DAY
+        : 0;
 
     const defaultRules: GameplayRules = {
       fogOfWar: true,
@@ -2047,6 +2137,14 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       existing: planetSurfaceDescriptorsByBodyIdFromSave
     });
 
+    const rawObjectives = dto.objectives ?? { conditions: [] };
+    const objectiveConditions = Array.isArray(rawObjectives.conditions) ? rawObjectives.conditions : [];
+    const maxTimeMs = isFiniteNumber(rawObjectives.maxTimeMs)
+      ? rawObjectives.maxTimeMs
+      : isFiniteNumber(rawObjectives.maxTurns)
+        ? rawObjectives.maxTurns * MS_PER_DAY
+        : undefined;
+
     const state: GameState = {
       scenarioId: dto.scenarioId || 'unknown',
       scenarioTitle: dto.scenarioTitle,
@@ -2056,7 +2154,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       rngState: normalizedRngState,
       idRngState: normalizedIdRngState,
       startYear,
-      day,
+      timeMs,
       systems,
       fleets,
       stations,
@@ -2071,7 +2169,7 @@ export const deserializeGameState = (json: string, options: DeserializeOptions =
       groundBuildings,
       settlementControl,
       bombardedTilesByBodyId: resolvedBombardedTiles,
-      objectives: dto.objectives || { conditions: [], maxTurns: undefined },
+      objectives: { conditions: objectiveConditions, maxTimeMs },
       rules: { ...defaultRules, ...(dto.rules ?? {}) }
     };
 

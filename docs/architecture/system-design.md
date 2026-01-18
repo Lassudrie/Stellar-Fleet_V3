@@ -16,7 +16,7 @@ graph TD
 
     subgraph "Engine Layer (src/engine/)"
         GameEngine class
-        runTurn.ts
+        strategicSimulation.ts
         RNG System
         Services (Movement, Battle, World)
     end
@@ -25,15 +25,17 @@ graph TD
 ## 3. Le Moteur de Jeu (`src/engine/`)
 Le cœur du jeu est agnostique de toute couche de présentation.
 *   **GameEngine** : Classe Singleton qui détient l'état.
-*   **Pattern Redux-like** : Les modifications d'état se font via des actions (`GameCommand`) ou le tick (`runTurn`).
-*   **Immutabilité** : L'état n'est jamais muté directement. Chaque tour produit un nouvel objet `GameState`.
+*   **Pattern Redux-like** : Les modifications d'état se font via des actions (`GameCommand`) ou le tick stratégique (`runStrategicTick`).
+*   **Immutabilité** : L'état n'est jamais muté directement. Chaque tick produit un nouvel objet `GameState`.
 
-### Boucle de Jeu (`runTurn.ts`)
+### Boucle stratégique (`strategicSimulation.ts`)
 Fonction pure : `(currentState, rng) => nextState`.
 Elle orchestre les services séquentiellement :
-1.  Résolution des batailles (V1).
-2.  IA Planning.
-3.  Exécution des Commandes.
-4.  Mouvement.
-5.  Détection de conflits.
-6.  Capture de systèmes.
+1.  IA Planning.
+2.  Mouvement.
+3.  Détection de conflits.
+4.  Résolution des batailles (V1).
+5.  Bombardement orbital.
+6.  Combat terrestre & conquête.
+7.  Objectifs de victoire.
+8.  Cleanup & maintenance.

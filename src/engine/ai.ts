@@ -1,5 +1,5 @@
 
-import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem, sorted } from '../shared/shared';
+import { GameState, Fleet, FactionId, AIState, ArmyState, FleetState, ShipType, FactionState, EnemySighting, Army, StarSystem, MS_PER_DAY, MS_PER_MINUTE, sorted } from '../shared/shared';
 import { GameCommand } from './commands';
 import { calculateFleetPower, getSystemById } from './world';
 import { RNG } from './rng';
@@ -23,14 +23,14 @@ interface AiTaskTargets {
 interface AiConfig {
   defendBias: number;
   attackRatio: number;
-  minMoveCommitTurns: number;
+  minMoveCommitDays: number;
   inertiaBonus: number;
   scoutProb: number;
   targetInertiaDecay: number;
   targetInertiaMin: number;
-  holdTurns: number;
-  sightingForgetAfterTurns: number;
-  sightingConfidenceDecayPerTurn: number;
+  holdDurationDays: number;
+  sightingForgetAfterDays: number;
+  sightingConfidenceDecayPerDay: number;
   sightingMinConfidence: number;
   taskTargets: AiTaskTargets;
 }
@@ -38,14 +38,14 @@ interface AiConfig {
 const BASE_AI_CONFIG: AiConfig = {
   defendBias: 1.5,
   attackRatio: 1.2,
-  minMoveCommitTurns: 3,
+  minMoveCommitDays: 3,
   inertiaBonus: 50,
   scoutProb: 0.1,
   targetInertiaDecay: 0.9,
   targetInertiaMin: 50,
-  holdTurns: 3,
-  sightingForgetAfterTurns: 12,
-  sightingConfidenceDecayPerTurn: 0.1,
+  holdDurationDays: 3,
+  sightingForgetAfterDays: 12,
+  sightingConfidenceDecayPerDay: 0.1,
   sightingMinConfidence: 0.05,
   taskTargets: {
     attack: 1,
@@ -122,14 +122,14 @@ const getAiConfig = (profile?: string): AiConfig => {
   return AI_PROFILE_CONFIGS[key] ?? BASE_AI_CONFIG;
 };
 
-export const AI_HOLD_TURNS = BASE_AI_CONFIG.holdTurns;
+export const AI_HOLD_DAYS = BASE_AI_CONFIG.holdDurationDays;
 
 export const createEmptyAIState = (): AIState => ({
   sightings: {},
   targetPriorities: {},
-  systemLastSeen: {},
+  systemLastSeenTimeMs: {},
   lastOwnerBySystemId: {},
-  holdUntilTurnBySystemId: {},
+  holdUntilTimeMsBySystemId: {},
 });
 
 const cloneAIState = (state: AIState): AIState => ({
@@ -141,9 +141,9 @@ const cloneAIState = (state: AIState): AIState => ({
     return acc;
   }, {}),
   targetPriorities: { ...state.targetPriorities },
-  systemLastSeen: { ...state.systemLastSeen },
+  systemLastSeenTimeMs: { ...state.systemLastSeenTimeMs },
   lastOwnerBySystemId: { ...state.lastOwnerBySystemId },
-  holdUntilTurnBySystemId: { ...state.holdUntilTurnBySystemId },
+  holdUntilTimeMsBySystemId: { ...state.holdUntilTimeMsBySystemId },
 });
 
 type TaskType = 'DEFEND' | 'ATTACK' | 'SCOUT' | 'HOLD' | 'INVADE';
@@ -169,10 +169,11 @@ const updateMemory = (
   cfg: AiConfig
 ) => {
   const perceivedState = state.rules.fogOfWar ? applyFogOfWar(state, factionId) : state;
+  const timeMs = state.timeMs;
   const myFleets = state.fleets.filter(f => f.factionId === factionId && isCommandableFleet(f));
   const mySystems = state.systems.filter(s => s.ownerFactionId === factionId);
-  const fleetIndex = new SpatialIndex(myFleets, CAPTURE_RANGE, state.day);
-  const systemIndex = new SpatialIndex(state.systems, CAPTURE_RANGE, state.day);
+  const fleetIndex = new SpatialIndex(myFleets, CAPTURE_RANGE, timeMs);
+  const systemIndex = new SpatialIndex(state.systems, CAPTURE_RANGE, timeMs);
   const systemById = new Map<string, StarSystem>();
   state.systems.forEach(sys => systemById.set(sys.id, sys));
   const perceivedSystemById = new Map<string, StarSystem>();
@@ -180,7 +181,7 @@ const updateMemory = (
 
   const minDistanceBySystemId: Record<string, number> = {};
   state.systems.forEach(system => {
-    const nearest = fleetIndex.findNearest(system.position, undefined, { currentTurn: state.day });
+    const nearest = fleetIndex.findNearest(system.position, undefined, { currentTimeMs: timeMs });
     minDistanceBySystemId[system.id] = nearest ? Math.sqrt(nearest.distanceSq) : Infinity;
   });
 
@@ -190,14 +191,14 @@ const updateMemory = (
     ? cloneAIState(existingState)
     : createEmptyAIState();
 
-  // Hold expirations are inclusive of the stored day: systems remain on hold
-  // while the current day is less than or equal to the recorded turn.
-  sortRecordKeys(memory.holdUntilTurnBySystemId).forEach(systemId => {
-    const holdUntil = memory.holdUntilTurnBySystemId[systemId];
+  // Hold expirations are inclusive of the stored time: systems remain on hold
+  // while the current time is less than or equal to the recorded time.
+  sortRecordKeys(memory.holdUntilTimeMsBySystemId).forEach(systemId => {
+    const holdUntil = memory.holdUntilTimeMsBySystemId[systemId];
     const system = systemById.get(systemId);
 
-    if (!system || system.ownerFactionId !== factionId || holdUntil < state.day) {
-      delete memory.holdUntilTurnBySystemId[systemId];
+    if (!system || system.ownerFactionId !== factionId || holdUntil < timeMs) {
+      delete memory.holdUntilTimeMsBySystemId[systemId];
       return;
     }
 
@@ -218,7 +219,7 @@ const updateMemory = (
     const nearestSystem = systemIndex.findNearest(
       fleet.position,
       sys => distSq(sys.position, fleet.position) <= captureSq,
-      { currentTurn: state.day }
+      { currentTimeMs: timeMs }
     );
     const closestSystemId = nearestSystem && nearestSystem.distanceSq <= captureSq ? nearestSystem.item.id : null;
 
@@ -227,10 +228,10 @@ const updateMemory = (
       factionId: fleet.factionId,
       systemId: closestSystemId,
       position: { ...fleet.position },
-      daySeen: state.day,
+      timeSeenMs: timeMs,
       estimatedPower: calculateFleetPower(fleet),
       confidence: 1.0,
-      lastUpdateDay: state.day
+      lastUpdateTimeMs: timeMs
     };
 
     memory.sightings[fleet.id] = updatedSighting;
@@ -242,19 +243,19 @@ const updateMemory = (
       return;
     }
 
-    const turnsSinceSeen = state.day - sighting.daySeen;
-    const lastUpdateDay = sighting.lastUpdateDay ?? sighting.daySeen;
-    const turnsSinceUpdate = Math.max(0, state.day - lastUpdateDay);
+    const daysSinceSeen = Math.max(0, (timeMs - sighting.timeSeenMs) / MS_PER_DAY);
+    const lastUpdateTimeMs = sighting.lastUpdateTimeMs ?? sighting.timeSeenMs;
+    const daysSinceUpdate = Math.max(0, (timeMs - lastUpdateTimeMs) / MS_PER_DAY);
 
-    if (turnsSinceSeen > cfg.sightingForgetAfterTurns) {
+    if (daysSinceSeen > cfg.sightingForgetAfterDays) {
       delete memory.sightings[fleetId];
       return;
     }
 
-    if (turnsSinceUpdate > 0) {
-      const decayFactor = Math.pow(1 - cfg.sightingConfidenceDecayPerTurn, turnsSinceUpdate);
+    if (daysSinceUpdate > 0) {
+      const decayFactor = Math.pow(1 - cfg.sightingConfidenceDecayPerDay, daysSinceUpdate);
       sighting.confidence *= decayFactor;
-      sighting.lastUpdateDay = state.day;
+      sighting.lastUpdateTimeMs = timeMs;
     }
 
     if (sighting.confidence < cfg.sightingMinConfidence) {
@@ -263,14 +264,14 @@ const updateMemory = (
   });
 
   observedSystemIds.forEach(id => {
-    memory.systemLastSeen[id] = state.day;
+    memory.systemLastSeenTimeMs[id] = timeMs;
     const observedSystem = perceivedSystemById.get(id);
     if (observedSystem) {
       memory.lastOwnerBySystemId[id] = observedSystem.ownerFactionId;
     }
   });
 
-  memory.holdUntilTurnBySystemId = createSortedRecord(memory.holdUntilTurnBySystemId);
+  memory.holdUntilTimeMsBySystemId = createSortedRecord(memory.holdUntilTimeMsBySystemId);
 
   return { perceivedState, myFleets, mySystems, minDistanceBySystemId, activeHoldSystems, memory };
 };
@@ -283,6 +284,8 @@ const evaluateSystems = (
   minDistanceBySystemId: Record<string, number>,
   cfg: AiConfig
 ) => {
+  const timeMs = state.timeMs;
+  const timeDays = timeMs / MS_PER_DAY;
   const analysisArray: {
     id: string,
     value: number,
@@ -295,7 +298,7 @@ const evaluateSystems = (
   const visibleEnemyFleets = perceivedState.fleets
     .filter(f => f.factionId !== factionId && isCommandableFleet(f));
   const visibleEnemyFleetIds = new Set(visibleEnemyFleets.map(fleet => fleet.id));
-  const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE, state.day);
+  const enemyIndex = new SpatialIndex(visibleEnemyFleets, CAPTURE_RANGE, timeMs);
   // Cache fleet power to avoid recomputing it repeatedly within a single evaluation pass.
   const fleetPowerCache = new Map<string, number>();
   const getFleetPowerCached = (fleet: Fleet): number => {
@@ -322,10 +325,11 @@ const evaluateSystems = (
       if (sys.ownerFactionId === factionId) value += 20;
       if (sys.isHomeworld) value += 150;
 
-      const fogAge = Math.max(0, state.day - (memory.systemLastSeen[sys.id] || 0));
+      const lastSeenTimeMs = memory.systemLastSeenTimeMs[sys.id] ?? 0;
+      const fogAge = Math.max(0, (timeMs - lastSeenTimeMs) / MS_PER_DAY);
       const distanceToEmpire = minDistanceBySystemId[sys.id] ?? Infinity;
 
-      const visibleFleetsHere = enemyIndex.queryRadius(sys.position, CAPTURE_RANGE, { currentTurn: state.day });
+      const visibleFleetsHere = enemyIndex.queryRadius(sys.position, CAPTURE_RANGE, { currentTimeMs: timeMs });
 
       const threatVisible = visibleFleetsHere.reduce((sum, fleet) => sum + getFleetPowerCached(fleet), 0);
 
@@ -448,13 +452,14 @@ const generateTasks = (
     const distanceToClosestFleet = minDistanceBySystemId[systemId] ?? Infinity;
     const distanceWeightedPriority = applyDistanceWeight(systemId, basePriority);
 
+    const holdUntilMinutes = holdUntil / MS_PER_MINUTE;
     tasks.push({
       type: 'HOLD',
       systemId,
       priority: applyTaskPreference('HOLD', distanceWeightedPriority * fogFactor + inertia),
       requiredPower,
       distanceToClosestFleet,
-      reason: `Hold garrison until turn ${holdUntil}`
+      reason: `Hold garrison until T+${holdUntilMinutes}m`
     });
   });
 
@@ -584,6 +589,7 @@ const assignFleets = (
   mySystems: StarSystem[],
   embarkedFriendlyArmies: Set<string>
 ) => {
+  const timeMs = state.timeMs;
   const availableFleetObjs = myFleets.map(f => ({
       fleet: f,
       power: calculateFleetPower(f),
@@ -610,7 +616,7 @@ const assignFleets = (
   };
 
   if (aiDebugger.getEnabled()) {
-      aiDebugger.startTurn(state.day, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
+      aiDebugger.startTick(timeMs, factionId, { totalFleets: myFleets.length, ownedSystems: mySystems.length });
   }
 
   for (const task of tasks) {
@@ -618,10 +624,11 @@ const assignFleets = (
       .filter(fObj => !fObj.assigned)
       .map(fObj => {
         const f = fObj.fleet;
-        const moveAge = Math.max(0, state.day - (f.stateStartTurn ?? (state.day - cfg.minMoveCommitTurns)));
+        const defaultStartTimeMs = timeMs - (cfg.minMoveCommitDays * MS_PER_DAY);
+        const moveAge = Math.max(0, (timeMs - (f.stateStartTimeMs ?? defaultStartTimeMs)) / MS_PER_DAY);
         const isLocked = f.state === FleetState.MOVING &&
                          f.targetSystemId !== task.systemId &&
-                         moveAge < cfg.minMoveCommitTurns &&
+                         moveAge < cfg.minMoveCommitDays &&
                          task.type !== 'DEFEND';
 
         if (isLocked) return null;
@@ -747,7 +754,7 @@ const assignFleets = (
   }
 
   if (aiDebugger.getEnabled()) {
-      aiDebugger.commitTurn();
+      aiDebugger.commitTick();
   }
 
   return assignments;
@@ -783,7 +790,7 @@ const planArmyEmbarkation = (
       ship =>
         ship.type === ShipType.TRANSPORTER &&
         !ship.carriedArmyId &&
-        (ship.transferBusyUntilDay ?? -Infinity) < state.day
+        (ship.transferBusyUntilTimeMs ?? -Infinity) < state.timeMs
     ).length;
 
     if (hasEmbarkedArmies && task.type === 'ATTACK') {
@@ -872,7 +879,7 @@ const generateCommands = (
                   .filter(s =>
                     s.carriedArmyId &&
                     embarkedFriendlyArmies.has(s.carriedArmyId) &&
-                    (s.transferBusyUntilDay ?? -Infinity) < state.day
+                    (s.transferBusyUntilTimeMs ?? -Infinity) < state.timeMs
                   )
                   .forEach(ship => {
                       if (!ship.carriedArmyId) return;
@@ -989,7 +996,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
         const freeTransports = fleet.ships.filter(ship =>
           ship.type === ShipType.TRANSPORTER &&
           !ship.carriedArmyId &&
-          (ship.transferBusyUntilDay ?? -Infinity) < state.day
+          (ship.transferBusyUntilTimeMs ?? -Infinity) < state.timeMs
         ).length;
         return count + freeTransports;
       }, 0);
@@ -1040,7 +1047,7 @@ const planPlanetTransfers = (state: GameState, factionId: FactionId): GameComman
   return commands;
 };
 
-export const planAiTurn = (
+export const planAiTick = (
   state: GameState,
   factionId: FactionId,
   existingState: AIState | undefined,

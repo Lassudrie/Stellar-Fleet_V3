@@ -200,8 +200,8 @@ export type BattleStatus = 'scheduled' | 'resolved';
 export interface Battle {
   id: string;
   systemId: string;
-  turnCreated: number;
-  turnResolved?: number;
+  timeCreatedMs: number;
+  timeResolvedMs?: number;
   status: BattleStatus;
   involvedFleetIds: string[];
   logs: string[];
@@ -222,7 +222,7 @@ Exemple minimal :
 {
   "id": "battle_alpha",
   "systemId": "sol",
-  "turnCreated": 12,
+  "timeCreatedMs": 720000,
   "status": "resolved",
   "involvedFleetIds": ["fleet_01", "fleet_02"],
   "winnerFactionId": "red"
@@ -241,7 +241,7 @@ export interface VictoryCondition {
 
 export interface GameObjectives {
   conditions: VictoryCondition[];
-  maxTurns?: number;
+  maxTimeMs?: number;
 }
 
 export interface GameplayRules {
@@ -257,14 +257,14 @@ export interface GameplayRules {
 ```typescript
 export interface LogEntry {
   id: string;
-  day: number;
+  timeMs: number;
   text: string;
   type: 'info' | 'combat' | 'move' | 'ai';
 }
 
 export interface GameMessage {
   id: string;
-  day: number;
+  timeMs: number;
   type: string;
   priority: number;
   title: string;
@@ -273,7 +273,7 @@ export interface GameMessage {
   payload: Record<string, unknown>;
   read: boolean;
   dismissed: boolean;
-  createdAtTurn: number;
+  createdAtTimeMs: number;
 }
 ```
 
@@ -288,7 +288,7 @@ export interface GameState {
   seed: number;
   rngState: number;
   startYear: number;
-  day: number;
+  timeMs: number;
   systems: StarSystem[];
   fleets: Fleet[];
   armies: Army[];
@@ -307,13 +307,13 @@ export interface GameState {
 
 ```typescript
 export type GameCommand =
-  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
+  | { type: 'MOVE_FLEET'; fleetId: string; targetSystemId: string; reason?: string }
   | { type: 'AI_UPDATE_STATE'; factionId: FactionId; newState: AIState; primaryAi?: boolean }
   | { type: 'ADD_LOG'; text: string; logType: 'info' | 'combat' | 'move' | 'ai' }
   | { type: 'LOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; reason?: string }
   | { type: 'UNLOAD_ARMY'; fleetId: string; shipId: string; armyId: string; systemId: string; planetId: string; reason?: string }
   | { type: 'TRANSFER_ARMY_PLANET'; armyId: string; fromPlanetId: string; toPlanetId: string; systemId: string; reason?: string }
-  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
-  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number }
-  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string; turn?: number };
+  | { type: 'ORDER_INVASION_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
+  | { type: 'ORDER_LOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string }
+  | { type: 'ORDER_UNLOAD_MOVE'; fleetId: string; targetSystemId: string; reason?: string };
 ```
