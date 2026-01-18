@@ -1582,8 +1582,8 @@ export class SpaceView {
       planetPreloadPx: 200,
       planetImpostorEnterPx: 6,
       planetImpostorExitPx: 16,
-      planetMeshEnterPx: 18,
-      planetMeshExitPx: 10,
+      planetMeshEnterPx: 12,
+      planetMeshExitPx: 6,
       crossFadeSeconds: 0.6,
       ...options.thresholds
     };
